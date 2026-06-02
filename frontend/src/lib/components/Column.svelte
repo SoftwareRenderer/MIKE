@@ -1,12 +1,16 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
-    import { createEventDispatcher } from 'svelte';
 
-    export let columnId: string;
-    export let title: string;
-    export let color: string;
-    export let tasks: Task[];
+    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask }: {
+        columnId: string;
+        title: string;
+        color: string;
+        tasks: Task[];
+        onDragStart: (taskId: string) => void;
+        onDrop: (taskId: string) => void;
+        onAddTask?: () => void;
+    } = $props();
 
     let isOver = $state(false);
 
@@ -23,17 +27,20 @@
         isOver = false;
         const taskId = e.dataTransfer?.getData('text/plain');
         if (taskId) {
-            createEventDispatcher().dispatch('drop', { taskId, columnId });
+            onDrop(taskId);
         }
     }
 </script>
 
-<div class="column" class:is-over ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop}>
+<div class={`column${isOver ? ' is-over' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop}>
     <div class="column-header" style="--col-color: {color}">
         <h3>{title}</h3>
         <span class="count">{tasks.length}</span>
     </div>
     <div class="card-list">
+        {#if onAddTask}
+            <button class="add-task-btn" onclick={onAddTask}>+ Add Task</button>
+        {/if}
         {#each tasks as task (task.id)}
             <Card {task} columnId={columnId} projectId={columnId} />
         {/each}
@@ -83,5 +90,19 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+    }
+    .add-task-btn {
+        width: 100%;
+        padding: 8px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        font-size: 13px;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background 0.15s ease;
+    }
+    .add-task-btn:hover {
+        background: var(--color-accent);
+        color: white;
     }
 </style>

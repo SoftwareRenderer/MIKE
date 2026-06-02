@@ -47,6 +47,10 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 		task.ProjectID = projectID
+		// Auto-generate title from prompt if not provided
+		if task.Title == "" && task.Prompt != "" {
+			task.Title = autoGenerateTitle(task.Prompt)
+		}
 		if err := tm.store.CreateTask(&task); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -550,5 +554,16 @@ func (ham *HomeAgentManager) HandleStream(w http.ResponseWriter, r *http.Request
 			conn.Write(r.Context(), websocket.MessageText, respData)
 		}
 	}
+}
+
+// autoGenerateTitle creates a short title from the first line of a prompt.
+func autoGenerateTitle(prompt string) string {
+	// Take the first line, up to 80 chars
+	line := strings.Split(prompt, "\n")[0]
+	line = strings.TrimSpace(line)
+	if len(line) > 80 {
+		line = line[:77] + "..."
+	}
+	return line
 }
 

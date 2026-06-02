@@ -24,6 +24,7 @@ export interface Task {
     max_consecutive_failed_turns: number;
     auto_commit: boolean;
     auto_pr: boolean;
+    plan_mode: boolean;
     created_at: string;
     updated_at: string;
 }

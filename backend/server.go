@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 
 	"github.com/creack/pty"
 	"github.com/coder/websocket"
@@ -80,9 +83,12 @@ func (s *Server) setupRoutes() {
 	// Config
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
 
+	// Filesystem browser
+	s.mux.HandleFunc("/api/fs", s.handleFS)
+
 	// Projects
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
-	s.mux.HandleFunc("/api/projects.", s.handleProjectScoped)
+	s.mux.HandleFunc("/api/projects/", s.handleProjectScoped)
 
 	// Serve built frontend (if available)
 	frontendDist := getEnv("FRONTEND_DIST", "./frontend/dist")
@@ -185,6 +191,72 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleFS lists directory contents for the file browser.
+func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = string(os.PathSeparator)
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	type fsEntry struct {
+		Name      string `json:"name"`
+		IsDir     bool   `json:"isDir"`
+		Path      string `json:"path"`
+		IsGitRepo bool   `json:"isGitRepo"`
+	}
+
+	// Check if this is a git repo
+	isGit := isGitRepo(path)
+
+	result := struct {
+		Path      string    `json:"path"`
+		IsGitRepo bool      `json:"isGitRepo"`
+		Entries   []fsEntry `json:"entries"`
+	}{
+		Path:      path,
+		IsGitRepo: isGit,
+		Entries:   []fsEntry{},
+	}
+
+	// Add parent directory entry if not at root
+	if path != string(os.PathSeparator) {
+		if parent := filepath.Dir(path); parent != path {
+			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: isGitRepo(parent)})
+		}
+	}
+
+	for _, e := range entries {
+		// Skip hidden entries and files
+		if e.Name()[0] == '.' || !e.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(path, e.Name())
+		result.Entries = append(result.Entries, fsEntry{
+			Name:      e.Name(),
+			IsDir:     e.IsDir(),
+			Path:      fullPath,
+			IsGitRepo: isGitRepo(fullPath),
+		})
+	}
+
+	// Sort entries alphabetically (case-insensitive), keeping ".." first
+	sort.SliceStable(result.Entries, func(i, j int) bool {
+		return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
+	})
+
+	jsonResponse(w, http.StatusOK, result)
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {

@@ -4,8 +4,7 @@
     import { moveTask, reorderTasks } from '$lib/api';
     import { board as boardStore } from '$lib/store';
 
-    export let tasks: Task[];
-    export let projectId: string;
+    let { tasks, projectId, onAddTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void } = $props();
 
     let draggedTaskId: string | null = $state(null);
 
@@ -49,8 +48,9 @@
             title={col.title}
             color={col.color}
             tasks={getTasksForColumn(col.id)}
-            on:dragstart={(e) => handleDragStart(e.detail.taskId)}
-            on:drop={(e) => handleDrop(e.detail.taskId, col.id)}
+            onDragStart={handleDragStart}
+            onDrop={(taskId: string) => handleDrop(taskId, col.id)}
+            onAddTask={col.id === 'backlog' ? onAddTask : undefined}
         />
     {/each}
 </div>

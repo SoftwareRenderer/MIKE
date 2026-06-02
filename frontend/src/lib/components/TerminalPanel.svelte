@@ -1,4 +1,3 @@
-"use client";
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';

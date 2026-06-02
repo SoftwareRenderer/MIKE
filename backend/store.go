@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
     auto_commit                  INTEGER NOT NULL DEFAULT 0,
     auto_pr                      INTEGER NOT NULL DEFAULT 0,
+    plan_mode                    INTEGER NOT NULL DEFAULT 0,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -139,7 +140,12 @@ CREATE INDEX IF NOT EXISTS idx_home_agent_messages_project ON home_agent_message
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Migrations for existing databases
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 func (s *Store) initConfigDefaults() error {
@@ -214,12 +220,12 @@ func (s *Store) queryProject(id string) (*Project, error) {
 func (s *Store) ListProjects() ([]Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, name, path, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id, name, path, created_at, updated_at FROM projects ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var projects []Project
+	projects := []Project{}
 	for rows.Next() {
 		var p Project
 		var createdAt, updatedAt string
@@ -258,10 +264,10 @@ func (s *Store) CreateTask(t *Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, t.Output, t.StatusState,
-		t.LlamaServerURL, t.ModelName, t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR),
+		t.LlamaServerURL, t.ModelName, t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR), b2i(t.PlanMode),
 		t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
@@ -275,18 +281,19 @@ func (s *Store) GetTask(projectID, taskID string) (*Task, error) {
 
 func (s *Store) queryTask(projectID, taskID string) (*Task, error) {
 	var t Task
-	var autoCommit, autoPR int
+	var autoCommit, autoPR, planMode int
 	var createdAt, updatedAt string
 	err := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?`,
 		taskID, projectID,
 	).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &createdAt, &updatedAt)
+		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
 	}
 	t.AutoCommit = i2b(autoCommit)
 	t.AutoPR = i2b(autoPR)
+	t.PlanMode = i2b(planMode)
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return &t, err
@@ -300,24 +307,25 @@ func (s *Store) GetTasksByProject(projectID string) ([]Task, error) {
 
 func (s *Store) queryTasksByProject(projectID string) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, created_at, updated_at FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
 		projectID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var tasks []Task
+	tasks := []Task{}
 	for rows.Next() {
 		var t Task
-		var autoCommit, autoPR int
+		var autoCommit, autoPR, planMode int
 		var createdAt, updatedAt string
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-			&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &createdAt, &updatedAt); err != nil {
+			&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		t.AutoCommit = i2b(autoCommit)
 		t.AutoPR = i2b(autoPR)
+		t.PlanMode = i2b(planMode)
 		t.CreatedAt = scanTime(createdAt)
 		t.UpdatedAt = scanTime(updatedAt)
 		tasks = append(tasks, t)
@@ -330,9 +338,9 @@ func (s *Store) UpdateTask(t *Task) error {
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
-		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, output = ?, status_state = ?, llama_server_url = ?, model_name = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_pr = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, output = ?, status_state = ?, llama_server_url = ?, model_name = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_pr = ?, plan_mode = ?, updated_at = ? WHERE id = ?`,
 		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, t.Output, t.StatusState,
-		t.LlamaServerURL, t.ModelName, t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR), now.Format(time.RFC3339), t.ID,
+		t.LlamaServerURL, t.ModelName, t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR), b2i(t.PlanMode), now.Format(time.RFC3339), t.ID,
 	)
 	return err
 }
@@ -407,7 +415,7 @@ func (s *Store) GetConversationHistory(taskID string) ([]ConversationHistory, er
 		return nil, err
 	}
 	defer rows.Close()
-	var history []ConversationHistory
+	history := []ConversationHistory{}
 	for rows.Next() {
 		var ch ConversationHistory
 		var createdAt string
@@ -450,7 +458,7 @@ func (s *Store) GetDependencies(taskID string) ([]TaskDependency, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var deps []TaskDependency
+	deps := []TaskDependency{}
 	for rows.Next() {
 		var d TaskDependency
 		var autoStart int
@@ -476,7 +484,7 @@ func (s *Store) GetDependents(taskID string) ([]TaskDependency, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var deps []TaskDependency
+	deps := []TaskDependency{}
 	for rows.Next() {
 		var d TaskDependency
 		var autoStart int
@@ -532,7 +540,7 @@ func (s *Store) GetReviewComments(taskID string) ([]ReviewComment, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var comments []ReviewComment
+	comments := []ReviewComment{}
 	for rows.Next() {
 		var c ReviewComment
 		var resolved int
@@ -559,7 +567,7 @@ func (s *Store) GetUnresolvedReviewComments(taskID string) ([]ReviewComment, err
 		return nil, err
 	}
 	defer rows.Close()
-	var comments []ReviewComment
+	comments := []ReviewComment{}
 	for rows.Next() {
 		var c ReviewComment
 		var resolved int
@@ -648,7 +656,7 @@ func (s *Store) GetHomeAgentMessages(projectID string) ([]HomeAgentMessage, erro
 		return nil, err
 	}
 	defer rows.Close()
-	var messages []HomeAgentMessage
+	messages := []HomeAgentMessage{}
 	for rows.Next() {
 		var m HomeAgentMessage
 		var createdAt string

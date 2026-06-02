@@ -193,7 +193,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 
 	client := NewLlamaClient(serverURL, modelName)
 	tools := GetToolDefinitions()
-	systemPrompt := BuildSystemPrompt(worktreePath)
+	var systemPrompt string
+	if task.PlanMode {
+		systemPrompt = BuildPlanModeSystemPrompt(worktreePath)
+	} else {
+		systemPrompt = BuildSystemPrompt(worktreePath)
+	}
 
 	history, _ := te.store.GetConversationHistory(task.ID)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}

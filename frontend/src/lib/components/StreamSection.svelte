@@ -1,4 +1,3 @@
-"use client";
 
 <script lang="ts">
     let { type, collapsible = false, summary = '', tokenCount = 0 }: { 

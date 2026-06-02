@@ -1,4 +1,3 @@
-"use client";
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
@@ -217,8 +216,8 @@
     <!-- Actions -->
     {#if fullText}
         <StreamActions
-            on:copy={copyOutput}
-            on:toggleRaw={toggleRaw}
+            onCopy={copyOutput}
+            onToggleRaw={toggleRaw}
             tokens={tokenStats}
         />
     {/if}

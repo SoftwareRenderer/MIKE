@@ -64,6 +64,7 @@ type Task struct {
     MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"` // Auto-stop after N consecutive failed tool calls (default: 3). A successful tool call resets the counter.
     AutoCommit                bool      `json:"auto_commit"`       // Automatically commit worktree changes when task completes
     AutoPr                    bool      `json:"auto_pr"`           // Automatically create a PR branch when task completes (implies auto_commit)
+    PlanMode                  bool      `json:"plan_mode"`         // AI creates a TODO.md plan first, executes after user approval
     CreatedAt                 time.Time `json:"created_at"`
     UpdatedAt                 time.Time `json:"updated_at"`
 }
@@ -118,6 +119,8 @@ type Project struct {
 ```
 
 Each project has its own independent board (set of tasks). Git worktrees are shared across all projects under a single worktrees directory, configured via the `WORKTREES_DIR` environment variable (default: `./worktrees` relative to the Go server binary's working directory).
+
+Projects are listed in alphabetical order (case-insensitive) via `ORDER BY name COLLATE NOCASE`.
 
 ### 3.7 Task Dependency
 
@@ -284,11 +287,19 @@ All board and task endpoints are scoped to a project via the `{projectId}` path 
 
 | Method | Endpoint                | Description              | Request Body         | Response                  |
 |--------|-------------------------|--------------------------|----------------------|---------------------------|
-| GET    | `/api/projects`         | List all projects        | —                    | `200 []Project`           |
+| GET    | `/api/projects`         | List all projects (sorted alphabetically, case-insensitive) | — | `200 []Project` |
 | POST   | `/api/projects`         | Create new project       | `{ path: string }`   | `201 Project`             |
 | GET    | `/api/projects/:id`     | Get project details      | —                    | `200 Project` or `404`    |
 | PUT    | `/api/projects/:id`     | Update project name      | `{ name: string }`   | `200 Project` or `404`    |
 | DELETE | `/api/projects/:id`     | Delete project           | —                    | `204 No Content`          |
+
+### 4.1a Filesystem Browser Endpoint
+
+| Method | Endpoint       | Description                                              | Query Params          | Response                                                                                       |
+|--------|----------------|----------------------------------------------------------|-----------------------|------------------------------------------------------------------------------------------------|
+| GET    | `/api/fs`      | List directory contents for project directory selection  | `path` (string)       | `200 { path: string, isGitRepo: bool, entries: [{ name, isDir, path, isGitRepo }] }`          |
+
+The response excludes hidden entries (names starting with `.`) and files (only directories are returned). Entries are sorted alphabetically (case-insensitive). Each directory entry includes an `isGitRepo` flag indicating whether it is a git repository. A `..` parent directory entry is included when not at root.
 
 ### 4.2 Board Endpoints (per-project)
 
@@ -301,11 +312,13 @@ All board and task endpoints are scoped to a project via the `{projectId}` path 
 
 | Method | Endpoint                                | Description           | Request Body                    | Response                  |
 |--------|-----------------------------------------|-----------------------|---------------------------------|---------------------------|
-| POST   | `/api/projects/:id/tasks`               | Create new task       | `Task` (title, prompt, llama_server_url?, model_name?, max_consecutive_failed_turns?) | `201 Task` |
+| POST   | `/api/projects/:id/tasks`               | Create new task       | `Task` (prompt, title?, llama_server_url?, model_name?, max_consecutive_failed_turns?, plan_mode?) | `201 Task` |
 | GET    | `/api/projects/:id/tasks/:taskId`       | Get single task       | —                               | `200 Task` or `404`       |
 | PUT    | `/api/projects/:id/tasks/:taskId`       | Update task fields    | `Task`                          | `200 Task` or `404`       |
 | DELETE | `/api/projects/:id/tasks/:taskId`       | Delete task           | —                               | `204 No Content`          |
 | POST   | `/api/projects/:id/tasks/:taskId/move`  | Move task to column   | `MoveTaskRequest`               | `200 Task` or `404`       |
+
+**Auto-generated titles**: When creating a task, the `title` field is optional. If not provided, the backend auto-generates a title from the first line of the `prompt` (trimmed, truncated to 80 characters with `...` suffix if longer).
 
 ### 4.4 Task Execution Endpoints (per-project)
 
@@ -452,6 +465,31 @@ For the execute_command tool, always set the 'timeout' parameter:
 - 30s for builds and tests (npm run build, npm test, make)
 - 60s for long-running operations (migrations, large downloads)
 Timeout is specified in seconds. The server will reject values above 300s.
+```
+
+#### 5.3a Plan Mode System Prompt
+
+When `task.PlanMode` is `true`, an extended system prompt is used that adds a structured planning workflow after the standard instructions:
+
+```
+## PLAN MODE — Follow this workflow strictly:
+
+### Phase 1: Analyze the Project
+Read the project structure silently. Check directory layout, config files (package.json, go.mod, etc.),
+dependencies, build system, README, and any existing TODO or issue files.
+
+### Phase 2: Ask Clarifying Questions
+Identify gaps that would block correct implementation. Ask at most 5 critical questions in a single message.
+Do not ask about things already answerable from the codebase.
+
+### Phase 3: Create TODO.md
+Write a TODO.md file in the project root with structured tasks (phases, concrete measurable actions).
+After writing TODO.md, call task_complete() with summary: "Plan created in TODO.md. Awaiting approval to proceed."
+
+### Phase 4: Execute the Plan
+Once the user approves the plan (by editing the task prompt to include "APPROVED" or similar),
+work through tasks in order, one at a time. Mark each task done in TODO.md (- [ ] to - [x]).
+When all tasks are marked [x], call task_complete() with a full summary of work done.
 ```
 
 ### 5.4 Task Execution Flow
@@ -656,9 +694,7 @@ frontend/
 │   │   ├── types.ts             // TypeScript interfaces
 │   │   └── components/
 │   │       ├── App.svelte            // Root layout with sidebar + board
-│   │       ├── ProjectNavigation.svelte // Collapsible sidebar project list
-│   │       ├── ProjectSwitcher.svelte  // Top bar project name dropdown
-│   │       ├── AddProjectDialog.svelte // Dialog to add a new project
+│   │       ├── FileBrowser.svelte    // Directory browser for project selection
 │   │       ├── Board.svelte          // Main board layout (4 columns)
 │   │       ├── Column.svelte         // Single column with header + card list
 │   │       ├── Card.svelte           // Draggable task card with status badge
@@ -685,15 +721,17 @@ frontend/
 All components follow the design patterns and input/presentation features from the llama.cpp UI (`./examples/llama.cpp/tools/ui`), using the same component primitives (Sheet, Dialog, Badge, Button, Collapsible, ScrollArea, etc.).
 
 **Board.svelte**
+- Props: `tasks`, `projectId`, `onAddTask?`
 - Renders 4 Column components in a horizontal flex layout
 - Handles drag-and-drop at the board level (dragstart, dragover, drop)
-- Shows global controls: "Add Task" button, Config button
+- Passes `onAddTask` callback to the Backlog column (renders "+ Add Task" button there)
 - Subscribes to board store for reactive updates
 - Responsive: collapses to single-column scroll on mobile
 
 **Column.svelte**
-- Props: `columnId`, `title`, `tasks`, `color`
+- Props: `columnId`, `title`, `tasks`, `color`, `onDragStart`, `onDrop`, `onAddTask?`
 - Renders column header with title and task count badge (Badge component)
+- Backlog column: shows "+ Add Task" button at the top of the card list (when `onAddTask` is provided)
 - Renders Card components in order
 - Handles drop events to reorder/move tasks
 - Visual drop-target highlighting with border animation
@@ -782,21 +820,16 @@ All components follow the design patterns and input/presentation features from t
 - Uses the same icon-button pattern as `ChatMessageActionIcons`
 
 **CreateTaskModal.svelte**
-- Sheet (slide-out) from the right, inspired by `ChatForm` + `Dialog` patterns
+- Dialog modal (centered overlay) for creating new tasks
 - Form layout:
-  - Title input (required, max 200 chars) with character counter
-  - Prompt textarea (required, min 10 chars) with auto-resize behavior
-  - Placeholder text: "Describe the task the AI should execute..."
-  - Optional: Completion behavior section (expandable)
+  - Description textarea (required) — the only required field. Placeholder: "Describe the task the AI should execute..."
+  - Title is NOT entered by the user — it is auto-generated by the backend from the first line of the prompt (trimmed, truncated to 80 chars with `...` if longer)
+  - Options section:
+    - "Plan mode" checkbox (default: off) — AI creates a TODO.md plan first, then executes tasks after user approval
     - "Auto-commit on completion" checkbox (default: off) — when checked, the AI's work is automatically committed and the task moves to Done
     - "Auto-create PR branch" checkbox (default: off, requires auto-commit) — creates a `pr/<branch>` copy when the task completes
-  - Optional: Agent configuration section (expandable)
-    - Llama.cpp Server URL (inherits global if empty)
-    - Model Name (inherits global if empty)
-    - Max Consecutive Failed Turns (default: 3) — auto-stop after N consecutive failed tool calls
 - Submit button: disabled when form is invalid or loading
 - Keyboard shortcuts: Ctrl+Enter to submit, Escape to close
-- Uses Input and Textarea UI primitives with `INPUT_CLASSES` styling
 
 **TaskPrompt.svelte** (used in CardDetail for editing)
 - Rich textarea with auto-resize height (inspired by `ChatFormTextarea`)
@@ -820,20 +853,22 @@ All components follow the design patterns and input/presentation features from t
 
 **App.svelte**
 - Root layout component with collapsible sidebar + main content area
-- Sidebar: ProjectNavigation component listing all projects
-- Main area: ProjectSwitcher in the top bar, then the Board component
-- On first load: fetches project list, selects first (or last-active) project
+- Sidebar: project list (sorted alphabetically, case-insensitive) with remove buttons
+- Main area: top bar with project name + settings, then the Board component
+- Modals: CreateTaskModal, ConfigModal, TerminalPanel, CardDetail, FileBrowser
+- On first load: fetches project list, selects first project
 - Layout: flex row, sidebar width ~240px (collapsible to 48px icon-only mode)
+- Error toasts displayed at bottom center for operation failures
 
-**ProjectNavigation.svelte**
-- Collapsible sidebar component displaying project list
+**Sidebar (in App.svelte)**
+- Collapsible sidebar displaying project list (sorted alphabetically, case-insensitive)
 - Each project rendered as a list item with:
-  - Project name (truncated)
+  - Project name (truncated with ellipsis)
   - Active indicator (highlighted background when selected)
-  - Task count badge (total tasks in project)
-- "Add Project" button at the bottom (opens AddProjectDialog)
-- Toggle button to collapse/expand sidebar
-- Uses the same list pattern as `ProjectNavigation` in the llama.cpp UI
+  - Remove button (✕) visible on hover — triggers confirmation dialog before removal
+- "Add Project" button at the bottom (opens FileBrowser)
+- Toggle button to collapse/expand sidebar (48px icon-only mode when collapsed)
+- Projects are removed via `DELETE /api/projects/:id` with auto-selection of next project
 
 **ProjectSwitcher.svelte**
 - Top bar dropdown showing current project name
@@ -843,14 +878,16 @@ All components follow the design patterns and input/presentation features from t
 - Keyboard shortcut: Ctrl+Shift+P to open switcher
 - Uses DropdownMenu pattern from llama.cpp UI
 
-**AddProjectDialog.svelte**
-- Dialog modal for adding a new project
-- Form fields:
-  - Directory path input (file system picker or manual path)
-  - Optional: project name override (defaults to directory basename)
-- "Add Project" button (validates path exists and is a git repo)
-- Error message if path is invalid or not a git repository
-- Uses Dialog component with structured form layout
+**FileBrowser.svelte**
+- Dialog modal for browsing and selecting a project directory
+- Path bar: home button (🏠), editable path input (Enter to navigate)
+- Directory listing: alphabetically sorted (case-insensitive), excludes hidden entries (`.` prefix) and files
+- Each directory entry shows a `git` badge if it is a git repository
+- Clicking a git repo directory selects it immediately (adds the project)
+- Clicking a non-git directory navigates into it
+- `..` parent entry for navigation (when not at root)
+- Footer shows current path, Cancel button, and Select button (enabled when current path is a git repo)
+- Calls `GET /api/fs?path=<path>` to fetch directory contents
 
 ### 6.3 State Management
 
@@ -966,6 +1003,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
     auto_commit                  INTEGER NOT NULL DEFAULT 0,
     auto_pr                      INTEGER NOT NULL DEFAULT 0,
+    plan_mode                    INTEGER NOT NULL DEFAULT 0,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -1090,7 +1128,7 @@ kanban/
 │   │           ├── App.svelte                    // Root layout with sidebar + board
 │   │           ├── ProjectNavigation.svelte      // Collapsible sidebar project list
 │   │           ├── ProjectSwitcher.svelte        // Top bar project name dropdown
-│   │           ├── AddProjectDialog.svelte       // Dialog to add a new project
+│   │           ├── FileBrowser.svelte            // Directory browser for project selection
 │   │           ├── Board.svelte
 │   │           ├── Column.svelte
 │   │           ├── Card.svelte

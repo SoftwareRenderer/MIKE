@@ -1,22 +1,21 @@
-"use client";
 
 <script lang="ts">
-    import { createEventDispatcher } from 'svelte';
-
-    let { tokens }: { tokens: { prompt: number; completed: number; total: number; duration: number } } = $props();
-
-    const dispatch = createEventDispatcher();
+    let { tokens, onCopy, onToggleRaw }: {
+        tokens: { prompt: number; completed: number; total: number; duration: number };
+        onCopy?: () => void;
+        onToggleRaw?: () => void;
+    } = $props();
 
     let copied = $state(false);
 
     function copy() {
-        dispatch('copy');
+        onCopy?.();
         copied = true;
         setTimeout(() => copied = false, 2000);
     }
 
     function toggleRaw() {
-        dispatch('toggleRaw');
+        onToggleRaw?.();
     }
 
     function formatDuration(ms: number): string {

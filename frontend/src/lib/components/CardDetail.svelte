@@ -1,4 +1,3 @@
-"use client";
 
 <script lang="ts">
     import { onMount } from 'svelte';
@@ -19,24 +18,27 @@
         selectedTask.set(null);
     }
 
-    $effect(() => {
-        const t = selectedTask.get();
-        if (t) {
-            task = t;
-            titleDraft = t.title;
-            editingTitle = false;
-            diffText = '';
-            badge = getStatusBadge(t);
-        }
-    });
-
     onMount(() => {
+        // Subscribe to selectedTask store
+        const unsub = selectedTask.subscribe(t => {
+            if (t) {
+                task = t;
+                titleDraft = t.title;
+                editingTitle = false;
+                diffText = '';
+                badge = getStatusBadge(t);
+            }
+        });
+
         // Listen for keyboard shortcuts
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') close();
         }
         window.addEventListener('keydown', handleKey);
-        return () => window.removeEventListener('keydown', handleKey);
+        return () => {
+            unsub();
+            window.removeEventListener('keydown', handleKey);
+        };
     });
 
     async function handleMove(status: string) {

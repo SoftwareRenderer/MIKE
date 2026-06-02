@@ -3,9 +3,7 @@
     import { startTask, stopTask, retryTask, resumeTask, moveTask } from '$lib/api';
     import { board as boardStore, selectedTask, showCardDetail } from '$lib/store';
 
-    export let task: Task;
-    export let columnId: string;
-    export let projectId: string;
+    let { task, columnId, projectId }: { task: Task; columnId: string; projectId: string } = $props();
 
     function handleDragStart(e: DragEvent) {
         e.dataTransfer?.setData('text/plain', task.id);

@@ -1,29 +1,26 @@
 <script lang="ts">
     import { createTask } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
-    import { createEventDispatcher } from 'svelte';
 
-    export let projectId: string | undefined;
+    let { projectId, onClose }: { projectId: string | undefined; onClose: () => void } = $props();
 
-    let title = $state('');
     let prompt = $state('');
     let autoCommit = $state(false);
     let autoPr = $state(false);
+    let planMode = $state(false);
     let loading = $state(false);
     let error = $state('');
 
-    const dispatch = createEventDispatcher();
-
     async function handleSubmit() {
-        if (!projectId || !title.trim() || !prompt.trim()) return;
+        if (!projectId || !prompt.trim()) return;
         loading = true;
         error = '';
         try {
             const task = await createTask(projectId, {
-                title: title.trim(),
                 prompt: prompt.trim(),
                 auto_commit: autoCommit,
                 auto_pr: autoPr,
+                plan_mode: planMode,
             });
             const board = boardStore.get();
             if (board) {
@@ -31,6 +28,7 @@
                 boardStore.set(board);
             }
             showCreateTask.set(false);
+            onClose();
         } catch (e) {
             error = String(e);
         } finally {
@@ -39,7 +37,7 @@
     }
 
     function handleClose() {
-        dispatch('close');
+        onClose();
     }
 </script>
 
@@ -51,14 +49,17 @@
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
             <label>
-                Title
-                <input type="text" bind:value={title} placeholder="Task title" maxlength="200" required />
-            </label>
-            <label>
-                Prompt
+                Description
                 <textarea bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required></textarea>
             </label>
             <div class="options">
+                <label class="checkbox-label">
+                    <input type="checkbox" bind:checked={planMode} />
+                    <span class="option-text">
+                        <span class="option-title">Plan mode</span>
+                        <span class="option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
+                    </span>
+                </label>
                 <label class="checkbox-label">
                     <input type="checkbox" bind:checked={autoCommit} />
                     Auto-commit on completion
@@ -73,7 +74,7 @@
             {/if}
             <div class="modal-footer">
                 <button type="button" onclick={handleClose}>Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading || !title.trim() || !prompt.trim()}>
+                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim()}>
                     {loading ? 'Creating...' : 'Create Task'}
                 </button>
             </div>
@@ -160,6 +161,21 @@
     .checkbox-label.disabled {
         opacity: 0.5;
         pointer-events: none;
+    }
+    .option-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+    .option-title {
+        font-weight: 600;
+        font-size: 13px;
+    }
+    .option-desc {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+        font-weight: 400;
     }
     .error {
         color: var(--color-status-red);

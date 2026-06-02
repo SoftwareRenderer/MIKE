@@ -2,9 +2,8 @@
     import type { Config } from '$lib/types';
     import { updateConfig, getConfig } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
-    import { createEventDispatcher } from 'svelte';
 
-    export let config: Config | null;
+    let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
     let serverUrl = $state(config?.llama_server_url || '');
     let modelName = $state(config?.model_name || '');
@@ -20,8 +19,6 @@
     if (config?.endpoint_limits) {
         endpointLimits = Object.entries(config.endpoint_limits).map(([url, max]) => ({ url, max }));
     }
-
-    const dispatch = createEventDispatcher();
 
     function addEndpointLimit() {
         endpointLimits.push({ url: '', max: 2 });
@@ -67,7 +64,7 @@
                 endpoint_limits: limits,
             });
             configStore.set(cfg);
-            dispatch('saved');
+            onSaved();
         } catch (e) {
             error = String(e);
         } finally {
@@ -76,7 +73,7 @@
     }
 
     function handleClose() {
-        dispatch('close');
+        onClose();
     }
 </script>
 

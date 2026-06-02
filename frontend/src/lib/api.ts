@@ -29,7 +29,10 @@ export async function updateProject(id: string, name: string): Promise<Project> 
 
 export async function deleteProject(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete project');
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to delete project' }));
+        throw new Error(err.error || 'Failed to delete project');
+    }
 }
 
 // -- Board endpoints --
