@@ -1,0 +1,337 @@
+"use client";
+
+<script lang="ts">
+    import { onMount, onDestroy } from 'svelte';
+    import type { StreamEvent, StreamSection } from '$lib/types';
+    import { createTaskStream } from '$lib/api';
+    import StreamSectionComp from './StreamSection.svelte';
+    import StreamActions from './StreamActions.svelte';
+
+    let { projectId, taskId }: { projectId: string; taskId: string } = $props();
+
+    let sections: StreamSection[] = $state([]);
+    let connected = $state(false);
+    let connecting = $state(true);
+    let fullText = $state('');
+    let showRaw = $state(false);
+    let rawFrames: string[] = $state([]);
+    let tokenStats = $state({ prompt: 0, completed: 0, total: 0, duration: 0 });
+    let ws: WebSocket | null = null;
+    let scrollEl: HTMLElement | null = null;
+    let atBottom = $state(true);
+
+    let currentTextSection: StreamSection | null = $state(null);
+    let currentReasoningSection: StreamSection | null = $state(null);
+    let activeToolCalls = $state<Map<string, StreamSection>>(new Map());
+
+    function genId() {
+        return Math.random().toString(36).slice(2, 10);
+    }
+
+    function ensureTextSection() {
+        if (!currentTextSection) {
+            currentTextSection = { id: genId(), type: 'text', content: '', isStreaming: true };
+            sections.push(currentTextSection);
+        }
+        return currentTextSection;
+    }
+
+    function ensureReasoningSection() {
+        if (!currentReasoningSection) {
+            currentReasoningSection = { id: genId(), type: 'reasoning', content: '', isStreaming: true, tokenCount: 0 };
+            sections.push(currentReasoningSection);
+        }
+        return currentReasoningSection;
+    }
+
+    function handleEvent(event: StreamEvent) {
+        switch (event.type) {
+            case 'token': {
+                const data = event.data as { text: string };
+                currentReasoningSection = null;
+                const sec = ensureTextSection();
+                sec.content += data.text;
+                sec.isStreaming = true;
+                fullText += data.text;
+                break;
+            }
+            case 'reasoning': {
+                const data = event.data as { text: string };
+                currentTextSection = null;
+                const sec = ensureReasoningSection();
+                sec.content += data.text;
+                sec.tokenCount = (sec.tokenCount || 0) + 1;
+                sec.isStreaming = true;
+                break;
+            }
+            case 'reasoning_end': {
+                const data = event.data as { summary: string };
+                if (currentReasoningSection) {
+                    currentReasoningSection.isStreaming = false;
+                    currentReasoningSection.reasoningSummary = data.summary;
+                    currentReasoningSection = null;
+                }
+                break;
+            }
+            case 'tool_call': {
+                const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
+                currentTextSection = null;
+                currentReasoningSection = null;
+                const sec: StreamSection = {
+                    id: genId(),
+                    type: 'tool_call',
+                    content: '',
+                    isStreaming: true,
+                    toolCall: { toolId: data.tool_id, toolName: data.tool_name, args: data.args }
+                };
+                sections.push(sec);
+                activeToolCalls.set(data.tool_id, sec);
+                break;
+            }
+            case 'tool_result': {
+                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
+                const sec = activeToolCalls.get(data.tool_id);
+                if (sec && sec.toolCall) {
+                    sec.toolCall.result = data.output;
+                    sec.toolCall.success = data.success;
+                    sec.toolCall.duration = data.duration;
+                    sec.isStreaming = false;
+                }
+                activeToolCalls.delete(data.tool_id);
+                break;
+            }
+            case 'complete': {
+                const data = event.data as { state: string; summary: string; tokens: { prompt: number; completed: number; total: number }; duration: number };
+                tokenStats = { ...data.tokens, duration: data.duration };
+                if (data.summary) fullText += '\n\n' + data.summary;
+                if (currentTextSection) currentTextSection.isStreaming = false;
+                if (currentReasoningSection) {
+                    currentReasoningSection.isStreaming = false;
+                }
+                connected = false;
+                break;
+            }
+            case 'error': {
+                const data = event.data as { message: string };
+                if (currentTextSection) currentTextSection.isStreaming = false;
+                if (currentReasoningSection) currentReasoningSection.isStreaming = false;
+                connected = false;
+                break;
+            }
+        }
+        scroll();
+    }
+
+    function scroll() {
+        if (scrollEl && atBottom) {
+            scrollEl.scrollTop = scrollEl.scrollHeight;
+        }
+    }
+
+    function checkScroll() {
+        if (scrollEl) {
+            atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 32;
+        }
+    }
+
+    function toggleRaw() {
+        showRaw = !showRaw;
+    }
+
+    function copyOutput() {
+        navigator.clipboard.writeText(fullText);
+    }
+
+    function collapseAll() {
+        // Just a visual hint — handled by StreamSection
+    }
+
+    onMount(() => {
+        ws = createTaskStream(projectId, taskId, (event) => {
+            rawFrames.push(JSON.stringify(event));
+            handleEvent(event);
+        });
+        ws.onopen = () => { connecting = false; connected = true; };
+        ws.onclose = () => { connected = false; };
+    });
+
+    onDestroy(() => {
+        if (ws) ws.close();
+    });
+</script>
+
+<div class="task-stream">
+    <!-- Connection Status -->
+    <div class="status-bar" class:connecting class:connected>
+        {#if connecting}
+            <span class="dot connecting"></span> Connecting...
+        {:else if connected}
+            <span class="dot connected"></span> Connected
+        {:else}
+            <span class="dot disconnected"></span> Disconnected
+        {/if}
+    </div>
+
+    <!-- Content -->
+    <div class="content" bind:this={scrollEl} on:scroll={checkScroll}>
+        {#if showRaw}
+            <pre class="raw">{rawFrames.join('\n')}</pre>
+        {:else}
+            {#each sections as sec (sec.id)}
+                <StreamSectionComp
+                    type={sec.type}
+                    collapsible={sec.type === 'reasoning' && !sec.isStreaming}
+                    summary={sec.reasoningSummary}
+                    tokenCount={sec.tokenCount}
+                >
+                    {#if sec.type === 'text'}
+                        <div class="stream-text">{sec.content}</div>
+                    {:else if sec.type === 'reasoning'}
+                        <div class="stream-reasoning">{sec.content}</div>
+                    {:else if sec.type === 'tool_call' && sec.toolCall}
+                        <div class="tool-call-card">
+                            <div class="tool-call-header">
+                                <span class="tool-name">{sec.toolCall.toolName}</span>
+                                {#if sec.isStreaming}
+                                    <span class="spinner">⏳</span>
+                                {:else if sec.toolCall.success}
+                                    <span class="success">✓</span>
+                                {:else}
+                                    <span class="error">✗</span>
+                                {/if}
+                                {#if sec.toolCall.duration !== undefined}
+                                    <span class="duration">{sec.toolCall.duration}ms</span>
+                                {/if}
+                            </div>
+                            <pre class="tool-args">{JSON.stringify(sec.toolCall.args, null, 2)}</pre>
+                            {#if sec.toolCall.result !== undefined}
+                                <pre class="tool-result" class:success={sec.toolCall.success} class:failure={!sec.toolCall.success}>{sec.toolCall.result}</pre>
+                            {/if}
+                        </div>
+                    {/if}
+                </StreamSectionComp>
+            {/each}
+        {/if}
+    </div>
+
+    <!-- Actions -->
+    {#if fullText}
+        <StreamActions
+            on:copy={copyOutput}
+            on:toggleRaw={toggleRaw}
+            tokens={tokenStats}
+        />
+    {/if}
+</div>
+
+<style>
+    .task-stream {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+    }
+    .status-bar {
+        padding: 4px 12px;
+        font-size: 12px;
+        color: var(--color-text-tertiary);
+        border-bottom: 1px solid var(--color-border);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .dot.connecting {
+        background: var(--color-status-yellow);
+        animation: pulse 1s infinite;
+    }
+    .dot.connected {
+        background: var(--color-status-green);
+    }
+    .dot.disconnected {
+        background: var(--color-text-tertiary);
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    .content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 0;
+    }
+    .stream-text {
+        font-size: 14px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        color: var(--color-text-primary);
+    }
+    .stream-reasoning {
+        font-size: 13px;
+        line-height: 1.5;
+        font-style: italic;
+        color: var(--color-text-tertiary);
+        white-space: pre-wrap;
+    }
+    .tool-call-card {
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+        border-left: 3px solid var(--color-accent);
+        padding: 8px 12px;
+    }
+    .tool-call-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
+    .tool-name {
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--color-accent);
+    }
+    .spinner { color: var(--color-status-yellow); }
+    .success { color: var(--color-status-green); }
+    .error { color: var(--color-status-red); }
+    .duration {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+        margin-left: auto;
+    }
+    .tool-args {
+        background: var(--color-surface-0);
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-family: var(--font-mono);
+        overflow-x: auto;
+        margin: 0;
+    }
+    .tool-result {
+        background: var(--color-surface-0);
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-family: var(--font-mono);
+        overflow-x: auto;
+        margin: 4px 0 0;
+        max-height: 150px;
+        overflow-y: auto;
+    }
+    .tool-result.success { border-left: 3px solid var(--color-status-green); }
+    .tool-result.failure { border-left: 3px solid var(--color-status-red); }
+    .raw {
+        background: var(--color-surface-0);
+        padding: 12px;
+        font-size: 12px;
+        font-family: var(--font-mono);
+        white-space: pre-wrap;
+        margin: 0;
+    }
+</style>
