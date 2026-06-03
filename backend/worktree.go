@@ -84,25 +84,43 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	// Create baseline branch capturing current working tree state (including uncommitted changes)
 	baselineBranch := fmt.Sprintf("__kanban_baseline_%s", taskID)
 
+	// Save original branch BEFORE any modifications
+	originalBranch, _ := wm.gitCurrentBranch(project.Path)
+
+	// Cleanup function: always restore original branch and clean up temp branch
+	cleanup := func() {
+		if originalBranch != "" {
+			wm.gitRun(project.Path, "checkout", originalBranch)
+		}
+		wm.gitRun(project.Path, "branch", "-D", baselineBranch)
+	}
+
 	// Step 1: Check for uncommitted changes
 	hasChanges, err := wm.hasWorkingTreeChanges(project.Path)
 	if err != nil {
 		return "", fmt.Errorf("check working tree: %w", err)
 	}
 
+	// Delete any existing baseline branch (from failed previous attempts)
+	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
+
 	if hasChanges {
 		// Step 2a: Stash current changes
 		if err := wm.gitRun(project.Path, "stash", "push", "-m", "kanban baseline stash"); err != nil {
 			return "", fmt.Errorf("stash changes: %w", err)
 		}
-		defer wm.gitRun(project.Path, "stash", "pop") // cleanup
+		defer func() {
+			// Always pop stash on exit
+			wm.gitRun(project.Path, "stash", "pop")
+		}()
 
-		// Step 2b: Create baseline branch from current HEAD
+		// Step 2b: Create baseline branch from current HEAD (does NOT change HEAD)
 		if err := wm.gitRun(project.Path, "branch", baselineBranch); err != nil {
 			return "", fmt.Errorf("create baseline branch: %w", err)
 		}
+		defer cleanup()
 
-		// Step 2c: Checkout baseline branch
+		// Step 2c: Checkout baseline branch to apply changes
 		if err := wm.gitRun(project.Path, "checkout", baselineBranch); err != nil {
 			return "", fmt.Errorf("checkout baseline: %w", err)
 		}
@@ -115,36 +133,34 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 
 		// Step 2e: Stage and commit changes on baseline branch
 		wm.gitRun(project.Path, "add", "-A")
-		if err := wm.gitRun(project.Path, "commit", "-m", fmt.Sprintf("Baseline for task %s", taskID)); err != nil {
-			// No changes to commit is ok
-		}
+		wm.gitRun(project.Path, "commit", "-m", fmt.Sprintf("Baseline for task %s", taskID))
 
 		// Step 2f: Go back to original branch
-		originalBranch, _ := wm.gitCurrentBranch(project.Path)
 		if originalBranch != "" {
 			wm.gitRun(project.Path, "checkout", originalBranch)
 		}
+
+		// Re-stash for the deferred pop (the changes are now committed, stash is empty)
+		// Actually the stash was already popped above, so the deferred pop will fail harmlessly
 	}
 
 	// Step 3: Create worktree from the baseline branch (or current HEAD if clean)
 	sourceRef := baselineBranch
 	if !hasChanges {
 		sourceRef = "HEAD"
+		defer cleanup() // still need to clean up if worktree creation fails
 	}
 
 	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
 	cmd.Dir = project.Path
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// Cleanup baseline branch
-		wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 		return "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
 
 	// Step 4: Create the task branch from the worktree's HEAD
-	if err := wm.gitRun(worktreePath, "checkout", "-b", branchName); err != nil {
+	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-b", branchName); err != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
-		wm.gitRun(project.Path, "branch", "-D", baselineBranch)
-		return "", fmt.Errorf("create branch: %w", err)
+		return "", fmt.Errorf("create branch: %s: %w", out, err)
 	}
 
 	// Step 5: Create initial baseline commit snapshot

@@ -129,6 +129,15 @@ CREATE TABLE IF NOT EXISTS home_agent_messages (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS task_messages (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_conversation_history_task ON conversation_history(task_id);
@@ -136,6 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(par
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_child ON task_dependencies(child_task_id);
 CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_home_agent_messages_project ON home_agent_messages(project_id);
+CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 `
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -277,6 +287,29 @@ func (s *Store) GetTask(projectID, taskID string) (*Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.queryTask(projectID, taskID)
+}
+
+// GetTaskByTaskID retrieves a task by its ID alone (without project ID).
+func (s *Store) GetTaskByTaskID(taskID string) (*Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var t Task
+	var autoCommit, autoPR, planMode int
+	var createdAt, updatedAt string
+	err := s.db.QueryRow(
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at FROM tasks WHERE id = ?`,
+		taskID,
+	).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
+		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("task not found")
+	}
+	t.AutoCommit = i2b(autoCommit)
+	t.AutoPR = i2b(autoPR)
+	t.PlanMode = i2b(planMode)
+	t.CreatedAt = scanTime(createdAt)
+	t.UpdatedAt = scanTime(updatedAt)
+	return &t, err
 }
 
 func (s *Store) queryTask(projectID, taskID string) (*Task, error) {
@@ -661,6 +694,42 @@ func (s *Store) GetHomeAgentMessages(projectID string) ([]HomeAgentMessage, erro
 		var m HomeAgentMessage
 		var createdAt string
 		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Role, &m.Content, &createdAt); err != nil {
+			return nil, err
+		}
+		m.CreatedAt = scanTime(createdAt)
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// CreateTaskMessage inserts a task chat message.
+func (s *Store) CreateTaskMessage(m *TaskMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`INSERT INTO task_messages (id, task_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, m.Role, m.Content, m.CreatedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
+// GetTaskMessages retrieves all messages for a task.
+func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, task_id, role, content, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+		taskID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	messages := []TaskMessage{}
+	for rows.Next() {
+		var m TaskMessage
+		var createdAt string
+		if err := rows.Scan(&m.ID, m.TaskID, &m.Role, &m.Content, &createdAt); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = scanTime(createdAt)

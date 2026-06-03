@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,8 +25,9 @@ type TaskExecutor struct {
 }
 
 type executionState struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	userMsgChan chan string
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
@@ -33,10 +35,13 @@ func NewTaskExecutor(store *Store, configStore *ConfigStore) *TaskExecutor {
 	te := &TaskExecutor{
 		store:       store,
 		configStore: configStore,
-		streamMgr:   NewStreamManager(),
+		streamMgr:   NewStreamManager(store),
 		tasks:       make(map[string]*executionState),
 	}
 	te.worktreeMgr = NewWorktreeManager(store, configStore)
+	// Wire up lazy-start: when a user message arrives and no executor is running,
+	// start one automatically so the agent always responds.
+	te.streamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
 
@@ -100,6 +105,83 @@ func (te *TaskExecutor) HandleStream(w http.ResponseWriter, r *http.Request, pro
 	te.streamMgr.HandleStream(w, r, taskID)
 }
 
+// handleLazyStart is called when a user message arrives for a task with no active executor.
+func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
+	log.Printf("[lazy-start] task=%s project=%s", taskID, projectID)
+
+	te.taskMu.Lock()
+	if _, exists := te.tasks[taskID]; exists {
+		te.taskMu.Unlock()
+		return
+	}
+	te.taskMu.Unlock()
+
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
+		return
+	}
+	if task.StatusState == "completed" {
+		return
+	}
+
+	cfg, err := te.configStore.GetConfig()
+	if err != nil {
+		return
+	}
+
+	serverURL := task.LlamaServerURL
+	if serverURL == "" {
+		serverURL = cfg.LlamaServerURL
+	}
+	if serverURL == "" {
+		return
+	}
+
+	modelName := task.ModelName
+	if modelName == "" {
+		modelName = cfg.ModelName
+	}
+	log.Printf("[lazy-start] task=%s url=%s model=%s", taskID, serverURL, modelName)
+
+	branchName := fmt.Sprintf("task/%s", task.ID[:8])
+	if len(task.ID) < 8 {
+		branchName = fmt.Sprintf("task/%s", task.ID)
+	}
+
+	wtPath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
+	if err != nil {
+		log.Printf("[lazy-start] task=%s worktree error: %v", taskID, err)
+		return
+	}
+	log.Printf("[lazy-start] task=%s worktree=%s", taskID, wtPath)
+
+	b := te.streamMgr.GetOrCreate(taskID)
+	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	userMsgChan := make(chan string, 16)
+	te.taskMu.Lock()
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
+	te.taskMu.Unlock()
+
+	b.SetUserMessageHandler(func(msg string) {
+		select {
+		case userMsgChan <- msg:
+		default:
+		}
+	})
+
+	log.Printf("[lazy-start] task=%s starting executor", taskID)
+	go te.executeTaskWithInitialMessage(ctx, task, wtPath, serverURL, modelName, b, userMsgChan, content)
+}
+
+// executeTaskWithInitialMessage starts the conversation with an initial user message.
+func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan string, initialMessage string) {
+	task.Prompt = task.Prompt + "\n\nUser follow-up: " + initialMessage
+	te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
+}
+
 // StartTask begins AI execution for a task.
 func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)
@@ -149,11 +231,19 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	userMsgChan := make(chan string, 16)
 	te.taskMu.Lock()
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
 	te.taskMu.Unlock()
 
-	go te.executeTask(ctx, task, worktreePath, serverURL, modelName, b)
+	b.SetUserMessageHandler(func(msg string) {
+		select {
+		case userMsgChan <- msg:
+		default:
+		}
+	})
+
+	go te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
 	return nil
 }
 
@@ -183,7 +273,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan string) {
 	defer func() {
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)

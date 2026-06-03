@@ -166,6 +166,7 @@ var (
 	reTaskResume      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
 	reTaskStream      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
+	reTaskMessages    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
 	reTaskDeps        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
 	reTaskDepChild    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies/([^/]+)$`)
 	reTaskDependents  = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependents$`)
@@ -184,6 +185,19 @@ var (
 	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
 	reProjectTerminal = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 )
+
+func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	messages, err := s.store.GetTaskMessages(taskID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, messages)
+}
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -335,6 +349,12 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := reTaskDiff.FindStringSubmatch(path); m != nil {
 		s.gitMgr.HandleTaskDiff(w, r, m[1], m[2])
+		return
+	}
+
+	// Task messages
+	if m := reTaskMessages.FindStringSubmatch(path); m != nil {
+		s.handleTaskMessages(w, r, m[1], m[2])
 		return
 	}
 

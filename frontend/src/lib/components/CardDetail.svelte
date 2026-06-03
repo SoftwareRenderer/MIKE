@@ -1,42 +1,38 @@
-
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Task } from '$lib/types';
-    import { selectedTask, showCardDetail, board as boardStore } from '$lib/store';
-    import { moveTask, deleteTask, startTask, stopTask, retryTask, resumeTask, getTaskDiff } from '$lib/api';
-    import TaskStream from './TaskStream.svelte';
+    import { board as boardStore } from '$lib/store';
+    import { moveTask, deleteTask, startTask, stopTask, retryTask, resumeTask, getTaskDiff, getBoard } from '$lib/api';
+    import TaskChat from './Chat/TaskChat.svelte';
 
-    let task: Task | null = $state(null);
+    let { task, tasks: columnTasks, onClose }: { task: Task; tasks: Task[]; onClose: () => void } = $props();
+
+    let allTasks: Task[] = $state([]);
     let diffText = $state('');
     let loadingDiff = $state(false);
     let editingTitle = $state(false);
     let titleDraft = $state('');
     let badge = $state({ text: 'Idle', color: 'var(--color-text-tertiary)' });
 
-    function close() {
-        showCardDetail.set(false);
-        selectedTask.set(null);
-    }
-
     onMount(() => {
-        // Subscribe to selectedTask store
-        const unsub = selectedTask.subscribe(t => {
-            if (t) {
-                task = t;
-                titleDraft = t.title;
-                editingTitle = false;
-                diffText = '';
-                badge = getStatusBadge(t);
+        titleDraft = task.title;
+        badge = getStatusBadge(task);
+
+        const unsubBoard = boardStore.subscribe(b => {
+            if (b && task) {
+                allTasks = b.tasks.filter(t => t.status === task.status)
+                    .sort((a, b) => a.column_order - b.column_order);
+            } else {
+                allTasks = [];
             }
         });
 
-        // Listen for keyboard shortcuts
         function handleKey(e: KeyboardEvent) {
-            if (e.key === 'Escape') close();
+            if (e.key === 'Escape') onClose();
         }
         window.addEventListener('keydown', handleKey);
         return () => {
-            unsub();
+            unsubBoard();
             window.removeEventListener('keydown', handleKey);
         };
     });
@@ -46,7 +42,6 @@
         try {
             const updated = await moveTask(task.project_id, task.id, status);
             task = updated;
-            selectedTask.set(updated);
             boardStore.update(b => {
                 if (!b) return b;
                 const idx = b.tasks.findIndex(t => t.id === task!.id);
@@ -54,7 +49,7 @@
                 return { ...b };
             });
         } catch (e) {
-            console.error('Failed to move:', e);
+            alert('Failed to move: ' + String(e));
         }
     }
 
@@ -63,7 +58,6 @@
         try {
             const updated = await startTask(task.project_id, task.id);
             task = updated;
-            selectedTask.set(updated);
             boardStore.update(b => {
                 if (!b) return b;
                 const idx = b.tasks.findIndex(t => t.id === task!.id);
@@ -71,7 +65,7 @@
                 return { ...b };
             });
         } catch (e) {
-            console.error('Failed to start:', e);
+            alert('Failed to start: ' + String(e));
         }
     }
 
@@ -80,9 +74,8 @@
         try {
             const updated = await stopTask(task.project_id, task.id);
             task = updated;
-            selectedTask.set(updated);
         } catch (e) {
-            console.error('Failed to stop:', e);
+            alert('Failed to stop: ' + String(e));
         }
     }
 
@@ -91,9 +84,8 @@
         try {
             const updated = await retryTask(task.project_id, task.id);
             task = updated;
-            selectedTask.set(updated);
         } catch (e) {
-            console.error('Failed to retry:', e);
+            alert('Failed to retry: ' + String(e));
         }
     }
 
@@ -102,24 +94,22 @@
         try {
             const updated = await resumeTask(task.project_id, task.id);
             task = updated;
-            selectedTask.set(updated);
         } catch (e) {
-            console.error('Failed to resume:', e);
+            alert('Failed to resume: ' + String(e));
         }
     }
 
     async function handleDelete() {
         if (!task || !confirm('Delete this task? This cannot be undone.')) return;
+        const projectId = task.project_id;
+        const taskId = task.id;
         try {
-            await deleteTask(task.project_id, task.id);
-            boardStore.update(b => {
-                if (!b) return b;
-                b.tasks = b.tasks.filter(t => t.id !== task!.id);
-                return { ...b };
-            });
-            close();
+            await deleteTask(projectId, taskId);
+            const board = await getBoard(projectId);
+            boardStore.set(board);
+            onClose();
         } catch (e) {
-            console.error('Failed to delete:', e);
+            alert('Failed to delete task: ' + String(e));
         }
     }
 
@@ -137,7 +127,6 @@
     function saveTitle() {
         if (!task || !titleDraft.trim()) return;
         editingTitle = false;
-        // TODO: call updateTask API
         task.title = titleDraft.trim();
     }
 
@@ -152,284 +141,381 @@
             default: return { text: 'Idle', color: 'var(--color-text-tertiary)' };
         }
     }
+
+    function getColumnTitle(status: string): string {
+        return status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
 </script>
 
-{#if task}
-    <div class="overlay" onclick={close}></div>
-    <div class="card-detail">
+    <div class="task-detail-page">
+        <!-- Header -->
         <div class="header">
-            {#if editingTitle}
-                <input
-                    class="title-input"
-                    bind:value={titleDraft}
-                    onblur={saveTitle}
-                    autofocus
-                />
-            {:else}
-                <h3 class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }}>{task.title}</h3>
-            {/if}
-            <div class="header-right">
-                <span class="badge" style="background:{badge.color}22;color:{badge.color}">{badge.text}</span>
-                <button class="close-btn" onclick={close}>X</button>
+            <div class="header-left">
+                <button class="btn-back" onclick={onClose} title="Back to board (Esc)">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <div class="header-main">
+                    {#if editingTitle}
+                        <input
+                            class="title-input"
+                            bind:value={titleDraft}
+                            onblur={saveTitle}
+                            onkeydown={(e) => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') { e.stopPropagation(); editingTitle = false; } }}
+                            placeholder="Task title"
+                            autofocus
+                        />
+                    {:else}
+                        <h3 class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} title="Click to edit">
+                            {task.title || '(untitled)'}
+                        </h3>
+                    {/if}
+                    <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
+                        {badge.text}
+                    </span>
+                </div>
+            </div>
+            <div class="header-actions">
+                {#if task.status === 'backlog'}
+                    <button class="btn-icon btn-primary-icon" onclick={handleStart} title="Start task">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l8 5-8 5V3z" fill="currentColor"/></svg>
+                    </button>
+                {/if}
+                {#if task.status === 'in_progress' && task.status_state === 'running'}
+                    <button class="btn-icon btn-danger-icon" onclick={handleStop} title="Stop task">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
+                    </button>
+                {/if}
+                {#if task.status === 'in_progress' && task.status_state === 'paused'}
+                    <button class="btn-icon btn-primary-icon" onclick={handleResume} title="Resume task">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l8 5-8 5V3z" fill="currentColor"/></svg>
+                    </button>
+                {/if}
+                {#if task.status === 'in_progress' && task.status_state === 'failed'}
+                    <button class="btn-icon btn-primary-icon" onclick={handleRetry} title="Retry task">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </button>
+                {/if}
+                {#if task.status === 'review'}
+                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} title="Approve">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} title="Reject">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </button>
+                {/if}
+                <button class="btn-icon" onclick={handleDelete} title="Delete task">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
             </div>
         </div>
 
-        <div class="body">
-            <!-- Prompt Section -->
-            <div class="section">
-                <h4>Prompt</h4>
-                <div class="prompt-text">{task.prompt}</div>
-            </div>
-
-            <!-- Stream Section (running/paused/queued) -->
-            {#if task.status_state === 'running' || task.status_state === 'paused' || task.status_state === 'queued'}
-                <div class="section">
-                    <h4>Live Output</h4>
-                    <TaskStream projectId={task.project_id} taskId={task.id} />
+        <!-- 3-Column Layout -->
+        <div class="columns">
+            <!-- Column 1: Board Overview -->
+            <div class="column column-context">
+                <div class="column-header" style="border-bottom-color: var(--color-border)">
+                    <span class="column-title">{getColumnTitle(task.status)}</span>
+                    <span class="column-count">{allTasks.length}</span>
                 </div>
-            {/if}
-
-            <!-- Output Section (completed/review) -->
-            {#if task.status_state === 'awaiting_review' || task.status_state === 'completed'}
-                <div class="section">
-                    <h4>Output</h4>
-                    <div class="output-text">{task.output || 'No output'}</div>
-                </div>
-            {/if}
-
-            <!-- Failed state message -->
-            {#if task.status_state === 'failed'}
-                <div class="section">
-                    <h4>Error</h4>
-                    <div class="error-text">{task.output || 'Task failed'}</div>
-                </div>
-            {/if}
-
-            <!-- Diff Section (review) -->
-            {#if task.status_state === 'awaiting_review'}
-                <div class="section">
-                    <h4>
-                        Diff
-                        <button class="btn-sm" onclick={loadDiff} disabled={loadingDiff}>
-                            {loadingDiff ? 'Loading...' : 'Load Diff'}
-                        </button>
-                    </h4>
-                    {#if diffText}
-                        <pre class="diff">{diffText}</pre>
-                    {/if}
-                </div>
-            {/if}
-
-            <!-- Metadata -->
-            <div class="section metadata">
-                <h4>Metadata</h4>
-                <div class="meta-grid">
-                    {#if task.branch}
-                        <div class="meta-item"><span class="label">Branch</span><span class="value">{task.branch}</span></div>
-                    {/if}
-                    {#if task.session_id}
-                        <div class="meta-item"><span class="label">Session</span><span class="value">{task.session_id.slice(0, 8)}</span></div>
-                    {/if}
-                    {#if task.llama_server_url}
-                        <div class="meta-item"><span class="label">Agent</span><span class="value">{task.llama_server_url}</span></div>
-                    {/if}
-                    {#if task.model_name}
-                        <div class="meta-item"><span class="label">Model</span><span class="value">{task.model_name}</span></div>
-                    {/if}
-                    <div class="meta-item"><span class="label">Created</span><span class="value">{new Date(task.created_at).toLocaleString()}</span></div>
-                    <div class="meta-item"><span class="label">Updated</span><span class="value">{new Date(task.updated_at).toLocaleString()}</span></div>
+                <div class="task-list">
+                    {#each allTasks as t (t.id)}
+                        <div
+                            class={`task-item${t.id === task.id ? ' selected' : ''}`}
+                            onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); }}
+                        >
+                            <div class="task-item-title">{t.title || '(untitled)'}</div>
+                            {#if t.status_state !== 'idle' && t.status_state !== ''}
+                                <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
+                                    {getStatusBadge(t).text}
+                                </span>
+                            {/if}
+                        </div>
+                    {/each}
                 </div>
             </div>
-        </div>
 
-        <!-- Footer Actions -->
-        <div class="footer">
-            {#if task.status === 'backlog'}
-                <button class="btn-primary" onclick={handleStart}>Start</button>
-            {/if}
-            {#if task.status === 'in_progress'}
-                {#if task.status_state === 'running'}
-                    <button class="btn-danger" onclick={handleStop}>Stop</button>
-                {/if}
-                {#if task.status_state === 'paused'}
-                    <button class="btn-primary" onclick={handleResume}>Resume</button>
-                {/if}
-                {#if task.status_state === 'failed'}
-                    <button class="btn-primary" onclick={handleRetry}>Retry</button>
-                {/if}
-            {/if}
-            {#if task.status === 'review'}
-                <button class="btn-primary" onclick={() => handleMove('done')}>Done</button>
-                <button class="btn-secondary" onclick={() => handleMove('in_progress')}>Reject</button>
-            {/if}
-            {#if task.status === 'done'}
-                <button class="btn-secondary" onclick={() => handleMove('backlog')}>Restore</button>
-            {/if}
-            <button class="btn-danger" onclick={handleDelete}>Delete</button>
+            <!-- Column 2: Chat / Agent Interface -->
+            <div class="column column-chat">
+                <div class="column-header">
+                    <div class="column-header-left">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                        <span class="column-title">Agent</span>
+                    </div>
+                </div>
+                <div style="flex:1;min-height:0">
+                    <TaskChat
+                        projectId={task.project_id}
+                        taskId={task.id}
+                        disabled={task.status_state === 'completed'}
+                    />
+                </div>
+            </div>
+
+            <!-- Column 3: Working Changes (Diff) -->
+            <div class="column column-diff">
+                <div class="column-header">
+                    <div class="column-header-left">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <span class="column-title">Changes</span>
+                    </div>
+                    <button class="btn-icon-sm" onclick={loadDiff} disabled={loadingDiff} title="Refresh diff">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
+                <div class="diff-content">
+                    {#if loadingDiff}
+                        <div class="diff-loading">Loading diff...</div>
+                    {:else if diffText}
+                        <pre class="diff-view">{diffText}</pre>
+                    {:else}
+                        <div class="diff-empty">
+                            <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/></svg>
+                            <p>No changes yet</p>
+                            <span class="hint">Changes appear when the task runs</span>
+                        </div>
+                    {/if}
+                </div>
+            </div>
         </div>
     </div>
-{/if}
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 99;
-    }
-    .card-detail {
-        position: fixed;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        width: 480px;
-        max-width: 100vw;
-        background: var(--color-surface-1);
-        border-left: 1px solid var(--color-border);
-        z-index: 100;
+    .task-detail-page {
+        flex: 1;
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        height: 100%;
     }
     .header {
-        padding: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 16px;
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
+        gap: 12px;
+        background: var(--color-surface-1);
+    }
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+    }
+    .btn-back {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .btn-back:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .header-main {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
     }
     .title {
-        font-size: 16px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
-        margin: 0 0 8px;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+        color: var(--color-text-primary);
     }
+    .title:hover { color: var(--color-accent); }
     .title-input {
-        width: 100%;
+        flex: 1;
         padding: 4px 8px;
-        font-size: 16px;
+        font-size: 14px;
+        font-weight: 600;
         background: var(--color-surface-2);
         border: 1px solid var(--color-accent);
         border-radius: var(--radius-sm);
         color: var(--color-text-primary);
-    }
-    .header-right {
-        display: flex;
-        gap: 8px;
-        align-items: center;
+        min-width: 0;
     }
     .badge {
         padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 12px;
-        font-weight: 500;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 600;
+        flex-shrink: 0;
+        border: 1px solid;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
     }
-    .close-btn {
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+    .btn-icon {
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        font-size: 16px;
         cursor: pointer;
-        padding: 4px;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
-    .body {
+    .btn-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .btn-primary-icon:hover { background: var(--color-accent)22; color: var(--color-accent); }
+    .btn-danger-icon:hover { background: var(--color-status-red)22; color: var(--color-status-red); }
+    .btn-success-icon:hover { background: var(--color-status-green)22; color: var(--color-status-green); }
+    .btn-secondary-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .columns {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .column {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .column-context {
+        width: 220px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--color-border);
+        background: var(--color-surface-0);
+    }
+    .column-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-bottom: 1px solid;
+        flex-shrink: 0;
+        background: var(--color-surface-1);
+    }
+    .column-header-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--color-text-secondary);
+    }
+    .column-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .column-count {
+        background: var(--color-surface-3);
+        border-radius: 8px;
+        padding: 1px 6px;
+        font-size: 11px;
+        color: var(--color-text-secondary);
+    }
+    .task-list {
         flex: 1;
         overflow-y: auto;
-        padding: 16px;
+        padding: 4px;
     }
-    .section {
-        margin-bottom: 16px;
-    }
-    .section h4 {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--color-text-secondary);
-        margin: 0 0 8px;
+    .task-item {
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: baseline;
+        gap: 8px;
+        transition: background 0.1s ease;
     }
-    .prompt-text, .output-text {
-        font-size: 14px;
-        line-height: 1.5;
-        color: var(--color-text-primary);
-        white-space: pre-wrap;
+    .task-item:hover { background: var(--color-surface-2); }
+    .task-item.selected {
+        background: var(--color-accent)18;
+        outline: 1px solid var(--color-accent)40;
     }
-    .error-text {
-        font-size: 14px;
-        color: var(--color-status-red);
-        white-space: pre-wrap;
-    }
-    .diff {
-        background: var(--color-surface-0);
-        padding: 12px;
-        border-radius: var(--radius-md);
+    .task-item-title {
         font-size: 12px;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
+    }
+    .task-item-badge {
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        flex-shrink: 0;
+    }
+    .column-chat {
+        flex: 1.2;
+        min-width: 0;
+        border-right: 1px solid var(--color-border);
+    }
+    .column-diff {
+        flex: 1;
+        min-width: 0;
+    }
+    .btn-icon-sm {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .btn-icon-sm:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .btn-icon-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+    .diff-content {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+    .diff-view {
+        padding: 10px 12px;
+        font-size: 11px;
         font-family: var(--font-mono);
         overflow-x: auto;
         white-space: pre;
         margin: 0;
-        max-height: 300px;
-        overflow-y: auto;
+        line-height: 1.5;
+        color: var(--color-text-primary);
     }
-    .metadata .meta-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-    }
-    .meta-item {
+    .diff-empty {
         display: flex;
         flex-direction: column;
-        gap: 2px;
-    }
-    .meta-item .label {
-        font-size: 11px;
-        color: var(--color-text-tertiary);
-        text-transform: uppercase;
-    }
-    .meta-item .value {
-        font-size: 13px;
-        color: var(--color-text-primary);
-        font-family: var(--font-mono);
-    }
-    .footer {
-        padding: 12px 16px;
-        border-top: 1px solid var(--color-border);
-        display: flex;
+        align-items: center;
+        justify-content: center;
         gap: 8px;
-        flex-wrap: wrap;
-        flex-shrink: 0;
+        padding: 32px 16px;
+        color: var(--color-text-tertiary);
+        text-align: center;
     }
-    .btn-primary {
-        padding: 6px 16px;
-        background: var(--color-accent);
-        color: white;
-        border-radius: var(--radius-md);
+    .diff-empty p { font-size: 13px; margin: 0; font-weight: 500; }
+    .diff-empty .hint { font-size: 11px; color: var(--color-text-tertiary); }
+    .diff-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+        color: var(--color-text-tertiary);
         font-size: 13px;
-    }
-    .btn-primary:hover {
-        background: var(--color-accent-hover);
-    }
-    .btn-secondary {
-        padding: 6px 16px;
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        border-radius: var(--radius-md);
-        font-size: 13px;
-    }
-    .btn-secondary:hover {
-        background: var(--color-surface-4);
-    }
-    .btn-danger {
-        padding: 6px 16px;
-        background: var(--color-status-red);
-        color: white;
-        border-radius: var(--radius-md);
-        font-size: 13px;
-    }
-    .btn-sm {
-        padding: 4px 8px;
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        border-radius: var(--radius-sm);
-        font-size: 12px;
     }
 </style>

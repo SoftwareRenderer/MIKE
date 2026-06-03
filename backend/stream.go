@@ -3,9 +3,11 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -23,6 +25,7 @@ const (
 	WSTypeQueue       WSMessageType = "queue"
 	WSTypeComplete    WSMessageType = "complete"
 	WSTypeError       WSMessageType = "error"
+	WSTypeUserMessage WSMessageType = "user_message"
 )
 
 // StreamEvent carries a typed payload to broadcast.
@@ -30,6 +33,9 @@ type StreamEvent struct {
 	Type WSMessageType
 	Data interface{}
 }
+
+// LazyStartHandler is called when a user message arrives for a task with no active executor.
+type LazyStartHandler func(projectID, taskID, content string)
 
 // broadcaster fans out events to multiple WebSocket clients.
 type broadcaster struct {
@@ -40,6 +46,8 @@ type broadcaster struct {
 	bufSize     int
 	seqCounter  atomic.Int64
 	closed      atomic.Bool
+	userMsgHandler func(string)
+	handlerMu    sync.RWMutex
 }
 
 func newBroadcaster(bufSize int) *broadcaster {
@@ -47,10 +55,24 @@ func newBroadcaster(bufSize int) *broadcaster {
 		bufSize = 100
 	}
 	return &broadcaster{
-		clients:  make(map[*websocket.Conn]bool),
+		clients:    make(map[*websocket.Conn]bool),
 		ringBuffer: make([]WSMessage, 0, bufSize),
-		bufSize:  bufSize,
+		bufSize:    bufSize,
 	}
+}
+
+// SetUserMessageHandler sets the callback for forwarding user messages to the executor.
+func (b *broadcaster) SetUserMessageHandler(h func(string)) {
+	b.handlerMu.Lock()
+	defer b.handlerMu.Unlock()
+	b.userMsgHandler = h
+}
+
+// getUserMessageHandler returns the current user message handler.
+func (b *broadcaster) getUserMessageHandler() func(string) {
+	b.handlerMu.RLock()
+	defer b.handlerMu.RUnlock()
+	return b.userMsgHandler
 }
 
 // add registers a new client.
@@ -111,7 +133,6 @@ func (b *broadcaster) getBuffer(fromSeq int64) []WSMessage {
 	if fromSeq <= 0 {
 		return b.ringBuffer
 	}
-	// Simplified: return all buffer (seq tracking is per-message, not per-buffered-item)
 	return b.ringBuffer
 }
 
@@ -128,15 +149,26 @@ func (b *broadcaster) close() {
 
 // StreamManager manages broadcasters for all active tasks.
 type StreamManager struct {
-	mu         sync.RWMutex
-	broadcasts map[string]*broadcaster
+	mu             sync.RWMutex
+	broadcasts     map[string]*broadcaster
+	store          *Store
+	lazyStartHandler LazyStartHandler
+	lazyMu         sync.RWMutex
 }
 
 // NewStreamManager creates a new StreamManager.
-func NewStreamManager() *StreamManager {
+func NewStreamManager(store *Store) *StreamManager {
 	return &StreamManager{
 		broadcasts: make(map[string]*broadcaster),
+		store:      store,
 	}
+}
+
+// SetLazyStartHandler sets the callback for lazy-starting an executor.
+func (sm *StreamManager) SetLazyStartHandler(h LazyStartHandler) {
+	sm.lazyMu.Lock()
+	defer sm.lazyMu.Unlock()
+	sm.lazyStartHandler = h
 }
 
 // GetOrCreate returns an existing broadcaster or creates a new one.
@@ -184,7 +216,6 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 
 	// Send buffered events on reconnect
 	if msg := r.URL.Query().Get("sync"); msg != "" {
-		// Client requested sync - send buffer
 		buf := b.getBuffer(0)
 		for _, m := range buf {
 			frame, _ := json.Marshal(m)
@@ -194,11 +225,59 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		}
 	}
 
-	// Keep reading to detect client close
+	// Keep reading to detect client close and handle user messages
 	for {
-		_, _, err := conn.Read(context.Background())
+		_, data, err := conn.Read(context.Background())
 		if err != nil {
 			break
+		}
+		var msg struct {
+			Type string `json:"type"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "user_message" {
+			var payload struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
+				log.Printf("[stream] task=%s user_message received", taskID)
+				// Always persist the user message
+				sm.store.CreateTaskMessage(&TaskMessage{
+					ID:        generateUUID(),
+					TaskID:    taskID,
+					Role:      "user",
+					Content:   payload.Content,
+					CreatedAt: time.Now().UTC(),
+				})
+				// Always broadcast back to all clients
+				b.send(StreamEvent{Type: WSTypeUserMessage, Data: map[string]string{"role": "user", "content": payload.Content}})
+				// If executor is running, forward to it
+				handler := b.getUserMessageHandler()
+				if handler != nil {
+					log.Printf("[stream] task=%s forwarding to executor", taskID)
+					handler(payload.Content)
+				} else {
+					// No executor running — lazy-start one
+					log.Printf("[stream] task=%s no executor, trying lazy-start", taskID)
+					sm.lazyMu.RLock()
+					lazyHandler := sm.lazyStartHandler
+					sm.lazyMu.RUnlock()
+					if lazyHandler != nil {
+						task, err := sm.store.GetTaskByTaskID(taskID)
+						var projectID string
+						if err == nil && task != nil {
+							projectID = task.ProjectID
+						}
+						log.Printf("[stream] task=%s project=%s calling lazy-start", taskID, projectID)
+						go lazyHandler(projectID, taskID, payload.Content)
+					} else {
+						log.Printf("[stream] task=%s no lazy-start handler registered", taskID)
+					}
+				}
+			}
 		}
 	}
 }

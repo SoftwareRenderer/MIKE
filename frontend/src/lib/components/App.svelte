@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail, selectedTask } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject } from '$lib/api';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
@@ -24,6 +24,7 @@
     let showCardDetailVal = $state(false);
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
+    let selectedTaskVal: Task | null = $state(null);
 
     // Subscribe to Svelte 4 stores on mount
     onMount(() => {
@@ -31,7 +32,8 @@
         const unsubConfig = showConfig.subscribe(v => showConfigVal = v);
         const unsubTerminal = showTerminal.subscribe(v => showTerminalVal = v);
         const unsubCard = showCardDetail.subscribe(v => showCardDetailVal = v);
-        return () => { unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); };
+        const unsubTask = selectedTask.subscribe(t => selectedTaskVal = t);
+        return () => { unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask(); };
     });
 
     onMount(async () => {
@@ -119,7 +121,7 @@
     }
 </script>
 
-<div class="app" class:collapsed>
+<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
@@ -162,11 +164,15 @@
                 </div>
             </top-bar>
             <board-container>
-                <Board 
-                    {tasks} 
-                    projectId={currentProject.id}
-                    onAddTask={() => showCreateTask.set(true)}
-                />
+                {#if showCardDetailVal && selectedTaskVal}
+                    <CardDetail task={selectedTaskVal} tasks={tasks} onClose={() => showCardDetail.set(false)} />
+                {:else}
+                    <Board 
+                        {tasks} 
+                        projectId={currentProject.id}
+                        onAddTask={() => showCreateTask.set(true)}
+                    />
+                {/if}
             </board-container>
         {:else}
             <div class="empty-state">
@@ -193,9 +199,6 @@
     {/if}
     {#if showTerminalVal}
         <TerminalPanel />
-    {/if}
-    {#if showCardDetailVal}
-        <CardDetail />
     {/if}
     {#if showFileBrowserVal}
         <FileBrowser
@@ -229,6 +232,9 @@
     }
     .app.collapsed .sidebar {
         width: 48px;
+    }
+    .app.task-detail .sidebar {
+        display: none;
     }
     .sidebar-header {
         display: flex;

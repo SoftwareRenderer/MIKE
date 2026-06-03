@@ -67,6 +67,14 @@ export interface HomeAgentMessage {
     created_at: string;
 }
 
+export interface TaskMessage {
+    id: string;
+    task_id: string;
+    role: string;
+    content: string;
+    created_at: string;
+}
+
 export interface GitCommit {
     hash: string;
     short: string;
@@ -110,7 +118,8 @@ export type StreamEventType =
     | 'status'
     | 'queue'
     | 'complete'
-    | 'error';
+    | 'error'
+    | 'user_message';
 
 export interface StreamEvent {
     type: StreamEventType;

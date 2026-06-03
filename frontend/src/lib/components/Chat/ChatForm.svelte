@@ -1,0 +1,160 @@
+<script lang="ts">
+    interface Props {
+        value?: string;
+        disabled?: boolean;
+        isLoading?: boolean;
+        placeholder?: string;
+        onSubmit?: (message: string) => void;
+        onStop?: () => void;
+    }
+
+    let {
+        value = $bindable(''),
+        disabled = false,
+        isLoading = false,
+        placeholder = 'Type a message...',
+        onSubmit,
+        onStop
+    }: Props = $props();
+
+    let textareaEl: HTMLTextAreaElement | undefined;
+    let canSend = $derived(value.trim().length > 0 && !disabled);
+
+    export function focus() {
+        textareaEl?.focus();
+    }
+
+    export function resetHeight() {
+        if (textareaEl) {
+            textareaEl.style.height = 'auto';
+        }
+    }
+
+    function autoResize() {
+        if (textareaEl) {
+            textareaEl.style.height = 'auto';
+            textareaEl.style.height = Math.min(textareaEl.scrollHeight, 160) + 'px';
+        }
+    }
+
+    function handleKeydown(e: KeyboardEvent) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (canSend) {
+                handleSubmit();
+            }
+        }
+    }
+
+    function handleSubmit() {
+        if (!canSend) return;
+        const msg = value.trim();
+        value = '';
+        resetHeight();
+        onSubmit?.(msg);
+        setTimeout(() => focus(), 10);
+    }
+
+    function handleStop() {
+        onStop?.();
+        setTimeout(() => focus(), 10);
+    }
+
+    $effect(() => {
+        autoResize();
+    });
+</script>
+
+<form class="chat-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+    <div class="chat-form-inner">
+        <textarea
+            bind:this={textareaEl}
+            bind:value
+            {disabled}
+            {placeholder}
+            rows="1"
+            onkeydown={handleKeydown}
+            oninput={autoResize}
+        ></textarea>
+        {#if isLoading}
+            <button type="button" class="btn-stop" onclick={handleStop} title="Stop">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
+                </svg>
+            </button>
+        {:else}
+            <button type="submit" class="btn-send" disabled={!canSend} title="Send">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M2 2l12 6-12 6V9l6-1-6-1V2z" fill="currentColor"/>
+                </svg>
+            </button>
+        {/if}
+    </div>
+</form>
+
+<style>
+    .chat-form {
+        padding: 8px 12px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-0);
+        flex-shrink: 0;
+    }
+    .chat-form-inner {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 6px 8px;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .chat-form-inner:focus-within {
+        border-color: var(--color-accent);
+        box-shadow: 0 0 0 2px var(--color-accent)22;
+    }
+    textarea {
+        flex: 1;
+        min-height: 24px;
+        max-height: 160px;
+        resize: none;
+        border: none;
+        background: transparent;
+        color: var(--color-text-primary);
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 4px 0;
+        outline: none;
+        font-family: inherit;
+        overflow-y: auto;
+    }
+    textarea::placeholder { color: var(--color-text-tertiary); }
+    textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-send,
+    .btn-stop {
+        flex-shrink: 0;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        padding: 0;
+    }
+    .btn-send { background: var(--color-accent); color: white; }
+    .btn-send:hover:not(:disabled) { opacity: 0.85; transform: scale(1.05); }
+    .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); cursor: not-allowed; }
+    .btn-stop {
+        background: var(--color-status-red);
+        color: white;
+        animation: pulse-stop 1.5s ease-in-out infinite;
+    }
+    .btn-stop:hover { opacity: 0.85; transform: scale(1.05); }
+    @keyframes pulse-stop {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+</style>

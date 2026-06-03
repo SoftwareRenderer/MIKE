@@ -259,6 +259,17 @@ type StreamErrorEvent struct {
 	Code    string `json:"code"`
 }
 
+// -- Task Message types --
+
+// TaskMessage represents a chat message for a task.
+type TaskMessage struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // -- Home Agent WebSocket types --
 
 // HomeAgentWSMessage is the envelope for home agent WebSocket frames.

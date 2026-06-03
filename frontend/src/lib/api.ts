@@ -118,7 +118,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
     return res.json();
 }
 
-export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): WebSocket {
+export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): { ws: WebSocket; send: (msg: string) => void; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -126,7 +126,21 @@ export function createTaskStream(projectId: string, taskId: string, onEvent: (ev
     };
     ws.onerror = () => onEvent({ type: 'error', data: { message: 'WebSocket error', code: 'ws_error' } });
     ws.onclose = () => onEvent({ type: 'status', data: { state: 'disconnected', activity: 'Stream closed' } });
-    return ws;
+    return {
+        ws,
+        send: (msg: string) => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'user_message', data: { content: msg } }));
+            }
+        },
+        close: () => ws.close()
+    };
+}
+
+export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
+    if (!res.ok) throw new Error('Failed to fetch messages');
+    return res.json();
 }
 
 export async function getTaskDiff(projectId: string, taskId: string): Promise<string> {

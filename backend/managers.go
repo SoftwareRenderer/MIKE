@@ -46,7 +46,11 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 			jsonError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
+		task.ID = generateUUID()
 		task.ProjectID = projectID
+		now := time.Now().UTC()
+		task.CreatedAt = now
+		task.UpdatedAt = now
 		// Auto-generate title from prompt if not provided
 		if task.Title == "" && task.Prompt != "" {
 			task.Title = autoGenerateTitle(task.Prompt)
@@ -477,7 +481,7 @@ func NewHomeAgentManager(store *Store, configStore *ConfigStore) *HomeAgentManag
 	return &HomeAgentManager{
 		store:       store,
 		configStore: configStore,
-		streamMgr:   NewStreamManager(),
+		streamMgr:   NewStreamManager(store),
 	}
 }
 
