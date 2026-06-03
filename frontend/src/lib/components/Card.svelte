@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { get } from 'svelte/store';
     import type { Task } from '$lib/types';
     import { startTask, stopTask, retryTask, resumeTask, moveTask } from '$lib/api';
     import { board as boardStore, selectedTask, showCardDetail } from '$lib/store';
@@ -31,7 +32,7 @@
                 default:
                     return;
             }
-            const board = boardStore.get();
+            const board = get(boardStore);
             if (board) {
                 const idx = board.tasks.findIndex(t => t.id === task.id);
                 if (idx !== -1) {

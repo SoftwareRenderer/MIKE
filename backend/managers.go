@@ -48,6 +48,9 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 		}
 		task.ID = generateUUID()
 		task.ProjectID = projectID
+		if task.Status == "" {
+			task.Status = "backlog"
+		}
 		now := time.Now().UTC()
 		task.CreatedAt = now
 		task.UpdatedAt = now

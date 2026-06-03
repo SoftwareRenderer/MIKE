@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { createTask } from '$lib/api';
+    import { get } from 'svelte/store';
+    import { createTask, getBoard } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
 
     let { projectId, onClose }: { projectId: string | undefined; onClose: () => void } = $props();
@@ -16,17 +17,15 @@
         loading = true;
         error = '';
         try {
-            const task = await createTask(projectId, {
+            await createTask(projectId, {
                 prompt: prompt.trim(),
                 auto_commit: autoCommit,
                 auto_pr: autoPr,
                 plan_mode: planMode,
             });
-            const board = boardStore.get();
-            if (board) {
-                board.tasks.push(task);
-                boardStore.set(board);
-            }
+            // Refresh the board
+            const board = await getBoard(projectId);
+            boardStore.set(board);
             showCreateTask.set(false);
             onClose();
         } catch (e) {
