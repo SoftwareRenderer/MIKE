@@ -81,16 +81,37 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonResponse(w, http.StatusOK, cfg)
 	case http.MethodPut:
-		var cfg Config
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		// Partial update: only update fields that are provided
+		var updates map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if err := cs.UpdateConfig(&cfg); err != nil {
+		current, err := cs.GetConfig()
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "failed to get current config")
+			return
+		}
+		if url, ok := updates["llama_server_url"]; ok {
+			current.LlamaServerURL = url.(string)
+		}
+		if model, ok := updates["model_name"]; ok {
+			current.ModelName = model.(string)
+		}
+		if workspace, ok := updates["workspace_dir"]; ok {
+			current.WorkspaceDir = workspace.(string)
+		}
+		if limits, ok := updates["endpoint_limits"]; ok {
+			if limits != nil {
+				limitsJSON, _ := json.Marshal(limits)
+				json.Unmarshal(limitsJSON, &current.EndpointLimits)
+			}
+		}
+		if err := cs.UpdateConfig(current); err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to update config")
 			return
 		}
-		jsonResponse(w, http.StatusOK, cfg)
+		jsonResponse(w, http.StatusOK, current)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

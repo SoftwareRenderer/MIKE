@@ -32,8 +32,41 @@
         const unsubConfig = showConfig.subscribe(v => showConfigVal = v);
         const unsubTerminal = showTerminal.subscribe(v => showTerminalVal = v);
         const unsubCard = showCardDetail.subscribe(v => showCardDetailVal = v);
-        const unsubTask = selectedTask.subscribe(t => selectedTaskVal = t);
-        return () => { unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask(); };
+        const unsubTask = selectedTask.subscribe(t => {
+            selectedTaskVal = t;
+            // Update URL when task changes
+            if (t) {
+                const currentUrl = new URL(location.href);
+                if (currentUrl.searchParams.get('task') !== t.id) {
+                    history.pushState({ task: t.id }, '', '?task=' + t.id);
+                }
+            }
+            // Don't clear URL here - let popstate handler manage it
+        });
+
+        // Handle browser back/forward
+        function handlePopState() {
+            const params = new URLSearchParams(location.search);
+            const taskId = params.get('task');
+            if (taskId) {
+                const task = tasks.find(t => t.id === taskId);
+                if (task) {
+                    selectedTaskVal = task;
+                    showCardDetailVal = true;
+                    selectedTask.set(task);
+                }
+            } else {
+                selectedTaskVal = null;
+                showCardDetailVal = false;
+                selectedTask.set(null);
+            }
+        }
+        window.addEventListener('popstate', handlePopState);
+
+        return () => {
+            unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask();
+            window.removeEventListener('popstate', handlePopState);
+        };
     });
 
     onMount(async () => {
@@ -52,6 +85,20 @@
         }
     });
 
+    // Function to restore task from URL after board loads
+    function restoreTaskFromUrl() {
+        const params = new URLSearchParams(location.search);
+        const taskId = params.get('task');
+        if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task) {
+                selectedTaskVal = task;
+                showCardDetailVal = true;
+                selectedTask.set(task);
+            }
+        }
+    }
+
     async function selectProject(p: Project) {
         currentProject = p;
         selectedProject.set(p);
@@ -59,6 +106,8 @@
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
             boardStore.set(b);
+            // Restore task from URL after board loads
+            restoreTaskFromUrl();
         } catch (e) {
             console.error('Failed to load board:', e);
         }
@@ -165,7 +214,11 @@
             </top-bar>
             <board-container>
                 {#if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} onClose={() => showCardDetail.set(false)} />
+                    <CardDetail task={selectedTaskVal} tasks={tasks} onClose={() => {
+                        showCardDetail.set(false);
+                        selectedTask.set(null);
+                        history.pushState({ task: null }, '', location.pathname);
+                    }} />
                 {:else}
                     <Board 
                         {tasks} 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -13,8 +14,38 @@ import (
 	"github.com/google/uuid"
 )
 
+var taskWords = []string{
+	// Nature
+	"ocean", "river", "mountain", "forest", "desert", "island", "valley", "meadow",
+	"garden", "stream", "canyon", "glacier", "volcano", "waterfall", "sunrise", "sunset",
+	"thunder", "lightning", "rainbow", "aurora", "breeze", "storm", "frost", "snow",
+	// Animals
+	"eagle", "wolf", "bear", "fox", "hawk", "owl", "deer", "lion",
+	"tiger", "shark", "dolphin", "whale", "panda", "falcon", "raven", "heron",
+	// Colors
+	"crimson", "azure", "emerald", "amber", "violet", "coral", "sapphire", "ruby",
+	"gold", "silver", "bronze", "copper", "ivory", "pearl", "onyx", "jade",
+	// Space
+	"nova", "comet", "meteor", "galaxy", "nebula", "planet", "star", "cosmos",
+	"orbit", "pulse", "zenith", "eclipse", "lunar", "solar", "stellar", "orbit",
+	// Elements
+	"flame", "stone", "iron", "steel", "crystal", "diamond", "obsidian", "marble",
+	"granite", "basalt", "quartz", "flint", "coal", "ash", "ember", "spark",
+	// Abstract
+	"dream", "vision", "spirit", "soul", "mind", "heart", "voice", "echo",
+	"shadow", "light", "truth", "wisdom", "power", "grace", "honor", "valor",
+}
+
 func generateUUID() string {
 	return uuid.New().String()
+}
+
+func generateTaskID() string {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	w1 := taskWords[r.Intn(len(taskWords))]
+	w2 := taskWords[r.Intn(len(taskWords))]
+	w3 := taskWords[r.Intn(len(taskWords))]
+	return w1 + "-" + w2 + "-" + w3
 }
 
 // -- TaskManager --
@@ -46,7 +77,7 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 			jsonError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		task.ID = generateUUID()
+		task.ID = generateTaskID()
 		task.ProjectID = projectID
 		if task.Status == "" {
 			task.Status = "backlog"

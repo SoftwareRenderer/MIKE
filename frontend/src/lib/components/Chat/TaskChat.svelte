@@ -13,6 +13,7 @@
         toolCall?: {
             toolName: string;
             args: Record<string, unknown>;
+            raw_args?: string;
             result?: string;
             success?: boolean;
             duration?: number;
@@ -78,7 +79,7 @@
                 const id = genId();
                 const entry: ChatEntry = {
                     id, role: 'assistant', content: '', isStreaming: true,
-                    toolCall: { toolName: data.tool_name, args: data.args, isPending: true }
+                    toolCall: { toolName: data.tool_name, args: data.args, raw_args: data.raw_args, isPending: true }
                 };
                 entries.push(entry);
                 activeToolCalls.set(data.tool_id, entry);
@@ -217,7 +218,7 @@
                                     <span class="tool-duration">{entry.toolCall.duration}ms</span>
                                 {/if}
                             </div>
-                            <pre class="tool-args">{JSON.stringify(entry.toolCall.args, null, 2)}</pre>
+                            <pre class="tool-args">{JSON.stringify(entry.toolCall.args, null, 2).trim() === '{}' ? entry.toolCall.raw_args || '(no arguments)' : JSON.stringify(entry.toolCall.args, null, 2)}</pre>
                             {#if entry.toolCall.result !== undefined}
                                 <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>
                                     {entry.toolCall.result}

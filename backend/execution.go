@@ -362,7 +362,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			for _, tc := range pendingToolCalls {
 				args := parseToolArgs(tc.Function.Arguments)
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task)
-				b.send(StreamEvent{Type: WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "args": args}})
+				b.send(StreamEvent{Type: WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "args": args, "raw_args": tc.Function.Arguments}})
 				b.send(StreamEvent{Type: WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": time.Since(startTime).Milliseconds()}})
 
 				if !success {
@@ -401,8 +401,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			assistantContent.Reset()
 		} else if assistantText != "" {
 			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
-			messages = append(messages, ChatMessage{Role: "user", Content: "Please continue working. Use the available tools to make progress."})
 			assistantContent.Reset()
+			// LLM responded with text but no tools - signal completion so UI stops streaming
+			task.StatusState = "idle"
+			te.store.UpdateTask(task)
+			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "tokens": usage, "duration": time.Since(startTime).Milliseconds()}})
+			return
 		}
 
 		if len(messages) > 100 {
@@ -476,7 +480,14 @@ func (te *TaskExecutor) gitRun(dir string, args ...string) error {
 
 func parseToolArgs(s string) map[string]interface{} {
 	result := make(map[string]interface{})
-	json.Unmarshal([]byte(s), &result)
+	s = strings.TrimSpace(s)
+	if s == "" || s == "{}" {
+		return result
+	}
+	if err := json.Unmarshal([]byte(s), &result); err != nil {
+		log.Printf("[tool] failed to parse args: %v", err)
+		return map[string]interface{}{"raw": s}
+	}
 	return result
 }
 
