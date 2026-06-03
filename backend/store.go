@@ -729,7 +729,7 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	for rows.Next() {
 		var m TaskMessage
 		var createdAt string
-		if err := rows.Scan(&m.ID, m.TaskID, &m.Role, &m.Content, &createdAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &createdAt); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = scanTime(createdAt)

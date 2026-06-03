@@ -122,7 +122,9 @@ export function createTaskStream(projectId: string, taskId: string, onEvent: (ev
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
-        onEvent({ type: msg.type, data: JSON.parse(msg.data) });
+        // msg.data may already be an object (json.RawMessage) or a string
+        const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+        onEvent({ type: msg.type, data });
     };
     ws.onerror = () => onEvent({ type: 'error', data: { message: 'WebSocket error', code: 'ws_error' } });
     ws.onclose = () => onEvent({ type: 'status', data: { state: 'disconnected', activity: 'Stream closed' } });
