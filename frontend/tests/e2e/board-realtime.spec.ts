@@ -17,32 +17,30 @@ test.describe('Board Real-time Updates', () => {
     await page.click('button[type="submit"]');
     await expect(page.locator('.modal')).not.toBeVisible();
 
-    // Wait briefly for the board to update (WebSocket + callback)
-    await page.waitForTimeout(1000);
-
-    // Board should now have one more card
-    const newCount = await page.locator('.card').count();
-    expect(newCount).toBeGreaterThan(initialCount);
+    // Wait for the board to update (card count increases)
+    await expect(async () => {
+      const count = await page.locator('.card').count();
+      expect(count).toBeGreaterThan(initialCount);
+    }).toPass({ timeout: 10000 });
   });
 
   test('should reflect task deletion on board without refresh', async ({ page }) => {
-    // Count cards before
-    const countBeforeCreate = await page.locator('.card').count();
+    const uniqueId = Date.now();
+    const uniqueTitle = `Delete me ${uniqueId}`;
 
-    // First create a task to delete
+    // Create a task to delete
     await page.click('.add-task-btn');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', `Delete test ${Date.now()}`);
+    await page.fill('textarea', uniqueTitle);
     await page.click('button[type="submit"]');
     await expect(page.locator('.modal')).not.toBeVisible();
-    await page.waitForTimeout(500);
 
-    // Verify card was added
-    const countAfterCreate = await page.locator('.card').count();
-    expect(countAfterCreate).toBeGreaterThan(countBeforeCreate);
+    // Wait for the specific card to appear (not affected by parallel workers)
+    const newCard = page.locator(`.card:has-text("${uniqueId}")`);
+    await expect(newCard).toBeVisible({ timeout: 10000 });
 
-    // Open the task detail (click the last/newest card)
-    await page.locator('.card').last().click();
+    // Open the task detail (click our specific card)
+    await newCard.click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
     // Intercept browser confirm dialog
@@ -55,7 +53,7 @@ test.describe('Board Real-time Updates', () => {
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 5000 });
 
-    const countAfterDelete = await page.locator('.card').count();
-    expect(countAfterDelete).toBeLessThan(countAfterCreate);
+    // Our specific card should be gone
+    await expect(page.locator(`.card:has-text("${uniqueId}")`)).not.toBeVisible();
   });
 });

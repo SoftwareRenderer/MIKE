@@ -336,7 +336,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 	for {
 		select {
 		case <-ctx.Done():
-			task.StatusState = "failed"
+			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
 			b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": "Task stopped", "code": "stopped"}})
@@ -375,7 +375,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			for i := 0; i < 3; i++ {
 				select {
 				case <-ctx.Done():
-					task.StatusState = "failed"
+					task.StatusState = "stopped"
 					task.Output = "Stopped by user"
 					te.store.UpdateTask(task)
 					return
@@ -510,7 +510,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		}
 
 		if len(messages) > 100 {
-			task.StatusState = "failed"
+			task.StatusState = "idle"
 			task.Output = "Conversation limit reached"
 			te.store.UpdateTask(task)
 			return

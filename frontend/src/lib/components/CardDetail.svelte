@@ -135,6 +135,7 @@
             case 'queued': return { text: 'Queued', color: 'var(--color-status-yellow)' };
             case 'paused': return { text: 'Paused', color: 'var(--color-status-purple)' };
             case 'awaiting_review': return { text: 'Review', color: 'var(--color-status-orange)' };
+            case 'stopped': return { text: 'Stopped', color: 'var(--color-text-tertiary)' };
             case 'failed': return { text: 'Failed', color: 'var(--color-status-red)' };
             case 'completed': return { text: 'Completed', color: 'var(--color-status-green)' };
             default: return { text: 'Idle', color: 'var(--color-text-tertiary)' };

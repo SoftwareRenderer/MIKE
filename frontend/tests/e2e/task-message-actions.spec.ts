@@ -44,7 +44,7 @@ test.describe.serial('Task Message Actions', () => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     const copyBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Copy"]');
     await copyBtn.click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(100);
 
     // Verify clipboard content
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
@@ -162,23 +162,35 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show regenerate button on assistant message after LLM response', async ({ page }) => {
+    // Count assistant messages before sending
+    const assistantCountBefore = await page.locator('.chat-message.assistant').count();
+
     // Send a message to trigger LLM response
     const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.fill(`Regenerate test ${Date.now()}`);
     await textarea.press('Enter');
     await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for assistant message (may not appear if executor fails to start)
-    const assistantVisible = await page.locator('.chat-message.assistant').last().isVisible({ timeout: 10000 }).catch(() => false);
-    if (!assistantVisible) {
-      return; // Executor didn't start, skip
+    // Wait for a NEW assistant message to appear (executor may not start)
+    const newAssistantAppeared = await page.waitForFunction(
+      (count) => document.querySelectorAll('.chat-message.assistant').length > count,
+      assistantCountBefore,
+      { timeout: 10000 }
+    ).catch(() => false);
+    if (!newAssistantAppeared) {
+      test.skip(); // Executor didn't start, skip gracefully
     }
 
-    // Wait for streaming to stop (cursor should disappear)
-    await expect(page.locator('.cursor-blink')).not.toBeVisible({ timeout: 10000 });
+    // Wait for streaming to stop on the new assistant message (cursor should disappear)
+    const lastAssistant = page.locator('.chat-message.assistant').last();
+    const cursorStopped = await lastAssistant.locator('.cursor-blink').isVisible({ timeout: 5000 }).catch(() => false);
+    if (cursorStopped) {
+      // Cursor is still visible — wait for it to disappear
+      await expect(lastAssistant.locator('.cursor-blink')).not.toBeVisible({ timeout: 10000 });
+    }
 
     // Regenerate button should be visible on the assistant message
-    const regenerateBtn = page.locator('.chat-message.assistant').last().locator('.action-btn[title="Regenerate"]');
+    const regenerateBtn = lastAssistant.locator('.action-btn[title="Regenerate"]');
     await expect(regenerateBtn).toBeVisible();
   });
 });

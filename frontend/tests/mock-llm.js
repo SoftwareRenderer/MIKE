@@ -32,6 +32,7 @@ const textResponse = loadFixture('text_response');
 const textResponseLong = loadFixture('text_response_long');
 const textResponseSlow = loadFixture('text_response_slow');
 const toolCallResponse = loadFixture('tool_call_response');
+const toolCallFail = loadFixture('tool_call_fail');
 
 let requestCount = 0;
 
@@ -47,9 +48,14 @@ function selectResponse(parsed) {
         .map(m => (m.content || '').toLowerCase())
         .join(' ');
 
+    // Failing tool call: message mentions file that does not exist
+    if (hasTools && /does not exist/i.test(userMessages)) {
+        return { chunks: toolCallFail, chunkDelay: 1 };
+    }
+
     // Tool call scenario: tools provided and message mentions file/directory operations
     if (hasTools && /list|file|directory|read|command|git|exec/i.test(userMessages)) {
-        return { chunks: toolCallResponse, chunkDelay: 5 };
+        return { chunks: toolCallResponse, chunkDelay: 1 };
     }
 
     // Slow response: for stop button test (needs streaming to be visible)
@@ -59,15 +65,15 @@ function selectResponse(parsed) {
 
     // Long response scenario: message asks for detailed/long output
     if (/long|detailed|write a|explain|describe/i.test(userMessages)) {
-        return { chunks: textResponseLong, chunkDelay: 5 };
+        return { chunks: textResponseLong, chunkDelay: 1 };
     }
 
     // Default: simple text response
-    return { chunks: textResponse, chunkDelay: 5 };
+    return { chunks: textResponse, chunkDelay: 1 };
 }
 
 const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url === '/chat/completions') {
+    if (req.method === 'POST' && (req.url === '/chat/completions' || req.url === '/v1/chat/completions')) {
         requestCount++;
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });
@@ -75,7 +81,8 @@ const server = http.createServer((req, res) => {
             try {
                 const parsed = JSON.parse(body);
                 const { chunks, chunkDelay } = selectResponse(parsed);
-                const fixtureName = chunks === toolCallResponse ? 'tool_call' :
+                const fixtureName = chunks === toolCallFail ? 'tool_call_fail' :
+                                    chunks === toolCallResponse ? 'tool_call' :
                                     chunks === textResponseSlow ? 'text_slow' :
                                     chunks === textResponseLong ? 'text_long' : 'text';
                 console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms)`);
@@ -88,7 +95,7 @@ const server = http.createServer((req, res) => {
                     'X-Accel-Buffering': 'no',
                 });
 
-                // Small initial delay to simulate LLM warm-up (200ms)
+                // Small initial delay to simulate LLM warm-up (50ms)
                 setTimeout(() => {
                     let i = 0;
                     const sendNext = () => {

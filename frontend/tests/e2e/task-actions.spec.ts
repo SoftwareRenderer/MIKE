@@ -92,21 +92,29 @@ test.describe('Task Actions', () => {
   });
 
   test('should show Start Task button for new tasks', async ({ page }) => {
+    // Count cards before creation to identify the new one
+    const countBefore = await page.locator('.card').count();
+
     // Create a new task
     await page.click('.add-task-btn');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
     await page.fill('textarea', `Start task test ${Date.now()}`);
     await page.click('button[type="submit"]');
     await expect(page.locator('.modal')).not.toBeVisible();
-    await page.waitForSelector('.card', { timeout: 5000 });
 
-    // Open the newly created task (last card)
-    await page.locator('.card').last().click();
+    // Wait for card count to increase (new card appeared)
+    await expect(async () => {
+      const count = await page.locator('.card').count();
+      expect(count).toBeGreaterThan(countBefore);
+    }).toPass({ timeout: 10000 });
+
+    // Open the newly created task (the one after the previous count)
+    await page.locator('.card').nth(countBefore).click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
     // New task should show the Start Task button
     const startButton = page.locator('.btn-start-task');
-    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeVisible({ timeout: 10000 });
 
     // Start button text should contain "Start"
     await expect(startButton).toContainText('Start');

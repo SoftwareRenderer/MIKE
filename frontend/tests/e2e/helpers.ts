@@ -36,6 +36,32 @@ export const test = base.extend<{
 
 export { expect } from '@playwright/test';
 
+// Helper: get the first project ID from the API
+export async function getProjectId(page: Page): Promise<string> {
+  return await page.evaluate(async () => {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    return projects[0]?.id || '';
+  });
+}
+
+// Helper: get the last task ID from the board API
+export async function getLastTaskId(page: Page, projectId: string): Promise<string> {
+  return await page.evaluate(async ({ pid }) => {
+    const res = await fetch(`/api/projects/${pid}/board`);
+    const board = await res.json();
+    return board.tasks[board.tasks.length - 1]?.id || '';
+  }, { pid: projectId });
+}
+
+// Helper: get task data from the API
+export async function getTaskData(page: Page, projectId: string, taskId: string): Promise<Record<string, unknown>> {
+  return await page.evaluate(async ({ pid, tid }) => {
+    const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+    return res.json();
+  }, { pid: projectId, tid: taskId });
+}
+
 // Helper: wait for WebSocket to connect by checking chat form is interactive
 export async function waitForWebSocket(page: Page, timeout = 5000): Promise<void> {
   await expect(page.locator('.chat-form')).toBeVisible({ timeout });
@@ -53,7 +79,7 @@ export async function waitForChatMessage(page: Page, timeout = 10000): Promise<v
 
 // Helper: ensure chat form is ready for input (handles new-task "Start Task" state)
 // Waits for the send button to be visible, meaning isLoading=false and form is interactive.
-export async function ensureChatForm(page: Page, timeout = 15000): Promise<void> {
+export async function ensureChatForm(page: Page, timeout = 5000): Promise<void> {
   // Click "Start Task" button if visible (new task state).
   // isVisible() + click() may have a race, so we retry in a loop.
   for (let attempt = 0; attempt < 3; attempt++) {
