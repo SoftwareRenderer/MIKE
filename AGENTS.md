@@ -73,6 +73,8 @@ npx playwright test --ui
 
 ### Testing Rules
 - **Server must be running** on `:3000` before tests
+- **Mock LLM is enabled by default** — tests use pre-recorded responses, not real Neptune endpoint
+- **Tests must NOT depend on real LLM** — use mock fixtures for deterministic results
 - **Use timeouts** for async operations (LLM responses, network calls)
 - **Wait for selectors** instead of fixed delays where possible
 - **Clean up after tests** — Don't leave server in broken state
@@ -92,6 +94,39 @@ npx playwright test --ui
   - `task-url.spec.ts` — URL navigation, `?task=` parameter
   - `task-message-actions.spec.ts` — message actions, editing, stats
   - `llm-connection.spec.ts` — LLM integration, tool calls
+
+### Mock LLM Server
+- Tests rely on a **mock LLM server** (NOT the real Neptune endpoint) for deterministic, fast results
+- Managed by `frontend/tests/global-setup.ts` — auto-starts before tests, restores config after
+- Mock server: `frontend/tests/mock-llm.js` (Node.js HTTP server on port 9999)
+- Fixtures: `frontend/tests/fixtures/` — pre-recorded SSE streaming responses
+- Response routing: mock selects fixture based on request body (tools present + message keywords)
+- Disable mock: `USE_MOCK_LLM=0 cd frontend && npx playwright test` (uses real LLM)
+
+#### Recording New Fixtures
+When the LLM behavior changes or new response types are needed:
+1. Set `USE_MOCK_LLM=0` to use the real Neptune endpoint (`http://neptune:8010/v1`)
+2. Run the relevant test(s) to capture real LLM responses
+3. Record the SSE stream output (use browser DevTools Network tab or add logging to `backend/llama.go`)
+4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
+5. Format: `{"choices": [{"delta": {"content": "..."}, "finish_reason": null}]}`
+6. Final frame includes `finish_reason: "stop"` and `usage` with token counts/timing
+7. Update `mock-llm.js` routing if new fixture needs keyword matching
+
+#### Fixture Format
+Each fixture is a JSON array of SSE chunks matching the OpenAI streaming API:
+```json
+[
+  {"choices": [{"delta": {"content": "Hello"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " world"}, "finish_reason": null}]},
+  {"choices": [{"delta": {}, "finish_reason": "stop"}, "usage": {"prompt_tokens": 45, "completion_tokens": 2, "total_tokens": 47, "prompt_ms": 320, "predicted_ms": 100}]}
+]
+```
+
+For tool calls, use `delta.tool_calls` instead of `delta.content`:
+```json
+{"choices": [{"delta": {"tool_calls": [{"id": "call_abc", "function": {"name": "read_file", "arguments": "{\"path\":\"README.md\"}"}, "type": "function"}]}, "finish_reason": "tool_calls"}]}
+```
 
 ### Backend Tests
 - Pre-existing: `go test ./...` (fails with "unable to open database file" — known issue)

@@ -26,6 +26,9 @@ test.describe('Board Real-time Updates', () => {
   });
 
   test('should reflect task deletion on board without refresh', async ({ page }) => {
+    // Count cards before
+    const countBeforeCreate = await page.locator('.card').count();
+
     // First create a task to delete
     await page.click('.add-task-btn');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -34,7 +37,9 @@ test.describe('Board Real-time Updates', () => {
     await expect(page.locator('.modal')).not.toBeVisible();
     await page.waitForTimeout(500);
 
-    const countBeforeDelete = await page.locator('.card').count();
+    // Verify card was added
+    const countAfterCreate = await page.locator('.card').count();
+    expect(countAfterCreate).toBeGreaterThan(countBeforeCreate);
 
     // Open the task detail (click the last/newest card)
     await page.locator('.card').last().click();
@@ -46,16 +51,11 @@ test.describe('Board Real-time Updates', () => {
     // Click delete button (title="Delete task")
     await page.click('button[title="Delete task"]');
 
-    // Wait for board to update
-    await page.waitForTimeout(1500);
-
-    // Navigate back to board if still on task detail
-    if (await page.locator('.task-detail-page').isVisible().catch(() => false)) {
-      await page.click('.back-btn');
-      await page.waitForTimeout(500);
-    }
+    // Navigate back to board
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 5000 });
 
     const countAfterDelete = await page.locator('.card').count();
-    expect(countAfterDelete).toBeLessThan(countBeforeDelete);
+    expect(countAfterDelete).toBeLessThan(countAfterCreate);
   });
 });

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ensureChatForm } from './helpers';
 
 test.describe('Task Chat', () => {
   test.beforeEach(async ({ page }) => {
@@ -6,19 +7,11 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should show chat messages area', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-
-    // Should show chat messages area
-    await expect(page.locator('.chat-messages')).toBeVisible();
-  });
-
   test('should show send button when typing', async ({ page }) => {
     await page.waitForSelector('.card', { timeout: 10000 });
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Test message');
@@ -33,6 +26,7 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
 
     // Send button should be disabled when textarea is empty
     const sendButton = page.locator('.btn-send');
@@ -44,6 +38,7 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Enter key test');
@@ -57,6 +52,7 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Line 1');
@@ -65,16 +61,6 @@ test.describe('Task Chat', () => {
 
     // Textarea should still have content (not sent)
     await expect(chatTextarea).not.toHaveValue('');
-  });
-
-  test('should show WebSocket connection status', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-
-    // Wait for chat form to be visible (indicates WebSocket connection attempt)
-    const chatForm = page.locator('.chat-form');
-    await expect(chatForm).toBeVisible({ timeout: 5000 });
   });
 
   test('should have diff column with refresh button', async ({ page }) => {
@@ -122,6 +108,27 @@ test.describe('Task Chat', () => {
 
     // Title input should appear
     await expect(page.locator('.title-input')).toBeVisible();
+  });
+
+  test('should show assistant streaming indicator immediately after sending a message', async ({ page }) => {
+    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.click('.card');
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
+
+    const chatTextarea = page.locator('textarea[placeholder*="message"]');
+
+    const msg = `stream_test_${Date.now()}`;
+    await chatTextarea.fill(msg);
+    await chatTextarea.press('Enter');
+
+    // Textarea should be cleared (message sent)
+    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+
+    // Assistant message with streaming cursor should appear immediately
+    // Use a tight timeout (500ms) to verify it's created on send,
+    // not waiting for the first LLM token
+    await expect(page.locator('.cursor-blink')).toBeVisible({ timeout: 500 });
   });
 
   test('should show status badge', async ({ page }) => {

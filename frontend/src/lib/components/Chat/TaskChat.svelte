@@ -204,6 +204,8 @@
         if (!msg || disabled) return;
         // Add message optimistically
         entries.push({ id: genId(), role: 'user', content: msg, isStreaming: false });
+        // Create assistant entry immediately so streaming UI appears
+        ensureAssistantEntry();
         lastSentMessage = msg;
         if (ws) ws.send(msg);
         isLoading = true;
@@ -227,6 +229,8 @@
         // Trim local entries: keep everything up to and including the last user message
         const userIdx = entries.findIndex(e => e.id === lastUser.id);
         entries = entries.slice(0, userIdx + 1);
+        // Create assistant entry immediately so streaming UI appears
+        ensureAssistantEntry();
         // Re-send the user message to trigger a new LLM response
         lastSentMessage = lastUser.content;
         if (ws) ws.send(lastUser.content);
@@ -240,6 +244,8 @@
         isLoading = true;
         // Add the prompt as the first user message
         entries.push({ id: genId(), role: 'user', content: taskPrompt, isStreaming: false });
+        // Create assistant entry immediately so streaming UI appears
+        ensureAssistantEntry();
         lastSentMessage = taskPrompt;
         scroll();
         try {

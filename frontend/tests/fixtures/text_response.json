@@ -1,60 +1,11 @@
 [
-  {
-    "id": "mock-123",
-    "object": "chat.completion.chunk",
-    "model": "mock-model",
-    "choices": [
-      {
-        "index": 0,
-        "delta": {
-          "role": "assistant",
-          "content": null
-        },
-        "finish_reason": null
-      }
-    ]
-  },
-  {
-    "id": "mock-123",
-    "object": "chat.completion.chunk",
-    "model": "mock-model",
-    "choices": [
-      {
-        "index": 0,
-        "delta": {
-          "tool_calls": [
-            {
-              "index": 0,
-              "id": "mock-tool-1",
-              "type": "function",
-              "function": {
-                "name": "task_complete",
-                "arguments": "{\"summary\":\"Task completed by mock\"}"
-              }
-            }
-          ]
-        },
-        "finish_reason": null
-      }
-    ]
-  },
-  {
-    "id": "mock-123",
-    "object": "chat.completion.chunk",
-    "model": "mock-model",
-    "choices": [
-      {
-        "index": 0,
-        "delta": {},
-        "finish_reason": "tool_calls"
-      }
-    ],
-    "usage": {
-      "prompt_tokens": 15,
-      "completion_tokens": 5,
-      "total_tokens": 20,
-      "prompt_ms": 50,
-      "predicted_ms": 100
-    }
-  }
+  {"choices": [{"delta": {"content": "Hello!"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " How"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " can"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " I"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " help"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " you"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": " today"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": "?"}, "finish_reason": null}]},
+  {"choices": [{"delta": {"content": ""}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 45, "completion_tokens": 8, "total_tokens": 53, "prompt_ms": 320, "predicted_ms": 180}}
 ]

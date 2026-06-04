@@ -50,3 +50,25 @@ export async function waitForMessageSent(page: Page, timeout = 5000): Promise<vo
 export async function waitForChatMessage(page: Page, timeout = 10000): Promise<void> {
   await expect(page.locator('.chat-message')).toBeVisible({ timeout });
 }
+
+// Helper: ensure chat form is ready for input (handles new-task "Start Task" state)
+// Waits for the send button to be visible, meaning isLoading=false and form is interactive.
+export async function ensureChatForm(page: Page, timeout = 15000): Promise<void> {
+  // Click "Start Task" button if visible (new task state).
+  // isVisible() + click() may have a race, so we retry in a loop.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const startButton = page.locator('.btn-start-task');
+    if (!(await startButton.isVisible().catch(() => false))) {
+      break; // Button not visible, task is not new
+    }
+    try {
+      await startButton.click({ timeout: 5000 });
+      break; // Click succeeded
+    } catch {
+      // Button may have been detached - retry
+    }
+  }
+  // Wait for send button (only visible when isLoading=false)
+  // This ensures the LLM has finished any pending response
+  await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+}

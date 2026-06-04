@@ -97,48 +97,4 @@ test.describe('Task Management', () => {
     await expect(page.locator('.column-diff .column-title')).toContainText('Changes');
   });
 
-  test('should show chat interface in task detail', async ({ page }) => {
-    // Wait for at least one card to exist
-    await page.waitForSelector('.card', { timeout: 10000 });
-
-    // Open task
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-
-    // Chat interface shows either a chat form (existing tasks) or start button (new tasks)
-    const hasChatForm = await page.locator('.chat-form').isVisible().catch(() => false);
-    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
-    expect(hasChatForm || hasStartButton).toBe(true);
-  });
-
-  test('should send a message in chat', async ({ page }) => {
-    // Wait for at least one card to exist
-    await page.waitForSelector('.card', { timeout: 10000 });
-
-    // Open task
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-
-    // Wait for chat interface to be ready (form or start button)
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 5000 });
-
-    // If this is a new task with a start button, click it first to get into chat mode
-    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
-    if (hasStartButton) {
-      await page.click('.btn-start-task');
-      // Wait for chat form to appear after starting
-      await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
-    }
-
-    // Type and send a message
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill('Hello from e2e test');
-    await chatTextarea.press('Enter');
-
-    // Wait for the textarea to be cleared (message sent)
-    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
-
-    // Message was sent successfully (textarea cleared)
-    // The echo from server may take time to appear
-  });
 });

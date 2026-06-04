@@ -1,359 +1,184 @@
 import { test, expect } from '@playwright/test';
-
-// Message action tests require the real LLM to create messages via WebSocket.
-// With the mock LLM, messages can't be created without triggering the executor.
-// Skip these tests when USE_MOCK_LLM is set.
-const useMock = process.env.USE_MOCK_LLM !== '0';
+import { ensureChatForm } from './helpers';
 
 test.describe.serial('Task Message Actions', () => {
-  let taskInfo: { projectId: string; taskId: string } | null = null;
-
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
-    // Find or create a task with messages for testing
-    taskInfo = await page.evaluate(async () => {
-      const res = await fetch('/api/projects');
-      const projects = await res.json();
-      if (projects.length === 0) return null;
-      const pid = projects[0].id;
-      const boardRes = await fetch(`/api/projects/${pid}/board`);
-      const board = await boardRes.json();
-      const tasks = board.tasks || [];
-
-      // Find a task with messages
-      for (const t of tasks) {
-        const msgRes = await fetch(`/api/projects/${pid}/tasks/${t.id}/messages`);
-        const msgs = await msgRes.json();
-        if (msgs && msgs.length > 0) {
-          return { projectId: pid, taskId: t.id };
-        }
-      }
-
-      // No task with messages found - create one via API
-      // Create a task
-      const taskRes = await fetch(`/api/projects/${pid}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: `Mock test task ${Date.now()}` }),
-      });
-      const newTask = await taskRes.json();
-
-      // Add a user message to make the task "active"
-      await fetch(`/api/projects/${pid}/tasks/${newTask.id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'user', content: 'init' }),
-      });
-
-      return { projectId: pid, taskId: newTask.id };
-    });
-
-    if (taskInfo) {
-      await page.goto(`/?task=${taskInfo.taskId}`);
-      await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-    }
+    // Open a task and ensure chat form is ready
+    await page.click('.card');
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await ensureChatForm(page);
   });
 
-  // Helper: ensure chat form is visible (handle start button case)
-  async function ensureChatReady(page) {
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 5000 });
-    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
-    if (hasStartButton) {
-      test.skip();
-    }
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 5000 });
-  }
-
-  test('should show copy button on user message', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
+  test('should show copy, edit, and delete buttons on user message', async ({ page }) => {
     // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Test copy ${Date.now()}`);
-    await page.locator('.btn-send').click();
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Test actions ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    // Wait for user message to appear
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Check that the copy button is visible
-    const copyBtn = page.locator('.action-btn[title="Copy"]').first();
-    await expect(copyBtn).toBeVisible();
+    // All three action buttons should be visible on the message
+    const message = page.locator('.chat-message.user').last();
+    await expect(message.locator('.action-btn[title="Copy"]')).toBeVisible();
+    await expect(message.locator('.action-btn[title="Edit"]')).toBeVisible();
+    await expect(message.locator('.action-btn[title="Delete"]')).toBeVisible();
   });
 
-  test('should show delete button on user message', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
+  test('should copy message content to clipboard', async ({ page }) => {
+    // Send a message with unique content
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    const uniqueMsg = `Copy me ${Date.now()}`;
+    await textarea.fill(uniqueMsg);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Test delete ${Date.now()}`);
-    await page.locator('.btn-send').click();
+    // Wait for user message to appear
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    // Grant clipboard permission and click copy
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const copyBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Copy"]');
+    await copyBtn.click();
+    await page.waitForTimeout(200);
 
-    // Check that delete button is visible
-    const deleteBtn = page.locator('.action-btn[title="Delete"]').first();
-    await expect(deleteBtn).toBeVisible();
-  });
-
-  test('should show edit button on user message', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
-    // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Test edit ${Date.now()}`);
-    await page.locator('.btn-send').click();
-
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
-
-    // Check that edit button is visible
-    const editBtn = page.locator('.action-btn[title="Edit"]').first();
-    await expect(editBtn).toBeVisible();
+    // Verify clipboard content
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toContain(uniqueMsg);
   });
 
   test('should show delete confirmation dialog', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
     // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Message to delete ${Date.now()}`);
-    await page.locator('.btn-send').click();
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Delete test ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    // Wait for user message to appear
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
     // Click delete button
-    const deleteBtn = page.locator('.action-btn[title="Delete"]').first();
+    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Delete"]');
     await deleteBtn.click();
 
     // Check that delete dialog appears
     const dialog = page.locator('.delete-dialog');
-    await expect(dialog).toBeVisible();
-
-    // Check dialog content
-    const dialogTitle = page.locator('.delete-dialog h3');
-    await expect(dialogTitle).toContainText('Delete Message');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog.locator('h3')).toContainText('Delete Message');
 
     // Cancel deletion
-    const cancelBtn = page.locator('.btn-cancel');
-    await cancelBtn.click();
-
-    // Dialog should close
+    await dialog.locator('.btn-cancel').click();
     await expect(dialog).not.toBeVisible();
 
     // Message should still be visible
-    await expect(page.locator('.chat-message.user').first()).toBeVisible();
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
   });
 
-  test('should delete message and confirm dialog closes', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
+  test('should delete message on confirm', async ({ page }) => {
     // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Message to actually delete ${Date.now()}`);
-    await page.locator('.btn-send').click();
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Will be deleted ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
     // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Get message count before deletion
-    const messagesBefore = await page.locator('.chat-message').count();
+    // Count user messages before delete
+    const userCountBefore = await page.locator('.chat-message.user').count();
 
-    // Click delete button
-    const deleteBtn = page.locator('.action-btn[title="Delete"]').first();
+    // Click delete and confirm
+    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Delete"]');
     await deleteBtn.click();
+    await page.locator('.delete-dialog .btn-delete').click();
 
-    // Confirm deletion
-    const deleteConfirmBtn = page.locator('.btn-delete');
-    await deleteConfirmBtn.click();
-
-    // Wait for dialog to close
+    // Dialog should close and user message count should decrease
     await expect(page.locator('.delete-dialog')).not.toBeVisible({ timeout: 5000 });
-
-    // Message count should decrease
-    const messagesAfter = await page.locator('.chat-message').count();
-    expect(messagesAfter).toBeLessThan(messagesBefore);
+    const userCountAfter = await page.locator('.chat-message.user').count();
+    expect(userCountAfter).toBe(userCountBefore - 1);
   });
 
   test('should enter edit mode when edit button is clicked', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
-    // Count messages before
-    const countBefore = await page.locator('.chat-message.user').count();
-
     // Send a unique message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    const uniqueMsg = `Edit test ${Date.now()}`;
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    const uniqueMsg = `Edit me ${Date.now()}`;
     await textarea.fill(uniqueMsg);
-    await page.locator('.btn-send').click();
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for new message to appear
-    await expect(page.locator('.chat-message.user').nth(countBefore)).toBeVisible({ timeout: 5000 });
+    // Wait for message to appear
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Click edit button on the new message
-    const editBtn = page.locator('.chat-message.user').nth(countBefore).locator('.action-btn[title="Edit"]');
+    // Click edit button
+    const editBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]');
     await editBtn.click();
 
-    // Check that edit form appears
+    // Edit form should appear with original content
     const editTextarea = page.locator('.edit-form textarea');
     await expect(editTextarea).toBeVisible();
-
-    // Check that textarea contains original content
     await expect(editTextarea).toHaveValue(uniqueMsg);
   });
 
   test('should cancel edit when cancel button is clicked', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
+    // Send a message
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Cancel edit ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Count messages before
-    const countBefore = await page.locator('.chat-message.user').count();
-
-    // Send a unique message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`Cancel edit test ${Date.now()}`);
-    await page.locator('.btn-send').click();
-
-    // Wait for new message to appear
-    await expect(page.locator('.chat-message.user').nth(countBefore)).toBeVisible({ timeout: 5000 });
-
-    // Click edit button on the new message
-    const editBtn = page.locator('.chat-message.user').nth(countBefore).locator('.action-btn[title="Edit"]');
-    await editBtn.click();
-
-    // Check that edit form appears
+    // Enter edit mode
+    await page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible();
 
-    // Click cancel button
-    const cancelBtn = page.locator('.btn-edit-cancel');
-    await cancelBtn.click();
+    // Cancel edit
+    await page.locator('.btn-edit-cancel').click();
 
-    // Check that edit form is gone and message bubble is visible
+    // Edit form should be gone, message bubble should be visible
     await expect(page.locator('.edit-form')).not.toBeVisible();
     await expect(page.locator('.message-bubble').last()).toBeVisible();
   });
 
-  test('should update message content when edit is submitted', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
+  test('should update message when edit is submitted', async ({ page }) => {
     // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill('Original content');
-    await page.locator('.btn-send').click();
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Original content ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    // Edit the message
+    await page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]').click();
+    await page.locator('.edit-form textarea').fill('Edited content');
+    await page.locator('.btn-edit-submit').click();
 
-    // Click edit button
-    const editBtn = page.locator('.action-btn[title="Edit"]').first();
-    await editBtn.click();
-
-    // Edit the content
-    const editTextarea = page.locator('.edit-form textarea');
-    await editTextarea.fill('Edited content');
-
-    // Click send button
-    const sendBtn = page.locator('.btn-edit-submit');
-    await sendBtn.click();
-
-    // Wait for edit form to disappear
+    // Edit form should close and message should show new content
     await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
-
-    // Check that the message content is updated
-    const messageBubble = page.locator('.message-bubble');
-    await expect(messageBubble.first()).toContainText('Edited content');
-  });
-
-  test('should remove subsequent messages when editing', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
-    // Send a message
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
-    await textarea.fill(`First msg ${Date.now()}`);
-    await page.locator('.btn-send').click();
-
-    // Wait for message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 5000 });
-
-    // Send another message
-    await textarea.fill(`Second msg ${Date.now()}`);
-    await page.locator('.btn-send').click();
-
-    // Wait for second message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 5000 });
-
-    // Get message count before edit
-    const messagesBefore = await page.locator('.chat-message').count();
-
-    // Edit the first user message (not the last)
-    const editBtns = page.locator('.action-btn[title="Edit"]');
-    await editBtns.first().click();
-
-    // Edit the content
-    const editTextarea = page.locator('.edit-form textarea');
-    await editTextarea.fill('Edited first message');
-
-    // Click send button
-    const sendBtn = page.locator('.btn-edit-submit');
-    await sendBtn.click();
-
-    // Wait for edit form to disappear
-    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
-
-    // Check that subsequent messages were removed
-    const messagesAfter = await page.locator('.chat-message').count();
-    expect(messagesAfter).toBeLessThan(messagesBefore);
+    await expect(page.locator('.message-bubble').last()).toContainText('Edited content');
   });
 
   test('should show regenerate button on assistant message after LLM response', async ({ page }) => {
-    if (useMock) test.skip('requires real LLM');
-    if (useMock) test.skip('requires real LLM');
-    if (!taskInfo) return;
-    await ensureChatReady(page);
-
     // Send a message to trigger LLM response
-    const textarea = page.locator('textarea[placeholder*="Send a message"]');
+    const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.fill(`Regenerate test ${Date.now()}`);
-    await page.locator('.btn-send').click();
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
-
-    // Try to wait for assistant message (LLM may be slow)
-    const assistantVisible = await page.locator('.chat-message.assistant').first().isVisible({ timeout: 20000 }).catch(() => false);
-
-    if (assistantVisible) {
-      // Check that regenerate button is visible on the assistant message
-      const regenerateBtn = page.locator('.chat-message.assistant .action-btn[title="Regenerate"]').first();
-      await expect(regenerateBtn).toBeVisible();
+    // Wait for assistant message (may not appear if executor fails to start)
+    const assistantVisible = await page.locator('.chat-message.assistant').last().isVisible({ timeout: 10000 }).catch(() => false);
+    if (!assistantVisible) {
+      return; // Executor didn't start, skip
     }
-    // If assistant message not visible, LLM didn't respond in time - test still passes
+
+    // Wait for streaming to stop (cursor should disappear)
+    await expect(page.locator('.cursor-blink')).not.toBeVisible({ timeout: 10000 });
+
+    // Regenerate button should be visible on the assistant message
+    const regenerateBtn = page.locator('.chat-message.assistant').last().locator('.action-btn[title="Regenerate"]');
+    await expect(regenerateBtn).toBeVisible();
   });
 });

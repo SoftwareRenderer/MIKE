@@ -3,9 +3,11 @@
  * 
  * Serves pre-recorded SSE streaming responses on POST /chat/completions.
  * 
- * Response selection:
- * - If tools are provided in the request -> tool_call_response.json
- * - Otherwise -> text_response.json
+ * Response routing:
+ * - Tools in request + "list"/"file"/"directory" in messages → tool_call_response.json (fast)
+ * - "stop" in messages → text_response_slow.json (100ms between chunks for stop button test)
+ * - "long"/"detailed"/"write" in messages → text_response_long.json (fast)
+ * - Default → text_response.json (fast)
  * 
  * Usage:
  *   node frontend/tests/mock-llm.js [port]
@@ -18,13 +20,51 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const PORT = parseInt(process.argv[2] || '9999', 10);
 
 // Load fixtures
-const textResponse = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'text_response.json'), 'utf8'));
-const toolCallResponse = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'tool_call_response.json'), 'utf8'));
+function loadFixture(name) {
+    return JSON.parse(fs.readFileSync(path.join(FIXTURES_DIR, `${name}.json`), 'utf8'));
+}
+
+const textResponse = loadFixture('text_response');
+const textResponseLong = loadFixture('text_response_long');
+const textResponseSlow = loadFixture('text_response_slow');
+const toolCallResponse = loadFixture('tool_call_response');
 
 let requestCount = 0;
+
+/**
+ * Select fixture based on request body content.
+ * Returns { chunks, chunkDelay } where chunkDelay is ms between SSE frames.
+ */
+function selectResponse(parsed) {
+    const hasTools = parsed.tools && parsed.tools.length > 0;
+    const messages = parsed.messages || [];
+    const userMessages = messages
+        .filter(m => m.role === 'user')
+        .map(m => (m.content || '').toLowerCase())
+        .join(' ');
+
+    // Tool call scenario: tools provided and message mentions file/directory operations
+    if (hasTools && /list|file|directory|read|command|git|exec/i.test(userMessages)) {
+        return { chunks: toolCallResponse, chunkDelay: 5 };
+    }
+
+    // Slow response: for stop button test (needs streaming to be visible)
+    if (/stop button|stop-test/i.test(userMessages)) {
+        return { chunks: textResponseSlow, chunkDelay: 100 };
+    }
+
+    // Long response scenario: message asks for detailed/long output
+    if (/long|detailed|write a|explain|describe/i.test(userMessages)) {
+        return { chunks: textResponseLong, chunkDelay: 5 };
+    }
+
+    // Default: simple text response
+    return { chunks: textResponse, chunkDelay: 5 };
+}
 
 const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/chat/completions') {
@@ -34,10 +74,12 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             try {
                 const parsed = JSON.parse(body);
-                // Always return text response (no tool calls) for simplicity
-                // Tool call handling requires the backend to execute tools, which complicates mocking
-                const chunks = textResponse;
-                
+                const { chunks, chunkDelay } = selectResponse(parsed);
+                const fixtureName = chunks === toolCallResponse ? 'tool_call' :
+                                    chunks === textResponseSlow ? 'text_slow' :
+                                    chunks === textResponseLong ? 'text_long' : 'text';
+                console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms)`);
+
                 // SSE headers
                 res.writeHead(200, {
                     'Content-Type': 'text/event-stream',
@@ -46,20 +88,21 @@ const server = http.createServer((req, res) => {
                     'X-Accel-Buffering': 'no',
                 });
 
-                // Send chunks with small delays to simulate streaming
-                let i = 0;
-                const sendNext = () => {
-                    if (i >= chunks.length) {
-                        res.write('data: [DONE]\n\n');
-                        res.end();
-                        return;
-                    }
-                    res.write(`data: ${JSON.stringify(chunks[i])}\n\n`);
-                    i++;
-                    // Small delay between chunks (5ms) to simulate real streaming
-                    setTimeout(sendNext, 5);
-                };
-                sendNext();
+                // Small initial delay to simulate LLM warm-up (200ms)
+                setTimeout(() => {
+                    let i = 0;
+                    const sendNext = () => {
+                        if (i >= chunks.length) {
+                            res.write('data: [DONE]\n\n');
+                            res.end();
+                            return;
+                        }
+                        res.write(`data: ${JSON.stringify(chunks[i])}\n\n`);
+                        i++;
+                        setTimeout(sendNext, chunkDelay);
+                    };
+                    sendNext();
+                }, 200);
             } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid request body' }));

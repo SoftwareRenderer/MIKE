@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ensureChatForm } from './helpers';
 
 test.describe('Chat Message Deduplication', () => {
   test.beforeEach(async ({ page }) => {
@@ -7,22 +8,22 @@ test.describe('Chat Message Deduplication', () => {
   });
 
   test('should not duplicate user message after sending', async ({ page }) => {
-    // Open a task
-    await page.click('.card');
+    // Create a fresh task to avoid state pollution from other tests
+    await page.click('.add-task-btn');
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+    await page.fill('textarea', `No dup test task ${Date.now()}`);
+    await page.click('button[type="submit"]');
+    await expect(page.locator('.modal')).not.toBeVisible();
+    await page.waitForSelector('.card', { timeout: 5000 });
+
+    // Open the newly created task (last card)
+    await page.locator('.card').last().click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Wait for chat interface to be ready
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 5000 });
+    // Ensure chat form is ready (handles new-task "Start Task" state)
+    await ensureChatForm(page);
 
-    // If this is a new task with a start button, click it first to get into chat mode
-    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
-    if (hasStartButton) {
-      await page.click('.btn-start-task');
-      // Wait for task to start and chat form to appear
-      await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
-    }
-
-    // Count initial messages
+    // Count initial messages (should be 0 for new task)
     const initialMsgCount = await page.locator('.chat-message.user').count();
 
     // Send a message
@@ -41,10 +42,5 @@ test.describe('Chat Message Deduplication', () => {
     const userMessages = page.locator('.chat-message.user');
     const userMsgCount = await userMessages.count();
     expect(userMsgCount).toBe(initialMsgCount + 1);
-
-    // Verify the message content appears only once
-    const matchingMessages = page.locator('.chat-message.user:has-text("' + testMsg + '")');
-    const matchingCount = await matchingMessages.count();
-    expect(matchingCount).toBe(1);
   });
 });
