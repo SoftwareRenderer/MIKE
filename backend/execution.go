@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -16,12 +17,13 @@ import (
 
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store       *Store
-	configStore *ConfigStore
-	worktreeMgr *WorktreeManager
-	streamMgr   *StreamManager
-	taskMu      sync.Mutex
-	tasks       map[string]*executionState
+	store          *Store
+	configStore    *ConfigStore
+	boardStreamMgr *BoardStreamManager
+	worktreeMgr    *WorktreeManager
+	streamMgr      *StreamManager
+	taskMu         sync.Mutex
+	tasks          map[string]*executionState
 }
 
 type executionState struct {
@@ -30,13 +32,34 @@ type executionState struct {
 	userMsgChan chan string
 }
 
+// wordRe matches words (sequences of non-whitespace chars) for token estimation.
+var wordRe = regexp.MustCompile(`\S+`)
+
+// estimateTokensFromText provides a rough token count from text content.
+// Uses ~1.3 tokens per word as a heuristic (typical for English text with GPT-style tokenizers).
+func estimateTokensFromText(text string) int {
+	words := wordRe.FindAllString(text, -1)
+	// ~1.3 tokens per word on average
+	return int(float64(len(words)) * 1.3)
+}
+
+// estimatePromptTokens estimates total prompt tokens from conversation messages.
+func estimatePromptTokens(messages []ChatMessage) int {
+	total := 0
+	for _, m := range messages {
+		total += estimateTokensFromText(m.Content)
+	}
+	return total
+}
+
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *Store, configStore *ConfigStore) *TaskExecutor {
+func NewTaskExecutor(store *Store, configStore *ConfigStore, boardStreamMgr *BoardStreamManager) *TaskExecutor {
 	te := &TaskExecutor{
-		store:       store,
-		configStore: configStore,
-		streamMgr:   NewStreamManager(store),
-		tasks:       make(map[string]*executionState),
+		store:          store,
+		configStore:    configStore,
+		boardStreamMgr: boardStreamMgr,
+		streamMgr:      NewStreamManager(store),
+		tasks:          make(map[string]*executionState),
 	}
 	te.worktreeMgr = NewWorktreeManager(store, configStore)
 	// Wire up lazy-start: when a user message arrives and no executor is running,
@@ -59,6 +82,7 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 		}
 		return
 	}
+	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
 	jsonResponse(w, http.StatusOK, task)
 }
@@ -73,6 +97,7 @@ func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request, proje
 		jsonError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
 	jsonResponse(w, http.StatusOK, task)
 }
@@ -87,6 +112,7 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request, proj
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
 	jsonResponse(w, http.StatusOK, task)
 }
@@ -318,10 +344,27 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		default:
 		}
 
-		usage, err := client.ChatStream(messages, tools, func(choice ChatChoice) {
+		// Real-time stats tracking
+		var streamTokenCount int
+		streamStart := time.Time{}
+
+		usage, err := client.ChatStream(ctx, messages, tools, func(choice ChatChoice) {
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				assistantContent.WriteString(*choice.Delta.Content)
 				b.send(StreamEvent{Type: WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+				streamTokenCount++
+				if streamStart.IsZero() {
+					streamStart = time.Now()
+				}
+				// Send real-time stats every 10 tokens
+				if streamTokenCount%10 == 0 {
+					elapsed := time.Since(streamStart).Milliseconds()
+					b.send(StreamEvent{Type: WSTypeStats, Data: map[string]interface{}{
+						"model_name":       modelName,
+						"predicted_tokens": streamTokenCount,
+						"predicted_ms":     int(elapsed),
+					}})
+				}
 			}
 			if len(choice.Delta.ToolCalls) > 0 {
 				pendingToolCalls = append(pendingToolCalls, choice.Delta.ToolCalls...)
@@ -338,7 +381,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 					return
 				case <-time.After(time.Duration(i+1) * 2 * time.Second):
 				}
-				usage, err = client.ChatStream(messages, tools, func(choice ChatChoice) {
+				usage, err = client.ChatStream(ctx, messages, tools, func(choice ChatChoice) {
 					if choice.Delta.Content != nil {
 						b.send(StreamEvent{Type: WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 					}
@@ -391,21 +434,78 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 					}
 					task.Output = summary
 					te.store.UpdateTask(task)
-					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "tokens": usage, "duration": time.Since(startTime).Milliseconds()}})
+					promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
+					if usage != nil {
+						promptTokens = usage.PromptTokens
+						predictedTokens = usage.CompletionTokens
+						promptMs = usage.PromptMs
+						predictedMs = usage.PredictedMs
+					} else {
+						promptTokens = estimatePromptTokens(messages)
+						predictedTokens = estimateTokensFromText(assistantText)
+					}
+					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": modelName, "duration": time.Since(startTime).Milliseconds()}})
 					return
 				}
 			}
 			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
 			messages = append(messages, ChatMessage{Role: "tool", Content: fmt.Sprintf("Tool results for %d calls", len(pendingToolCalls))})
+			// Compute stats from usage (fall back to estimation if LLM didn't provide usage)
+			promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
+			if usage != nil {
+				promptTokens, predictedTokens = usage.PromptTokens, usage.CompletionTokens
+				promptMs, predictedMs = usage.PromptMs, usage.PredictedMs
+			} else {
+				promptTokens = estimatePromptTokens(messages[:len(messages)-2])
+				predictedTokens = estimateTokensFromText(assistantText)
+			}
+			// Persist assistant message with stats
+			te.store.CreateTaskMessage(&TaskMessage{
+				ID:              generateUUID(),
+				TaskID:          task.ID,
+				Role:            "assistant",
+				Content:         assistantText,
+				ModelName:       modelName,
+				PromptTokens:    promptTokens,
+				PredictedTokens: predictedTokens,
+				PromptMs:        promptMs,
+				PredictedMs:     predictedMs,
+				Duration:        time.Since(startTime).Milliseconds(),
+				CreatedAt:       time.Now().UTC(),
+			})
 			pendingToolCalls = nil
 			assistantContent.Reset()
 		} else if assistantText != "" {
 			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
+			// Compute stats from usage (fall back to estimation if LLM didn't provide usage)
+			promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
+			if usage != nil {
+				promptTokens, predictedTokens = usage.PromptTokens, usage.CompletionTokens
+				promptMs, predictedMs = usage.PromptMs, usage.PredictedMs
+			} else {
+				promptTokens = estimatePromptTokens(messages[:len(messages)-1])
+				predictedTokens = estimateTokensFromText(assistantText)
+			}
+			duration := time.Since(startTime).Milliseconds()
+			// Persist assistant message with stats
+			te.store.CreateTaskMessage(&TaskMessage{
+				ID:              generateUUID(),
+				TaskID:          task.ID,
+				Role:            "assistant",
+				Content:         assistantText,
+				ModelName:       modelName,
+				PromptTokens:    promptTokens,
+				PredictedTokens: predictedTokens,
+				PromptMs:        promptMs,
+				PredictedMs:     predictedMs,
+				Duration:        duration,
+				CreatedAt:       time.Now().UTC(),
+			})
 			assistantContent.Reset()
 			// LLM responded with text but no tools - signal completion so UI stops streaming
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
-			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "tokens": usage, "duration": time.Since(startTime).Milliseconds()}})
+			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": modelName, "duration": duration}})
 			return
 		}
 

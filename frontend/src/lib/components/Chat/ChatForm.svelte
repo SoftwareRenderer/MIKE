@@ -121,8 +121,8 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 13px;
-        line-height: 1.5;
+        font-size: 0.875rem;
+        line-height: 1.5rem;
         padding: 4px 0;
         outline: none;
         font-family: inherit;
@@ -156,5 +156,16 @@
     @keyframes pulse-stop {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.7; }
+    }
+
+    @media (max-width: 768px) {
+        .chat-form {
+            padding: 8px;
+        }
+        .btn-send,
+        .btn-stop {
+            width: 44px;
+            height: 44px;
+        }
     }
 </style>

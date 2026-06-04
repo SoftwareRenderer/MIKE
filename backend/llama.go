@@ -3,9 +3,11 @@ package backend
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -73,6 +75,8 @@ type ChatUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	PromptMs         int `json:"prompt_ms"`
+	PredictedMs      int `json:"predicted_ms"`
 }
 
 // ChatResponse is a full streaming response frame.
@@ -85,7 +89,7 @@ type ChatResponse struct {
 type StreamCallback func(choice ChatChoice)
 
 // ChatStream sends a chat completion request with streaming.
-func (c *LlamaClient) ChatStream(messages []ChatMessage, tools []ChatTool, cb StreamCallback) (*ChatUsage, error) {
+func (c *LlamaClient) ChatStream(ctx context.Context, messages []ChatMessage, tools []ChatTool, cb StreamCallback) (*ChatUsage, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("llama server URL not configured")
 	}
@@ -114,7 +118,13 @@ func (c *LlamaClient) ChatStream(messages []ChatMessage, tools []ChatTool, cb St
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("post to llama: %w", err)
 	}
@@ -148,6 +158,7 @@ func (c *LlamaClient) ChatStream(messages []ChatMessage, tools []ChatTool, cb St
 
 		if cr.Usage != nil {
 			usage = cr.Usage
+			log.Printf("[llama] usage: prompt_tokens=%d, completion_tokens=%d, prompt_ms=%d, predicted_ms=%d", usage.PromptTokens, usage.CompletionTokens, usage.PromptMs, usage.PredictedMs)
 		}
 
 		for _, choice := range cr.Choices {
@@ -155,6 +166,11 @@ func (c *LlamaClient) ChatStream(messages []ChatMessage, tools []ChatTool, cb St
 		}
 	}
 
+	if usage != nil {
+		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, prompt_ms=%d, predicted_ms=%d", usage.PromptTokens, usage.CompletionTokens, usage.PromptMs, usage.PredictedMs)
+	} else {
+		log.Printf("[llama] no usage data received")
+	}
 	return usage, scanner.Err()
 }
 

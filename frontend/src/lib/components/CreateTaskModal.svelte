@@ -3,7 +3,7 @@
     import { createTask, getBoard } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
 
-    let { projectId, onClose }: { projectId: string | undefined; onClose: () => void } = $props();
+    let { projectId, onClose, onTaskCreated }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void } = $props();
 
     let prompt = $state('');
     let autoCommit = $state(false);
@@ -27,6 +27,7 @@
             const board = await getBoard(projectId);
             boardStore.set(board);
             showCreateTask.set(false);
+            onTaskCreated?.();
             onClose();
         } catch (e) {
             error = String(e);
@@ -202,5 +203,26 @@
         padding: 8px 16px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
+    }
+
+    @media (max-width: 768px) {
+        .modal {
+            width: 100vw;
+            max-width: none;
+            max-height: 100vh;
+            height: 100vh;
+            border-radius: 0;
+            border: none;
+        }
+        .modal-header {
+            padding: 16px;
+        }
+        .modal-body {
+            padding: 16px;
+        }
+        button[type="button"],
+        .btn-primary {
+            min-height: 44px;
+        }
     }
 </style>

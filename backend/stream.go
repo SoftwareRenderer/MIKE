@@ -26,6 +26,7 @@ const (
 	WSTypeComplete    WSMessageType = "complete"
 	WSTypeError       WSMessageType = "error"
 	WSTypeUserMessage WSMessageType = "user_message"
+	WSTypeStats       WSMessageType = "stats"
 )
 
 // StreamEvent carries a typed payload to broadcast.

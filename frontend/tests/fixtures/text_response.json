@@ -1,0 +1,60 @@
+[
+  {
+    "id": "mock-123",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant",
+          "content": null
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-123",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "mock-tool-1",
+              "type": "function",
+              "function": {
+                "name": "task_complete",
+                "arguments": "{\"summary\":\"Task completed by mock\"}"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-123",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 15,
+      "completion_tokens": 5,
+      "total_tokens": 20,
+      "prompt_ms": 50,
+      "predicted_ms": 100
+    }
+  }
+]

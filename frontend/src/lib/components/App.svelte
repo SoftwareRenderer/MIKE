@@ -1,8 +1,8 @@
 
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail, selectedTask } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createBoardStream } from '$lib/api';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import TerminalPanel from './TerminalPanel.svelte';
@@ -16,6 +16,7 @@
     let tasks: Task[] = $state([]);
     let cfg: Config | null = $state(null);
     let collapsed = $state(false);
+    let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
 
     // Local state mirroring stores
     let showCreateTaskVal = $state(false);
@@ -25,6 +26,15 @@
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
     let selectedTaskVal: Task | null = $state(null);
+    let mobileMenuOpen = $state(false);
+    let isMobile = $derived(false);
+
+    $effect(() => {
+        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
+        check();
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    });
 
     // Subscribe to Svelte 4 stores on mount
     onMount(() => {
@@ -85,6 +95,10 @@
         }
     });
 
+    onDestroy(() => {
+        disconnectBoardStream();
+    });
+
     // Function to restore task from URL after board loads
     function restoreTaskFromUrl() {
         const params = new URLSearchParams(location.search);
@@ -99,7 +113,26 @@
         }
     }
 
+    function disconnectBoardStream() {
+        if (boardStream) {
+            boardStream.close();
+            boardStream = null;
+        }
+    }
+
+    async function refreshBoard() {
+        if (!currentProject) return;
+        try {
+            const b = await getBoard(currentProject.id);
+            tasks = b.tasks || [];
+            boardStore.set(b);
+        } catch (e) {
+            console.error('Failed to refresh board:', e);
+        }
+    }
+
     async function selectProject(p: Project) {
+        disconnectBoardStream();
         currentProject = p;
         selectedProject.set(p);
         try {
@@ -108,6 +141,8 @@
             boardStore.set(b);
             // Restore task from URL after board loads
             restoreTaskFromUrl();
+            // Connect board stream for real-time updates
+            boardStream = createBoardStream(p.id, () => refreshBoard());
         } catch (e) {
             console.error('Failed to load board:', e);
         }
@@ -171,20 +206,29 @@
 </script>
 
 <div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
+    <!-- Mobile sidebar backdrop -->
+    {#if isMobile && mobileMenuOpen}
+        <div class="sidebar-backdrop" onclick={() => mobileMenuOpen = false}></div>
+    {/if}
+
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen}>
         <div class="sidebar-header">
             <h2 class:collapsed>Kanban</h2>
-            <button class="toggle-btn" onclick={toggleSidebar}>
-                {collapsed ? '▸' : '◂'}
-            </button>
+            {#if isMobile}
+                <button class="toggle-btn" onclick={() => mobileMenuOpen = false}>✕</button>
+            {:else}
+                <button class="toggle-btn" onclick={toggleSidebar}>
+                    {collapsed ? '▸' : '◂'}
+                </button>
+            {/if}
         </div>
         <nav class="project-list">
             {#each projects as p (p.id)}
                 <div class="project-item-wrapper" class:active={currentProject?.id === p.id}>
                     <button
                         class="project-item"
-                        onclick={() => selectProject(p)}
+                        onclick={() => { selectProject(p); if (isMobile) mobileMenuOpen = false; }}
                     >
                         <span class="project-name">{p.name}</span>
                     </button>
@@ -207,6 +251,15 @@
     <main class="main">
         {#if currentProject}
             <top-bar>
+                {#if isMobile}
+                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} title="Menu">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/>
+                            <line x1="3" y1="12" x2="21" y2="12"/>
+                            <line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
+                {/if}
                 <span class="project-title">{currentProject.name}</span>
                 <div class="actions">
                     <button class="icon-btn" onclick={() => showConfig.set(true)} title="Settings">⚙</button>
@@ -241,6 +294,7 @@
         <CreateTaskModal
             projectId={currentProject?.id}
             onClose={() => showCreateTask.set(false)}
+            onTaskCreated={() => refreshBoard()}
         />
     {/if}
     {#if showConfigVal}
@@ -269,6 +323,38 @@
 </svelte:head>
 
 <style>
+    /* -- Global mobile styles -- */
+    @media (max-width: 768px) {
+        :global(input),
+        :global(textarea),
+        :global(select) {
+            font-size: 16px !important;
+        }
+
+        :global(*) {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        :global(button),
+        :global(a),
+        :global([role="button"]) {
+            touch-action: manipulation;
+        }
+
+        :global(.action-btn),
+        :global(.btn-icon),
+        :global(.icon-btn),
+        :global(.toggle-btn),
+        :global(.close-btn),
+        :global(.btn-back),
+        :global(.btn-send),
+        :global(.btn-stop),
+        :global(.btn-icon-sm) {
+            min-width: 44px;
+            min-height: 44px;
+        }
+    }
+
     .app {
         display: flex;
         height: 100vh;
@@ -452,5 +538,49 @@
         font-size: 14px;
         z-index: 400;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .sidebar-backdrop {
+        display: none;
+    }
+    .hamburger {
+        display: none;
+    }
+
+    @media (max-width: 768px) {
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 280px;
+            z-index: 200;
+            transform: translateX(-100%);
+            transition: transform 0.25s ease;
+            box-shadow: none;
+        }
+        .sidebar.mobile-open {
+            transform: translateX(0);
+            box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+        }
+        .sidebar-backdrop {
+            display: block;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 199;
+        }
+        .hamburger {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        top-bar {
+            padding: 8px 12px;
+            gap: 8px;
+        }
+        .project-title {
+            flex: 1;
+            text-align: center;
+        }
     }
 </style>

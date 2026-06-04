@@ -17,7 +17,7 @@ test.describe('LLM Connection', () => {
     await expect(page.locator('.modal-header h2')).toContainText('Settings');
   });
 
-  test('should start task execution with LLM', async ({ page }) => {
+  test('should start task execution by sending a message', async ({ page }) => {
     // Create a task first
     await page.click('.add-task-btn');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -30,18 +30,16 @@ test.describe('LLM Connection', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Click Start button
-    const startButton = page.locator('.btn-primary-icon[title="Start task"]');
-    if (await startButton.count() > 0) {
-      await startButton.click();
+    // Send a message to trigger LLM (conversational start)
+    const chatTextarea = page.locator('textarea[placeholder*="message"]');
+    await chatTextarea.fill('Hello, please respond');
+    await chatTextarea.press('Enter');
 
-      // Should show Running status or agent response
-      await page.waitForTimeout(5000);
+    // Wait for textarea to be cleared (message sent)
+    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
 
-      // Check for any indicator that task started (badge change or chat activity)
-      const badge = page.locator('.badge');
-      await expect(badge).toBeVisible();
-    }
+    // Wait for user message echo
+    await expect(page.locator('.chat-message').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('should show LLM response in chat', async ({ page }) => {
@@ -57,8 +55,8 @@ test.describe('LLM Connection', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Wait for WebSocket to connect
-    await page.waitForTimeout(2000);
+    // Wait for chat form to be visible instead of fixed timeout
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Send a message to trigger LLM response
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -68,14 +66,12 @@ test.describe('LLM Connection', () => {
     // Wait for textarea to be cleared
     await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for LLM response (may take time)
-    await page.waitForTimeout(10000);
-
-    // Check for any chat message (user or assistant)
+    // Wait for chat message to appear (user echo) using explicit wait
     const chatMessages = page.locator('.chat-message');
-    const messageCount = await chatMessages.count();
+    await expect(chatMessages.first()).toBeVisible({ timeout: 10000 });
+
     // At least the user message echo should appear
-    expect(messageCount).toBeGreaterThan(0);
+    expect(await chatMessages.count()).toBeGreaterThan(0);
   });
 
   test('should handle LLM connection gracefully', async ({ page }) => {
@@ -83,11 +79,8 @@ test.describe('LLM Connection', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Wait for WebSocket to connect
-    await page.waitForTimeout(3000);
-
     // Chat form should be visible regardless of LLM connection status
-    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 5000 });
   });
 
   test('should show stop button when task is running', async ({ page }) => {
@@ -111,8 +104,8 @@ test.describe('LLM Connection', () => {
     // Wait for textarea to be cleared
     await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait a bit for task to start
-    await page.waitForTimeout(3000);
+    // Wait for user message echo instead of fixed timeout
+    await expect(page.locator('.chat-message').first()).toBeVisible({ timeout: 5000 });
 
     // Stop button should appear when LLM is responding
     const stopButton = page.locator('.btn-stop');
@@ -128,8 +121,8 @@ test.describe('LLM Connection', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Wait for WebSocket to connect
-    await page.waitForTimeout(3000);
+    // Wait for chat form instead of fixed timeout
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Send a message that might trigger tool usage
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -139,20 +132,20 @@ test.describe('LLM Connection', () => {
     // Wait for textarea to be cleared (message sent)
     await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
 
-    // Wait for response
-    await page.waitForTimeout(20000);
+    // Wait for user message echo with explicit wait
+    await expect(page.locator('.chat-message').first()).toBeVisible({ timeout: 10000 });
 
     // Check if any tool call cards appeared (they may or may not depending on LLM behavior)
     const toolCallCards = page.locator('.tool-call-card');
     const count = await toolCallCards.count();
-    
+
     // If tool calls were made, verify they have the right structure
     if (count > 0) {
       await expect(toolCallCards.first()).toBeVisible();
       await expect(page.locator('.tool-name').first()).toBeVisible();
       await expect(page.locator('.tool-args').first()).toBeVisible();
     }
-    
+
     // Either way, verify the chat UI is functional
     // The message echo should appear
     const chatMessages = page.locator('.chat-message');

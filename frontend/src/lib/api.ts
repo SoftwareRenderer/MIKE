@@ -118,6 +118,24 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
     return res.json();
 }
 
+// Board stream - WebSocket for real-time board updates
+export function createBoardStream(projectId: string, onRefresh: () => void): { ws: WebSocket; close: () => void } {
+    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'board_refresh') {
+            onRefresh();
+        }
+    };
+    ws.onclose = () => {
+        // Silent reconnect handled by caller
+    };
+    ws.onerror = () => {
+        // Connection errors are handled via onclose
+    };
+    return { ws, close: () => ws.close() };
+}
+
 export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): { ws: WebSocket; send: (msg: string) => void; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream`);
     ws.onmessage = (e) => {
@@ -143,6 +161,24 @@ export async function getTaskMessages(projectId: string, taskId: string): Promis
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
     if (!res.ok) throw new Error('Failed to fetch messages');
     return res.json();
+}
+
+export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId }),
+    });
+    if (!res.ok) throw new Error('Failed to delete messages');
+}
+
+export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+    });
+    if (!res.ok) throw new Error('Failed to update message');
 }
 
 export async function getTaskDiff(projectId: string, taskId: string): Promise<string> {

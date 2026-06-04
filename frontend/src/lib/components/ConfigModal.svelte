@@ -272,4 +272,27 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
     }
+
+    @media (max-width: 768px) {
+        .modal {
+            width: 100vw;
+            max-width: none;
+            max-height: 100vh;
+            height: 100vh;
+            border-radius: 0;
+            border: none;
+        }
+        .modal-header {
+            padding: 16px;
+        }
+        .modal-body {
+            padding: 16px;
+        }
+        button[type="button"],
+        .btn-primary,
+        .btn-test,
+        .btn-small {
+            min-height: 44px;
+        }
+    }
 </style>

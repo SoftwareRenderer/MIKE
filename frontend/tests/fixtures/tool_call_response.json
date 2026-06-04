@@ -1,0 +1,186 @@
+[
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant",
+          "content": null
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "f8AkJA2K3uNwr43Y0eLy2P18FQQcW4eq",
+              "type": "function",
+              "function": {
+                "name": "execute_command",
+                "arguments": "{"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "\"command\":\""
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "ls"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": " -"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "la"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "\""
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "}"
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "mock-456",
+    "object": "chat.completion.chunk",
+    "model": "mock-model",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 459,
+      "completion_tokens": 10,
+      "total_tokens": 469,
+      "prompt_ms": 650,
+      "predicted_ms": 857
+    }
+  }
+]

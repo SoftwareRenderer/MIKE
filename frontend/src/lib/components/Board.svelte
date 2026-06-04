@@ -63,4 +63,16 @@
         height: 100%;
         overflow-x: auto;
     }
+
+    @media (max-width: 768px) {
+        .board {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            padding-left: 4vw;
+            padding-right: 4vw;
+            gap: 8px;
+        }
+    }
 </style>

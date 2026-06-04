@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import type { Task } from '$lib/types';
     import { board as boardStore } from '$lib/store';
-    import { moveTask, deleteTask, startTask, stopTask, retryTask, resumeTask, getTaskDiff, getBoard } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
     import TaskChat from './Chat/TaskChat.svelte';
 
     let { task, tasks: columnTasks, onClose }: { task: Task; tasks: Task[]; onClose: () => void } = $props();
@@ -13,6 +13,51 @@
     let editingTitle = $state(false);
     let titleDraft = $state('');
     let badge = $state({ text: 'Idle', color: 'var(--color-text-tertiary)' });
+    let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
+    let isMobile = $derived(false);
+    let touchStartX = $state(0);
+    let touchEndX = $state(0);
+
+    $effect(() => {
+        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
+        check();
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    });
+
+    function handleTouchStart(e: TouchEvent) {
+        touchStartX = e.touches[0].clientX;
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+        touchEndX = e.changedTouches[0].clientX;
+        processSwipe();
+    }
+
+    function handlePointerDown(e: PointerEvent) {
+        touchStartX = e.clientX;
+    }
+
+    function handlePointerUp(e: PointerEvent) {
+        touchEndX = e.clientX;
+        processSwipe();
+    }
+
+    function processSwipe() {
+        const diff = touchStartX - touchEndX;
+        const threshold = 50;
+        if (Math.abs(diff) > threshold) {
+            if (diff > 0 && activeTab !== 'diff') {
+                // Swiped left — go next
+                if (activeTab === 'context') activeTab = 'chat';
+                else if (activeTab === 'chat') activeTab = 'diff';
+            } else if (diff < 0 && activeTab !== 'context') {
+                // Swiped right — go prev
+                if (activeTab === 'diff') activeTab = 'chat';
+                else if (activeTab === 'chat') activeTab = 'context';
+            }
+        }
+    }
 
     onMount(() => {
         titleDraft = task.title;
@@ -50,52 +95,6 @@
             });
         } catch (e) {
             alert('Failed to move: ' + String(e));
-        }
-    }
-
-    async function handleStart() {
-        if (!task) return;
-        try {
-            const updated = await startTask(task.project_id, task.id);
-            task = updated;
-            boardStore.update(b => {
-                if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === task!.id);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b };
-            });
-        } catch (e) {
-            alert('Failed to start: ' + String(e));
-        }
-    }
-
-    async function handleStop() {
-        if (!task) return;
-        try {
-            const updated = await stopTask(task.project_id, task.id);
-            task = updated;
-        } catch (e) {
-            alert('Failed to stop: ' + String(e));
-        }
-    }
-
-    async function handleRetry() {
-        if (!task) return;
-        try {
-            const updated = await retryTask(task.project_id, task.id);
-            task = updated;
-        } catch (e) {
-            alert('Failed to retry: ' + String(e));
-        }
-    }
-
-    async function handleResume() {
-        if (!task) return;
-        try {
-            const updated = await resumeTask(task.project_id, task.id);
-            task = updated;
-        } catch (e) {
-            alert('Failed to resume: ' + String(e));
         }
     }
 
@@ -177,26 +176,6 @@
                 </div>
             </div>
             <div class="header-actions">
-                {#if task.status === 'backlog'}
-                    <button class="btn-icon btn-primary-icon" onclick={handleStart} title="Start task">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l8 5-8 5V3z" fill="currentColor"/></svg>
-                    </button>
-                {/if}
-                {#if task.status === 'in_progress' && task.status_state === 'running'}
-                    <button class="btn-icon btn-danger-icon" onclick={handleStop} title="Stop task">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
-                    </button>
-                {/if}
-                {#if task.status === 'in_progress' && task.status_state === 'paused'}
-                    <button class="btn-icon btn-primary-icon" onclick={handleResume} title="Resume task">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l8 5-8 5V3z" fill="currentColor"/></svg>
-                    </button>
-                {/if}
-                {#if task.status === 'in_progress' && task.status_state === 'failed'}
-                    <button class="btn-icon btn-primary-icon" onclick={handleRetry} title="Retry task">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    </button>
-                {/if}
                 {#if task.status === 'review'}
                     <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} title="Approve">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -211,10 +190,37 @@
             </div>
         </div>
 
+        <!-- Mobile Tab Bar -->
+        {#if isMobile}
+            <div class="mobile-tab-bar">
+                <button
+                    class="tab-btn {activeTab === 'context' ? 'active' : ''}"
+                    onclick={() => activeTab = 'context'}
+                >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2"/></svg>
+                    Context
+                </button>
+                <button
+                    class="tab-btn {activeTab === 'chat' ? 'active' : ''}"
+                    onclick={() => activeTab = 'chat'}
+                >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                    Agent
+                </button>
+                <button
+                    class="tab-btn {activeTab === 'diff' ? 'active' : ''}"
+                    onclick={() => activeTab = 'diff'}
+                >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Changes
+                </button>
+            </div>
+        {/if}
+
         <!-- 3-Column Layout -->
-        <div class="columns">
+        <div class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp}>
             <!-- Column 1: Board Overview -->
-            <div class="column column-context">
+            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'}>
                 <div class="column-header" style="border-bottom-color: var(--color-border)">
                     <span class="column-title">{getColumnTitle(task.status)}</span>
                     <span class="column-count">{allTasks.length}</span>
@@ -237,7 +243,7 @@
             </div>
 
             <!-- Column 2: Chat / Agent Interface -->
-            <div class="column column-chat">
+            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'}>
                 <div class="column-header">
                     <div class="column-header-left">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
@@ -248,13 +254,14 @@
                     <TaskChat
                         projectId={task.project_id}
                         taskId={task.id}
+                        taskPrompt={task.prompt}
                         disabled={task.status_state === 'completed'}
                     />
                 </div>
             </div>
 
             <!-- Column 3: Working Changes (Diff) -->
-            <div class="column column-diff">
+            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'}>
                 <div class="column-header">
                     <div class="column-header-left">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -376,8 +383,6 @@
         justify-content: center;
     }
     .btn-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
-    .btn-primary-icon:hover { background: var(--color-accent)22; color: var(--color-accent); }
-    .btn-danger-icon:hover { background: var(--color-status-red)22; color: var(--color-status-red); }
     .btn-success-icon:hover { background: var(--color-status-green)22; color: var(--color-status-green); }
     .btn-secondary-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
     .columns {
@@ -517,5 +522,60 @@
         padding: 32px;
         color: var(--color-text-tertiary);
         font-size: 13px;
+    }
+    .mobile-tab-bar {
+        display: none;
+    }
+    .column.hidden {
+        display: none;
+    }
+
+    @media (max-width: 768px) {
+        .mobile-tab-bar {
+            display: flex;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-surface-1);
+            flex-shrink: 0;
+        }
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 10px 8px;
+            border: none;
+            background: none;
+            color: var(--color-text-tertiary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s ease;
+        }
+        .tab-btn.active {
+            color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+        }
+        .tab-btn:hover:not(.active) {
+            color: var(--color-text-primary);
+        }
+        .columns.mobile-swipe {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        .columns.mobile-swipe .column {
+            flex: 0 0 100% !important;
+            min-width: 100% !important;
+            scroll-snap-align: start;
+        }
+        .column-context {
+            border-right: none;
+        }
+        .column-chat {
+            border-right: none;
+        }
     }
 </style>

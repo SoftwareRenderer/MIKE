@@ -6,11 +6,11 @@ test.describe('Task Actions', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should show Start button for backlog task', async ({ page }) => {
+  test('should not show Start/Stop buttons in header', async ({ page }) => {
     // Create a task first
     await page.click('.add-task-btn');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', 'Task to start');
+    await page.fill('textarea', 'Task for conversational start');
     await page.click('button[type="submit"]');
     await expect(page.locator('.modal')).not.toBeVisible();
     await page.waitForSelector('.card', { timeout: 5000 });
@@ -19,9 +19,16 @@ test.describe('Task Actions', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Should show Start button for backlog task
-    const startButtons = page.locator('.btn-primary-icon[title="Start task"]');
-    await expect(startButtons.first()).toBeVisible();
+    // Should NOT show legacy Start/Stop buttons (conversational model)
+    const startButtons = page.locator('[title="Start task"]');
+    const stopButtons = page.locator('[title="Stop task"]');
+    await expect(startButtons).not.toBeVisible();
+    await expect(stopButtons).not.toBeVisible();
+
+    // Should show chat interface (form for existing tasks, start button for new tasks)
+    const hasChatForm = await page.locator('.chat-form').isVisible().catch(() => false);
+    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
+    expect(hasChatForm || hasStartButton).toBe(true);
   });
 
   test('should show Delete button', async ({ page }) => {
@@ -82,5 +89,26 @@ test.describe('Task Actions', () => {
 
     // Column count should be visible
     await expect(page.locator('.column-context .column-count')).toBeVisible();
+  });
+
+  test('should show Start Task button for new tasks', async ({ page }) => {
+    // Create a new task
+    await page.click('.add-task-btn');
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+    await page.fill('textarea', `Start task test ${Date.now()}`);
+    await page.click('button[type="submit"]');
+    await expect(page.locator('.modal')).not.toBeVisible();
+    await page.waitForSelector('.card', { timeout: 5000 });
+
+    // Open the newly created task (last card)
+    await page.locator('.card').last().click();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+
+    // New task should show the Start Task button
+    const startButton = page.locator('.btn-start-task');
+    await expect(startButton).toBeVisible();
+
+    // Start button text should contain "Start"
+    await expect(startButton).toContainText('Start');
   });
 });

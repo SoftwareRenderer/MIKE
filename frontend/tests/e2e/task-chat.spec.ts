@@ -72,10 +72,7 @@ test.describe('Task Chat', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Wait for WebSocket to connect
-    await page.waitForTimeout(3000);
-
-    // Should show status bar or chat form (either indicates connection attempt)
+    // Wait for chat form to be visible (indicates WebSocket connection attempt)
     const chatForm = page.locator('.chat-form');
     await expect(chatForm).toBeVisible({ timeout: 5000 });
   });

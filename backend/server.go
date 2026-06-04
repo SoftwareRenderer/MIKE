@@ -20,18 +20,19 @@ import (
 
 // Server is the main HTTP server.
 type Server struct {
-	store        *Store
-	configStore  *ConfigStore
-	projectMgr   *ProjectManager
-	taskMgr      *TaskManager
-	boardMgr     *BoardManager
-	depMgr       *DependencyManager
-	reviewMgr    *ReviewManager
-	gitMgr       *GitManager
-	executor     *TaskExecutor
-	homeAgentMgr *HomeAgentManager
-	mux          *http.ServeMux
-	addr         string
+	store          *Store
+	configStore    *ConfigStore
+	projectMgr     *ProjectManager
+	taskMgr        *TaskManager
+	boardMgr       *BoardManager
+	boardStreamMgr *BoardStreamManager
+	depMgr         *DependencyManager
+	reviewMgr      *ReviewManager
+	gitMgr         *GitManager
+	executor       *TaskExecutor
+	homeAgentMgr   *HomeAgentManager
+	mux            *http.ServeMux
+	addr           string
 }
 
 // NewServer creates a new Server instance.
@@ -61,12 +62,13 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	}
 
 	s.projectMgr = NewProjectManager(store)
-	s.boardMgr = NewBoardManager(store)
-	s.taskMgr = NewTaskManager(store)
+	s.boardStreamMgr = NewBoardStreamManager()
+	s.boardMgr = NewBoardManager(store, s.boardStreamMgr)
+	s.taskMgr = NewTaskManager(store, s.boardStreamMgr)
 	s.depMgr = NewDependencyManager(store)
 	s.reviewMgr = NewReviewManager(store)
 	s.gitMgr = NewGitManager(store)
-	s.executor = NewTaskExecutor(store, cfgStore)
+	s.executor = NewTaskExecutor(store, cfgStore, s.boardStreamMgr)
 	s.homeAgentMgr = NewHomeAgentManager(store, cfgStore)
 
 	s.setupRoutes()
@@ -157,6 +159,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 var (
 	reProjectByID     = regexp.MustCompile(`^/api/projects/([^/]+)$`)
 	reProjectBoard    = regexp.MustCompile(`^/api/projects/([^/]+)/board$`)
+	reProjectBoardWS  = regexp.MustCompile(`^/api/projects/([^/]+)/board/stream$`)
 	reProjectTasks    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks$`)
 	reProjectTaskByID = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)$`)
 	reTaskMove        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/move$`)
@@ -167,6 +170,7 @@ var (
 	reTaskStream      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
 	reTaskMessages    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
+	reTaskMessageByID = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/([^/]+)$`)
 	reTaskDeps        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
 	reTaskDepChild    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies/([^/]+)$`)
 	reTaskDependents  = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependents$`)
@@ -187,6 +191,21 @@ var (
 )
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method == http.MethodDelete {
+		var req struct {
+			MessageID string `json:"message_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
+			jsonError(w, http.StatusBadRequest, "message_id required")
+			return
+		}
+		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -197,6 +216,25 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	jsonResponse(w, http.StatusOK, messages)
+}
+
+func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request, projectID, taskID, messageID string) {
+	if r.Method == http.MethodPatch {
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
+			jsonError(w, http.StatusBadRequest, "content required")
+			return
+		}
+		if err := s.store.UpdateTaskMessage(messageID, req.Content); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +336,12 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Board stream (WebSocket)
+	if m := reProjectBoardWS.FindStringSubmatch(path); m != nil {
+		s.boardStreamMgr.HandleStream(w, r, m[1])
+		return
+	}
+
 	// Board
 	if m := reProjectBoard.FindStringSubmatch(path); m != nil {
 		s.boardMgr.HandleGetBoard(w, r, m[1])
@@ -353,6 +397,10 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Task messages
+	if m := reTaskMessageByID.FindStringSubmatch(path); m != nil {
+		s.handleTaskMessageByID(w, r, m[1], m[2], m[3])
+		return
+	}
 	if m := reTaskMessages.FindStringSubmatch(path); m != nil {
 		s.handleTaskMessages(w, r, m[1], m[2])
 		return

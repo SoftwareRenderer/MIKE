@@ -52,12 +52,13 @@ func generateTaskID() string {
 
 // TaskManager handles task CRUD operations.
 type TaskManager struct {
-	store *Store
+	store         *Store
+	boardStreamMgr *BoardStreamManager
 }
 
 // NewTaskManager creates a new TaskManager.
-func NewTaskManager(store *Store) *TaskManager {
-	return &TaskManager{store: store}
+func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager) *TaskManager {
+	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr}
 }
 
 // HandleList lists or creates tasks for a project.
@@ -93,6 +94,7 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		tm.boardStreamMgr.Broadcast(projectID)
 		jsonResponse(w, http.StatusCreated, task)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -124,12 +126,14 @@ func (tm *TaskManager) HandleByID(w http.ResponseWriter, r *http.Request, projec
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		tm.boardStreamMgr.Broadcast(projectID)
 		jsonResponse(w, http.StatusOK, task)
 	case http.MethodDelete:
 		if err := tm.store.DeleteTask(projectID, taskID); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		tm.boardStreamMgr.Broadcast(projectID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -164,6 +168,7 @@ func (tm *TaskManager) HandleMove(w http.ResponseWriter, r *http.Request, projec
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	tm.boardStreamMgr.Broadcast(projectID)
 	jsonResponse(w, http.StatusOK, task)
 }
 

@@ -160,17 +160,6 @@
 </script>
 
 <div class="task-stream">
-    <!-- Connection Status -->
-    <div class="status-bar" class:connecting class:connected>
-        {#if connecting}
-            <span class="dot connecting"></span> Connecting...
-        {:else if connected}
-            <span class="dot connected"></span> Connected
-        {:else}
-            <span class="dot disconnected"></span> Disconnected
-        {/if}
-    </div>
-
     <!-- Content -->
     <div class="content" bind:this={scrollEl} on:scroll={checkScroll}>
         {#if showRaw}
@@ -229,32 +218,6 @@
         flex-direction: column;
         height: 100%;
         overflow: hidden;
-    }
-    .status-bar {
-        padding: 4px 12px;
-        font-size: 12px;
-        color: var(--color-text-tertiary);
-        border-bottom: 1px solid var(--color-border);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-    .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        display: inline-block;
-    }
-    .dot.connecting {
-        background: var(--color-status-yellow);
-        animation: pulse 1s infinite;
-    }
-    .dot.connected {
-        background: var(--color-status-green);
-    }
-    .dot.disconnected {
-        background: var(--color-text-tertiary);
     }
     @keyframes pulse {
         0%, 100% { opacity: 1; }

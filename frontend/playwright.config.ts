@@ -2,10 +2,12 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  workers: 1,
+  workers: 2,
+  globalSetup: './tests/global-setup.ts',
+  globalTeardown: './tests/global-setup.ts',
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:3000',
@@ -15,6 +17,15 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      testIgnore: /.*\.mobile\.spec\.ts/,
+    },
+    {
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 5'],
+        viewport: { width: 390, height: 844 },
+      },
+      testMatch: /.*\.mobile\.spec\.ts/,
     },
   ],
 });

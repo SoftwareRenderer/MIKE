@@ -72,6 +72,12 @@ export interface TaskMessage {
     task_id: string;
     role: string;
     content: string;
+    model_name?: string;
+    prompt_tokens?: number;
+    predicted_tokens?: number;
+    prompt_ms?: number;
+    predicted_ms?: number;
+    duration?: number;
     created_at: string;
 }
 
@@ -119,7 +125,8 @@ export type StreamEventType =
     | 'queue'
     | 'complete'
     | 'error'
-    | 'user_message';
+    | 'user_message'
+    | 'stats';
 
 export interface StreamEvent {
     type: StreamEventType;
@@ -164,7 +171,11 @@ export interface StreamQueueEvent {
 export interface StreamCompleteEvent {
     state: string;
     summary: string;
-    tokens: { prompt: number; completed: number; total: number };
+    model_name: string;
+    prompt_tokens: number;
+    predicted_tokens: number;
+    prompt_ms: number;
+    predicted_ms: number;
     duration: number;
 }
 

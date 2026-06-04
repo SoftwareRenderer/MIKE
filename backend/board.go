@@ -7,12 +7,13 @@ import (
 
 // BoardManager handles board-level operations.
 type BoardManager struct {
-	store *Store
+	store          *Store
+	boardStreamMgr *BoardStreamManager
 }
 
 // NewBoardManager creates a new BoardManager.
-func NewBoardManager(store *Store) *BoardManager {
-	return &BoardManager{store: store}
+func NewBoardManager(store *Store, boardStreamMgr *BoardStreamManager) *BoardManager {
+	return &BoardManager{store: store, boardStreamMgr: boardStreamMgr}
 }
 
 // HandleGetBoard returns the board (all tasks) for a project.
@@ -64,5 +65,6 @@ func (bm *BoardManager) HandleReorder(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 
+	bm.boardStreamMgr.Broadcast(projectID)
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }

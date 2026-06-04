@@ -130,11 +130,17 @@ CREATE TABLE IF NOT EXISTS home_agent_messages (
 );
 
 CREATE TABLE IF NOT EXISTS task_messages (
-    id         TEXT PRIMARY KEY,
-    task_id    TEXT NOT NULL,
-    role       TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    created_at TEXT NOT NULL,
+    id                 TEXT PRIMARY KEY,
+    task_id            TEXT NOT NULL,
+    role               TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    model_name         TEXT DEFAULT NULL,
+    prompt_tokens      INTEGER DEFAULT 0,
+    predicted_tokens   INTEGER DEFAULT 0,
+    prompt_ms          INTEGER DEFAULT 0,
+    predicted_ms       INTEGER DEFAULT 0,
+    duration           INTEGER DEFAULT 0,
+    created_at         TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
@@ -155,6 +161,12 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	}
 	// Migrations for existing databases
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN model_name TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_tokens INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_tokens INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_ms INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_ms INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN duration INTEGER DEFAULT 0`)
 	return nil
 }
 
@@ -707,8 +719,8 @@ func (s *Store) CreateTaskMessage(m *TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, m.Role, m.Content, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, role, content, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, m.Role, m.Content, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -718,7 +730,7 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, role, content, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, role, content, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -729,13 +741,40 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	for rows.Next() {
 		var m TaskMessage
 		var createdAt string
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &createdAt); err != nil {
+		var modelName sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
 			return nil, err
+		}
+		if modelName.Valid {
+			m.ModelName = modelName.String
 		}
 		m.CreatedAt = scanTime(createdAt)
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
+}
+
+// DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it.
+func (s *Store) DeleteTaskMessagesAfter(taskID, messageID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Get the created_at of the message to delete
+	var createdAt string
+	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt)
+	if err != nil {
+		return err
+	}
+	// Delete this message and all messages created after it
+	_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND created_at >= ?`, taskID, createdAt)
+	return err
+}
+
+// UpdateTaskMessage updates the content of a message.
+func (s *Store) UpdateTaskMessage(messageID, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE task_messages SET content = ? WHERE id = ?`, content, messageID)
+	return err
 }
 
 // -- Helper functions --

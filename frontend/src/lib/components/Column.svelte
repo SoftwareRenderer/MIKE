@@ -42,7 +42,7 @@
             <button class="add-task-btn" onclick={onAddTask}>+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} columnId={columnId} projectId={columnId} />
+            <Card {task} {columnId} />
         {/each}
     </div>
 </div>
@@ -61,6 +61,16 @@
     }
     .column.is-over {
         background: var(--color-surface-2);
+    }
+
+    @media (max-width: 768px) {
+        .column {
+            flex: 0 0 auto !important;
+            min-width: 280px;
+            max-width: none;
+            width: 92vw;
+            scroll-snap-align: center;
+        }
     }
     .column-header {
         display: flex;
