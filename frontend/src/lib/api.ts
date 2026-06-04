@@ -1,9 +1,19 @@
 const API_BASE = '/api';
 
+/** Extract error message from a failed API response, falling back to a default. */
+async function apiError(res: Response, defaultMsg: string): Promise<Error> {
+    try {
+        const body = await res.json();
+        return new Error(body.error || defaultMsg);
+    } catch {
+        return new Error(defaultMsg);
+    }
+}
+
 // -- Project endpoints --
 export async function getProjects(): Promise<Project[]> {
     const res = await fetch(`${API_BASE}/projects`);
-    if (!res.ok) throw new Error('Failed to fetch projects');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
     return res.json();
 }
 
@@ -13,7 +23,7 @@ export async function createProject(path: string): Promise<Project> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
     });
-    if (!res.ok) throw new Error('Failed to create project');
+    if (!res.ok) throw await apiError(res, 'Failed to create project');
     return res.json();
 }
 
@@ -23,22 +33,19 @@ export async function updateProject(id: string, name: string): Promise<Project> 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
     });
-    if (!res.ok) throw new Error('Failed to update project');
+    if (!res.ok) throw await apiError(res, 'Failed to update project');
     return res.json();
 }
 
 export async function deleteProject(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Failed to delete project' }));
-        throw new Error(err.error || 'Failed to delete project');
-    }
+    if (!res.ok) throw await apiError(res, 'Failed to delete project');
 }
 
 // -- Board endpoints --
 export async function getBoard(projectId: string): Promise<Board> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/board`);
-    if (!res.ok) throw new Error('Failed to fetch board');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch board');
     return res.json();
 }
 
@@ -48,7 +55,7 @@ export async function reorderTasks(projectId: string, reorders: ReorderRequest[]
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reorders),
     });
-    if (!res.ok) throw new Error('Failed to reorder tasks');
+    if (!res.ok) throw await apiError(res, 'Failed to reorder tasks');
 }
 
 // -- Task CRUD endpoints --
@@ -58,13 +65,13 @@ export async function createTask(projectId: string, task: Partial<Task>): Promis
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
     });
-    if (!res.ok) throw new Error('Failed to create task');
+    if (!res.ok) throw await apiError(res, 'Failed to create task');
     return res.json();
 }
 
 export async function getTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
-    if (!res.ok) throw new Error('Task not found');
+    if (!res.ok) throw await apiError(res, 'Task not found');
     return res.json();
 }
 
@@ -74,13 +81,13 @@ export async function updateTask(projectId: string, taskId: string, task: Partia
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
     });
-    if (!res.ok) throw new Error('Failed to update task');
+    if (!res.ok) throw await apiError(res, 'Failed to update task');
     return res.json();
 }
 
 export async function deleteTask(projectId: string, taskId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete task');
+    if (!res.ok) throw await apiError(res, 'Failed to delete task');
 }
 
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
@@ -89,32 +96,32 @@ export async function moveTask(projectId: string, taskId: string, status: string
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
     });
-    if (!res.ok) throw new Error('Failed to move task');
+    if (!res.ok) throw await apiError(res, 'Failed to move task');
     return res.json();
 }
 
 // -- Task execution endpoints --
 export async function startTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to start task');
+    if (!res.ok) throw await apiError(res, 'Failed to start task');
     return res.json();
 }
 
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to stop task');
+    if (!res.ok) throw await apiError(res, 'Failed to stop task');
     return res.json();
 }
 
 export async function retryTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to retry task');
+    if (!res.ok) throw await apiError(res, 'Failed to retry task');
     return res.json();
 }
 
 export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to resume task');
+    if (!res.ok) throw await apiError(res, 'Failed to resume task');
     return res.json();
 }
 
@@ -159,7 +166,7 @@ export function createTaskStream(projectId: string, taskId: string, onEvent: (ev
 
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
-    if (!res.ok) throw new Error('Failed to fetch messages');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
     return res.json();
 }
 
@@ -169,7 +176,7 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId }),
     });
-    if (!res.ok) throw new Error('Failed to delete messages');
+    if (!res.ok) throw await apiError(res, 'Failed to delete messages');
 }
 
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
@@ -178,19 +185,19 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
     });
-    if (!res.ok) throw new Error('Failed to update message');
+    if (!res.ok) throw await apiError(res, 'Failed to update message');
 }
 
 export async function getTaskDiff(projectId: string, taskId: string): Promise<string> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`);
-    if (!res.ok) throw new Error('Failed to fetch diff');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
     return res.text();
 }
 
 // -- Configuration endpoints --
 export async function getConfig(): Promise<Config> {
     const res = await fetch(`${API_BASE}/config`);
-    if (!res.ok) throw new Error('Failed to fetch config');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch config');
     return res.json();
 }
 
@@ -200,14 +207,24 @@ export async function updateConfig(config: Config): Promise<Config> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
     });
-    if (!res.ok) throw new Error('Failed to update config');
+    if (!res.ok) throw await apiError(res, 'Failed to update config');
+    return res.json();
+}
+
+export async function testConnection(llamaServerUrl: string, modelName: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/config/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llama_server_url: llamaServerUrl, model_name: modelName }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to test connection');
     return res.json();
 }
 
 // -- Dependency endpoints --
 export async function getDependencies(projectId: string, taskId: string): Promise<TaskDependency[]> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`);
-    if (!res.ok) throw new Error('Failed to fetch dependencies');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch dependencies');
     return res.json();
 }
 
@@ -217,14 +234,14 @@ export async function createDependency(projectId: string, taskId: string, childT
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ child_task_id: childTaskId, auto_start: autoStart }),
     });
-    if (!res.ok) throw new Error('Failed to create dependency');
+    if (!res.ok) throw await apiError(res, 'Failed to create dependency');
     return res.json();
 }
 
 // -- Review comment endpoints --
 export async function getReviewComments(projectId: string, taskId: string): Promise<ReviewComment[]> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`);
-    if (!res.ok) throw new Error('Failed to fetch review comments');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch review comments');
     return res.json();
 }
 
@@ -234,7 +251,7 @@ export async function createReviewComment(projectId: string, taskId: string, fil
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_path: filePath, line_num: lineNum, comment }),
     });
-    if (!res.ok) throw new Error('Failed to create review comment');
+    if (!res.ok) throw await apiError(res, 'Failed to create review comment');
     return res.json();
 }
 
@@ -242,20 +259,20 @@ export async function createReviewComment(projectId: string, taskId: string, fil
 export async function getGitLog(projectId: string, branch?: string): Promise<GitCommit[]> {
     const url = branch ? `${API_BASE}/projects/${projectId}/git/log?branch=${branch}` : `${API_BASE}/projects/${projectId}/git/log`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch git log');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
     return res.json();
 }
 
 export async function getGitStatus(projectId: string): Promise<GitStatus> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/git/status`);
-    if (!res.ok) throw new Error('Failed to fetch git status');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
     return res.json();
 }
 
 // -- Home agent endpoints --
 export async function getHomeAgentMessages(projectId: string): Promise<HomeAgentMessage[]> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/home-agent/messages`);
-    if (!res.ok) throw new Error('Failed to fetch messages');
+    if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
     return res.json();
 }
 

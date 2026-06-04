@@ -1,5 +1,5 @@
 /**
- * Global setup: starts mock LLM server and updates kanban config.
+ * Global setup: starts mock LLM server and sets in-memory override on kanban.
  * 
  * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock enabled).
  */
@@ -11,7 +11,6 @@ const MOCK_PORT = 9999;
 const KANBAN_BASE = 'http://localhost:3000';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
-let originalConfig: any = null;
 
 async function setup(): Promise<void> {
     const useMock = process.env.USE_MOCK_LLM !== '0';
@@ -30,32 +29,24 @@ async function setup(): Promise<void> {
 
     await waitForServer(MOCK_PORT);
 
-    // Save and update config
-    originalConfig = await fetchJson(`${KANBAN_BASE}/api/config`);
-    if (originalConfig) {
-        await putJson(`${KANBAN_BASE}/api/config`, {
-            llama_server_url: `http://localhost:${MOCK_PORT}/v1`,
-            model_name: 'mock-model',
-        });
-        console.log(`[global-setup] Config updated to use mock LLM on port ${MOCK_PORT}`);
-    }
+    // Set in-memory override (does NOT modify the database)
+    await postJson(`${KANBAN_BASE}/api/test/override`, {
+        llama_server_url: `http://localhost:${MOCK_PORT}/v1`,
+        model_name: 'mock-model',
+    });
+    console.log(`[global-setup] In-memory override set to mock LLM on port ${MOCK_PORT}`);
 }
 
 async function teardown(): Promise<void> {
     const useMock = process.env.USE_MOCK_LLM !== '0';
     if (!useMock) return;
 
-    // Restore original config
-    if (originalConfig) {
-        try {
-            await putJson(`${KANBAN_BASE}/api/config`, {
-                llama_server_url: originalConfig.llama_server_url,
-                model_name: originalConfig.model_name,
-            });
-            console.log('[global-teardown] Config restored to original');
-        } catch (e) {
-            console.error('[global-teardown] Failed to restore config:', e);
-        }
+    // Clear in-memory override (database is never modified)
+    try {
+        await deleteRequest(`${KANBAN_BASE}/api/test/override`);
+        console.log('[global-teardown] In-memory override cleared');
+    } catch (e) {
+        console.error('[global-teardown] Failed to clear override:', e);
     }
 
     // Stop mock server
@@ -85,23 +76,11 @@ function waitForServer(port: number, timeout = 5000): Promise<void> {
     });
 }
 
-function fetchJson(url: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        http.get(url, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(data)); } catch { resolve(null); }
-            });
-        }).on('error', reject);
-    });
-}
-
-function putJson(url: string, body: any): Promise<any> {
+function postJson(url: string, body: any): Promise<any> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
         const req = http.request(url, {
-            method: 'PUT',
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(data),
@@ -115,6 +94,22 @@ function putJson(url: string, body: any): Promise<any> {
         });
         req.on('error', reject);
         req.write(data);
+        req.end();
+    });
+}
+
+function deleteRequest(url: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const req = http.request(url, {
+            method: 'DELETE',
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
         req.end();
     });
 }

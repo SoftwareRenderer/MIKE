@@ -74,7 +74,9 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	log.Printf("[start] task=%s project=%s", taskID, projectID)
 	if err := te.StartTask(projectID, taskID); err != nil {
+		log.Printf("[start] task=%s error: %v", taskID, err)
 		if strings.Contains(err.Error(), "already running") {
 			jsonError(w, http.StatusConflict, err.Error())
 		} else {
@@ -82,6 +84,7 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 		}
 		return
 	}
+	log.Printf("[start] task=%s started", taskID)
 	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
 	jsonResponse(w, http.StatusOK, task)
@@ -170,10 +173,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 	}
 	log.Printf("[lazy-start] task=%s url=%s model=%s", taskID, serverURL, modelName)
 
-	branchName := fmt.Sprintf("task/%s", task.ID[:8])
-	if len(task.ID) < 8 {
-		branchName = fmt.Sprintf("task/%s", task.ID)
-	}
+	branchName := fmt.Sprintf("task/%s", task.ID)
 
 	wtPath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
@@ -215,7 +215,21 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		return err
 	}
 	if task.StatusState == "running" {
-		return fmt.Errorf("task already running")
+		te.taskMu.Lock()
+		_, activelyRunning := te.tasks[taskID]
+		te.taskMu.Unlock()
+		if !activelyRunning {
+			// Stale state — server likely crashed while task was running.
+			// Reset to idle so the user can retry.
+			log.Printf("[start] task=%s stale running state detected, resetting to idle", taskID)
+			task.StatusState = "idle"
+			task.Status = "todo"
+			if err := te.store.UpdateTask(task); err != nil {
+				return fmt.Errorf("reset stale state: %w", err)
+			}
+		} else {
+			return fmt.Errorf("task already running")
+		}
 	}
 
 	cfg, err := te.configStore.GetConfig()
@@ -236,10 +250,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		modelName = cfg.ModelName
 	}
 
-	branchName := fmt.Sprintf("task/%s", task.ID[:8])
-	if len(task.ID) < 8 {
-		branchName = fmt.Sprintf("task/%s", task.ID)
-	}
+	branchName := fmt.Sprintf("task/%s", task.ID)
 
 	worktreePath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {

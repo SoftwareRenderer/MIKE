@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -83,7 +84,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 
 	// Config
+	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
+
+	// Test override (in-memory, not persisted)
+	s.mux.HandleFunc("/api/test/override", s.configStore.HandleTestOverride)
 
 	// Filesystem browser
 	s.mux.HandleFunc("/api/fs", s.handleFS)
@@ -105,7 +110,7 @@ func (s *Server) setupRoutes() {
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:    s.addr,
-		Handler: corsMiddleware(s.mux),
+		Handler: panicRecoveryMiddleware(corsMiddleware(s.mux)),
 	}
 	log.Printf("Server starting on %s", s.addr)
 	return srv.ListenAndServe()
@@ -149,6 +154,18 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func panicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("[PANIC] %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				jsonError(w, http.StatusInternalServerError, fmt.Sprintf("internal server error: %v", err))
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

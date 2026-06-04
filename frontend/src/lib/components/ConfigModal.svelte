@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Config } from '$lib/types';
-    import { updateConfig, getConfig } from '$lib/api';
+    import { updateConfig, getConfig, testConnection as testConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
@@ -32,16 +32,8 @@
         testing = true;
         testResult = '';
         try {
-            const res = await fetch(serverUrl.replace(/\/$/, '') + '/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: 'test', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
-            });
-            if (res.ok || res.status === 400) {
-                testResult = 'Connection successful!';
-            } else {
-                testResult = `Connection failed: HTTP ${res.status}`;
-            }
+            const result = await testConnectionApi(serverUrl.trim(), modelName.trim());
+            testResult = result.message;
         } catch (e) {
             testResult = 'Connection failed: ' + String(e);
         } finally {
