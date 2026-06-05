@@ -143,7 +143,7 @@ export function createBoardStream(projectId: string, onRefresh: () => void): { w
     return { ws, close: () => ws.close() };
 }
 
-export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): { ws: WebSocket; send: (msg: string) => void; close: () => void } {
+export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): { ws: WebSocket; send: (msg: string) => void; sendWithModel: (msg: string, modelName: string, serverUrl: string) => void; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -158,6 +158,14 @@ export function createTaskStream(projectId: string, taskId: string, onEvent: (ev
         send: (msg: string) => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'user_message', data: { content: msg } }));
+            }
+        },
+        sendWithModel: (msg: string, modelName: string, serverUrl: string) => {
+            if (ws.readyState === WebSocket.OPEN) {
+                const data: Record<string, string> = { content: msg };
+                if (modelName) data.model_name = modelName;
+                if (serverUrl) data.llama_server_url = serverUrl;
+                ws.send(JSON.stringify({ type: 'user_message', data }));
             }
         },
         close: () => ws.close()
@@ -228,6 +236,27 @@ export async function testConnection(llamaServerUrl: string, modelName: string):
     });
     if (!res.ok) throw await apiError(res, 'Failed to test connection');
     return res.json();
+}
+
+export async function fetchModels(llamaServerUrl: string): Promise<{ models: string[]; error?: string }> {
+    const res = await fetch(`${API_BASE}/config/fetch-models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llama_server_url: llamaServerUrl }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to fetch models');
+    return res.json();
+}
+
+/** Resolve a provider+model selection to the actual server URL and model name. */
+export function resolveProviderModel(
+    providers: { name: string; url: string; models: string[] }[],
+    providerName: string,
+    modelName: string
+): { llama_server_url: string; model_name: string } | null {
+    const provider = providers.find(p => p.name === providerName);
+    if (!provider) return null;
+    return { llama_server_url: provider.url, model_name: modelName };
 }
 
 // -- Dependency endpoints --

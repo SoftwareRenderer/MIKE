@@ -57,17 +57,39 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 		}
 	}
 
+	providersRaw, err := cs.store.GetConfigValue("providers")
+	if err != nil {
+		return nil, err
+	}
+	providers := make([]Provider, 0)
+	if providersRaw != "" {
+		if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
+			return nil, err
+		}
+	}
+
+	defaultProvider, err := cs.store.GetConfigValue("default_provider")
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
-		LlamaServerURL: llamaURL,
-		ModelName:      modelName,
-		WorkspaceDir:   workspaceDir,
-		EndpointLimits: endpointLimits,
+		LlamaServerURL:  llamaURL,
+		ModelName:       modelName,
+		WorkspaceDir:    workspaceDir,
+		EndpointLimits:  endpointLimits,
+		Providers:       providers,
+		DefaultProvider: defaultProvider,
 	}, nil
 }
 
 // UpdateConfig persists the full server configuration.
 func (cs *ConfigStore) UpdateConfig(c *Config) error {
 	endpointLimitsJSON, err := json.Marshal(c.EndpointLimits)
+	if err != nil {
+		return err
+	}
+	providersJSON, err := json.Marshal(c.Providers)
 	if err != nil {
 		return err
 	}
@@ -81,6 +103,12 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 		return err
 	}
 	if err := cs.store.SetConfigValue("endpoint_limits", string(endpointLimitsJSON)); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
 		return err
 	}
 	return nil
@@ -122,6 +150,18 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				limitsJSON, _ := json.Marshal(limits)
 				json.Unmarshal(limitsJSON, &current.EndpointLimits)
 			}
+		}
+		if providers, ok := updates["providers"]; ok {
+			if providers != nil {
+				providersJSON, _ := json.Marshal(providers)
+				var p []Provider
+				if err := json.Unmarshal(providersJSON, &p); err == nil {
+					current.Providers = p
+				}
+			}
+		}
+		if dp, ok := updates["default_provider"]; ok {
+			current.DefaultProvider = dp.(string)
 		}
 		if err := cs.UpdateConfig(current); err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to update config")
@@ -218,8 +258,121 @@ func (cs *ConfigStore) ClearOverride() {
 	cs.override = nil
 }
 
+// FetchModelsRequest is the body for POST /api/config/fetch-models.
+type FetchModelsRequest struct {
+	LlamaServerURL string `json:"llama_server_url"`
+}
+
+// FetchModelsResponse is the result of fetching models from an LLM server.
+type FetchModelsResponse struct {
+	Models  []string `json:"models"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// FetchModels calls GET {url}/v1/models on an OpenAI-compatible endpoint and returns model IDs.
+func (cs *ConfigStore) FetchModels(url string) FetchModelsResponse {
+	url = strings.TrimRight(url, "/") + "/models"
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Connection failed: %v", err)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))}
+	}
+
+	// Parse OpenAI-compatible response: { "object": "list", "data": [{ "id": "model-name", ... }] }
+	var oaiResp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &oaiResp); err != nil {
+		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Failed to parse response: %v", err)}
+	}
+
+	models := make([]string, 0, len(oaiResp.Data))
+	for _, m := range oaiResp.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return FetchModelsResponse{Models: models}
+}
+
+// HandleFetchModels handles POST /api/config/fetch-models.
+func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FetchModelsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.LlamaServerURL == "" {
+		jsonError(w, http.StatusBadRequest, "llama_server_url is required")
+		return
+	}
+
+	result := cs.FetchModels(req.LlamaServerURL)
+	jsonResponse(w, http.StatusOK, result)
+}
+
+// ResolveModel resolves a model selection to the actual server URL and model name.
+// Resolution order: task override -> default provider -> legacy config fields.
+// If the task has explicit llama_server_url/model_name set, those take priority.
+// Otherwise, if default_provider is set, look up the provider and use its URL.
+// Falls back to legacy llama_server_url/model_name in config.
+func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *Config) (serverURL, modelName string) {
+	// 1. Task-level override (explicit values set on the task)
+	if taskLlamaURL != "" {
+		serverURL = taskLlamaURL
+	}
+	if taskModelName != "" {
+		modelName = taskModelName
+	}
+	// If both are set on the task, use them directly
+	if serverURL != "" && modelName != "" {
+		return serverURL, modelName
+	}
+
+	// 2. Default provider
+	if defaultProviderName != "" && len(cfg.Providers) > 0 {
+		for _, p := range cfg.Providers {
+			if p.Name == defaultProviderName {
+				if serverURL == "" {
+					serverURL = p.URL
+				}
+				// If no model name yet, use the first available model
+				if modelName == "" && len(p.Models) > 0 {
+					modelName = p.Models[0]
+				}
+				break
+			}
+		}
+	}
+
+	// 3. Legacy config fields
+	if serverURL == "" {
+		serverURL = cfg.LlamaServerURL
+	}
+	if modelName == "" {
+		modelName = cfg.ModelName
+	}
+
+	return serverURL, modelName
+}
+
 // HandleTestOverride handles POST /api/test/override.
 // Sets or clears an in-memory config override without modifying the database.
+// Preserves providers, default_provider, and endpoint_limits from the database.
 func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
@@ -230,17 +383,19 @@ func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request
 			jsonError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		// Get current config to preserve workspace_dir and endpoint_limits
-		current, err := cs.store.GetConfigValue("workspace_dir")
+		// Get current config to preserve workspace_dir, providers, endpoint_limits
+		current, err := cs.GetConfig()
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "failed to get workspace_dir")
+			jsonError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
 		cs.SetOverride(&Config{
 			LlamaServerURL: req.LlamaServerURL,
 			ModelName:      req.ModelName,
-			WorkspaceDir:   current,
-			EndpointLimits: make(map[string]int),
+			WorkspaceDir:   current.WorkspaceDir,
+			EndpointLimits: current.EndpointLimits,
+			Providers:      current.Providers,
+			DefaultProvider: current.DefaultProvider,
 		})
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "override set"})
 	} else if r.Method == http.MethodDelete {

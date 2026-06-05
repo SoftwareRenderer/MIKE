@@ -159,6 +159,17 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - Model: `Qwen3.6-35B-A3B` (NOT `-Q8_0.gguf`)
 - Workspace: `/home/mwren/projects/kanban/worktrees` (absolute path)
 
+## Architecture
+
+### Client-Server Boundary
+- **The frontend client ONLY communicates through the Go server** (`localhost:3000/api/...`). It never calls the LLM endpoint directly.
+- All LLM traffic (chat completions, model listing, etc.) flows: Browser → Go server → LLM server.
+- This means features like "fetch models" must be proxied through a Go endpoint (e.g., `POST /api/config/fetch-models`), not called from the browser.
+
+### WebSocket Protocol
+- All real-time communication uses WebSocket through the Go server
+- Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields
+
 ## Common Patterns
 
 ### Svelte 5 Reactivity

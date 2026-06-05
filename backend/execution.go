@@ -29,7 +29,44 @@ type TaskExecutor struct {
 type executionState struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
-	userMsgChan chan string
+	userMsgChan chan UserMessage
+}
+
+// modelConfig holds mutable model/provider settings for an executor.
+type modelConfig struct {
+	mu        sync.Mutex
+	serverURL string
+	modelName string
+}
+
+func (mc *modelConfig) get() (string, string) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	return mc.serverURL, mc.modelName
+}
+
+func (mc *modelConfig) set(serverURL, modelName string) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.serverURL = serverURL
+	mc.modelName = modelName
+}
+
+// parseModelMetadata extracts optional model metadata from a user message.
+// Format: JSON line with model_name/llama_server_url followed by \n and the actual content.
+func parseModelMetadata(msg string) (content, modelName, serverURL string) {
+	idx := strings.Index(msg, "\n")
+	if idx <= 0 {
+		return msg, "", ""
+	}
+	head := msg[:idx]
+	content = msg[idx+1:]
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(head), &meta); err != nil {
+		// Not a metadata prefix — return the full message as content
+		return msg, "", ""
+	}
+	return content, meta["model_name"], meta["llama_server_url"]
 }
 
 // wordRe matches words (sequences of non-whitespace chars) for token estimation.
@@ -146,8 +183,9 @@ func (te *TaskExecutor) ResetForTest() {
 }
 
 // handleLazyStart is called when a user message arrives for a task with no active executor.
-func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
-	log.Printf("[lazy-start] task=%s project=%s", taskID, projectID)
+// modelName and serverURL are optional overrides from the user's model selection.
+func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL string) {
+	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s)", taskID, projectID, modelName, serverURL)
 
 	te.taskMu.Lock()
 	if _, exists := te.tasks[taskID]; exists {
@@ -176,7 +214,10 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 		return
 	}
 
-	serverURL := task.LlamaServerURL
+	// Resolution: message override > task override > config
+	if serverURL == "" {
+		serverURL = task.LlamaServerURL
+	}
 	if serverURL == "" {
 		serverURL = cfg.LlamaServerURL
 	}
@@ -184,7 +225,9 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 		return
 	}
 
-	modelName := task.ModelName
+	if modelName == "" {
+		modelName = task.ModelName
+	}
 	if modelName == "" {
 		modelName = cfg.ModelName
 	}
@@ -203,14 +246,14 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	userMsgChan := make(chan string, 16)
+	userMsgChan := make(chan UserMessage, 16)
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
 	te.taskMu.Unlock()
 
-	b.SetUserMessageHandler(func(msg string) {
+	b.SetUserMessageHandler(func(um UserMessage) {
 		select {
-		case userMsgChan <- msg:
+		case userMsgChan <- um:
 		default:
 		}
 	})
@@ -220,7 +263,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 }
 
 // executeTaskWithInitialMessage starts the conversation with an initial user message.
-func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan string, initialMessage string) {
+func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage, initialMessage string) {
 	task.Prompt = task.Prompt + "\n\nUser follow-up: " + initialMessage
 	te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
 }
@@ -293,14 +336,14 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	userMsgChan := make(chan string, 16)
+	userMsgChan := make(chan UserMessage, 16)
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
 	te.taskMu.Unlock()
 
-	b.SetUserMessageHandler(func(msg string) {
+	b.SetUserMessageHandler(func(um UserMessage) {
 		select {
-		case userMsgChan <- msg:
+		case userMsgChan <- um:
 		default:
 		}
 	})
@@ -335,7 +378,8 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan string) {
+// Supports mid-conversation model/provider switching via modelConfig.
+func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -347,6 +391,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		te.streamMgr.Remove(task.ID)
 	}()
 
+	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
 	client := NewLlamaClient(serverURL, modelName)
 	tools := GetToolDefinitions()
 	var systemPrompt string
@@ -384,9 +429,31 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		default:
 		}
 
+		// Check for model/provider changes before each LLM call.
+		// Re-read task from store to pick up any updates (e.g., from model selector).
+		if updatedTask, err := te.store.GetTaskByTaskID(task.ID); err == nil {
+			newURL := updatedTask.LlamaServerURL
+			newModel := updatedTask.ModelName
+			curURL, curModel := mc.get()
+			if newURL != "" && newURL != curURL || newModel != "" && newModel != curModel {
+				if newURL == "" {
+					newURL = curURL
+				}
+				if newModel == "" {
+					newModel = curModel
+				}
+				mc.set(newURL, newModel)
+				client = NewLlamaClient(newURL, newModel)
+				log.Printf("[model-switch] task=%s url=%s model=%s", task.ID, newURL, newModel)
+			}
+		}
+
 		// Real-time stats tracking
 		var streamTokenCount int
 		streamStart := time.Time{}
+
+		// Capture current model for this iteration (may have changed above)
+		_, activeModel := mc.get()
 
 		usage, err := client.ChatStream(ctx, messages, tools, func(choice ChatChoice) {
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
@@ -400,7 +467,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				if streamTokenCount%10 == 0 {
 					elapsed := time.Since(streamStart).Milliseconds()
 					b.send(StreamEvent{Type: WSTypeStats, Data: map[string]interface{}{
-						"model_name":       modelName,
+						"model_name":       activeModel,
 						"predicted_tokens": streamTokenCount,
 						"predicted_ms":     int(elapsed),
 					}})
@@ -520,7 +587,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 						promptTokens = estimatePromptTokens(messages)
 						predictedTokens = estimateTokensFromText(assistantText)
 					}
-					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": modelName, "duration": time.Since(startTime).Milliseconds()}})
+					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": activeModel, "duration": time.Since(startTime).Milliseconds()}})
 					return
 				}
 			}
@@ -545,7 +612,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				TaskID:          task.ID,
 				Role:            "assistant",
 				Content:         assistantText,
-				ModelName:       modelName,
+				ModelName:       activeModel,
 				PromptTokens:    promptTokens,
 				PredictedTokens: predictedTokens,
 				PromptMs:        promptMs,
@@ -573,7 +640,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				TaskID:          task.ID,
 				Role:            "assistant",
 				Content:         assistantText,
-				ModelName:       modelName,
+				ModelName:       activeModel,
 				PromptTokens:    promptTokens,
 				PredictedTokens: predictedTokens,
 				PromptMs:        promptMs,
@@ -585,7 +652,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			// LLM responded with text but no tools - signal completion so UI stops streaming
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
-			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": modelName, "duration": duration}})
+			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": activeModel, "duration": duration}})
 			return
 		}
 

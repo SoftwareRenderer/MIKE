@@ -36,7 +36,8 @@ type StreamEvent struct {
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
-type LazyStartHandler func(projectID, taskID, content string)
+// modelName and serverURL are optional overrides from the user's model selection.
+type LazyStartHandler func(projectID, taskID, content, modelName, serverURL string)
 
 // broadcaster fans out events to multiple WebSocket clients.
 type broadcaster struct {
@@ -47,7 +48,7 @@ type broadcaster struct {
 	bufSize     int
 	seqCounter  atomic.Int64
 	closed      atomic.Bool
-	userMsgHandler func(string)
+	userMsgHandler func(UserMessage)
 	handlerMu    sync.RWMutex
 }
 
@@ -70,15 +71,22 @@ func (b *broadcaster) clearBuffer() {
 	b.ringBuffer = b.ringBuffer[:0]
 }
 
+// UserMessage carries a user message with optional model override.
+type UserMessage struct {
+	Content      string
+	ModelName    string
+	ServerURL    string
+}
+
 // SetUserMessageHandler sets the callback for forwarding user messages to the executor.
-func (b *broadcaster) SetUserMessageHandler(h func(string)) {
+func (b *broadcaster) SetUserMessageHandler(h func(UserMessage)) {
 	b.handlerMu.Lock()
 	defer b.handlerMu.Unlock()
 	b.userMsgHandler = h
 }
 
 // getUserMessageHandler returns the current user message handler.
-func (b *broadcaster) getUserMessageHandler() func(string) {
+func (b *broadcaster) getUserMessageHandler() func(UserMessage) {
 	b.handlerMu.RLock()
 	defer b.handlerMu.RUnlock()
 	return b.userMsgHandler
@@ -259,10 +267,12 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		}
 		if msg.Type == "user_message" {
 			var payload struct {
-				Content string `json:"content"`
+				Content       string `json:"content"`
+				ModelName     string `json:"model_name"`
+				LlamaServerURL string `json:"llama_server_url"`
 			}
 			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
-				log.Printf("[stream] task=%s user_message received", taskID)
+				log.Printf("[stream] task=%s user_message received (model=%s, url=%s)", taskID, payload.ModelName, payload.LlamaServerURL)
 				// Always persist the user message
 				sm.store.CreateTaskMessage(&TaskMessage{
 					ID:        generateUUID(),
@@ -273,11 +283,15 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 				})
 				// Always broadcast back to all clients
 				b.send(StreamEvent{Type: WSTypeUserMessage, Data: map[string]string{"role": "user", "content": payload.Content}})
-				// If executor is running, forward to it
+				// If executor is running, forward to it (with model info)
 				handler := b.getUserMessageHandler()
 				if handler != nil {
 					log.Printf("[stream] task=%s forwarding to executor", taskID)
-					handler(payload.Content)
+					handler(UserMessage{
+						Content:   payload.Content,
+						ModelName: payload.ModelName,
+						ServerURL: payload.LlamaServerURL,
+					})
 				} else {
 					// No executor running — lazy-start one
 					log.Printf("[stream] task=%s no executor, trying lazy-start", taskID)
@@ -290,8 +304,8 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 						if err == nil && task != nil {
 							projectID = task.ProjectID
 						}
-						log.Printf("[stream] task=%s project=%s calling lazy-start", taskID, projectID)
-						go lazyHandler(projectID, taskID, payload.Content)
+						log.Printf("[stream] task=%s project=%s calling lazy-start (model=%s, url=%s)", taskID, projectID, payload.ModelName, payload.LlamaServerURL)
+						go lazyHandler(projectID, taskID, payload.Content, payload.ModelName, payload.LlamaServerURL)
 					} else {
 						log.Printf("[stream] task=%s no lazy-start handler registered", taskID)
 					}

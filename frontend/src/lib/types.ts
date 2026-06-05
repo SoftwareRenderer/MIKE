@@ -38,6 +38,15 @@ export interface Config {
     model_name: string;
     workspace_dir: string;
     endpoint_limits: Record<string, number>;
+    providers: Provider[];
+    default_provider: string;
+}
+
+export interface Provider {
+    name: string;
+    display_name: string;
+    url: string;
+    models: string[];
 }
 
 export interface TaskDependency {

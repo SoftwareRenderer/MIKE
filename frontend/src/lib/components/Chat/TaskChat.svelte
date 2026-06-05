@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import type { StreamEvent } from '$lib/types';
-    import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask } from '$lib/api';
+    import type { StreamEvent, Provider } from '$lib/types';
+    import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
 import { board as boardStore } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -41,6 +41,11 @@ import { board as boardStore } from '$lib/store';
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
     let inputValue = $state('');
+
+    // Model selection state
+    let providers: Provider[] = $state([]);
+    let selectedModel = $state('');
+    let selectedUrl = $state('');
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, ChatEntry>>(new Map());
@@ -228,6 +233,27 @@ import { board as boardStore } from '$lib/store';
         scroll();
     }
 
+    async function loadProviders() {
+        try {
+            const cfg = await getConfig();
+            providers = cfg.providers || [];
+            // Initialize model selection from task or config default
+            if (cfg.default_provider && providers.length > 0) {
+                const defaultP = providers.find(p => p.name === cfg.default_provider);
+                if (defaultP && defaultP.models.length > 0) {
+                    selectedUrl = defaultP.url;
+                    selectedModel = defaultP.models[0];
+                }
+            }
+            if (!selectedUrl && cfg.llama_server_url) {
+                selectedUrl = cfg.llama_server_url;
+                selectedModel = cfg.model_name || '';
+            }
+        } catch {
+            providers = [];
+        }
+    }
+
     async function loadHistory() {
         try {
             const messages = await getTaskMessages(projectId, taskId);
@@ -283,9 +309,28 @@ import { board as boardStore } from '$lib/store';
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = msg;
-        if (ws) ws.send(msg);
+        // Send with model info for lazy-start
+        if (ws && ws.sendWithModel) {
+            ws.sendWithModel(msg, selectedModel, selectedUrl);
+        } else if (ws) {
+            ws.send(msg);
+        }
         isLoading = true;
         scroll();
+    }
+
+    async function handleModelSelect(providerName: string, modelName: string, providerUrl: string) {
+        selectedModel = modelName;
+        selectedUrl = providerUrl;
+        // Update task with new model/provider
+        try {
+            await updateTask(projectId, taskId, {
+                model_name: modelName,
+                llama_server_url: providerUrl,
+            });
+        } catch (e) {
+            console.error('Failed to update task model:', e);
+        }
     }
 
     async function handleRegenerate(entryId: string) {
@@ -379,7 +424,20 @@ import { board as boardStore } from '$lib/store';
     let destroyed = $state(false);
 
     onMount(async () => {
+        await loadProviders();
         await loadHistory();
+        // Override model selection with task-specific values if set
+        try {
+            const task = await (await import('$lib/api')).getTask(projectId, taskId);
+            if (task.llama_server_url) {
+                selectedUrl = task.llama_server_url;
+            }
+            if (task.model_name) {
+                selectedModel = task.model_name;
+            }
+        } catch {
+            // Task may not exist yet
+        }
         connect();
     });
 
@@ -467,8 +525,12 @@ import { board as boardStore } from '$lib/store';
             disabled={disabled}
             isLoading={isLoading}
             placeholder="Send a message to the agent..."
+            providers={providers}
+            selectedModel={selectedModel}
+            selectedUrl={selectedUrl}
             onSubmit={(msg) => handleSend(msg)}
             onStop={handleStop}
+            onModelSelect={handleModelSelect}
         />
     {/if}
 </div>

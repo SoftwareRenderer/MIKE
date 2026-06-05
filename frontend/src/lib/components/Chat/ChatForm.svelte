@@ -1,11 +1,18 @@
 <script lang="ts">
+    import type { Provider } from '$lib/types';
+    import ModelSelector from './ModelSelector.svelte';
+
     interface Props {
         value?: string;
         disabled?: boolean;
         isLoading?: boolean;
         placeholder?: string;
+        providers?: Provider[];
+        selectedModel?: string;
+        selectedUrl?: string;
         onSubmit?: (message: string) => void;
         onStop?: () => void;
+        onModelSelect?: (providerName: string, modelName: string, providerUrl: string) => void;
     }
 
     let {
@@ -13,12 +20,17 @@
         disabled = false,
         isLoading = false,
         placeholder = 'Type a message...',
+        providers = [],
+        selectedModel = '',
+        selectedUrl = '',
         onSubmit,
-        onStop
+        onStop,
+        onModelSelect,
     }: Props = $props();
 
     let textareaEl: HTMLTextAreaElement | undefined;
     let canSend = $derived(value.trim().length > 0 && !disabled);
+    let showModelSelector = $derived(providers.length > 0);
 
     export function focus() {
         textareaEl?.focus();
@@ -66,6 +78,18 @@
 </script>
 
 <form class="chat-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+    <!-- Model selector bar -->
+    {#if showModelSelector}
+        <div class="model-bar">
+            <ModelSelector
+                {providers}
+                {selectedModel}
+                {selectedUrl}
+                {disabled}
+                onSelect={onModelSelect}
+            />
+        </div>
+    {/if}
     <div class="chat-form-inner">
         <textarea
             bind:this={textareaEl}
@@ -98,6 +122,14 @@
         border-top: 1px solid var(--color-border);
         background: var(--color-surface-0);
         flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+    .model-bar {
+        padding: 0 0 6px;
+        display: flex;
+        align-items: center;
     }
     .chat-form-inner {
         display: flex;
