@@ -1,3 +1,36 @@
 [
-  {"choices": [{"delta": {"tool_calls": [{"id": "call_mock123", "function": {"name": "execute_command", "arguments": "{\"command\":\"ls -la\"}"}, "type": "function"}]}, "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 55, "completion_tokens": 12, "total_tokens": 67, "prompt_ms": 400, "predicted_ms": 250}}
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "id": "call_mock123",
+              "function": {
+                "name": "execute_command",
+                "arguments": "{\"command\":\"ls -la\"}"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 12,
+      "total_tokens": 67,
+      "prompt_ms": 400,
+      "predicted_ms": 250
+    }
+  }
 ]

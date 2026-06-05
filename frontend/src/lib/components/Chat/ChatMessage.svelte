@@ -5,6 +5,7 @@
         role: string;
         content: string;
         isStreaming?: boolean;
+        timestamp?: string;
         stats?: { prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         onCopy?: () => void;
         onDelete?: () => void;
@@ -12,7 +13,13 @@
         onRegenerate?: () => void;
     }
 
-    let { role, content, isStreaming = false, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+    let { role, content, isStreaming = false, timestamp, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+
+    function formatTime(isoStr: string): string {
+        const date = new Date(isoStr);
+        if (isNaN(date.getTime())) return '';
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
 
     let isEditing = $state(false);
     let editContent = $state(content);
@@ -110,6 +117,9 @@
                     <div class="message-text">{@html userHtml}</div>
                 </div>
                 <div class="message-actions user-actions">
+                    {#if timestamp}
+                        <span class="message-timestamp">{formatTime(timestamp)}</span>
+                    {/if}
                     <button class="action-btn" onclick={handleCopy} title="Copy">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -192,6 +202,9 @@
                 </div>
             {/if}
             <div class="message-actions assistant-actions">
+                    {#if timestamp}
+                        <span class="message-timestamp">{formatTime(timestamp)}</span>
+                    {/if}
                     <button class="action-btn" onclick={handleCopy} title="Copy">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -260,6 +273,7 @@
     }
     .assistant .message-text {
         color: var(--color-text-primary);
+        white-space: normal;
     }
     .assistant .message-text.streaming {
         border-left: 2px solid var(--color-accent);
@@ -293,18 +307,26 @@
         padding: 0;
     }
     .assistant .message-text :global(p) {
-        margin: 0 0 0.75rem;
+        margin: 0;
+        line-height: 1.25;
     }
     .assistant .message-text :global(p:last-child) {
         margin-bottom: 0;
     }
     .assistant .message-text :global(ul),
     .assistant .message-text :global(ol) {
-        margin: 4px 0;
+        margin: 0.5rem 0;
         padding-left: 1.5rem;
+        white-space: normal;
+        line-height: 1.25;
     }
     .assistant .message-text :global(li) {
-        margin: 2px 0;
+        margin: 0;
+        line-height: 1.25;
+        white-space: normal;
+    }
+    .assistant .message-text :global(li > p) {
+        margin: 0;
     }
     .assistant .message-text :global(blockquote) {
         border-left: 3px solid var(--color-border);
@@ -382,6 +404,19 @@
     }
     .assistant-actions {
         justify-content: flex-start;
+    }
+    .message-timestamp {
+        font-size: 0.625rem;
+        color: var(--color-text-tertiary);
+        opacity: 0.6;
+        white-space: nowrap;
+        margin: 0 4px;
+    }
+    .user-actions .message-timestamp {
+        margin-left: 0;
+    }
+    .assistant-actions .message-timestamp {
+        margin-right: 0;
     }
     .action-btn {
         background: none;

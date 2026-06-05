@@ -1,0 +1,81 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "I'll list the files in the project."
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "call_stream001",
+              "function": {
+                "name": "execu"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "name": "te_command",
+                "arguments": "{\"command\":\"ls "
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "-la\"}"
+              }
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 18,
+      "total_tokens": 73,
+      "prompt_ms": 400,
+      "predicted_ms": 250
+    }
+  }
+]

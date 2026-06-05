@@ -25,7 +25,7 @@ async function setup(): Promise<void> {
         stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    mockServer.stderr.on('data', () => {});
+    mockServer.stderr.on('data', data => console.error('[mock]', data.toString().trim()));
 
     await waitForServer(MOCK_PORT);
 
@@ -114,30 +114,26 @@ function deleteRequest(url: string): Promise<any> {
     });
 }
 
-// Playwright requires a single default export that detects setup vs teardown
-// by checking if process.env.PLAYWRIGHT_PROJECT_NAME is set.
-// Actually, Playwright calls globalSetup and globalTeardown as separate files.
-// We need two separate files OR use the same file with detection.
+// Playwright calls globalSetup before tests and globalTeardown after tests.
+// Both use the same exported function. We detect the phase by checking
+// if PLAYWRIGHT_PROJECT_NAME is set (Playwright sets this for globalTeardown).
+// Alternatively, we can use a lock file to coordinate between the two phases.
 
-// Detection approach: check if mock server is already running.
-// If NOT running -> setup. If running -> teardown.
+const LOCK_FILE = '/tmp/kanban-test-setup.lock';
+import fs from 'node:fs';
 
 export default async function main(): Promise<void> {
-    const running = await isMockRunning();
+    // If lock file exists, we're in teardown phase (setup already ran)
+    // Otherwise, we're in setup phase
+    const isTeardown = fs.existsSync(LOCK_FILE);
     
-    if (!running) {
-        await setup();
-    } else {
+    if (isTeardown) {
         await teardown();
+        // Remove lock file
+        try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+    } else {
+        await setup();
+        // Create lock file to indicate setup completed
+        try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
     }
-}
-
-function isMockRunning(): Promise<boolean> {
-    return new Promise((resolve) => {
-        const req = http.get(`http://localhost:${MOCK_PORT}/`, () => {
-            resolve(true);
-        });
-        req.on('error', () => resolve(false));
-        req.end();
-    });
 }

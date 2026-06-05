@@ -1,26 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm } from './helpers';
+import { ensureChatForm, createAndOpenTask } from './helpers';
 
 test.describe.serial('LLM Stats Persistence', () => {
   let taskId: string | null = null;
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
   test('should create a task and get an LLM response with stats', async ({ page }) => {
-    // Create a task
-    await page.click('.add-task-btn');
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', `Stats persistence test ${Date.now()}`);
-    await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
-    await page.waitForSelector('.card', { timeout: 5000 });
-
-    // Open the task
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page, `Stats persistence test ${Date.now()}`);
 
     // Capture task ID from URL
     taskId = (await page.url()).match(/task=([^&]+)/)?.[1] || null;

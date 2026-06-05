@@ -1,0 +1,47 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "execute_command"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "call_text001",
+              "function": {
+                "name": "execute_command",
+                "arguments": "{\"command\":\"echo hello\"}"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 15,
+      "total_tokens": 70,
+      "prompt_ms": 300,
+      "predicted_ms": 200
+    }
+  }
+]

@@ -33,6 +33,9 @@ const textResponseLong = loadFixture('text_response_long');
 const textResponseSlow = loadFixture('text_response_slow');
 const toolCallResponse = loadFixture('tool_call_response');
 const toolCallFail = loadFixture('tool_call_fail');
+const toolCallStreaming = loadFixture('tool_call_streaming');
+const toolCallWithText = loadFixture('tool_call_with_text');
+const toolCallComplete = loadFixture('tool_call_complete');
 
 let requestCount = 0;
 
@@ -43,28 +46,51 @@ let requestCount = 0;
 function selectResponse(parsed) {
     const hasTools = parsed.tools && parsed.tools.length > 0;
     const messages = parsed.messages || [];
+
+    // Use only the LAST user message for routing.
+    // This avoids false matches from conversation history (e.g., the initial
+    // task prompt persisted as a user message in earlier turns).
     const userMessages = messages
         .filter(m => m.role === 'user')
-        .map(m => (m.content || '').toLowerCase())
-        .join(' ');
+        .map(m => (m.content || '').toLowerCase());
+    const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : '';
+
+    // If there are tool results in the conversation, the LLM should respond
+    // with text (not another tool call) to avoid infinite tool-call loops.
+    const hasToolResults = messages.some(m => m.role === 'tool');
+    if (hasToolResults) {
+        return { chunks: toolCallComplete, chunkDelay: 1 };
+    }
 
     // Failing tool call: message mentions file that does not exist
-    if (hasTools && /does not exist/i.test(userMessages)) {
+    if (hasTools && /does not exist/i.test(lastUserMsg)) {
         return { chunks: toolCallFail, chunkDelay: 1 };
     }
 
+    // Streaming tool call scenario: tools provided and message mentions "streaming" or "multi"
+    // This simulates real LLM behavior where tool calls are split across multiple SSE chunks
+    if (hasTools && /streaming|multi.*chunk|split.*tool/i.test(lastUserMsg)) {
+        return { chunks: toolCallStreaming, chunkDelay: 1 };
+    }
+
+    // Tool call with text content: LLM sends tool name as text before the tool call
+    // This simulates the "tool name printed twice" bug
+    if (hasTools && /text.*tool|tool.*text|toolname.*dup/i.test(lastUserMsg)) {
+        return { chunks: toolCallWithText, chunkDelay: 1 };
+    }
+
     // Tool call scenario: tools provided and message mentions file/directory operations
-    if (hasTools && /list|file|directory|read|command|git|exec/i.test(userMessages)) {
+    if (hasTools && /\blist\b|\bdirectory\b|\bread\b|\bcommand\b|\bgit\b|\bexec\b/i.test(lastUserMsg)) {
         return { chunks: toolCallResponse, chunkDelay: 1 };
     }
 
     // Slow response: for stop button test (needs streaming to be visible)
-    if (/stop button|stop-test/i.test(userMessages)) {
+    if (/stop button|stop-test/i.test(lastUserMsg)) {
         return { chunks: textResponseSlow, chunkDelay: 100 };
     }
 
     // Long response scenario: message asks for detailed/long output
-    if (/long|detailed|write a|explain|describe/i.test(userMessages)) {
+    if (/long|detailed|write a|explain|describe/i.test(lastUserMsg)) {
         return { chunks: textResponseLong, chunkDelay: 1 };
     }
 
@@ -82,10 +108,15 @@ const server = http.createServer((req, res) => {
                 const parsed = JSON.parse(body);
                 const { chunks, chunkDelay } = selectResponse(parsed);
                 const fixtureName = chunks === toolCallFail ? 'tool_call_fail' :
+                                    chunks === toolCallStreaming ? 'tool_call_streaming' :
+                                    chunks === toolCallWithText ? 'tool_call_with_text' :
                                     chunks === toolCallResponse ? 'tool_call' :
+                                    chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === textResponseSlow ? 'text_slow' :
                                     chunks === textResponseLong ? 'text_long' : 'text';
-                console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms)`);
+                const msgs = parsed.messages || [];
+                const lastUser = msgs.filter(m => m.role === 'user').pop();
+                console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
 
                 // SSE headers
                 res.writeHead(200, {

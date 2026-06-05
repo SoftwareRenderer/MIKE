@@ -167,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_ms INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_ms INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN duration INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_calls TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_result TEXT DEFAULT NULL`)
 	return nil
 }
 
@@ -719,8 +721,8 @@ func (s *Store) CreateTaskMessage(m *TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, role, content, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, m.Role, m.Content, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, role, content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, m.Role, m.Content, m.ToolCalls, m.ToolResult, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -730,7 +732,7 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, role, content, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, role, content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -741,12 +743,18 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	for rows.Next() {
 		var m TaskMessage
 		var createdAt string
-		var modelName sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
+		var modelName, toolCalls, toolResult sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &toolCalls, &toolResult, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
 			return nil, err
 		}
 		if modelName.Valid {
 			m.ModelName = modelName.String
+		}
+		if toolCalls.Valid {
+			m.ToolCalls = toolCalls.String
+		}
+		if toolResult.Valid {
+			m.ToolResult = toolResult.String
 		}
 		m.CreatedAt = scanTime(createdAt)
 		messages = append(messages, m)
@@ -775,6 +783,28 @@ func (s *Store) UpdateTaskMessage(messageID, content string) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE task_messages SET content = ? WHERE id = ?`, content, messageID)
 	return err
+}
+
+// ResetData clears all test data except config and projects.
+// Projects are preserved so tests can find them. Used by e2e tests for a clean slate.
+func (s *Store) ResetData() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Clear in reverse dependency order to respect foreign keys
+	tables := []string{
+		"task_messages",
+		"home_agent_messages",
+		"review_comments",
+		"task_dependencies",
+		"conversation_history",
+		"tasks",
+	}
+	for _, table := range tables {
+		if _, err := s.db.Exec(fmt.Sprintf("DELETE FROM %s", table)); err != nil {
+			return fmt.Errorf("clear %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // -- Helper functions --

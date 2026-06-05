@@ -77,11 +77,8 @@ export async function waitForChatMessage(page: Page, timeout = 10000): Promise<v
   await expect(page.locator('.chat-message')).toBeVisible({ timeout });
 }
 
-// Helper: ensure chat form is ready for input (handles new-task "Start Task" state)
-// Waits for the send button to be visible, meaning isLoading=false and form is interactive.
-export async function ensureChatForm(page: Page, timeout = 5000): Promise<void> {
-  // Click "Start Task" button if visible (new task state).
-  // isVisible() + click() may have a race, so we retry in a loop.
+// Helper: click "Start Task" if the task is in new state
+async function clickStartTaskIfNew(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const startButton = page.locator('.btn-start-task');
     if (!(await startButton.isVisible().catch(() => false))) {
@@ -94,7 +91,93 @@ export async function ensureChatForm(page: Page, timeout = 5000): Promise<void> 
       // Button may have been detached - retry
     }
   }
+}
+
+// Helper: wait for the chat form to be present (send OR stop button visible)
+// Use this when you need the form to exist but don't care if LLM is still responding.
+export async function waitForChatForm(page: Page, timeout = 5000): Promise<void> {
+  await clickStartTaskIfNew(page);
+  await expect(page.locator('.chat-form')).toBeVisible({ timeout });
+}
+
+// Helper: ensure chat form is ready for input (send button visible, isLoading=false)
+// Waits for the LLM to finish any pending response before resolving.
+export async function ensureChatForm(page: Page, timeout = 10000): Promise<void> {
+  await clickStartTaskIfNew(page);
   // Wait for send button (only visible when isLoading=false)
   // This ensures the LLM has finished any pending response
   await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+}
+
+// Helper: create a fresh task via UI and open it
+// Use this instead of clicking an existing card to avoid shared-state issues across parallel workers.
+export async function createAndOpenTask(page: Page, title?: string): Promise<string> {
+  const taskTitle = title || `task-${Date.now()}`;
+  await page.click('.add-task-btn');
+  await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+  await page.fill('textarea', taskTitle);
+  await page.click('button[type="submit"]');
+  await expect(page.locator('.modal')).not.toBeVisible();
+  await page.waitForSelector('.card', { timeout: 5000 });
+
+  // Open the newly created task by finding the card with matching title
+  // (using .last() is unreliable when many tasks share the same column_order)
+  const taskCard = page.locator('.card').filter({ hasText: taskTitle });
+  await expect(taskCard).toBeVisible({ timeout: 5000 });
+  await taskCard.click();
+  await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+
+  return taskTitle;
+}
+
+// Helper: send a message and wait for the LLM response to complete
+// Returns after the send button reappears (isLoading=false).
+export async function sendMessageAndWait(page: Page, message: string, timeout = 15000): Promise<void> {
+  const chatTextarea = page.locator('textarea[placeholder*="message"]');
+  await chatTextarea.fill(message);
+  await chatTextarea.press('Enter');
+  // Wait for textarea to be cleared (message sent)
+  await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+  // Wait for send button to reappear (LLM complete)
+  await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+}
+
+// Helper: create a task via API and return its ID
+// This avoids the UI race conditions and is faster for tests that don't need UI interaction.
+export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
+  return await page.evaluate(async ({ pid, prompt }) => {
+    const res = await fetch(`/api/projects/${pid}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const task = await res.json();
+    return task.id;
+  }, { pid: projectId, prompt });
+}
+
+// Helper: send a message via WebSocket to trigger lazy-start
+// This bypasses the "Start Task" button and avoids the first executor.
+export async function sendViaWebSocket(page: Page, projectId: string, taskId: string, message: string): Promise<void> {
+  return await page.evaluate(async ({ pid, tid, msg }) => {
+    const ws = new WebSocket(`${window.location.origin}/api/projects/${pid}/tasks/${tid}/stream`);
+    return new Promise<void>((resolve, reject) => {
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'user_message', data: { content: msg } }));
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'user_message') {
+          // Server echoed the message back — lazy-start should be triggered
+          ws.close();
+          resolve();
+        }
+      };
+      ws.onerror = () => {
+        ws.close();
+        reject(new Error('WebSocket error'));
+      };
+      setTimeout(() => { ws.close(); reject(new Error('WebSocket timeout')); }, 10000);
+    });
+  }, { pid: projectId, tid: taskId, msg: message });
 }

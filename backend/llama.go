@@ -31,8 +31,9 @@ func NewLlamaClient(baseURL, modelName string) *LlamaClient {
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 // ChatTool represents a tool definition.
@@ -48,14 +49,61 @@ type ToolDef struct {
 	Parameters  map[string]interface{} `json:"parameters"`
 }
 
-// ChatToolCall represents a tool call from the model.
+// ChatToolCall represents a tool call (or delta) from the model.
+// In streaming responses, each chunk has an Index field to identify
+// which tool call the delta belongs to. The client must merge deltas
+// by index to reconstruct complete tool calls.
 type ChatToolCall struct {
+	Index    int    `json:"index"`
 	ID       string `json:"id"`
 	Function struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
 	Type string `json:"type"`
+}
+
+// MergeToolCalls merges streaming tool call deltas by index into complete tool calls.
+// Each delta chunk may have partial data (id in first chunk, arguments split across chunks).
+// This function accumulates fields by index and returns the merged tool calls.
+func MergeToolCalls(existing []ChatToolCall, deltas []ChatToolCall) []ChatToolCall {
+	// Build a map of index -> position in existing slice
+	idxMap := make(map[int]int) // index -> position in existing slice
+	for i, tc := range existing {
+		idxMap[tc.Index] = i
+	}
+
+	for _, delta := range deltas {
+		pos, ok := idxMap[delta.Index]
+		isNew := !ok
+		if isNew {
+			// New tool call - append it
+			pos = len(existing)
+			idxMap[delta.Index] = pos
+			existing = append(existing, delta)
+		}
+		// Merge non-empty fields from delta into existing.
+		// For new tool calls, the fields are already set by the append above,
+		// so we skip merging to avoid doubling the values.
+		if !isNew {
+			if delta.ID != "" {
+				existing[pos].ID = delta.ID
+			}
+			// Name is streamed as fragments - concatenate them (like arguments)
+			if delta.Function.Name != "" {
+				existing[pos].Function.Name += delta.Function.Name
+			}
+			// Arguments are streamed as fragments - concatenate them
+			if delta.Function.Arguments != "" {
+				existing[pos].Function.Arguments += delta.Function.Arguments
+			}
+			if delta.Type != "" {
+				existing[pos].Type = delta.Type
+			}
+		}
+	}
+
+	return existing
 }
 
 // ChatChoiceDelta is the delta in a streaming response.

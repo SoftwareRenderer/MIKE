@@ -267,6 +267,8 @@ type TaskMessage struct {
 	TaskID          string    `json:"task_id"`
 	Role            string    `json:"role"`
 	Content         string    `json:"content"`
+	ToolCalls       string    `json:"tool_calls,omitempty"`
+	ToolResult      string    `json:"tool_result,omitempty"`
 	ModelName       string    `json:"model_name,omitempty"`
 	PromptTokens    int       `json:"prompt_tokens,omitempty"`
 	PredictedTokens int       `json:"predicted_tokens,omitempty"`

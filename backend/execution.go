@@ -134,6 +134,17 @@ func (te *TaskExecutor) HandleStream(w http.ResponseWriter, r *http.Request, pro
 	te.streamMgr.HandleStream(w, r, taskID)
 }
 
+// ResetForTest stops all running executors and clears state. Used by e2e tests.
+func (te *TaskExecutor) ResetForTest() {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	for taskID, state := range te.tasks {
+		state.cancel()
+		delete(te.tasks, taskID)
+	}
+	te.streamMgr.ResetForTest()
+}
+
 // handleLazyStart is called when a user message arrives for a task with no active executor.
 func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 	log.Printf("[lazy-start] task=%s project=%s", taskID, projectID)
@@ -153,6 +164,12 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content string) {
 	if task.StatusState == "completed" {
 		return
 	}
+
+	// Update task status to running
+	task.StatusState = "running"
+	task.Status = "in_progress"
+	_ = te.store.UpdateTask(task)
+	te.boardStreamMgr.Broadcast(projectID)
 
 	cfg, err := te.configStore.GetConfig()
 	if err != nil {
@@ -249,7 +266,6 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	if modelName == "" {
 		modelName = cfg.ModelName
 	}
-
 	branchName := fmt.Sprintf("task/%s", task.ID)
 
 	worktreePath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
@@ -263,6 +279,15 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	if err := te.store.UpdateTask(task); err != nil {
 		return err
 	}
+
+	// Persist the initial prompt as a user message so it appears in chat history
+	_ = te.store.CreateTaskMessage(&TaskMessage{
+		ID:        generateUUID(),
+		TaskID:    taskID,
+		Role:      "user",
+		Content:   task.Prompt,
+		CreatedAt: time.Now().UTC(),
+	})
 
 	b := te.streamMgr.GetOrCreate(taskID)
 	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
@@ -312,6 +337,10 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 // executeTask runs the AI conversation loop.
 func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan string) {
 	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
+			b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": fmt.Sprintf("Internal error: %v", r), "code": "panic"}})
+		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
 		te.taskMu.Unlock()
@@ -378,7 +407,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				}
 			}
 			if len(choice.Delta.ToolCalls) > 0 {
-				pendingToolCalls = append(pendingToolCalls, choice.Delta.ToolCalls...)
+				pendingToolCalls = MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
 			}
 		})
 
@@ -412,12 +441,48 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 
 		assistantText := assistantContent.String()
 
+		// toolResult holds the output of a single tool execution for feedback to the LLM.
+		type toolResult struct {
+			toolCallID string
+			output     string
+		}
+		var toolResults []toolResult
+
 		if len(pendingToolCalls) > 0 {
 			for _, tc := range pendingToolCalls {
+				if tc.ID == "" || tc.Function.Name == "" {
+					log.Printf("[tool] skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
+					continue
+				}
 				args := parseToolArgs(tc.Function.Arguments)
+				toolStart := time.Now()
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task)
+				toolDuration := time.Since(toolStart).Milliseconds()
 				b.send(StreamEvent{Type: WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "args": args, "raw_args": tc.Function.Arguments}})
-				b.send(StreamEvent{Type: WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": time.Since(startTime).Milliseconds()}})
+				b.send(StreamEvent{Type: WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
+				// Collect result for feedback to the LLM
+				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
+				// Persist tool call as a separate message so it survives page refresh
+				tcJSON, _ := json.Marshal(map[string]interface{}{
+					"tool_id":   tc.ID,
+					"tool_name": tc.Function.Name,
+					"args":      args,
+					"raw_args":  tc.Function.Arguments,
+				})
+				resultJSON, _ := json.Marshal(map[string]interface{}{
+					"output":  result,
+					"success": success,
+					"duration": toolDuration,
+				})
+				_ = te.store.CreateTaskMessage(&TaskMessage{
+					ID:         generateUUID(),
+					TaskID:     task.ID,
+					Role:       "tool_call",
+					Content:    "",
+					ToolCalls:  string(tcJSON),
+					ToolResult: string(resultJSON),
+					CreatedAt:  time.Now().UTC(),
+				})
 
 				if !success {
 					consecutiveFailures++
@@ -459,15 +524,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 					return
 				}
 			}
+			msgCountBefore := len(messages)
 			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
-			messages = append(messages, ChatMessage{Role: "tool", Content: fmt.Sprintf("Tool results for %d calls", len(pendingToolCalls))})
+			// Feed back each tool result with its tool_call_id so the LLM can see the actual output
+			for _, tr := range toolResults {
+				messages = append(messages, ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
+			}
 			// Compute stats from usage (fall back to estimation if LLM didn't provide usage)
 			promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
 			if usage != nil {
 				promptTokens, predictedTokens = usage.PromptTokens, usage.CompletionTokens
 				promptMs, predictedMs = usage.PromptMs, usage.PredictedMs
 			} else {
-				promptTokens = estimatePromptTokens(messages[:len(messages)-2])
+				promptTokens = estimatePromptTokens(messages[:msgCountBefore])
 				predictedTokens = estimateTokensFromText(assistantText)
 			}
 			// Persist assistant message with stats
@@ -596,7 +665,23 @@ func parseToolArgs(s string) map[string]interface{} {
 		return result
 	}
 	if err := json.Unmarshal([]byte(s), &result); err != nil {
-		log.Printf("[tool] failed to parse args: %v", err)
+		// Some LLMs send arguments as a JSON-encoded string (double-encoded).
+		// e.g. "{\"command\":\"ls\"}" instead of {"command":"ls"}
+		var innerStr string
+		if err2 := json.Unmarshal([]byte(s), &innerStr); err2 == nil && innerStr != "" {
+			if err3 := json.Unmarshal([]byte(innerStr), &result); err3 == nil {
+				return result
+			}
+		}
+		// Some LLMs prepend an extra '{' to the arguments.
+		// e.g. '{{"command":"ls"}' instead of {"command":"ls"}
+		if len(s) > 1 && s[0] == '{' && s[1] == '{' {
+			trimmed := s[1:]
+			if err4 := json.Unmarshal([]byte(trimmed), &result); err4 == nil {
+				return result
+			}
+		}
+		log.Printf("[tool] failed to parse args: %v (raw: %q)", err, s)
 		return map[string]interface{}{"raw": s}
 	}
 	return result

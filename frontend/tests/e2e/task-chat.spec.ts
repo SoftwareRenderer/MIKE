@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm } from './helpers';
+import { ensureChatForm, waitForChatForm, createAndOpenTask } from './helpers';
 
 test.describe('Task Chat', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,9 +8,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show send button when typing', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
     await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -23,9 +21,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should disable send button when empty', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
     await ensureChatForm(page);
 
     // Send button should be disabled when textarea is empty
@@ -35,9 +31,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should send message with Enter key', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
     await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -49,9 +43,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should not send on Shift+Enter', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
     await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -64,9 +56,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should have diff column with refresh button', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
 
     // Diff column should show empty state
     await expect(page.locator('.diff-empty')).toBeVisible();
@@ -77,9 +67,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show task list in context column', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
 
     // Task list should be visible
     await expect(page.locator('.task-list')).toBeVisible();
@@ -89,9 +77,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show task actions in header', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
 
     // Delete button should always be visible
     const deleteButton = page.locator('.header-actions .btn-icon').last();
@@ -99,9 +85,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should allow editing task title', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
 
     // Click on title to edit
     await page.click('.title');
@@ -111,9 +95,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show assistant streaming indicator immediately after sending a message', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
     await ensureChatForm(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -132,9 +114,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show status badge', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await createAndOpenTask(page);
 
     // Badge should be visible
     await expect(page.locator('.badge')).toBeVisible();

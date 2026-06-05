@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent } from '$lib/types';
-    import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, updateTaskMessage, stopTask, startTask } from '$lib/api';
+    import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask } from '$lib/api';
+import { board as boardStore } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
 
@@ -27,6 +28,7 @@
             predicted_ms: number;
             duration: number;
         };
+        createdAt?: string;
     }
 
     let { projectId, taskId, taskPrompt = '', disabled = false }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean } = $props();
@@ -46,12 +48,34 @@
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
 
-    // A task is "new" when it has no assistant messages (only user messages or empty)
-    let hasAssistantResponse = $derived(entries.some(e => e.role === 'assistant'));
-    let isNewTask = $derived(!hasAssistantResponse && taskPrompt && !isLoading);
+    // A task is "new" (show "Start Task" button) only when:
+    // - There are no entries yet (no messages loaded from backend)
+    // - The task prompt is set
+    // - Not currently loading
+    // Once entries are loaded (even just user messages), show the chat.
+    let isNewTask = $derived(entries.length === 0 && taskPrompt && !isLoading);
 
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
+    }
+
+    function formatToolArgs(toolName: string, args: Record<string, unknown>): string {
+        switch (toolName) {
+            case 'execute_command':
+                return `$ ${args.command as string}`;
+            case 'read_file':
+                return `📄 ${args.path as string}`;
+            case 'write_file': {
+                const path = args.path as string;
+                const content = args.content as string;
+                const lines = content ? content.split('\n').length : 0;
+                return `✏️ ${path} (${lines} lines)`;
+            }
+            case 'task_complete':
+                return args.summary as string || '(task complete)';
+            default:
+                return JSON.stringify(args, null, 2);
+        }
     }
 
     function ensureAssistantEntry(): ChatEntry {
@@ -61,7 +85,7 @@
         }
         const id = genId();
         currentAssistantId = id;
-        const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true };
+        const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString() };
         entries.push(entry);
         return entry;
     }
@@ -90,10 +114,22 @@
             }
             case 'tool_call': {
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
+                // If the LLM sent the tool name as text content before the tool call,
+                // clear it to avoid duplicating the tool name in the UI
+                if (currentAssistantId) {
+                    const entry = entries.find(e => e.id === currentAssistantId);
+                    if (entry && entry.content.trim() === data.tool_name) {
+                        entry.content = '';
+                    }
+                }
                 closeCurrentAssistant();
+                // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
+                if (!data.tool_id || data.tool_id === '') {
+                    break;
+                }
                 const id = genId();
                 const entry: ChatEntry = {
-                    id, role: 'assistant', content: '', isStreaming: true,
+                    id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString(),
                     toolCall: { toolName: data.tool_name, args: data.args, raw_args: data.raw_args, isPending: true }
                 };
                 entries.push(entry);
@@ -103,14 +139,28 @@
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
                 const entry = activeToolCalls.get(data.tool_id);
-                if (entry && entry.toolCall) {
-                    entry.toolCall.result = data.output;
-                    entry.toolCall.success = data.success;
-                    entry.toolCall.duration = data.duration;
-                    entry.toolCall.isPending = false;
-                    entry.isStreaming = false;
-                }
                 activeToolCalls.delete(data.tool_id);
+                if (entry && entry.toolCall) {
+                    // Create a completely new entry object to force Svelte 5 reactivity
+                    // (keyed {#each} may skip re-render if object reference is the same)
+                    const updatedEntry: ChatEntry = {
+                        ...entry,
+                        isStreaming: false,
+                        toolCall: {
+                            ...entry.toolCall,
+                            result: data.output,
+                            success: data.success,
+                            duration: data.duration,
+                            isPending: false
+                        }
+                    };
+                    const idx = entries.findIndex(e => e.id === entry.id);
+                    if (idx !== -1) {
+                        entries = entries.map((e, i) => i === idx ? updatedEntry : e);
+                    }
+                } else {
+                    entries = [...entries];
+                }
                 break;
             }
             case 'user_message': {
@@ -121,7 +171,7 @@
                     break;
                 }
                 closeCurrentAssistant();
-                entries.push({ id: genId(), role: data.role, content: data.content, isStreaming: false });
+                entries.push({ id: genId(), role: data.role, content: data.content, isStreaming: false, createdAt: new Date().toISOString() });
                 break;
             }
             case 'complete': {
@@ -146,6 +196,13 @@
                 const data = event.data as { state: string };
                 if (data.state === 'running') {
                     isLoading = true;
+                    // A new executor is starting (e.g., lazy-start after user follow-up).
+                    // Clear pending tool calls and streaming state from any previous executor
+                    // to avoid mixing tool call deltas from concurrent executors.
+                    closeCurrentAssistant();
+                    activeToolCalls.clear();
+                    // Remove pending tool call entries (assistant entries with toolCall and isStreaming)
+                    entries = entries.filter(e => !(e.toolCall && e.toolCall.isPending));
                 }
                 break;
             }
@@ -174,17 +231,36 @@
     async function loadHistory() {
         try {
             const messages = await getTaskMessages(projectId, taskId);
-            entries = messages.map(m => ({
-                id: m.id, role: m.role, content: m.content, isStreaming: false,
-                stats: m.model_name ? {
-                    model_name: m.model_name,
-                    prompt_tokens: m.prompt_tokens ?? 0,
-                    predicted_tokens: m.predicted_tokens ?? 0,
-                    prompt_ms: m.prompt_ms ?? 0,
-                    predicted_ms: m.predicted_ms ?? 0,
-                    duration: m.duration ?? 0,
-                } : undefined,
-            }));
+            entries = messages.map(m => {
+                // Restore tool call entries from persisted data
+                if (m.role === 'tool_call' && m.tool_calls) {
+                    const tc = JSON.parse(m.tool_calls);
+                    const result = m.tool_result ? JSON.parse(m.tool_result) : null;
+                    return {
+                        id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
+                        toolCall: {
+                            toolName: tc.tool_name,
+                            args: tc.args ?? {},
+                            raw_args: tc.raw_args,
+                            result: result?.output,
+                            success: result?.success ?? true,
+                            duration: result?.duration,
+                            isPending: false,
+                        },
+                    };
+                }
+                return {
+                    id: m.id, role: m.role, content: m.content, isStreaming: false, createdAt: m.created_at,
+                    stats: m.model_name ? {
+                        model_name: m.model_name,
+                        prompt_tokens: m.prompt_tokens ?? 0,
+                        predicted_tokens: m.predicted_tokens ?? 0,
+                        prompt_ms: m.prompt_ms ?? 0,
+                        predicted_ms: m.predicted_ms ?? 0,
+                        duration: m.duration ?? 0,
+                    } : undefined,
+                };
+            });
         } catch { /* No history yet */ }
     }
 
@@ -203,7 +279,7 @@
     function handleSend(msg: string) {
         if (!msg || disabled) return;
         // Add message optimistically
-        entries.push({ id: genId(), role: 'user', content: msg, isStreaming: false });
+        entries.push({ id: genId(), role: 'user', content: msg, isStreaming: false, createdAt: new Date().toISOString() });
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = msg;
@@ -220,11 +296,11 @@
         const beforeEntries = entries.slice(0, idx);
         const lastUser = [...beforeEntries].reverse().find(e => e.role === 'user');
         if (!lastUser) return;
-        // Delete messages from backend starting after the last user message
+        // Regenerate from backend starting after the last user message
         try {
-            await deleteTaskMessagesAfter(projectId, taskId, lastUser.id);
+            await regenerateTaskMessages(projectId, taskId, lastUser.id);
         } catch (e) {
-            console.error('Failed to delete messages for regenerate:', e);
+            console.error('Failed to regenerate messages:', e);
         }
         // Trim local entries: keep everything up to and including the last user message
         const userIdx = entries.findIndex(e => e.id === lastUser.id);
@@ -243,18 +319,29 @@
         isStarting = true;
         isLoading = true;
         // Add the prompt as the first user message
-        entries.push({ id: genId(), role: 'user', content: taskPrompt, isStreaming: false });
+        entries.push({ id: genId(), role: 'user', content: taskPrompt, isStreaming: false, createdAt: new Date().toISOString() });
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = taskPrompt;
         scroll();
         try {
-            await startTask(projectId, taskId);
+            const updated = await startTask(projectId, taskId);
+            boardStore.update(b => {
+                if (!b) return b;
+                const idx = b.tasks.findIndex(t => t.id === taskId);
+                if (idx !== -1) b.tasks[idx] = updated;
+                return { ...b };
+            });
         } catch (e) {
             console.error('Failed to start task:', e);
             isLoading = false;
             isStarting = false;
+            return;
         }
+        // Reset loading state — WebSocket 'complete' event may not arrive
+        // (e.g., if connection drops or LLM endpoint is misconfigured)
+        isLoading = false;
+        isStarting = false;
     }
 
     async function handleStop() {
@@ -306,7 +393,7 @@
     <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll}>
         {#if isNewTask && taskPrompt}
             <!-- New task: show prompt as first message -->
-            <ChatMessage role="user" content={taskPrompt} isStreaming={false} />
+            <ChatMessage role="user" content={taskPrompt} isStreaming={false} timestamp={entries[0]?.createdAt} />
         {:else if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
@@ -321,9 +408,7 @@
                     <div class="tool-call-entry">
                         <div class="tool-call-card">
                             <div class="tool-call-header">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                    <path d="M6 1h4l1 2h3l-2 3h3l-3 4h2l-4 4H7l-1-2H3l2-3H3l3-4H6l1-2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-                                </svg>
+                                <span class="tool-icon">{#if entry.toolCall.toolName === 'execute_command'}⚡{:else if entry.toolCall.toolName === 'read_file'}📄{:else if entry.toolCall.toolName === 'write_file'}✏️{:else if entry.toolCall.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
                                 <span class="tool-name">{entry.toolCall.toolName}</span>
                                 {#if entry.toolCall.isPending}
                                     <span class="tool-status pending"><span class="spinner"></span> Running...</span>
@@ -336,7 +421,7 @@
                                     <span class="tool-duration">{entry.toolCall.duration}ms</span>
                                 {/if}
                             </div>
-                            <pre class="tool-args">{JSON.stringify(entry.toolCall.args, null, 2).trim() === '{}' ? entry.toolCall.raw_args || '(no arguments)' : JSON.stringify(entry.toolCall.args, null, 2)}</pre>
+                            <pre class="tool-args">{formatToolArgs(entry.toolCall.toolName, entry.toolCall.args)}</pre>
                             {#if entry.toolCall.result !== undefined}
                                 <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>
                                     {entry.toolCall.result}
@@ -345,7 +430,7 @@
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} isStreaming={entry.isStreaming || false} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => { const idx = entries.findIndex(e => e.id === entry.id); const messageAfterIdx = idx + 1; if (messageAfterIdx < entries.length) { deleteTaskMessagesAfter(projectId, taskId, entries[messageAfterIdx].id).catch(console.error); } updateTaskMessage(projectId, taskId, entry.id, newContent).catch(console.error); lastSentMessage = newContent; entries[idx].content = newContent; entries = entries.slice(0, idx + 1); if (ws) ws.send(newContent); isLoading = true; }} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => { const idx = entries.findIndex(e => e.id === entry.id); const messageAfterIdx = idx + 1; if (messageAfterIdx < entries.length) { deleteTaskMessagesAfter(projectId, taskId, entries[messageAfterIdx].id).catch(console.error); } updateTaskMessage(projectId, taskId, entry.id, newContent).catch(console.error); lastSentMessage = newContent; entries[idx].content = newContent; entries = entries.slice(0, idx + 1); if (ws) ws.send(newContent); isLoading = true; }} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}

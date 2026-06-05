@@ -62,6 +62,14 @@ func newBroadcaster(bufSize int) *broadcaster {
 	}
 }
 
+// clearBuffer clears the ring buffer. Called when a new executor starts
+// to discard events from a previous executor.
+func (b *broadcaster) clearBuffer() {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+	b.ringBuffer = b.ringBuffer[:0]
+}
+
 // SetUserMessageHandler sets the callback for forwarding user messages to the executor.
 func (b *broadcaster) SetUserMessageHandler(h func(string)) {
 	b.handlerMu.Lock()
@@ -199,6 +207,16 @@ func (sm *StreamManager) Get(taskID string) *broadcaster {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.broadcasts[taskID]
+}
+
+// ResetForTest closes all broadcasters and clears state. Used by e2e tests.
+func (sm *StreamManager) ResetForTest() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for taskID, b := range sm.broadcasts {
+		b.close()
+		delete(sm.broadcasts, taskID)
+	}
 }
 
 // HandleStream upgrades a WebSocket connection and subscribes to a task stream.

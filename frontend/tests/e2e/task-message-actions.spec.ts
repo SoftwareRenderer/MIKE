@@ -1,14 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm } from './helpers';
+import { ensureChatForm, createAndOpenTask } from './helpers';
 
 test.describe.serial('Task Message Actions', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
-    // Open a task and ensure chat form is ready
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    // Create a fresh task and open it to avoid shared-state issues
+    await createAndOpenTask(page);
     await ensureChatForm(page);
   });
 
@@ -181,15 +180,11 @@ test.describe.serial('Task Message Actions', () => {
       test.skip(); // Executor didn't start, skip gracefully
     }
 
-    // Wait for streaming to stop on the new assistant message (cursor should disappear)
-    const lastAssistant = page.locator('.chat-message.assistant').last();
-    const cursorStopped = await lastAssistant.locator('.cursor-blink').isVisible({ timeout: 5000 }).catch(() => false);
-    if (cursorStopped) {
-      // Cursor is still visible — wait for it to disappear
-      await expect(lastAssistant.locator('.cursor-blink')).not.toBeVisible({ timeout: 10000 });
-    }
+    // Wait for streaming to stop: the send button reappears when LLM is done
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 15000 });
 
-    // Regenerate button should be visible on the assistant message
+    // Regenerate button should be visible on the last assistant message
+    const lastAssistant = page.locator('.chat-message.assistant').last();
     const regenerateBtn = lastAssistant.locator('.action-btn[title="Regenerate"]');
     await expect(regenerateBtn).toBeVisible();
   });

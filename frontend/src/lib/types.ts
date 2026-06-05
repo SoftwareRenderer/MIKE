@@ -72,6 +72,8 @@ export interface TaskMessage {
     task_id: string;
     role: string;
     content: string;
+    tool_calls?: string;
+    tool_result?: string;
     model_name?: string;
     prompt_tokens?: number;
     predicted_tokens?: number;

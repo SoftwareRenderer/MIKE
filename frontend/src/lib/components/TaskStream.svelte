@@ -76,6 +76,10 @@
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 currentTextSection = null;
                 currentReasoningSection = null;
+                // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
+                if (!data.tool_id || data.tool_id === '') {
+                    break;
+                }
                 const sec: StreamSection = {
                     id: genId(),
                     type: 'tool_call',
@@ -90,13 +94,26 @@
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
                 const sec = activeToolCalls.get(data.tool_id);
-                if (sec && sec.toolCall) {
-                    sec.toolCall.result = data.output;
-                    sec.toolCall.success = data.success;
-                    sec.toolCall.duration = data.duration;
-                    sec.isStreaming = false;
-                }
                 activeToolCalls.delete(data.tool_id);
+                if (sec && sec.toolCall) {
+                    // Create a completely new section object to force Svelte 5 reactivity
+                    const updatedSec: StreamSection = {
+                        ...sec,
+                        isStreaming: false,
+                        toolCall: {
+                            ...sec.toolCall,
+                            result: data.output,
+                            success: data.success,
+                            duration: data.duration
+                        }
+                    };
+                    const idx = sections.findIndex(s => s.id === sec.id);
+                    if (idx !== -1) {
+                        sections = sections.map((s, i) => i === idx ? updatedSec : s);
+                    }
+                } else {
+                    sections = [...sections];
+                }
                 break;
             }
             case 'complete': {

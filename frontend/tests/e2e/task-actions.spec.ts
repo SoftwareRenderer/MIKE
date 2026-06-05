@@ -108,8 +108,8 @@ test.describe('Task Actions', () => {
       expect(count).toBeGreaterThan(countBefore);
     }).toPass({ timeout: 10000 });
 
-    // Open the newly created task (the one after the previous count)
-    await page.locator('.card').nth(countBefore).click();
+    // Open the newly created task (new tasks get column_order=0, so they appear first)
+    await page.locator('.card').first().click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
     // New task should show the Start Task button

@@ -90,6 +90,9 @@ func (s *Server) setupRoutes() {
 	// Test override (in-memory, not persisted)
 	s.mux.HandleFunc("/api/test/override", s.configStore.HandleTestOverride)
 
+	// Test database reset (clears all data except config)
+	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
+
 	// Filesystem browser
 	s.mux.HandleFunc("/api/fs", s.handleFS)
 
@@ -186,6 +189,7 @@ var (
 	reTaskResume      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
 	reTaskStream      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
+	reTaskMessagesRegenerate = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/regenerate$`)
 	reTaskMessages    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
 	reTaskMessageByID = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/([^/]+)$`)
 	reTaskDeps        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
@@ -206,6 +210,25 @@ var (
 	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
 	reProjectTerminal = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 )
+
+func (s *Server) handleTaskMessagesRegenerate(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
+		jsonError(w, http.StatusBadRequest, "message_id required")
+		return
+	}
+	if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method == http.MethodDelete {
@@ -260,6 +283,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleTestReset clears all data except config. Used by e2e tests for a clean slate.
+func (s *Server) handleTestReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.store.ResetData(); err != nil {
+		log.Printf("[test-reset] failed to reset data: %v", err)
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Reset executors and streams
+	s.executor.ResetForTest()
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
 // handleFS lists directory contents for the file browser.
@@ -414,6 +453,10 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Task messages
+	if m := reTaskMessagesRegenerate.FindStringSubmatch(path); m != nil {
+		s.handleTaskMessagesRegenerate(w, r, m[1], m[2])
+		return
+	}
 	if m := reTaskMessageByID.FindStringSubmatch(path); m != nil {
 		s.handleTaskMessageByID(w, r, m[1], m[2], m[3])
 		return
