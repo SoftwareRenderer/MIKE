@@ -97,8 +97,8 @@ test.describe.serial('Task Message Actions', () => {
 
     // Dialog should close and user message count should decrease
     await expect(page.locator('.delete-dialog')).not.toBeVisible({ timeout: 5000 });
-    const userCountAfter = await page.locator('.chat-message.user').count();
-    expect(userCountAfter).toBe(userCountBefore - 1);
+    // Wait for the message to actually disappear (async API call must complete)
+    await expect(page.locator('.chat-message.user')).toHaveCount(userCountBefore - 1, { timeout: 5000 });
   });
 
   test('should enter edit mode when edit button is clicked', async ({ page }) => {
@@ -155,7 +155,7 @@ test.describe.serial('Task Message Actions', () => {
     await page.locator('.edit-form textarea').fill('Edited content');
     await page.locator('.btn-edit-submit').click();
 
-    // Edit form should close and message should show new content
+    // Edit form should close and message should show new content (optimistic update)
     await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
     await expect(page.locator('.message-bubble').last()).toContainText('Edited content');
   });

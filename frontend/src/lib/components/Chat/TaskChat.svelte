@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { get } from 'svelte/store';
     import type { StreamEvent, Provider } from '$lib/types';
     import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
-import { board as boardStore } from '$lib/store';
+import { board as boardStore, config as configStore, showToast } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
 
@@ -169,14 +170,23 @@ import { board as boardStore } from '$lib/store';
                 break;
             }
             case 'user_message': {
-                const data = event.data as { role: string; content: string };
-                // Skip if this is an echo of a message we just sent (optimistic UI already added it)
+                const data = event.data as { id?: string; role: string; content: string };
+                // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
                 if (lastSentMessage === data.content) {
                     lastSentMessage = null;
+                    if (data.id) {
+                        // Find the last user entry (our optimistic message) and update its ID
+                        for (let i = entries.length - 1; i >= 0; i--) {
+                            if (entries[i].role === 'user' && entries[i].content === data.content) {
+                                entries[i].id = data.id;
+                                break;
+                            }
+                        }
+                    }
                     break;
                 }
                 closeCurrentAssistant();
-                entries.push({ id: genId(), role: data.role, content: data.content, isStreaming: false, createdAt: new Date().toISOString() });
+                entries.push({ id: data.id || genId(), role: data.role, content: data.content, isStreaming: false, createdAt: new Date().toISOString() });
                 break;
             }
             case 'complete': {
@@ -251,6 +261,14 @@ import { board as boardStore } from '$lib/store';
             }
         } catch {
             providers = [];
+        }
+    }
+
+    /** Update providers from the config store (reacts to settings changes). */
+    function updateProvidersFromStore() {
+        const cfg = get(configStore);
+        if (cfg && cfg.providers) {
+            providers = cfg.providers;
         }
     }
 
@@ -404,6 +422,40 @@ import { board as boardStore } from '$lib/store';
         }
     }
 
+    async function handleDelete() {
+        if (!deleteConfirm) return;
+        const entryId = deleteConfirm.entryId;
+        const idx = entries.findIndex(e => e.id === entryId);
+        if (idx === -1) {
+            deleteConfirm = null;
+            return;
+        }
+        try {
+            await deleteTaskMessagesAfter(projectId, taskId, entryId);
+            entries = entries.filter((_, i) => i < idx);
+        } catch (e) {
+            showToast(String(e));
+        }
+        deleteConfirm = null;
+    }
+
+    async function handleEdit(entryId: string, newContent: string) {
+        const idx = entries.findIndex(e => e.id === entryId);
+        if (idx === -1) return;
+        const messageAfterIdx = idx + 1;
+        // Optimistic update: update local state immediately
+        lastSentMessage = newContent;
+        entries[idx].content = newContent;
+        entries = entries.slice(0, idx + 1);
+        if (ws) ws.send(newContent);
+        isLoading = true;
+        // Fire-and-forget API calls with error handling
+        if (messageAfterIdx < entries.length) {
+            deleteTaskMessagesAfter(projectId, taskId, entries[messageAfterIdx].id).catch(e => showToast(String(e)));
+        }
+        updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
+    }
+
     function connect() {
         if (ws) return;
         connecting = true;
@@ -439,6 +491,8 @@ import { board as boardStore } from '$lib/store';
             // Task may not exist yet
         }
         connect();
+        // Subscribe to config store to react to settings changes
+        return configStore.subscribe(() => updateProvidersFromStore());
     });
 
     onDestroy(() => {
@@ -488,7 +542,7 @@ import { board as boardStore } from '$lib/store';
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => { const idx = entries.findIndex(e => e.id === entry.id); const messageAfterIdx = idx + 1; if (messageAfterIdx < entries.length) { deleteTaskMessagesAfter(projectId, taskId, entries[messageAfterIdx].id).catch(console.error); } updateTaskMessage(projectId, taskId, entry.id, newContent).catch(console.error); lastSentMessage = newContent; entries[idx].content = newContent; entries = entries.slice(0, idx + 1); if (ws) ws.send(newContent); isLoading = true; }} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => handleEdit(entry.id, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}
@@ -501,7 +555,7 @@ import { board as boardStore } from '$lib/store';
                 <p>This will delete {deleteConfirm.count} message{deleteConfirm.count > 1 ? 's' : ''}. This action cannot be undone.</p>
                 <div class="delete-actions">
                     <button class="btn-cancel" onclick={() => deleteConfirm = null}>Cancel</button>
-                    <button class="btn-delete" onclick={() => { const idx = entries.findIndex(e => e.id === deleteConfirm!.entryId); entries = entries.filter((_, i) => i < idx); deleteTaskMessagesAfter(projectId, taskId, deleteConfirm!.entryId).catch(console.error); deleteConfirm = null; }}>Delete</button>
+                    <button class="btn-delete" onclick={handleDelete}>Delete</button>
                 </div>
             </div>
         </div>

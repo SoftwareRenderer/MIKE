@@ -11,3 +11,12 @@ export const showCreateTask = writable(false);
 export const showConfig = writable(false);
 export const showTerminal = writable(false);
 export const showCardDetail = writable(false);
+
+// Toast notification — empty string means no toast visible
+export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);
+
+/** Show a toast message that auto-dismisses after `duration` ms. */
+export function showToast(message: string, type: 'error' | 'success' = 'error', duration = 4000) {
+    toast.set({ message, type });
+    setTimeout(() => toast.set(null), duration);
+}

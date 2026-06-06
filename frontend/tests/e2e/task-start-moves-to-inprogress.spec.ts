@@ -16,7 +16,7 @@ test.describe.serial('Start Task Moves to In Progress', () => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: `start-move-test-${Date.now()}`, prompt: 'hello' }),
+        body: JSON.stringify({ title: `start-move-test-${Date.now()}`, prompt: 'hello', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
       });
       return res.json();
     }, { pid: projectId });
@@ -54,7 +54,7 @@ test.describe.serial('Start Task Moves to In Progress', () => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: `column-move-test-${Date.now()}`, prompt: 'hi' }),
+        body: JSON.stringify({ title: `column-move-test-${Date.now()}`, prompt: 'hi', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
       });
       return res.json();
     }, { pid: projectId });

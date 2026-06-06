@@ -274,15 +274,16 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
 				log.Printf("[stream] task=%s user_message received (model=%s, url=%s)", taskID, payload.ModelName, payload.LlamaServerURL)
 				// Always persist the user message
+				msgID := generateUUID()
 				sm.store.CreateTaskMessage(&TaskMessage{
-					ID:        generateUUID(),
+					ID:        msgID,
 					TaskID:    taskID,
 					Role:      "user",
 					Content:   payload.Content,
 					CreatedAt: time.Now().UTC(),
 				})
-				// Always broadcast back to all clients
-				b.send(StreamEvent{Type: WSTypeUserMessage, Data: map[string]string{"role": "user", "content": payload.Content}})
+				// Always broadcast back to all clients (include backend-generated id)
+				b.send(StreamEvent{Type: WSTypeUserMessage, Data: map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}})
 				// If executor is running, forward to it (with model info)
 				handler := b.getUserMessageHandler()
 				if handler != nil {

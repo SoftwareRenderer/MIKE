@@ -10,6 +10,7 @@
     import ConfigModal from './ConfigModal.svelte';
     import Board from './Board.svelte';
     import FileBrowser from './FileBrowser.svelte';
+    import Toast from './Toast.svelte';
 
     let projects: Project[] = $state([]);
     let currentProject: Project | null = $state(null);
@@ -316,6 +317,7 @@
     {#if addProjectError}
         <div class="error-toast">{addProjectError}</div>
     {/if}
+    <Toast />
 </div>
 
 <svelte:head>

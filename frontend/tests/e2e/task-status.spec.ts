@@ -16,7 +16,7 @@ test.describe.serial('Task Status States', () => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: `stop test ${Date.now()}`, prompt: 'stop button test' }),
+        body: JSON.stringify({ title: `stop test ${Date.now()}`, prompt: 'stop button test', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
       });
       return res.json();
     }, { pid: projectId });
@@ -55,7 +55,7 @@ test.describe.serial('Task Status States', () => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: `fail test ${Date.now()}`, prompt: 'read a file that does not exist' }),
+        body: JSON.stringify({ title: `fail test ${Date.now()}`, prompt: 'read a file that does not exist', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
       });
       return res.json();
     }, { pid: projectId });

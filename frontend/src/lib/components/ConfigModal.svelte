@@ -1,17 +1,12 @@
 <script lang="ts">
     import type { Config, Provider } from '$lib/types';
-    import { updateConfig, getConfig, testConnection as testConnectionApi, fetchModels as fetchModelsApi } from '$lib/api';
+    import { updateConfig, getConfig, fetchModels as fetchModelsApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
-    let serverUrl = $state(config?.llama_server_url || '');
-    let modelName = $state(config?.model_name || '');
     let workspaceDir = $state(config?.workspace_dir || '');
-    let defaultProvider = $state(config?.default_provider || '');
     let loading = $state(false);
-    let testing = $state(false);
-    let testResult = $state('');
     let error = $state('');
 
     interface EndpointLimit { url: string; max: number; }
@@ -30,13 +25,53 @@
     }
 
     // -- Provider management --
+    interface ModelEntry {
+        name: string;
+        readonly: boolean; // true = fetched from API, not editable
+    }
+
     interface ProviderDraft {
         name: string;
         display_name: string;
         url: string;
-        models: string[];
+        models: ModelEntry[];
         fetchingModels: boolean;
         fetchError: string;
+    }
+
+    /** Generate a provider name from a URL (hostname-port slug). */
+    function generateProviderName(url: string): string {
+        try {
+            const u = new URL(url);
+            const host = u.hostname.replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+            const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+            return `${host}-${port}`;
+        } catch {
+            return `provider-${Date.now()}`;
+        }
+    }
+
+    /** Generate a display name from a URL (TitleCase hostname:port). */
+    function generateDisplayName(url: string): string {
+        try {
+            const u = new URL(url);
+            const host = u.hostname.charAt(0).toUpperCase() + u.hostname.slice(1);
+            const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+            return `${host}:${port}`;
+        } catch {
+            return 'Provider';
+        }
+    }
+
+    /** Derive name and display_name from URL for a provider draft. */
+    function syncProviderMeta(p: ProviderDraft) {
+        if (p.url.trim()) {
+            p.name = generateProviderName(p.url.trim());
+            p.display_name = generateDisplayName(p.url.trim());
+        } else {
+            p.name = '';
+            p.display_name = '';
+        }
     }
 
     let providers = $state<ProviderDraft[]>(
@@ -44,6 +79,7 @@
             ...p,
             fetchingModels: false,
             fetchError: '',
+            models: (p.models || []).map(m => ({ name: m, readonly: false })),
         }))
     );
 
@@ -59,9 +95,6 @@
     }
 
     function removeProvider(idx: number) {
-        if (providers[idx].name === defaultProvider) {
-            defaultProvider = '';
-        }
         providers.splice(idx, 1);
     }
 
@@ -75,13 +108,8 @@
             if (result.error) {
                 p.fetchError = result.error;
             } else {
-                // Merge: add new models that aren't already in the list
-                const existing = new Set(p.models);
-                for (const m of result.models) {
-                    if (!existing.has(m)) {
-                        p.models.push(m);
-                    }
-                }
+                // Replace: clear existing models and use fetched list (readonly)
+                p.models = result.models.map(m => ({ name: m, readonly: true }));
             }
         } catch (e) {
             p.fetchError = String(e);
@@ -91,25 +119,11 @@
     }
 
     function addModelToProvider(idx: number) {
-        providers[idx].models.push('');
+        providers[idx].models.push({ name: '', readonly: false });
     }
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
         providers[idx].models.splice(modelIdx, 1);
-    }
-
-    // -- Connection test --
-    async function testConnection() {
-        testing = true;
-        testResult = '';
-        try {
-            const result = await testConnectionApi(serverUrl.trim(), modelName.trim());
-            testResult = result.message;
-        } catch (e) {
-            testResult = 'Connection failed: ' + String(e);
-        } finally {
-            testing = false;
-        }
     }
 
     async function handleSave() {
@@ -121,20 +135,20 @@
                 if (el.url.trim()) limits[el.url.trim()] = el.max;
             }
             const savedProviders: Provider[] = providers
-                .filter(p => p.name.trim() || p.url.trim())
-                .map(p => ({
-                    name: p.name.trim(),
-                    display_name: p.display_name.trim(),
-                    url: p.url.trim(),
-                    models: p.models.filter(m => m.trim()).map(m => m.trim()),
-                }));
+                .filter(p => p.url.trim())
+                .map(p => {
+                    syncProviderMeta(p);
+                    return {
+                        name: p.name.trim(),
+                        display_name: p.display_name.trim(),
+                        url: p.url.trim(),
+                        models: p.models.filter(m => m.name.trim()).map(m => m.name.trim()),
+                    };
+                });
             const cfg = await updateConfig({
-                llama_server_url: serverUrl.trim(),
-                model_name: modelName.trim(),
                 workspace_dir: workspaceDir.trim(),
                 endpoint_limits: limits,
                 providers: savedProviders,
-                default_provider: defaultProvider.trim(),
             });
             configStore.set(cfg);
             onSaved();
@@ -157,19 +171,6 @@
             <button class="close-btn" onclick={handleClose}>✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
-            <!-- Default Provider -->
-            {#if providers.length > 0}
-                <label>
-                    Default Provider
-                    <select bind:value={defaultProvider}>
-                        <option value="">— None (use legacy fields) —</option>
-                        {#each providers as p}
-                            <option value={p.name}>{p.display_name || p.name}</option>
-                        {/each}
-                    </select>
-                </label>
-            {/if}
-
             <!-- Providers Section -->
             <div class="providers-section">
                 <div class="section-header">
@@ -179,14 +180,15 @@
                 {#each providers as p, i}
                     <div class="provider-card">
                         <div class="provider-fields">
-                            <input type="text" bind:value={p.name} placeholder="Name (e.g., neptune)" class="field-name" />
-                            <input type="text" bind:value={p.display_name} placeholder="Display Name (e.g., Neptune)" />
                             <div class="url-row">
-                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" style="flex:1" />
+                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" style="flex:1" oninput={() => syncProviderMeta(p)} />
                                 <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()}>
                                     {p.fetchingModels ? 'Fetching...' : 'Fetch Models'}
                                 </button>
                             </div>
+                            {#if p.display_name}
+                                <div class="provider-meta">{p.display_name}</div>
+                            {/if}
                             {#if p.fetchError}
                                 <div class="fetch-error">{p.fetchError}</div>
                             {/if}
@@ -196,10 +198,17 @@
                                     <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>+ Add</button>
                                 </div>
                                 {#each p.models as model, mi}
-                                    <div class="model-row">
-                                        <input type="text" bind:value={p.models[mi]} placeholder="Model name" />
-                                        <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)}>✕</button>
-                                    </div>
+                                    {#if model.readonly}
+                                        <div class="model-row model-row-readonly">
+                                            <span class="model-name-label">{model.name}</span>
+                                            <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)}>✕</button>
+                                        </div>
+                                    {:else}
+                                        <div class="model-row">
+                                            <input type="text" bind:value={model.name} placeholder="Model name" />
+                                            <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)}>✕</button>
+                                        </div>
+                                    {/if}
                                 {/each}
                             </div>
                         </div>
@@ -207,23 +216,8 @@
                     </div>
                 {/each}
                 {#if providers.length === 0}
-                    <div class="providers-empty">No providers configured. Add one above or use legacy fields below.</div>
+                    <div class="providers-empty">No providers configured. Add one above.</div>
                 {/if}
-            </div>
-
-            <!-- Legacy Fields -->
-            <div class="legacy-section">
-                <div class="section-header">
-                    <label style="margin:0">Legacy (fallback)</label>
-                </div>
-                <label>
-                    Llama.cpp Server URL
-                    <input type="text" bind:value={serverUrl} placeholder="http://localhost:8081/v1" />
-                </label>
-                <label>
-                    Model Name
-                    <input type="text" bind:value={modelName} placeholder="Leave empty for default" />
-                </label>
             </div>
 
             <label>
@@ -243,17 +237,6 @@
                         <button type="button" class="btn-remove" onclick={() => removeEndpointLimit(i)}>✕</button>
                     </div>
                 {/each}
-            </div>
-
-            <div class="test-section">
-                <button type="button" class="btn-test" onclick={testConnection} disabled={testing}>
-                    {testing ? 'Testing...' : 'Test Connection'}
-                </button>
-                {#if testResult}
-                    <div class="test-result" class:success={testResult.includes('successful')} class:fail={!testResult.includes('successful')}>
-                        {testResult}
-                    </div>
-                {/if}
             </div>
 
             {#if error}
@@ -385,6 +368,11 @@
         font-family: var(--font-mono, monospace);
         font-size: 13px;
     }
+    .provider-meta {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+        font-family: var(--font-mono, monospace);
+    }
     .url-row {
         display: flex;
         gap: 8px;
@@ -436,6 +424,20 @@
         gap: 4px;
         align-items: center;
     }
+    .model-row-readonly {
+        padding: 4px 8px;
+        background: var(--color-surface-0);
+        border-radius: var(--radius-sm);
+    }
+    .model-name-label {
+        flex: 1;
+        font-size: 13px;
+        color: var(--color-text-secondary);
+        font-family: var(--font-mono, monospace);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     .model-row input {
         flex: 1;
         font-size: 13px;
@@ -458,17 +460,6 @@
         background: var(--color-status-red)22;
     }
 
-    /* Legacy section */
-    .legacy-section {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        background: var(--color-surface-0);
-        border: 1px dashed var(--color-border);
-        border-radius: var(--radius-md);
-    }
-
     /* Endpoint limits */
     .endpoint-limits {
         display: flex;
@@ -485,35 +476,6 @@
         padding: 4px 8px;
     }
 
-    /* Test section */
-    .test-section {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .btn-test {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        align-self: flex-start;
-        cursor: pointer;
-    }
-    .btn-test:disabled {
-        opacity: 0.5;
-    }
-    .test-result {
-        font-size: 13px;
-        padding: 8px;
-        border-radius: var(--radius-md);
-    }
-    .test-result.success {
-        background: var(--color-status-green)22;
-        color: var(--color-status-green);
-    }
-    .test-result.fail {
-        background: var(--color-status-red)22;
-        color: var(--color-status-red);
-    }
     .error {
         color: var(--color-status-red);
         font-size: 13px;
@@ -564,7 +526,6 @@
         }
         button[type="button"],
         .btn-primary,
-        .btn-test,
         .btn-small,
         .btn-fetch,
         .btn-add-model {

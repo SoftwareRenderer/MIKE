@@ -209,17 +209,9 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	_ = te.store.UpdateTask(task)
 	te.boardStreamMgr.Broadcast(projectID)
 
-	cfg, err := te.configStore.GetConfig()
-	if err != nil {
-		return
-	}
-
-	// Resolution: message override > task override > config
+	// Resolution: message override > task override
 	if serverURL == "" {
 		serverURL = task.LlamaServerURL
-	}
-	if serverURL == "" {
-		serverURL = cfg.LlamaServerURL
 	}
 	if serverURL == "" {
 		return
@@ -227,9 +219,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	if modelName == "" {
 		modelName = task.ModelName
-	}
-	if modelName == "" {
-		modelName = cfg.ModelName
 	}
 	log.Printf("[lazy-start] task=%s url=%s model=%s", taskID, serverURL, modelName)
 
@@ -292,23 +281,12 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		}
 	}
 
-	cfg, err := te.configStore.GetConfig()
-	if err != nil {
-		return fmt.Errorf("get config: %w", err)
-	}
-
 	serverURL := task.LlamaServerURL
-	if serverURL == "" {
-		serverURL = cfg.LlamaServerURL
-	}
 	if serverURL == "" {
 		return fmt.Errorf("llama server URL not configured")
 	}
 
 	modelName := task.ModelName
-	if modelName == "" {
-		modelName = cfg.ModelName
-	}
 	branchName := fmt.Sprintf("task/%s", task.ID)
 
 	worktreePath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)

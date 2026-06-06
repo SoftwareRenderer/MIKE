@@ -6,6 +6,7 @@
         content: string;
         isStreaming?: boolean;
         timestamp?: string;
+        messageId?: string;
         stats?: { prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         onCopy?: () => void;
         onDelete?: () => void;
@@ -13,7 +14,7 @@
         onRegenerate?: () => void;
     }
 
-    let { role, content, isStreaming = false, timestamp, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+    let { role, content, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
 
     function formatTime(isoStr: string): string {
         const date = new Date(isoStr);
@@ -96,6 +97,7 @@
     class:user={role === 'user'} 
     class:assistant={role === 'assistant'} 
     class:system={role === 'system'}
+    data-message-id={messageId}
 >
     {#if role === 'user'}
         <div class="message-wrapper user-wrapper">

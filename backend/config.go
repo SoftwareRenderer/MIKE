@@ -83,7 +83,7 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	}, nil
 }
 
-// UpdateConfig persists the full server configuration.
+// UpdateConfig persists the full server configuration and updates the in-memory override if set.
 func (cs *ConfigStore) UpdateConfig(c *Config) error {
 	endpointLimitsJSON, err := json.Marshal(c.EndpointLimits)
 	if err != nil {
@@ -111,6 +111,12 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
 		return err
 	}
+	// Also update in-memory override if set (so tests see the new values)
+	cs.overrideMu.Lock()
+	if cs.override != nil {
+		*cs.override = *c
+	}
+	cs.overrideMu.Unlock()
 	return nil
 }
 
@@ -326,10 +332,9 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 }
 
 // ResolveModel resolves a model selection to the actual server URL and model name.
-// Resolution order: task override -> default provider -> legacy config fields.
+// Resolution order: task override -> default provider.
 // If the task has explicit llama_server_url/model_name set, those take priority.
 // Otherwise, if default_provider is set, look up the provider and use its URL.
-// Falls back to legacy llama_server_url/model_name in config.
 func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *Config) (serverURL, modelName string) {
 	// 1. Task-level override (explicit values set on the task)
 	if taskLlamaURL != "" {
@@ -357,14 +362,6 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 				break
 			}
 		}
-	}
-
-	// 3. Legacy config fields
-	if serverURL == "" {
-		serverURL = cfg.LlamaServerURL
-	}
-	if modelName == "" {
-		modelName = cfg.ModelName
 	}
 
 	return serverURL, modelName

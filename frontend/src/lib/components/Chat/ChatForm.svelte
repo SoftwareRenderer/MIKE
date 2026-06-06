@@ -83,8 +83,8 @@
         <div class="model-bar">
             <ModelSelector
                 {providers}
-                {selectedModel}
-                {selectedUrl}
+                currentModel={selectedModel}
+                currentUrl={selectedUrl}
                 {disabled}
                 onSelect={onModelSelect}
             />
