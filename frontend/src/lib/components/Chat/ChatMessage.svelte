@@ -358,7 +358,7 @@
         padding: 0;
     }
     .assistant .message-text :global(p) {
-        margin: 0;
+        margin: 0.125rem;
         line-height: 1.25;
     }
     .assistant .message-text :global(p:last-child) {

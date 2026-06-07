@@ -303,7 +303,6 @@
                         <div class="diff-empty">
                             <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/></svg>
                             <p>No changes yet</p>
-                            <span class="hint">Changes appear when the task runs</span>
                         </div>
                     {/if}
                 </div>
@@ -472,7 +471,7 @@
     .task-list {
         flex: 1;
         overflow-y: auto;
-        padding: 4px;
+        padding: 0 4px 4px 4px;
     }
     .section-group {
         margin-bottom: 4px;
@@ -482,6 +481,11 @@
         align-items: center;
         justify-content: space-between;
         padding: 6px 6px 2px 6px;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--color-surface-0);
+        border-bottom: 1px solid var(--color-border);
     }
     .section-title {
         font-size: 0.75rem;
@@ -631,10 +635,11 @@
             border-right: none;
         }
         .task-list {
-            padding: 8px;
+            padding: 0 8px 8px 8px;
         }
         .section-header {
             padding: 8px 4px 4px 4px;
+            top: 0;
         }
         .task-item {
             padding: 10px 12px;
