@@ -31,6 +31,16 @@ func (pm *ProjectManager) HandleList(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, projects)
 }
 
+// HandleCounts returns task counts (backlog, in_progress, review) for all projects.
+func (pm *ProjectManager) HandleCounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	counts := pm.store.GetAllProjectCounts()
+	jsonResponse(w, http.StatusOK, counts)
+}
+
 // HandleCreate creates a new project from a directory path.
 func (pm *ProjectManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest

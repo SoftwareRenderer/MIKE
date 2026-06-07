@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail, selectedTask } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, createBoardStream } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import TerminalPanel from './TerminalPanel.svelte';
@@ -18,6 +18,7 @@
     let cfg: Config | null = $state(null);
     let collapsed = $state(false);
     let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
+    let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
 
     // Local state mirroring stores
     let showCreateTaskVal = $state(false);
@@ -93,6 +94,9 @@
             const c = await getConfig();
             cfg = c;
             configStore.set(c);
+            // Fetch initial project counts
+            const counts = await getProjectCounts();
+            projectCounts = counts;
         } catch (e) {
             console.error('Failed to load:', e);
         }
@@ -145,7 +149,9 @@
             // Restore task from URL after board loads
             restoreTaskFromUrl();
             // Connect board stream for real-time updates
-            boardStream = createBoardStream(p.id, () => refreshBoard());
+            boardStream = createBoardStream(p.id, () => refreshBoard(), (counts) => {
+                projectCounts = counts;
+            });
         } catch (e) {
             console.error('Failed to load board:', e);
         }
@@ -237,6 +243,22 @@
                         onclick={() => { selectProject(p); if (isMobile) mobileMenuOpen = false; }}
                     >
                         <span class="project-name">{p.name}</span>
+                        {#if !collapsed && projectCounts[p.id]}
+                            <span class="project-stats">
+                                <span class="stat-badge" style="color: var(--color-column-backlog)">
+                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                                    {projectCounts[p.id].backlog}
+                                </span>
+                                <span class="stat-badge" style="color: var(--color-column-in-progress)">
+                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                                    {projectCounts[p.id].in_progress}
+                                </span>
+                                <span class="stat-badge" style="color: var(--color-column-review)">
+                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                                    {projectCounts[p.id].review}
+                                </span>
+                            </span>
+                        {/if}
                     </button>
                     <button
                         class="project-remove-btn"
@@ -442,6 +464,7 @@
     .project-item {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         width: 100%;
         padding: 8px 12px;
         border-radius: var(--radius-md);
@@ -449,6 +472,13 @@
         font-size: 0.875rem;
         color: var(--color-text-primary);
         background: transparent;
+    }
+    .project-name {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .project-item:hover {
         background: var(--color-surface-2);
@@ -482,6 +512,27 @@
         text-overflow: ellipsis;
     }
     .collapsed .project-name {
+        display: none;
+    }
+    .project-stats {
+        display: flex;
+        gap: 6px;
+        margin-left: 8px;
+        flex-shrink: 0;
+    }
+    .stat-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.6;
+    }
+    .stat-badge svg {
+        flex-shrink: 0;
+    }
+    .collapsed .project-stats {
         display: none;
     }
     .sidebar-footer {

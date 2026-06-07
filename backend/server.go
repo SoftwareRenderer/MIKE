@@ -63,7 +63,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	}
 
 	s.projectMgr = NewProjectManager(store)
-	s.boardStreamMgr = NewBoardStreamManager()
+	s.boardStreamMgr = NewBoardStreamManager(store)
 	s.boardMgr = NewBoardManager(store, s.boardStreamMgr)
 	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore)
 	s.depMgr = NewDependencyManager(store)
@@ -386,6 +386,12 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+
+	// Project counts (must check before reProjectByID, which matches /api/projects/counts)
+	if path == "/api/projects/counts" {
+		s.projectMgr.HandleCounts(w, r)
+		return
+	}
 
 	// Project CRUD
 	if m := reProjectByID.FindStringSubmatch(path); m != nil {

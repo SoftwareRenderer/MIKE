@@ -17,6 +17,12 @@ export async function getProjects(): Promise<Project[]> {
     return res.json();
 }
 
+export async function getProjectCounts(): Promise<Record<string, ProjectCounts>> {
+    const res = await fetch(`${API_BASE}/projects/counts`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch project counts');
+    return res.json();
+}
+
 export async function createProject(path: string): Promise<Project> {
     const res = await fetch(`${API_BASE}/projects`, {
         method: 'POST',
@@ -126,12 +132,15 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 }
 
 // Board stream - WebSocket for real-time board updates
-export function createBoardStream(projectId: string, onRefresh: () => void): { ws: WebSocket; close: () => void } {
+export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void): { ws: WebSocket; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'board_refresh') {
             onRefresh();
+        }
+        if (msg.type === 'project_counts' && onProjectCounts) {
+            onProjectCounts(msg.data);
         }
     };
     ws.onclose = () => {

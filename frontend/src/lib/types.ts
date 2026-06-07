@@ -144,6 +144,12 @@ export interface ReorderRequest {
     column_order: number;
 }
 
+export interface ProjectCounts {
+    backlog: number;
+    in_progress: number;
+    review: number;
+}
+
 // Stream events
 export type StreamEventType =
     | 'token'

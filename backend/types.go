@@ -69,6 +69,13 @@ type Project struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// ProjectCounts holds task counts per status for a project.
+type ProjectCounts struct {
+	Backlog     int `json:"backlog"`
+	InProgress  int `json:"in_progress"`
+	Review      int `json:"review"`
+}
+
 // MoveTaskRequest is the request body for moving a task.
 type MoveTaskRequest struct {
 	Status string `json:"status"`

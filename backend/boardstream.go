@@ -14,12 +14,14 @@ import (
 type BoardStreamManager struct {
 	mu       sync.RWMutex
 	clients  map[string]map[*websocket.Conn]bool // projectID -> set of connections
+	store    *Store
 }
 
 // NewBoardStreamManager creates a new BoardStreamManager.
-func NewBoardStreamManager() *BoardStreamManager {
+func NewBoardStreamManager(store *Store) *BoardStreamManager {
 	return &BoardStreamManager{
 		clients: make(map[string]map[*websocket.Conn]bool),
+		store:   store,
 	}
 }
 
@@ -52,8 +54,10 @@ func (bsm *BoardStreamManager) remove(projectID string, conn *websocket.Conn) {
 	}
 }
 
-// Broadcast sends a board_refresh event to all clients of a project.
+// Broadcast sends a board_refresh event to all clients of a project,
+// and a project_counts event to ALL connected clients across all projects.
 func (bsm *BoardStreamManager) Broadcast(projectID string) {
+	// Send board_refresh to project-specific clients
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
 	bsm.mu.RUnlock()
@@ -64,6 +68,36 @@ func (bsm *BoardStreamManager) Broadcast(projectID string) {
 			// Client disconnected, will be cleaned up on read loop exit
 		}
 	}
+
+	// Broadcast updated counts to ALL clients
+	bsm.BroadcastProjectCounts()
+}
+
+// BroadcastAll sends a raw message to ALL connected WebSocket clients across all projects.
+func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
+	bsm.mu.RLock()
+	defer bsm.mu.RUnlock()
+
+	for _, conns := range bsm.clients {
+		for conn := range conns {
+			if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+				// Client disconnected, will be cleaned up on read loop exit
+			}
+		}
+	}
+}
+
+// BroadcastProjectCounts computes and broadcasts task counts for all projects.
+func (bsm *BoardStreamManager) BroadcastProjectCounts() {
+	if bsm.store == nil {
+		return
+	}
+	counts := bsm.store.GetAllProjectCounts()
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":   "project_counts",
+		"data":   counts,
+	})
+	bsm.BroadcastAll(msg)
 }
 
 // HandleStream upgrades a WebSocket connection and subscribes to board updates.

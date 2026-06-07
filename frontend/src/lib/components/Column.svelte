@@ -35,7 +35,18 @@
 
 <div class={`column${isOver ? ' is-over' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={`${title} column`}>
     <div class="column-header" style="--col-color: {color}">
-        <h3>{title}</h3>
+        <h3>
+            {#if columnId === 'backlog'}
+                <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+            {:else if columnId === 'in_progress'}
+                <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+            {:else if columnId === 'review'}
+                <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+            {:else if columnId === 'done'}
+                <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+            {/if}
+            {title}
+        </h3>
         <span class="count">{tasks.length}</span>
     </div>
     <div class="card-list">
@@ -81,11 +92,18 @@
         border-bottom: 2px solid var(--col-color);
     }
     .column-header h3 {
+        display: flex;
+        align-items: center;
+        gap: 5px;
         font-size: 0.875rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         color: var(--color-text-secondary);
+    }
+    .col-icon {
+        flex-shrink: 0;
+        color: var(--col-color);
     }
     .count {
         background: var(--color-surface-3);

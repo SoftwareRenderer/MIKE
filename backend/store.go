@@ -501,6 +501,39 @@ func (s *Store) ReorderTasks(projectID string, reorders []ReorderRequest) error 
 	return tx.Commit()
 }
 
+// GetAllProjectCounts returns task counts grouped by project and status.
+// Only counts backlog, in_progress, and review (not done).
+func (s *Store) GetAllProjectCounts() map[string]ProjectCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := make(map[string]ProjectCounts)
+	rows, err := s.db.Query(
+		`SELECT project_id, status, COUNT(*) FROM tasks WHERE status IN ('backlog', 'in_progress', 'review') GROUP BY project_id, status`,
+	)
+	if err != nil {
+		return counts
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var projectID, status string
+		var count int
+		if err := rows.Scan(&projectID, &status, &count); err != nil {
+			continue
+		}
+		c := counts[projectID]
+		switch status {
+		case "backlog":
+			c.Backlog = count
+		case "in_progress":
+			c.InProgress = count
+		case "review":
+			c.Review = count
+		}
+		counts[projectID] = c
+	}
+	return counts
+}
+
 // -- Task dependency operations --
 
 func (s *Store) CreateDependency(d *TaskDependency) error {
