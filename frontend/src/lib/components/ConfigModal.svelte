@@ -465,11 +465,11 @@
         font-size: 14px;
         font-weight: 500;
         color: #B0BAC4;
-        min-width: 100px;
         flex-shrink: 0;
     }
     .option-input {
-        width: 100px;
+        width: 72px;
+        min-width: 72px;
         flex-shrink: 0;
     }
 
