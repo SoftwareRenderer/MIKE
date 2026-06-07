@@ -340,6 +340,9 @@
         font-weight: 500;
         color: var(--color-text-primary);
     }
+    .field-label input {
+        width: 100%;
+    }
 
     /* Inputs */
     input[type="text"], input[type="number"], select {
@@ -350,7 +353,6 @@
         color: var(--color-text-primary);
         font-size: 14px;
         outline: none;
-        width: 100%;
     }
     input:focus, select:focus {
         border-color: var(--color-accent);
@@ -535,6 +537,7 @@
     .model-input {
         padding: 6px 8px;
         font-size: 14px;
+        width: 100%;
     }
 
     /* Star button (default model toggle) */
