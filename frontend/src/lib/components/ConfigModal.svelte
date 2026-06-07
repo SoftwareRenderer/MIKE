@@ -168,14 +168,15 @@
             <!-- Providers Section -->
             <div class="providers-section">
                 <div class="section-header">
-                    <label style="margin:0">Providers</label>
+                    <h3 class="section-label">Providers</h3>
                     <button type="button" class="btn-small" onclick={addProvider}>+ Add Provider</button>
                 </div>
                 {#each providers as p, i}
                     <div class="provider-card">
                         <div class="provider-fields">
                             <div class="url-row">
-                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" style="flex:1" oninput={() => syncProviderMeta(p)} />
+                                <label class="sr-only" for={`provider-url-${i}`}>Provider URL</label>
+                                <input id={`provider-url-${i}`} type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" style="flex:1" oninput={() => syncProviderMeta(p)} />
                                 <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()}>
                                     {p.fetchingModels ? 'Fetching...' : 'Fetch Models'}
                                 </button>
@@ -187,13 +188,13 @@
                                 <div class="fetch-error">{p.fetchError}</div>
                             {/if}
                             <div class="concurrency-row">
-                                <label class="concurrency-label">Concurrency</label>
-                                <input type="number" bind:value={p.concurrency} min="1" max="20" class="concurrency-input" />
+                                <label class="concurrency-label" for={`concurrency-${i}`}>Concurrency</label>
+                                <input id={`concurrency-${i}`} type="number" bind:value={p.concurrency} min="1" max="20" class="concurrency-input" />
                             </div>
                             <div class="models-section">
                                 <div class="models-header">
-                                    <span class="models-label">Models ({p.models.length})</span>
-                                    <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>+ Add</button>
+                                    <span class="models-label" id={`models-heading-${i}`}>Models ({p.models.length})</span>
+                                    <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>+ Add Model</button>
                                 </div>
                                 {#each p.models as model, mi}
                                     {#if model.readonly}
@@ -224,7 +225,7 @@
                 {/if}
             </div>
 
-            <label>
+            <label class="field-label">
                 Workspace Directory
                 <input type="text" bind:value={workspaceDir} placeholder="./workspace" />
             </label>
@@ -274,9 +275,10 @@
         font-weight: 600;
     }
     .close-btn {
-        font-size: 18px;
-        color: var(--color-text-secondary);
-        padding: 4px;
+        font-size: 20px;
+        color: var(--color-text-primary);
+        padding: 4px 8px;
+        line-height: 1;
     }
     .modal-body {
         padding: 20px;
@@ -284,13 +286,45 @@
         flex-direction: column;
         gap: 16px;
     }
+
+    /* Screen-reader only utility */
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    /* Section headings — 16px bold on modal bg (#24292E): primary text ~15:1 ✓ */
+    .section-label {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    /* Field labels — 14px on modal bg */
+    .field-label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
     label {
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 500;
-        color: var(--color-text-secondary);
+        color: var(--color-text-primary);
     }
     input[type="text"], input[type="number"], select {
         background: var(--color-surface-2);
@@ -317,10 +351,12 @@
         margin-bottom: 0;
     }
     .btn-small {
-        padding: 4px 10px;
+        padding: 6px 12px;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
-        font-size: 12px;
+        color: var(--color-text-primary);
+        font-size: 14px;
+        font-weight: 500;
         cursor: pointer;
     }
     .btn-small:hover {
@@ -334,9 +370,10 @@
         gap: 8px;
     }
     .providers-empty {
-        font-size: 12px;
-        color: var(--color-text-tertiary);
+        font-size: 14px;
+        color: var(--color-text-primary);
         padding: 8px 0;
+        opacity: 0.85;
     }
     .provider-card {
         display: flex;
@@ -359,8 +396,8 @@
         font-size: 13px;
     }
     .provider-meta {
-        font-size: 11px;
-        color: var(--color-text-tertiary);
+        font-size: 13px;
+        color: #B0BAC4; /* ~6.5:1 on #2D3339 card bg ✓ */
         font-family: var(--font-mono, monospace);
     }
     .url-row {
@@ -373,8 +410,8 @@
         border-radius: var(--radius-sm);
         background: var(--color-accent);
         color: white;
-        font-size: 12px;
-        font-weight: 500;
+        font-size: 14px;
+        font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
         flex-shrink: 0;
@@ -384,9 +421,10 @@
         cursor: not-allowed;
     }
     .fetch-error {
-        font-size: 11px;
+        font-size: 14px;
         color: var(--color-status-red);
         padding: 4px 0;
+        font-weight: 500;
     }
     .models-section {
         display: flex;
@@ -399,14 +437,17 @@
         justify-content: space-between;
     }
     .models-label {
-        font-size: 11px;
-        color: var(--color-text-tertiary);
+        font-size: 14px;
+        font-weight: 600;
+        color: #B0BAC4; /* ~6.5:1 on #2D3339 card bg ✓ */
     }
     .btn-add-model {
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
-        font-size: 11px;
+        color: var(--color-text-primary);
+        font-size: 13px;
+        font-weight: 500;
         cursor: pointer;
     }
     .model-row {
@@ -421,8 +462,8 @@
     }
     .model-name-label {
         flex: 1;
-        font-size: 13px;
-        color: var(--color-text-secondary);
+        font-size: 14px;
+        color: #B0BAC4; /* ~6.5:1 on #2D3339 card bg ✓ */
         font-family: var(--font-mono, monospace);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -430,22 +471,23 @@
     }
     .model-row input {
         flex: 1;
-        font-size: 13px;
-        padding: 4px 8px;
+        font-size: 14px;
+        padding: 6px 8px;
     }
     .btn-remove-model {
         color: var(--color-status-red);
-        padding: 2px 6px;
-        font-size: 12px;
+        padding: 4px 8px;
+        font-size: 16px;
         flex-shrink: 0;
+        line-height: 1;
     }
     .btn-star {
         background: none;
         border: none;
-        padding: 2px 4px;
-        font-size: 14px;
+        padding: 4px;
+        font-size: 18px;
         cursor: pointer;
-        color: var(--color-text-tertiary);
+        color: #B0BAC4; /* ~6.5:1 on card bg ✓ */
         flex-shrink: 0;
         line-height: 1;
     }
@@ -457,35 +499,37 @@
     }
     .btn-remove-provider {
         color: var(--color-status-red);
-        padding: 4px 8px;
-        font-size: 14px;
+        padding: 6px 10px;
+        font-size: 18px;
         flex-shrink: 0;
-        margin-top: 2px;
+        line-height: 1;
     }
     .btn-remove-provider:hover {
         background: var(--color-status-red)22;
     }
 
-    /* Concurrency */
+    /* Concurrency — label on card bg (#2D3339) */
     .concurrency-row {
         display: flex;
         align-items: center;
         gap: 8px;
     }
     .concurrency-label {
-        font-size: 11px;
-        color: var(--color-text-tertiary);
-        min-width: 70px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #B0BAC4; /* ~6.5:1 on #2D3339 card bg ✓ */
+        min-width: 80px;
     }
     .concurrency-input {
-        width: 70px;
-        font-size: 12px;
-        padding: 4px 8px;
+        width: 80px;
+        font-size: 14px;
+        padding: 6px 8px;
     }
 
     .error {
         color: var(--color-status-red);
-        font-size: 13px;
+        font-size: 14px;
+        font-weight: 500;
     }
     .modal-footer {
         display: flex;

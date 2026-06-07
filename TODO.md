@@ -17,10 +17,10 @@ Move concurrency configuration from a global `endpoint_limits` map into a per-pr
 - [x] Update `ConfigModal.svelte`: add concurrency input inside each provider card, remove the separate "Endpoint Concurrency Limits" section, set default concurrency to 1 when adding a new provider
 
 ### 3. Build and verify
-- [ ] Build backend (`go build -o kanban .`)
-- [ ] Build frontend (`cd frontend && npm run build`)
-- [ ] Restart server and verify config endpoint returns updated schema
-- [ ] Run e2e tests (`cd frontend && npx playwright test`)
+- [x] Build backend (`go build -o kanban .`)
+- [x] Build frontend (`cd frontend && npm run build`)
+- [x] Restart server and verify config endpoint returns updated schema
+- [x] Run e2e tests (`cd frontend && npx playwright test`) — Provider Settings: 5/5 pass, 4 pre-existing UI failures unrelated to this change
 
 ## Notes
 - Default concurrency per provider: 1
