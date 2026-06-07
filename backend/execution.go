@@ -85,8 +85,14 @@ func estimatePromptTokens(messages []ChatMessage) int {
 	total := 0
 	for _, m := range messages {
 		total += estimateTokensFromText(m.Content)
+		total += estimateTokensFromText(m.ReasoningContent)
 	}
 	return total
+}
+
+// estimateTotalTokens estimates total output tokens from content and reasoning.
+func estimateTotalTokens(content, reasoning string) int {
+	return estimateTokensFromText(content) + estimateTokensFromText(reasoning)
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
@@ -463,6 +469,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 				reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 				b.send(StreamEvent{Type: WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+				streamTokenCount++
+				if streamStart.IsZero() {
+					streamStart = time.Now()
+				}
+				// Send real-time stats every 10 tokens (including reasoning)
+				if streamTokenCount%10 == 0 {
+					elapsed := time.Since(streamStart).Milliseconds()
+					b.send(StreamEvent{Type: WSTypeStats, Data: map[string]interface{}{
+						"model_name":       activeModel,
+						"predicted_tokens": streamTokenCount,
+						"predicted_ms":     int(elapsed),
+					}})
+				}
 			}
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				assistantContent.WriteString(*choice.Delta.Content)
@@ -597,7 +616,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 						predictedMs = usage.PredictedMs
 					} else {
 						promptTokens = estimatePromptTokens(messages)
-						predictedTokens = estimateTokensFromText(assistantText)
+						predictedTokens = estimateTotalTokens(assistantText, reasoningContent.String())
+						promptMs = int(time.Since(startTime).Milliseconds() * 7 / 10)
+						predictedMs = int(time.Since(startTime).Milliseconds() * 3 / 10)
 					}
 					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": activeModel, "duration": time.Since(startTime).Milliseconds()}})
 					return
@@ -611,12 +632,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			}
 			// Compute stats from usage (fall back to estimation if LLM didn't provide usage)
 			promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
+			durationMs := time.Since(startTime).Milliseconds()
 			if usage != nil {
 				promptTokens, predictedTokens = usage.PromptTokens, usage.CompletionTokens
 				promptMs, predictedMs = usage.PromptMs, usage.PredictedMs
 			} else {
 				promptTokens = estimatePromptTokens(messages[:msgCountBefore])
-				predictedTokens = estimateTokensFromText(assistantText)
+				predictedTokens = estimateTotalTokens(assistantText, reasoningContent.String())
+				// Estimate timing: assume ~70% of time is prompt processing, ~30% is generation
+				promptMs = int(durationMs * 7 / 10)
+				predictedMs = int(durationMs * 3 / 10)
 			}
 			// Persist assistant message with stats
 			te.store.CreateTaskMessage(&TaskMessage{
@@ -645,7 +670,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				promptMs, predictedMs = usage.PromptMs, usage.PredictedMs
 			} else {
 				promptTokens = estimatePromptTokens(messages[:len(messages)-1])
-				predictedTokens = estimateTokensFromText(assistantText)
+				predictedTokens = estimateTotalTokens(assistantText, reasoningContent.String())
+				promptMs = int(time.Since(startTime).Milliseconds() * 7 / 10)
+				predictedMs = int(time.Since(startTime).Milliseconds() * 3 / 10)
 			}
 			duration := time.Since(startTime).Milliseconds()
 			// Persist assistant message with stats

@@ -530,7 +530,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll}>
         {#if isNewTask && taskPrompt}
             <!-- New task: show prompt as first message -->
-            <ChatMessage role="user" content={taskPrompt} isStreaming={false} timestamp={entries[0]?.createdAt} />
+            <ChatMessage role="user" content={taskPrompt} isStreaming={false} timestamp={entries[0]?.createdAt} onEdit={async (newContent) => { await updateTask(projectId, taskId, { prompt: newContent }); }} />
         {:else if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">

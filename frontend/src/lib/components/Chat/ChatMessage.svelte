@@ -8,7 +8,7 @@
         isStreaming?: boolean;
         timestamp?: string;
         messageId?: string;
-        stats?: { prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
+        stats?: { model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         onCopy?: () => void;
         onDelete?: () => void;
         onEdit?: (newContent: string) => void;
