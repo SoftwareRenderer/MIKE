@@ -39,6 +39,9 @@ export interface Config {
     workspace_dir: string;
     providers: Provider[];
     default_provider: string;
+    default_auto_commit?: boolean;
+    default_plan_mode?: boolean;
+    default_max_failed_turns?: number;
 }
 
 export interface Provider {

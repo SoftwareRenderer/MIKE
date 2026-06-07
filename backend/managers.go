@@ -52,13 +52,14 @@ func generateTaskID() string {
 
 // TaskManager handles task CRUD operations.
 type TaskManager struct {
-	store         *Store
+	store          *Store
 	boardStreamMgr *BoardStreamManager
+	configStore    *ConfigStore
 }
 
 // NewTaskManager creates a new TaskManager.
-func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager) *TaskManager {
-	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr}
+func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager, configStore *ConfigStore) *TaskManager {
+	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore}
 }
 
 // HandleList lists or creates tasks for a project.
@@ -89,6 +90,20 @@ func (tm *TaskManager) HandleList(w http.ResponseWriter, r *http.Request, projec
 		// Auto-generate title from prompt if not provided
 		if task.Title == "" && task.Prompt != "" {
 			task.Title = autoGenerateTitle(task.Prompt)
+		}
+		// Apply config defaults for new tasks
+		if tm.configStore != nil {
+			if cfg, err := tm.configStore.GetConfig(); err == nil {
+				if cfg.DefaultAutoCommit != nil && task.AutoCommit == false {
+					task.AutoCommit = *cfg.DefaultAutoCommit
+				}
+				if cfg.DefaultPlanMode != nil && task.PlanMode == false {
+					task.PlanMode = *cfg.DefaultPlanMode
+				}
+				if cfg.DefaultMaxFailedTurns != nil && task.MaxConsecutiveFailedTurns == 0 {
+					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns
+				}
+			}
 		}
 		if err := tm.store.CreateTask(&task); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())

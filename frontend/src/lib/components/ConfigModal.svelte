@@ -1,11 +1,14 @@
 <script lang="ts">
     import type { Config, Provider } from '$lib/types';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi } from '$lib/api';
+    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
     let workspaceDir = $state(config?.workspace_dir || '');
+    let defaultAutoCommit = $state(config?.default_auto_commit ?? false);
+    let defaultPlanMode = $state(config?.default_plan_mode ?? false);
+    let defaultMaxFailedTurns = $state(config?.default_max_failed_turns ?? 3);
     let loading = $state(false);
     let error = $state('');
 
@@ -24,6 +27,9 @@
         default_model: string; // per-provider default model
         fetchingModels: boolean;
         fetchError: string;
+        expanded: boolean; // card expansion state
+        testingConnection: boolean;
+        testResult: { success: boolean; message: string } | null;
     }
 
     /** Generate a provider name from a URL (hostname-port slug). */
@@ -72,6 +78,9 @@
                 default_model: p.default_model || '',
                 fetchingModels: false,
                 fetchError: '',
+                expanded: !p.default_model, // collapse if already configured
+                testingConnection: false,
+                testResult: null,
                 models: (p.models || []).map(m => ({ name: m, readonly: false })),
             };
             // Migrate: if old global default_model belongs to this provider and provider has no default set
@@ -81,6 +90,28 @@
             return draft;
         })
     );
+
+    function toggleProvider(idx: number) {
+        providers[idx].expanded = !providers[idx].expanded;
+    }
+
+    async function testProviderConnection(idx: number) {
+        const p = providers[idx];
+        if (!p.url.trim()) return;
+        p.testingConnection = true;
+        p.testResult = null;
+        try {
+            const result = await testConnectionApi(p.url.trim(), p.default_model || (p.models.find(m => m.name)?.name || ''));
+            p.testResult = {
+                success: result.success,
+                message: result.message,
+            };
+        } catch (e) {
+            p.testResult = { success: false, message: String(e) };
+        } finally {
+            p.testingConnection = false;
+        }
+    }
 
     function addProvider() {
         providers.push({
@@ -92,6 +123,9 @@
             default_model: '',
             fetchingModels: false,
             fetchError: '',
+            expanded: true,
+            testingConnection: false,
+            testResult: null,
         });
     }
 
@@ -170,6 +204,9 @@
             const cfg = await updateConfig({
                 workspace_dir: workspaceDir.trim(),
                 providers: savedProviders,
+                default_auto_commit: defaultAutoCommit,
+                default_plan_mode: defaultPlanMode,
+                default_max_failed_turns: defaultMaxFailedTurns,
             });
             configStore.set(cfg);
             onSaved();
@@ -201,66 +238,185 @@
                 <div class="providers-list">
                     {#each providers as p, i}
                         <div class="provider-card">
-                            <div class="provider-header">
+                            <!-- Card header: always visible -->
+                            <div class="provider-card-header" onclick={() => toggleProvider(i)}>
                                 <div class="reorder-buttons">
-                                    <button type="button" class="btn-reorder btn-reorder-up" onclick={() => reorderProvider(i, 'up')} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
-                                        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                                    <button type="button" class="btn-reorder btn-reorder-up" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'up'); }} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                                             <path d="M8 4l4 5H4z" fill="currentColor"/>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn-reorder btn-reorder-down" onclick={() => reorderProvider(i, 'down')} disabled={i === providers.length - 1} title="Move down (lower priority)" aria-label="Move provider down">
-                                        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                                    <button type="button" class="btn-reorder btn-reorder-down" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'down'); }} disabled={i === providers.length - 1} title="Move down (lower priority)" aria-label="Move provider down">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                                             <path d="M8 11l4-5H4z" fill="currentColor"/>
                                         </svg>
                                     </button>
                                 </div>
-                                <div class="provider-title-row">
-                                    <label class="sr-only" for={`provider-url-${i}`}>Provider URL</label>
-                                    <input id={`provider-url-${i}`} type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} />
-                                    <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()}>
-                                        {p.fetchingModels ? 'Fetching...' : 'Fetch Models'}
+                                <div class="provider-title-section">
+                                    <div class="provider-title-main">
+                                        {#if config?.default_provider === p.name}
+                                            <span class="active-dot"></span>
+                                        {/if}
+                                        <span class="provider-display-name">{p.display_name || 'New Provider'}</span>
+                                        {#if config?.default_provider === p.name}
+                                            <span class="active-badge">Active</span>
+                                        {/if}
+                                        {#if i === 0 && providers.length > 1}
+                                            <span class="priority-badge">Highest priority</span>
+                                        {/if}
+                                    </div>
+                                    {#if p.expanded}
+                                        <div class="provider-subtitle">
+                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                        </div>
+                                    {/if}
+                                </div>
+                                <div class="provider-actions">
+                                    <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
+                                    {#if p.default_model}
+                                        <span class="default-model-badge">{p.default_model}</span>
+                                    {/if}
+                                    <button type="button" class="btn-remove-provider" onclick={(e) => { e.stopPropagation(); if (confirm('Remove this provider?')) removeProvider(i); }} title="Remove provider" aria-label="Remove provider">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-label={p.expanded ? 'Collapse' : 'Expand'}>
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={p.expanded}>
+                                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
                                     </button>
                                 </div>
-                                <button type="button" class="btn-remove-provider" onclick={() => removeProvider(i)} title="Remove provider" aria-label="Remove provider">✕</button>
                             </div>
-                            {#if p.display_name}
-                                <div class="provider-meta">{p.display_name} {i === 0 && providers.length > 1 ? '<span class="priority-badge">highest priority</span>' : ''}</div>
-                            {/if}
-                            {#if p.fetchError}
-                                <div class="fetch-error">{p.fetchError}</div>
-                            {/if}
-                            <div class="provider-options">
-                                <div class="option-row">
-                                    <label class="option-label" for={`concurrency-${i}`}>Concurrency</label>
-                                    <input id={`concurrency-${i}`} type="number" bind:value={p.concurrency} min="1" max="20" class="option-input" />
-                                </div>
-                            </div>
-                            <div class="models-section">
-                                <div class="models-header">
-                                    <span class="models-label">Models</span>
-                                    <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>+ Add</button>
-                                </div>
-                                <div class="models-list">
-                                    {#each p.models as model, mi}
-                                        <div class="model-row" class:readonly={model.readonly}>
-                                            <button type="button" class="btn-star" class:active={model.name && p.default_model === model.name} onclick={() => model.name && setProviderDefaultModel(i, model.name)} title="Set as default model for this provider" aria-label={`Set ${model.name} as default for ${p.display_name}`}>
-                                                {model.name && p.default_model === model.name ? '★' : '☆'}
-                                            </button>
-                                            {#if model.readonly}
-                                                <span class="model-name-label">{model.name}</span>
+
+                            <!-- Expanded details -->
+                            {#if p.expanded}
+                                <div class="provider-details">
+                                    <div class="details-actions">
+                                        <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()}>
+                                            {#if p.fetchingModels}
+                                                <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
+                                                </svg>
+                                                Fetching...
                                             {:else}
-                                                <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" />
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                </svg>
+                                                Fetch Models
                                             {/if}
-                                            <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`}>✕</button>
+                                        </button>
+                                        <button type="button" class="btn-test" onclick={() => testProviderConnection(i)} disabled={p.testingConnection || !p.url.trim()}>
+                                            {#if p.testingConnection}
+                                                <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
+                                                </svg>
+                                                Testing...
+                                            {:else}
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <path d="M2 8l4 4L14 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                                </svg>
+                                                Test Connection
+                                            {/if}
+                                        </button>
+                                    </div>
+                                    {#if p.fetchError}
+                                        <div class="fetch-error">
+                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                                                <path d="M8 5v4M8 10v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                            </svg>
+                                            {p.fetchError}
                                         </div>
-                                    {/each}
+                                    {/if}
+                                    {#if p.testResult}
+                                        <div class="test-result" class:test-success={p.testResult.success} class:test-failure={!p.testResult.success}>
+                                            {#if p.testResult.success}
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                                                    <path d="M5 8l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                                </svg>
+                                            {:else}
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                                                    <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                </svg>
+                                            {/if}
+                                            {p.testResult.message}
+                                        </div>
+                                    {/if}
+                                    <div class="provider-options">
+                                        <div class="option-row">
+                                            <div class="option-label-group">
+                                                <label class="option-label" for={`concurrency-${i}`}>Concurrency</label>
+                                                <span class="help-icon" title="Maximum simultaneous requests to this provider. Higher values allow parallel task execution but may overload the server.">
+                                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                                        <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                                                    </svg>
+                                                </span>
+                                            </div>
+                                            <input id={`concurrency-${i}`} type="number" bind:value={p.concurrency} min="1" max="20" class="option-input" />
+                                        </div>
+                                    </div>
+                                    <div class="models-section">
+                                        <div class="models-header">
+                                            <span class="models-label">Default Model</span>
+                                            <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>
+                                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                                    <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                </svg>
+                                                Add Model
+                                            </button>
+                                        </div>
+                                        <div class="models-list">
+                                            {#each [...p.models].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) as model, mi}
+                                                <div class="model-row" class:readonly={model.readonly}>
+                                                    {#if model.name}
+                                                        <button type="button" class="btn-default" class:active={p.default_model === model.name} onclick={() => setProviderDefaultModel(i, model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`}>
+                                                            {p.default_model === model.name ? 'Default' : 'Set default'}
+                                                        </button>
+                                                    {:else}
+                                                        <span class="btn-default-placeholder"></span>
+                                                    {/if}
+                                                    <div class="model-name-cell">
+                                                        {#if model.name === config?.model_name}
+                                                            <span class="in-use-badge">In use</span>
+                                                        {/if}
+                                                        {#if model.readonly}
+                                                            <span class="model-name-label">{model.name}</span>
+                                                        {:else}
+                                                            <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" />
+                                                        {/if}
+                                                    </div>
+                                                    <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`}>
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            {/each}
+                                        </div>
+                                        {#if p.models.length === 0}
+                                            <div class="models-empty">No models added. Use "Fetch Models" or add manually.</div>
+                                        {/if}
+                                    </div>
                                 </div>
-                            </div>
+                            {/if}
                         </div>
                     {/each}
                 </div>
                 {#if providers.length === 0}
-                    <div class="providers-empty">No providers configured. Add one above.</div>
+                    <div class="providers-empty">
+                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" class="empty-icon">
+                            <rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M4 16h32" stroke="currentColor" stroke-width="1.5"/>
+                            <circle cx="10" cy="12" r="1" fill="currentColor"/>
+                            <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                            <circle cx="20" cy="12" r="1" fill="currentColor"/>
+                        </svg>
+                        <p>No providers configured</p>
+                        <span>Add an LLM provider to get started. Supports any OpenAI-compatible API.</span>
+                    </div>
                 {/if}
             </fieldset>
 
@@ -270,7 +426,57 @@
                 <label class="field-label">
                     Workspace Directory
                     <input type="text" bind:value={workspaceDir} placeholder="./workspace" />
+                    <span class="field-help">Directory where task worktrees are created</span>
                 </label>
+            </fieldset>
+
+            <!-- Task Defaults Section -->
+            <fieldset class="section">
+                <h3 class="section-label">Task Defaults</h3>
+                <p class="section-description">These settings apply to newly created tasks</p>
+
+                <label class="toggle-field">
+                    <div class="toggle-label-group">
+                        <span class="toggle-label">Auto-commit</span>
+                        <span class="help-icon" title="Automatically commit changes when the task completes">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="toggle-switch" class:active={defaultAutoCommit} onclick={() => defaultAutoCommit = !defaultAutoCommit}>
+                        <span class="toggle-knob"></span>
+                    </div>
+                </label>
+
+                <label class="toggle-field">
+                    <div class="toggle-label-group">
+                        <span class="toggle-label">Plan mode</span>
+                        <span class="help-icon" title="Task describes its plan before making changes">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="toggle-switch" class:active={defaultPlanMode} onclick={() => defaultPlanMode = !defaultPlanMode}>
+                        <span class="toggle-knob"></span>
+                    </div>
+                </label>
+
+                <div class="field-row">
+                    <div class="option-label-group">
+                        <label class="field-label-inline" for="default-max-failed">Max failed turns</label>
+                        <span class="help-icon" title="Stop task after this many consecutive LLM failures">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                            </svg>
+                        </span>
+                    </div>
+                    <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
+                </div>
             </fieldset>
 
             {#if error}
@@ -301,10 +507,12 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
-        width: 560px;
+        width: 640px;
         max-width: 90vw;
         max-height: 90vh;
-        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
     .modal-header {
         display: flex;
@@ -324,10 +532,25 @@
         line-height: 1;
     }
     .modal-body {
-        padding: 20px;
+        padding: 20px 20px 0;
         display: flex;
         flex-direction: column;
         gap: 24px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+        scroll-behavior: smooth;
+    }
+    /* Scroll depth indicator */
+    .modal-body::-webkit-scrollbar {
+        width: 6px;
+    }
+    .modal-body::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .modal-body::-webkit-scrollbar-thumb {
+        background: var(--color-surface-4);
+        border-radius: 3px;
     }
 
     /* Screen-reader only utility */
@@ -382,6 +605,80 @@
     .field-label input {
         width: 100%;
     }
+    .field-help {
+        font-size: 12px;
+        color: var(--color-text-tertiary);
+        font-weight: 400;
+    }
+
+    /* Section description */
+    .section-description {
+        font-size: 12px;
+        color: var(--color-text-tertiary);
+        margin: -4px 0 4px;
+    }
+
+    /* Toggle field */
+    .toggle-field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+        cursor: pointer;
+    }
+    .toggle-field + .toggle-field {
+        border-top: 1px solid var(--color-border);
+    }
+    .toggle-label-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .toggle-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+    .toggle-switch {
+        width: 40px;
+        height: 22px;
+        background: var(--color-surface-4);
+        border-radius: 11px;
+        position: relative;
+        transition: background 0.2s ease;
+        flex-shrink: 0;
+    }
+    .toggle-switch.active {
+        background: var(--color-accent);
+    }
+    .toggle-knob {
+        width: 16px;
+        height: 16px;
+        background: white;
+        border-radius: 50%;
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        transition: transform 0.2s ease;
+    }
+    .toggle-switch.active .toggle-knob {
+        transform: translateX(18px);
+    }
+
+    /* Field row (inline label + input) */
+    .field-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-top: 1px solid var(--color-border);
+        gap: 12px;
+    }
+    .field-label-inline {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
 
     /* Inputs */
     input[type="text"], input[type="number"], select {
@@ -421,11 +718,29 @@
         flex-direction: column;
         gap: 8px;
     }
+
+    /* Providers empty state */
     .providers-empty {
-        font-size: 14px;
-        color: #B0BAC4;
-        padding: 16px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 32px 16px;
         text-align: center;
+        color: var(--color-text-secondary);
+    }
+    .providers-empty p {
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+    .providers-empty span {
+        font-size: 13px;
+        max-width: 280px;
+    }
+    .empty-icon {
+        color: var(--color-text-tertiary);
+        margin-bottom: 4px;
     }
 
     /* Provider card */
@@ -433,28 +748,156 @@
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+        overflow: hidden;
+        transition: border-color 0.15s ease;
+    }
+    .provider-card:hover {
+        border-color: var(--color-border-bright);
     }
 
-    /* Provider header: reorder + URL + Fetch on left, remove on right */
-    .provider-header {
+    /* Card header (always visible, clickable to expand/collapse) */
+    .provider-card-header {
         display: flex;
-        align-items: flex-start;
-        gap: 8px;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        cursor: pointer;
+        user-select: none;
     }
-    .provider-title-row {
+    .provider-card-header:hover {
+        background: var(--color-surface-3);
+    }
+    .provider-card-header input {
+        cursor: text;
+    }
+
+    /* Provider title section */
+    .provider-title-section {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .provider-title-main {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex: 1;
-        min-width: 0;
     }
+    .provider-display-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    /* Active provider indicator */
+    .active-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-status-green);
+        flex-shrink: 0;
+        box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.2);
+    }
+    .active-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-status-green);
+        background: rgba(63, 185, 80, 0.1);
+        padding: 2px 6px;
+        border-radius: 3px;
+    }
+    .priority-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-status-green);
+        background: rgba(63, 185, 80, 0.1);
+        padding: 2px 6px;
+        border-radius: 3px;
+    }
+    .provider-subtitle {
+        display: flex;
+        align-items: center;
+    }
+
+    /* URL input in header */
     .url-input {
-        flex: 1;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        background: transparent;
+        border: 1px solid transparent;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        width: 100%;
         min-width: 0;
+        font-family: var(--font-mono, monospace);
+    }
+    .url-input:focus {
+        background: var(--color-surface-0);
+        border-color: var(--color-accent);
+        color: var(--color-text-primary);
+    }
+    .url-input::placeholder {
+        color: var(--color-text-tertiary);
+    }
+
+    /* Provider actions (right side of header) */
+    .provider-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .model-count-badge {
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        background: var(--color-surface-3);
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .default-model-badge {
+        font-size: 11px;
+        color: var(--color-status-yellow);
+        background: rgba(227, 179, 65, 0.1);
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+        font-family: var(--font-mono, monospace);
+    }
+
+    /* Expand/collapse button */
+    .btn-expand {
+        padding: 4px;
+        color: var(--color-text-secondary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: transform 0.15s ease, color 0.15s ease;
+    }
+    .btn-expand:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-4);
+    }
+    .btn-expand svg {
+        transition: transform 0.2s ease;
+    }
+    .btn-expand svg.expanded {
+        transform: rotate(180deg);
     }
 
     /* Reorder buttons */
@@ -463,20 +906,20 @@
         flex-direction: column;
         gap: 1px;
         flex-shrink: 0;
-        padding-top: 4px;
+        padding-top: 2px;
     }
     .btn-reorder {
         background: none;
         border: none;
-        padding: 4px;
+        padding: 3px;
         cursor: pointer;
         color: var(--color-text-primary);
-        opacity: 0.85;
+        opacity: 0.5;
         display: flex;
         align-items: center;
         justify-content: center;
         line-height: 1;
-        border-radius: 4px;
+        border-radius: 3px;
     }
     .btn-reorder:hover:not(:disabled) {
         color: var(--color-accent);
@@ -484,47 +927,117 @@
         background: var(--color-surface-3);
     }
     .btn-reorder:disabled {
-        opacity: 0.2;
+        opacity: 0.15;
         cursor: default;
     }
 
-    /* Provider meta (display name) */
-    .provider-meta {
-        font-size: 12px;
-        color: #B0BAC4;
-        font-family: var(--font-mono, monospace);
-        padding-left: 2px;
+    /* Remove provider button */
+    .btn-remove-provider {
+        color: var(--color-text-tertiary);
+        padding: 5px;
+        line-height: 1;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-sm);
+        transition: color 0.15s ease, background 0.15s ease;
     }
-    .priority-badge {
-        color: var(--color-status-green);
-        font-size: 10px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+    .btn-remove-provider:hover {
+        color: var(--color-status-red);
+        background: rgba(248, 81, 73, 0.1);
     }
 
-    /* Fetch button */
-    .btn-fetch {
-        padding: 8px 14px;
+    /* Expanded details panel */
+    .provider-details {
+        padding: 0 14px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border-top: 1px solid var(--color-border);
+        padding-top: 12px;
+    }
+
+    /* Action buttons row (Fetch Models, Test Connection) */
+    .details-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .btn-fetch,
+    .btn-test {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
         border-radius: var(--radius-sm);
-        background: var(--color-accent);
-        color: white;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
-        flex-shrink: 0;
+        transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-fetch {
+        background: var(--color-accent);
+        color: white;
+    }
+    .btn-fetch:hover:not(:disabled) {
+        background: var(--color-accent-hover);
     }
     .btn-fetch:disabled {
-        opacity: 0.5;
+        opacity: 0.4;
         cursor: not-allowed;
+    }
+    .btn-test {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .btn-test:hover:not(:disabled) {
+        background: var(--color-surface-4);
+    }
+    .btn-test:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    /* Spin animation for loading icons */
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    .spin-icon {
+        animation: spin 0.8s linear infinite;
+        transform-origin: center;
     }
 
     /* Fetch error */
     .fetch-error {
-        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
         color: var(--color-status-red);
         font-weight: 500;
+        background: rgba(248, 81, 73, 0.08);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+    }
+
+    /* Test connection result */
+    .test-result {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+    }
+    .test-result.test-success {
+        color: var(--color-status-green);
+        background: rgba(63, 185, 80, 0.08);
+    }
+    .test-result.test-failure {
+        color: var(--color-status-red);
+        background: rgba(248, 81, 73, 0.08);
     }
 
     /* Provider options (concurrency, etc.) */
@@ -532,24 +1045,41 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding-top: 4px;
-        border-top: 1px solid var(--color-border);
     }
     .option-row {
         display: flex;
         align-items: center;
         gap: 12px;
     }
+    .option-label-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
     .option-label {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 500;
-        color: #B0BAC4;
+        color: var(--color-text-secondary);
         flex-shrink: 0;
     }
     .option-input {
-        width: 72px;
-        min-width: 72px;
+        width: 64px;
+        min-width: 64px;
         flex-shrink: 0;
+        padding: 4px 8px;
+    }
+
+    /* Help icon tooltip */
+    .help-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-text-tertiary);
+        cursor: help;
+        position: relative;
+    }
+    .help-icon:hover {
+        color: var(--color-text-secondary);
     }
 
     /* Models section */
@@ -557,8 +1087,6 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding-top: 4px;
-        border-top: 1px solid var(--color-border);
     }
     .models-header {
         display: flex;
@@ -566,11 +1094,16 @@
         justify-content: space-between;
     }
     .models-label {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
-        color: #B0BAC4;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
     }
     .btn-add-model {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         padding: 4px 10px;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
@@ -579,6 +1112,9 @@
         font-weight: 500;
         cursor: pointer;
     }
+    .btn-add-model:hover {
+        background: var(--color-surface-4);
+    }
 
     /* Models list */
     .models-list {
@@ -586,24 +1122,47 @@
         flex-direction: column;
         gap: 4px;
     }
+    .models-empty {
+        font-size: 12px;
+        color: var(--color-text-tertiary);
+        padding: 8px 0;
+        font-style: italic;
+    }
 
-    /* Model row — fixed columns for alignment */
+    /* Model row */
     .model-row {
         display: grid;
-        grid-template-columns: 28px 1fr 32px;
+        grid-template-columns: 90px 1fr 28px;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
     }
     .model-row.readonly {
-        padding: 6px 8px;
+        padding: 5px 8px;
         background: var(--color-surface-0);
         border-radius: var(--radius-sm);
+    }
+    .model-name-cell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+    }
+    .in-use-badge {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--color-status-blue);
+        background: rgba(76, 154, 255, 0.12);
+        padding: 1px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
     }
 
     /* Model name display */
     .model-name-label {
-        font-size: 14px;
-        color: #B0BAC4;
+        font-size: 13px;
+        color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -612,63 +1171,54 @@
 
     /* Model name input */
     .model-input {
-        padding: 6px 8px;
-        font-size: 14px;
+        padding: 5px 8px;
+        font-size: 13px;
         width: 100%;
     }
 
-    /* Star button (default model toggle) */
-    .btn-star {
-        background: none;
-        border: none;
-        padding: 0;
-        font-size: 18px;
+    /* Default model button */
+    .btn-default {
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
         cursor: pointer;
+        text-align: center;
+        white-space: nowrap;
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        transition: all 0.15s ease;
+        justify-self: start;
+    }
+    .btn-default:hover {
+        background: var(--color-surface-4);
         color: var(--color-text-primary);
-        opacity: 0.7;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
     }
-    .btn-star:hover {
+    .btn-default.active {
+        background: rgba(227, 179, 65, 0.18);
         color: var(--color-status-yellow);
-        opacity: 1;
     }
-    .btn-star.active {
-        color: var(--color-status-yellow);
-        opacity: 1;
+    .btn-default-placeholder {
+        width: 90px;
     }
 
     /* Remove model button */
     .btn-remove-model {
-        color: var(--color-status-red);
+        color: var(--color-text-secondary);
         padding: 0;
-        font-size: 16px;
         line-height: 1;
         display: flex;
         align-items: center;
         justify-content: center;
-        opacity: 0.7;
+        border-radius: var(--radius-sm);
+        font-size: 18px;
+        width: 28px;
+        height: 28px;
+        transition: color 0.15s ease, background 0.15s ease;
     }
     .btn-remove-model:hover {
-        opacity: 1;
-    }
-
-    /* Remove provider button */
-    .btn-remove-provider {
         color: var(--color-status-red);
-        padding: 4px;
-        font-size: 18px;
-        line-height: 1;
-        flex-shrink: 0;
-        opacity: 0.6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .btn-remove-provider:hover {
-        opacity: 1;
+        background: rgba(248, 81, 73, 0.1);
     }
 
     .error {
@@ -680,8 +1230,13 @@
         display: flex;
         justify-content: flex-end;
         gap: 8px;
-        padding-top: 8px;
+        padding: 12px 20px;
         border-top: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        flex-shrink: 0;
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
     }
     .btn-primary {
         padding: 8px 20px;
@@ -720,10 +1275,34 @@
         .modal-body {
             padding: 16px;
         }
+        .provider-card-header {
+            padding: 14px 12px;
+        }
+        .provider-details {
+            padding: 0 12px 14px;
+            padding-top: 12px;
+        }
+        .details-actions {
+            flex-direction: column;
+        }
+        .btn-fetch,
+        .btn-test {
+            justify-content: center;
+        }
+        .model-row {
+            grid-template-columns: 1fr;
+            gap: 4px;
+        }
+        .btn-default,
+        .btn-default-placeholder {
+            width: 100%;
+            justify-self: stretch;
+        }
         button[type="button"],
         .btn-primary,
         .btn-small,
         .btn-fetch,
+        .btn-test,
         .btn-add-model {
             min-height: 44px;
         }

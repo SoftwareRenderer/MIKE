@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,14 +61,27 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
+	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
+	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
-	return &Config{
+	cfg := &Config{
 		LlamaServerURL:  llamaURL,
 		ModelName:       modelName,
 		WorkspaceDir:    workspaceDir,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
-	}, nil
+	}
+	if v, err := parseBoolPtr(defaultAutoCommitRaw); err == nil && v != nil {
+		cfg.DefaultAutoCommit = v
+	}
+	if v, err := parseBoolPtr(defaultPlanModeRaw); err == nil && v != nil {
+		cfg.DefaultPlanMode = v
+	}
+	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
+		cfg.DefaultMaxFailedTurns = v
+	}
+	return cfg, nil
 }
 
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
@@ -90,6 +104,21 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 	}
 	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
 		return err
+	}
+	if c.DefaultAutoCommit != nil {
+		if err := cs.store.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
+			return err
+		}
+	}
+	if c.DefaultPlanMode != nil {
+		if err := cs.store.SetConfigValue("default_plan_mode", fmt.Sprintf("%t", *c.DefaultPlanMode)); err != nil {
+			return err
+		}
+	}
+	if c.DefaultMaxFailedTurns != nil {
+		if err := cs.store.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
+			return err
+		}
 	}
 	// Also update in-memory override if set (so tests see the new values)
 	cs.overrideMu.Lock()
@@ -142,6 +171,22 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if dp, ok := updates["default_provider"]; ok {
 			current.DefaultProvider = dp.(string)
+		}
+		if dac, ok := updates["default_auto_commit"]; ok {
+			if v, ok := dac.(bool); ok {
+				current.DefaultAutoCommit = &v
+			}
+		}
+		if dpm, ok := updates["default_plan_mode"]; ok {
+			if v, ok := dpm.(bool); ok {
+				current.DefaultPlanMode = &v
+			}
+		}
+		if dmft, ok := updates["default_max_failed_turns"]; ok {
+			if f, ok := dmft.(float64); ok {
+				v := int(f)
+				current.DefaultMaxFailedTurns = &v
+			}
 		}
 		if err := cs.UpdateConfig(current); err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to update config")
@@ -380,4 +425,28 @@ func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request
 	} else {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// parseBoolPtr parses a string to a *bool. Returns nil pointer if the string is empty.
+func parseBoolPtr(s string) (*bool, error) {
+	if s == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// parseIntPtr parses a string to a *int. Returns nil pointer if the string is empty.
+func parseIntPtr(s string) (*int, error) {
+	if s == "" {
+		return nil, nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }

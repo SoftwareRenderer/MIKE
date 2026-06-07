@@ -65,7 +65,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.projectMgr = NewProjectManager(store)
 	s.boardStreamMgr = NewBoardStreamManager()
 	s.boardMgr = NewBoardManager(store, s.boardStreamMgr)
-	s.taskMgr = NewTaskManager(store, s.boardStreamMgr)
+	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore)
 	s.depMgr = NewDependencyManager(store)
 	s.reviewMgr = NewReviewManager(store)
 	s.gitMgr = NewGitManager(store)

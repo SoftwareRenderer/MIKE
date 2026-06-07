@@ -34,11 +34,14 @@ type Board struct {
 
 // Config represents global server configuration.
 type Config struct {
-	LlamaServerURL  string     `json:"llama_server_url"`
-	ModelName       string     `json:"model_name"`
-	WorkspaceDir    string     `json:"workspace_dir"`
-	Providers       []Provider `json:"providers"`          // named provider presets
-	DefaultProvider string     `json:"default_provider"`   // name of default provider (legacy, kept for compat)
+	LlamaServerURL            string     `json:"llama_server_url"`
+	ModelName                 string     `json:"model_name"`
+	WorkspaceDir              string     `json:"workspace_dir"`
+	Providers                 []Provider `json:"providers"`          // named provider presets
+	DefaultProvider           string     `json:"default_provider"`   // name of default provider (legacy, kept for compat)
+	DefaultAutoCommit         *bool      `json:"default_auto_commit,omitempty"`         // default auto-commit for new tasks
+	DefaultPlanMode           *bool      `json:"default_plan_mode,omitempty"`           // default plan mode for new tasks
+	DefaultMaxFailedTurns     *int       `json:"default_max_failed_turns,omitempty"`    // default max consecutive failed turns for new tasks
 }
 
 // Provider is a named LLM server preset with a list of available models.
