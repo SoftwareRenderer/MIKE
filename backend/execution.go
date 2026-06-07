@@ -529,7 +529,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				}
 			}
 			if err != nil {
-				task.StatusState = "paused"
+				task.StatusState = "failed"
 				task.Output = fmt.Sprintf("Connection failed: %v", err)
 				te.store.UpdateTask(task)
 				b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": err.Error(), "code": "connection_failed"}})

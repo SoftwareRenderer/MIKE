@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { get } from 'svelte/store';
     import type { Task } from '$lib/types';
-    import { board as boardStore, selectedTask } from '$lib/store';
+    import { board as boardStore, selectedTask, streamingTaskIds } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
     import TaskChat from './Chat/TaskChat.svelte';
 
@@ -18,7 +19,12 @@
     let loadingDiff = $state(false);
     let editingTitle = $state(false);
     let titleDraft = $state('');
-    let badge = $state({ text: 'Idle', color: 'var(--color-text-tertiary)' });
+    let badge = $derived.by(() => {
+        const streaming = get(streamingTaskIds).has(task.id);
+        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        return { text: 'Idle', color: 'var(--color-text-tertiary)' };
+    });
     let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
     let isMobile = $derived(false);
     let touchStartX = $state(0);
@@ -67,7 +73,6 @@
 
     onMount(() => {
         titleDraft = task.title;
-        badge = getStatusBadge(task);
 
         const unsubBoard = boardStore.subscribe(b => {
             if (b) {
@@ -134,17 +139,11 @@
         task.title = titleDraft.trim();
     }
 
-    function getStatusBadge(task: Task): { text: string; color: string } {
-        switch (task.status_state) {
-            case 'running': return { text: 'Running', color: 'var(--color-status-blue)' };
-            case 'queued': return { text: 'Queued', color: 'var(--color-status-yellow)' };
-            case 'paused': return { text: 'Paused', color: 'var(--color-status-purple)' };
-            case 'awaiting_review': return { text: 'Review', color: 'var(--color-status-orange)' };
-            case 'stopped': return { text: 'Stopped', color: 'var(--color-text-tertiary)' };
-            case 'failed': return { text: 'Failed', color: 'var(--color-status-red)' };
-            case 'completed': return { text: 'Completed', color: 'var(--color-status-green)' };
-            default: return { text: 'Idle', color: 'var(--color-text-tertiary)' };
-        }
+    function getStatusBadge(t: Task): { text: string; color: string } {
+        const streaming = get(streamingTaskIds).has(t.id);
+        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (t.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        return { text: '', color: 'var(--color-text-tertiary)' };
     }
 
 
@@ -261,7 +260,7 @@
                                         aria-current={t.id === task.id ? 'task' : undefined}
                                     >
                                         <span class="task-item-title">{t.title || '(untitled)'}</span>
-                                        {#if t.status_state !== 'idle' && t.status_state !== ''}
+                                        {#if getStatusBadge(t).text}
                                             <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
                                                 {getStatusBadge(t).text}
                                             </span>

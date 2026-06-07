@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
-    import { selectedTask, showCardDetail, board as boardStore } from '$lib/store';
+    import { get } from 'svelte/store';
+    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds } from '$lib/store';
     import { moveTask } from '$lib/api';
 
     let { task, columnId, projectId }: { task: Task; columnId: string; projectId?: string } = $props();
@@ -26,17 +27,12 @@
         return () => window.removeEventListener('resize', check);
     });
 
-    function getStatusBadge(): { text: string; color: string } | null {
-        switch (task.status_state) {
-            case 'running': return { text: 'Running', color: 'var(--color-status-blue)' };
-            case 'queued': return { text: 'Queued', color: 'var(--color-status-yellow)' };
-            case 'paused': return { text: 'Paused', color: 'var(--color-status-purple)' };
-            case 'awaiting_review': return { text: 'Review', color: 'var(--color-status-orange)' };
-            case 'stopped': return { text: 'Stopped', color: 'var(--color-status-gray)' };
-            case 'failed': return { text: 'Failed', color: 'var(--color-status-red)' };
-            default: return null;
-        }
-    }
+    let statusBadge = $derived.by(() => {
+        const streaming = get(streamingTaskIds).has(task.id);
+        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        return null;
+    });
 
     function truncate(s: string, max: number): string {
         return s.length > max ? s.slice(0, max) + '...' : s;
@@ -84,9 +80,9 @@
 >
     <div class="card-title">{truncate(task.title, 50)}</div>
     <div class="card-preview">{truncate(task.prompt, 80)}</div>
-    {#if getStatusBadge()}
-        <div class="badge" style="background: {getStatusBadge()!.color}22; color: {getStatusBadge()!.color}">
-            {getStatusBadge()!.text}
+    {#if statusBadge}
+        <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
+            {statusBadge.text}
         </div>
     {/if}
     <button

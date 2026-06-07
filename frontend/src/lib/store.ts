@@ -12,6 +12,9 @@ export const showConfig = writable(false);
 export const showTerminal = writable(false);
 export const showCardDetail = writable(false);
 
+// Task IDs that are actively streaming tokens (frontend-only, real-time)
+export const streamingTaskIds = writable<Set<string>>(new Set());
+
 // Toast notification — empty string means no toast visible
 export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);
 

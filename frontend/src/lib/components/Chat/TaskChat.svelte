@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider } from '$lib/types';
     import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
-import { board as boardStore, config as configStore, showToast } from '$lib/store';
+import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
@@ -106,9 +106,20 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         }
     }
 
+    /** Mark this task as actively streaming tokens. */
+    function markStreaming() {
+        streamingTaskIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
+    }
+
+    /** Mark this task as no longer streaming. */
+    function markNotStreaming() {
+        streamingTaskIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
+    }
+
     function handleEvent(event: StreamEvent) {
         switch (event.type) {
             case 'token': {
+                markStreaming();
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.content += data.text;
@@ -192,6 +203,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
                 break;
             }
             case 'complete': {
+                markNotStreaming();
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
                 closeCurrentAssistant();
                 // Attach stats to the last assistant entry
@@ -204,6 +216,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
                 break;
             }
             case 'error': {
+                markNotStreaming();
                 closeCurrentAssistant();
                 connected = false;
                 isLoading = false;
@@ -426,6 +439,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     }
 
     async function handleStop() {
+        markNotStreaming();
         if (ws) {
             ws.close();
             ws = null;
@@ -483,6 +497,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         ws = createTaskStream(projectId, taskId, (event) => handleEvent(event));
         ws.ws.onopen = () => { connecting = false; connected = true; };
         ws.ws.onclose = () => {
+            markNotStreaming();
             connected = false;
             closeCurrentAssistant();
             isLoading = false;
