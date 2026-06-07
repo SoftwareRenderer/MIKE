@@ -5,7 +5,7 @@
     import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
     import TaskChat from './Chat/TaskChat.svelte';
 
-    let { task, tasks: columnTasks, onClose }: { task: Task; tasks: Task[]; onClose: () => void } = $props();
+    let { task, tasks: columnTasks, projectName, onClose }: { task: Task; tasks: Task[]; projectName?: string; onClose: () => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -161,6 +161,7 @@
                 </button>
                 <div class="header-main">
                     {#if editingTitle}
+                        <span class="project-prefix">{projectName} / </span>
                         <input
                             class="title-input"
                             bind:value={titleDraft}
@@ -170,6 +171,7 @@
                             autofocus={true}
                         />
                     {:else}
+                        <span class="project-prefix">{projectName}{#if task.title || task.title === ''} / {/if}</span>
                         <button type="button" class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} aria-label="Edit task title">
                             {task.title || '(untitled)'}
                         </button>
@@ -353,6 +355,13 @@
         gap: 10px;
         min-width: 0;
         flex: 1;
+    }
+    .project-prefix {
+        font-size: 0.875rem;
+        font-weight: 400;
+        color: var(--color-text-tertiary);
+        white-space: nowrap;
+        flex-shrink: 0;
     }
     .title {
         font-size: 0.875rem;

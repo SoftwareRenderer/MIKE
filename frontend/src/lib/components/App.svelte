@@ -256,6 +256,7 @@
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
+            {#if !(showCardDetailVal && selectedTaskVal)}
             <header class="top-bar">
                 {#if isMobile}
                     <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu">
@@ -276,9 +277,10 @@
                     </button>
                 </div>
             </header>
+            {/if}
             <section class="board-container" aria-label="Kanban board">
                 {#if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectName={currentProject?.name} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         history.pushState({ task: null }, '', location.pathname);
