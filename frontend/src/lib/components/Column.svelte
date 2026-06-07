@@ -81,7 +81,7 @@
         border-bottom: 2px solid var(--col-color);
     }
     .column-header h3 {
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -91,7 +91,7 @@
         background: var(--color-surface-3);
         border-radius: 10px;
         padding: 2px 8px;
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
     }
     .card-list {
@@ -107,7 +107,7 @@
         padding: 8px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 13px;
+        font-size: 0.875rem;
         color: var(--color-text-secondary);
         cursor: pointer;
         transition: background 0.15s ease;

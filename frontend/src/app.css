@@ -7,8 +7,8 @@
     --color-border: #30363D;
     --color-border-bright: #444C56;
     --color-text-primary: #E6EDF3;
-    --color-text-secondary: #8B949E;
-    --color-text-tertiary: #8B949E;
+    --color-text-secondary: #AEB2B8;
+    --color-text-tertiary: #AEB2B8;
     --color-accent: #0084FF;
     --color-accent-hover: #339DFF;
     --color-status-blue: #4C9AFF;
@@ -36,6 +36,7 @@
 
 body {
     font-family: var(--font-sans);
+    font-size: 1rem;
     background: var(--color-surface-0);
     color: var(--color-text-primary);
     line-height: 1.5;

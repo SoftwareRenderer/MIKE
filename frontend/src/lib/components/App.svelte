@@ -340,7 +340,7 @@
         :global(input),
         :global(textarea),
         :global(select) {
-            font-size: 16px !important;
+            font-size: 1rem !important;
         }
 
         :global(*) {
@@ -412,14 +412,14 @@
         border-bottom: 1px solid var(--color-border);
     }
     .sidebar-header h2 {
-        font-size: 16px;
+        font-size: 1rem;
         font-weight: 600;
     }
     .collapsed .sidebar-header h2 {
         display: none;
     }
     .toggle-btn {
-        font-size: 12px;
+        font-size: 0.75rem;
         padding: 4px 8px;
         color: var(--color-text-secondary);
     }
@@ -444,7 +444,7 @@
         padding: 8px 12px;
         border-radius: var(--radius-md);
         text-align: left;
-        font-size: 14px;
+        font-size: 0.875rem;
         color: var(--color-text-primary);
         background: transparent;
     }
@@ -464,7 +464,7 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-status-red);
-        font-size: 14px;
+        font-size: 0.875rem;
         opacity: 0;
         transition: opacity 0.15s ease;
         flex-shrink: 0;
@@ -491,7 +491,7 @@
         padding: 8px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 13px;
+        font-size: 0.875rem;
         color: var(--color-text-secondary);
     }
     .add-project-btn:hover {
@@ -512,7 +512,7 @@
         background: var(--color-surface-1);
     }
     .project-title {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 600;
     }
     .actions {
@@ -523,7 +523,7 @@
         padding: 6px 12px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 13px;
+        font-size: 0.875rem;
     }
     .icon-btn:hover {
         background: var(--color-accent);
@@ -542,7 +542,7 @@
         color: var(--color-text-secondary);
     }
     .empty-state h2 {
-        font-size: 20px;
+        font-size: 1.25rem;
         color: var(--color-text-primary);
     }
     .btn-primary {
@@ -564,7 +564,7 @@
         color: white;
         padding: 10px 20px;
         border-radius: var(--radius-md);
-        font-size: 14px;
+        font-size: 0.875rem;
         z-index: 400;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }

@@ -190,11 +190,11 @@
         border-bottom: 1px solid var(--color-border);
     }
     .browser-header h2 {
-        font-size: 16px;
+        font-size: 1rem;
         font-weight: 600;
     }
     .close-btn {
-        font-size: 18px;
+        font-size: 1.125rem;
         color: var(--color-text-secondary);
         padding: 4px;
     }
@@ -212,7 +212,7 @@
         align-items: center;
     }
     .home-btn {
-        font-size: 18px;
+        font-size: 1.125rem;
         padding: 4px 8px;
         background: var(--color-surface-3);
         border-radius: var(--radius-sm);
@@ -224,7 +224,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
-        font-size: 13px;
+        font-size: 0.875rem;
         font-family: var(--font-mono);
     }
     .path-input:focus-visible {
@@ -232,7 +232,7 @@
     }
     .error {
         color: var(--color-status-red);
-        font-size: 13px;
+        font-size: 0.875rem;
         padding: 8px;
         background: var(--color-status-red)11;
         border-radius: var(--radius-sm);
@@ -244,7 +244,7 @@
     }
     .git-indicator {
         color: var(--color-status-green);
-        font-size: 13px;
+        font-size: 0.875rem;
         padding: 8px;
         background: var(--color-status-green)11;
         border-radius: var(--radius-sm);
@@ -262,7 +262,7 @@
         padding: 8px 12px;
         border-radius: var(--radius-sm);
         cursor: pointer;
-        font-size: 14px;
+        font-size: 0.875rem;
         text-align: left;
         width: 100%;
         font: inherit;
@@ -280,7 +280,7 @@
         background: var(--color-status-green)22;
     }
     .icon {
-        font-size: 16px;
+        font-size: 1rem;
         flex-shrink: 0;
     }
     .name {
@@ -290,7 +290,7 @@
         white-space: nowrap;
     }
     .git-badge {
-        font-size: 10px;
+        font-size: 0.75rem;
         padding: 1px 6px;
         background: var(--color-status-green)33;
         color: var(--color-status-green);
@@ -306,7 +306,7 @@
         gap: 12px;
     }
     .current-path {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
         overflow: hidden;
@@ -322,7 +322,7 @@
         padding: 6px 16px;
         background: var(--color-surface-3);
         border-radius: var(--radius-md);
-        font-size: 13px;
+        font-size: 0.875rem;
     }
     .btn-cancel:hover {
         background: var(--color-surface-4);
@@ -332,7 +332,7 @@
         background: var(--color-accent);
         color: white;
         border-radius: var(--radius-md);
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 500;
     }
     .btn-select:hover:not(:disabled) {

@@ -177,11 +177,11 @@
         border-bottom: 1px solid var(--color-border);
     }
     .modal-header h2 {
-        font-size: 16px;
+        font-size: 1rem;
         font-weight: 600;
     }
     .close-btn {
-        font-size: 18px;
+        font-size: 1.125rem;
         color: var(--color-text-secondary);
         padding: 4px;
     }
@@ -195,7 +195,7 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-secondary);
     }
@@ -205,7 +205,7 @@
         border-radius: var(--radius-md);
         padding: 8px 12px;
         color: var(--color-text-primary);
-        font-size: 14px;
+        font-size: 0.875rem;
     }
     input[type="text"]:focus-visible, textarea:focus-visible {
         border-color: var(--color-accent);
@@ -224,7 +224,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-secondary);
     }
@@ -246,16 +246,16 @@
     }
     .option-title {
         font-weight: 600;
-        font-size: 13px;
+        font-size: 0.875rem;
     }
     .option-desc {
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
     .error {
         color: var(--color-status-red);
-        font-size: 13px;
+        font-size: 0.875rem;
     }
     .modal-footer {
         display: flex;

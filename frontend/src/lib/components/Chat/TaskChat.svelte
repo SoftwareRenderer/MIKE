@@ -661,8 +661,8 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         text-align: center;
         height: 100%;
     }
-    .chat-empty p { font-size: 13px; margin: 0; font-weight: 500; }
-    .chat-empty .hint { font-size: 11px; }
+    .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .chat-empty .hint { font-size: 0.75rem; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .tool-call-entry { padding: 4px 0; }
     .tool-call-card {
@@ -672,8 +672,8 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         padding: 8px 12px;
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .tool-name { font-weight: 600; font-size: 12px; color: var(--color-accent); }
-    .tool-status { font-size: 11px; font-weight: 500; }
+    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-accent); }
+    .tool-status { font-size: 0.75rem; font-weight: 500; }
     .tool-status.pending { color: var(--color-status-yellow); }
     .tool-status.success { color: var(--color-status-green); }
     .tool-status.error { color: var(--color-status-red); }
@@ -687,12 +687,12 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         animation: spin 0.6s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .tool-duration { font-size: 10px; color: var(--color-text-tertiary); margin-left: auto; }
+    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); margin-left: auto; }
     .tool-args {
         background: var(--color-surface-0);
         padding: 6px 8px;
         border-radius: var(--radius-sm);
-        font-size: 11px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         overflow-x: auto;
         margin: 0;
@@ -702,7 +702,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         background: var(--color-surface-0);
         padding: 6px 8px;
         border-radius: var(--radius-sm);
-        font-size: 11px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         overflow-x: auto;
         margin: 4px 0 0;

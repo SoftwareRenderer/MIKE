@@ -114,7 +114,7 @@
         flex-shrink: 0;
     }
     .title {
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 600;
         color: var(--color-text-secondary);
     }
@@ -122,7 +122,7 @@
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        font-size: 16px;
+        font-size: 1rem;
         cursor: pointer;
         padding: 2px 6px;
     }

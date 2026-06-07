@@ -74,7 +74,7 @@
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-weight: 500;
         padding: 4px 0;
         cursor: pointer;
@@ -84,11 +84,11 @@
     .section-header:hover {
         color: var(--color-text-primary);
     }
-    .icon { font-size: 14px; }
+    .icon { font-size: 0.875rem; }
     .label { text-transform: capitalize; }
     .token-count {
         color: var(--color-text-tertiary);
-        font-size: 11px;
+        font-size: 0.75rem;
     }
     .collapse-icon {
         margin-left: auto;
@@ -98,7 +98,7 @@
         transform: rotate(-90deg);
     }
     .collapsed-summary {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-style: italic;
         padding: 2px 0 4px;

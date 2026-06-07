@@ -57,7 +57,7 @@
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
         border-radius: var(--radius-sm);
-        font-size: 12px;
+        font-size: 0.75rem;
         cursor: pointer;
     }
     .action-btn:hover {
@@ -70,7 +70,7 @@
         margin-left: auto;
     }
     .stat {
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
     }

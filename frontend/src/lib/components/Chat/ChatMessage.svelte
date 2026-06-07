@@ -390,11 +390,11 @@
         flex-direction: column;
         gap: 4px;
         padding: 2px 0 4px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
     .stats-model-name {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-tertiary);
         text-transform: uppercase;
@@ -457,7 +457,7 @@
         justify-content: flex-start;
     }
     .message-timestamp {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.6;
         white-space: nowrap;

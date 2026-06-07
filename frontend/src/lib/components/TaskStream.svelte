@@ -246,13 +246,13 @@
         padding: 8px 0;
     }
     .stream-text {
-        font-size: 14px;
+        font-size: 0.875rem;
         line-height: 1.6;
         white-space: pre-wrap;
         color: var(--color-text-primary);
     }
     .stream-reasoning {
-        font-size: 13px;
+        font-size: 0.875rem;
         line-height: 1.5;
         font-style: italic;
         color: var(--color-text-tertiary);
@@ -272,14 +272,14 @@
     }
     .tool-name {
         font-weight: 600;
-        font-size: 13px;
+        font-size: 0.875rem;
         color: var(--color-accent);
     }
     .spinner { color: var(--color-status-yellow); }
     .success { color: var(--color-status-green); }
     .error { color: var(--color-status-red); }
     .duration {
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         margin-left: auto;
     }
@@ -287,7 +287,7 @@
         background: var(--color-surface-0);
         padding: 8px;
         border-radius: var(--radius-sm);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         overflow-x: auto;
         margin: 0;
@@ -296,7 +296,7 @@
         background: var(--color-surface-0);
         padding: 8px;
         border-radius: var(--radius-sm);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         overflow-x: auto;
         margin: 4px 0 0;
@@ -308,7 +308,7 @@
     .raw {
         background: var(--color-surface-0);
         padding: 12px;
-        font-size: 12px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         white-space: pre-wrap;
         margin: 0;

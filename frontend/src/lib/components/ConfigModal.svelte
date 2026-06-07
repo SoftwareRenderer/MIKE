@@ -394,7 +394,7 @@
                                                 <span class="help-icon" title="Maximum simultaneous requests to this provider. Higher values allow parallel task execution but may overload the server.">
                                                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                                         <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                                        <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                                                        <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                                                     </svg>
                                                 </span>
                                             </div>
@@ -493,7 +493,7 @@
                         <span class="help-icon" title="Automatically commit changes when the task completes">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                             </svg>
                         </span>
                     </div>
@@ -516,7 +516,7 @@
                         <span class="help-icon" title="Task describes its plan before making changes">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                             </svg>
                         </span>
                     </div>
@@ -539,7 +539,7 @@
                         <span class="help-icon" title="Stop task after this many consecutive LLM failures">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
+                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                             </svg>
                         </span>
                     </div>
@@ -590,11 +590,11 @@
         border-bottom: 1px solid var(--color-border);
     }
     .modal-header h2 {
-        font-size: 16px;
+        font-size: 1rem;
         font-weight: 600;
     }
     .close-btn {
-        font-size: 20px;
+        font-size: 1.25rem;
         color: var(--color-text-primary);
         padding: 4px 8px;
         line-height: 1;
@@ -647,7 +647,7 @@
     /* Section headings */
     .section-label {
         margin: 0;
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -666,7 +666,7 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -674,14 +674,14 @@
         width: 100%;
     }
     .field-help {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
 
     /* Section description */
     .section-description {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         margin: -4px 0 4px;
     }
@@ -702,7 +702,7 @@
         gap: 8px;
     }
     .toggle-label {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -742,7 +742,7 @@
         gap: 12px;
     }
     .field-label-inline {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -754,7 +754,7 @@
         border-radius: var(--radius-md);
         padding: 8px 12px;
         color: var(--color-text-primary);
-        font-size: 14px;
+        font-size: 0.875rem;
     }
     input:focus-visible, select:focus-visible {
         border-color: var(--color-accent);
@@ -769,7 +769,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 500;
         cursor: pointer;
         white-space: nowrap;
@@ -796,12 +796,12 @@
         color: var(--color-text-secondary);
     }
     .providers-empty p {
-        font-size: 15px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .providers-empty span {
-        font-size: 13px;
+        font-size: 0.875rem;
         max-width: 280px;
     }
     .empty-icon {
@@ -851,7 +851,7 @@
         gap: 8px;
     }
     .provider-display-name {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 600;
         color: var(--color-text-primary);
     }
@@ -867,7 +867,7 @@
     .active-badge {
         display: inline-flex;
         align-items: center;
-        font-size: 10px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -880,7 +880,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 10px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -896,7 +896,7 @@
 
     /* URL input in header */
     .url-input {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
         background: transparent;
         border: 1px solid transparent;
@@ -923,7 +923,7 @@
         flex-shrink: 0;
     }
     .model-count-badge {
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
         background: var(--color-surface-3);
         padding: 2px 8px;
@@ -932,7 +932,7 @@
         white-space: nowrap;
     }
     .default-model-badge {
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-status-yellow);
         background: rgba(227, 179, 65, 0.1);
         padding: 2px 8px;
@@ -1036,7 +1036,7 @@
         gap: 6px;
         padding: 6px 12px;
         border-radius: var(--radius-sm);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
@@ -1079,7 +1079,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-status-red);
         font-weight: 500;
         background: rgba(248, 81, 73, 0.08);
@@ -1092,7 +1092,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 12px;
+        font-size: 0.75rem;
         font-weight: 500;
         padding: 6px 10px;
         border-radius: var(--radius-sm);
@@ -1123,7 +1123,7 @@
         gap: 6px;
     }
     .option-label {
-        font-size: 13px;
+        font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-secondary);
         flex-shrink: 0;
@@ -1160,7 +1160,7 @@
         justify-content: space-between;
     }
     .models-label {
-        font-size: 12px;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -1174,7 +1174,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-weight: 500;
         cursor: pointer;
     }
@@ -1189,7 +1189,7 @@
         gap: 4px;
     }
     .models-empty {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         padding: 8px 0;
         font-style: italic;
@@ -1214,7 +1214,7 @@
         min-width: 0;
     }
     .in-use-badge {
-        font-size: 10px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.03em;
@@ -1227,7 +1227,7 @@
 
     /* Model name display */
     .model-name-label {
-        font-size: 13px;
+        font-size: 0.875rem;
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
         overflow: hidden;
@@ -1238,7 +1238,7 @@
     /* Model name input */
     .model-input {
         padding: 5px 8px;
-        font-size: 13px;
+        font-size: 0.875rem;
         width: 100%;
     }
 
@@ -1248,7 +1248,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         padding: 4px 6px;
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
         cursor: pointer;
         width: 100%;
@@ -1269,7 +1269,7 @@
     .btn-default {
         padding: 3px 10px;
         border-radius: 10px;
-        font-size: 11px;
+        font-size: 0.75rem;
         font-weight: 600;
         cursor: pointer;
         text-align: center;
@@ -1300,7 +1300,7 @@
         align-items: center;
         justify-content: center;
         border-radius: var(--radius-sm);
-        font-size: 18px;
+        font-size: 1.125rem;
         width: 28px;
         height: 28px;
         transition: color 0.15s ease, background 0.15s ease;
@@ -1312,7 +1312,7 @@
 
     .error {
         color: var(--color-status-red);
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 500;
     }
     .modal-footer {

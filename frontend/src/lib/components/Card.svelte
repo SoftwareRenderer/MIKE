@@ -117,7 +117,7 @@
         cursor: grabbing;
     }
     .card-title {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 500;
         margin-bottom: 6px;
         white-space: nowrap;
@@ -125,7 +125,7 @@
         text-overflow: ellipsis;
     }
     .card-preview {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
         line-height: 1.4;
         display: -webkit-box;
@@ -135,7 +135,7 @@
     }
     .badge {
         display: inline-block;
-        font-size: 11px;
+        font-size: 0.75rem;
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         margin-top: 8px;
@@ -153,7 +153,7 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-tertiary);
-        font-size: 14px;
+        font-size: 0.875rem;
         opacity: 0;
         transition: opacity 0.15s ease, background 0.15s ease;
         padding: 0;

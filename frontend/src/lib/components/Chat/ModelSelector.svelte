@@ -313,7 +313,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 11px;
+        font-size: 0.75rem;
         font-family: inherit;
         cursor: pointer;
         transition: all 0.15s ease;
@@ -357,7 +357,7 @@
 
     .empty {
         padding: 12px 16px;
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         text-align: center;
     }
@@ -372,7 +372,7 @@
         border: none;
         background: none;
         color: var(--color-text-primary);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-family: inherit;
         cursor: pointer;
         text-align: left;
@@ -393,7 +393,7 @@
         font-weight: 500;
     }
     .model-count {
-        font-size: 10px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         flex-shrink: 0;
     }
@@ -408,7 +408,7 @@
         border: none;
         background: none;
         color: var(--color-text-primary);
-        font-size: 12px;
+        font-size: 0.75rem;
         font-family: inherit;
         cursor: pointer;
         text-align: left;

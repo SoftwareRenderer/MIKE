@@ -352,7 +352,7 @@
         flex: 1;
     }
     .title {
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 600;
         cursor: pointer;
         margin: 0;
@@ -372,7 +372,7 @@
     .title-input {
         flex: 1;
         padding: 4px 8px;
-        font-size: 14px;
+        font-size: 0.875rem;
         font-weight: 600;
         background: var(--color-surface-2);
         border: 1px solid var(--color-accent);
@@ -383,7 +383,7 @@
     .badge {
         padding: 2px 8px;
         border-radius: 10px;
-        font-size: 10px;
+        font-size: 0.75rem;
         font-weight: 600;
         flex-shrink: 0;
         border: 1px solid;
@@ -443,7 +443,7 @@
         color: var(--color-text-secondary);
     }
     .column-title {
-        font-size: 11px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -452,7 +452,7 @@
         background: var(--color-surface-3);
         border-radius: 8px;
         padding: 1px 6px;
-        font-size: 11px;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
     }
     .task-list {
@@ -470,14 +470,14 @@
         padding: 6px 6px 2px 6px;
     }
     .section-title {
-        font-size: 10px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.4px;
         color: var(--color-text-tertiary);
     }
     .section-count {
-        font-size: 10px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
     .task-item {
@@ -502,7 +502,7 @@
         outline: 1px solid var(--color-accent)40;
     }
     .task-item-title {
-        font-size: 12px;
+        font-size: 0.75rem;
         color: var(--color-text-primary);
         white-space: nowrap;
         overflow: hidden;
@@ -511,7 +511,7 @@
         min-width: 0;
     }
     .task-item-badge {
-        font-size: 9px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         flex-shrink: 0;
@@ -545,7 +545,7 @@
     }
     .diff-view {
         padding: 10px 12px;
-        font-size: 11px;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         overflow-x: auto;
         white-space: pre;
@@ -563,15 +563,15 @@
         color: var(--color-text-tertiary);
         text-align: center;
     }
-    .diff-empty p { font-size: 13px; margin: 0; font-weight: 500; }
-    .diff-empty .hint { font-size: 11px; color: var(--color-text-tertiary); }
+    .diff-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .diff-empty .hint { font-size: 0.75rem; color: var(--color-text-tertiary); }
     .diff-loading {
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 32px;
         color: var(--color-text-tertiary);
-        font-size: 13px;
+        font-size: 0.875rem;
     }
     .mobile-tab-bar {
         display: none;
@@ -597,7 +597,7 @@
             border: none;
             background: none;
             color: var(--color-text-tertiary);
-            font-size: 12px;
+            font-size: 0.75rem;
             font-weight: 500;
             cursor: pointer;
             border-bottom: 2px solid transparent;
@@ -634,7 +634,7 @@
             padding: 8px 4px 4px 4px;
         }
         .section-title {
-            font-size: 11px;
+            font-size: 0.75rem;
         }
         .task-item {
             padding: 10px 12px;
@@ -642,7 +642,7 @@
             align-items: center;
         }
         .task-item-title {
-            font-size: 13px;
+            font-size: 0.875rem;
         }
     }
 </style>
