@@ -545,9 +545,10 @@
         background: none;
         border: none;
         padding: 0;
-        font-size: 16px;
+        font-size: 18px;
         cursor: pointer;
-        color: #B0BAC4;
+        color: var(--color-text-primary);
+        opacity: 0.7;
         line-height: 1;
         display: flex;
         align-items: center;
@@ -555,9 +556,11 @@
     }
     .btn-star:hover {
         color: var(--color-status-yellow);
+        opacity: 1;
     }
     .btn-star.active {
         color: var(--color-status-yellow);
+        opacity: 1;
     }
 
     /* Remove model button */
