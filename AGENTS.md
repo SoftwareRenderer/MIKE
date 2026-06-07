@@ -71,6 +71,14 @@ npx playwright test --grep "should edit message"
 npx playwright test --ui
 ```
 
+### Test Environment Cleanup
+Before running tests, ensure no stale processes hold ports:
+```bash
+pkill -f "mock-llm" 2>/dev/null
+rm -f /tmp/kanban-test-setup.lock
+```
+Tests fail with `ERR_CONNECTION_REFUSED` if the mock LLM port (9999) is held by a previous run.
+
 ### Testing Rules
 - **Server must be running** on `:3000` before tests
 - **Mock LLM is enabled by default** — tests use pre-recorded responses, not real Neptune endpoint
@@ -198,6 +206,22 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - Edit mode: replace message + discard conversation tree
 - Stats format: `X tokens · Ys · Z tok/s` (completion tokens, not total)
 
+### Diff Viewer
+- Raw unified diff from `getTaskDiff()` is parsed into structured rows in `CardDetail.svelte`
+- Row types: `file-header` (`diff --git`, `---`, `+++`), `index`, `hunk-header` (`@@`), `added` (`+`), `removed` (`-`), `context` (` `)
+- Each code row renders as CSS grid: `2rem` line number gutter + content
+- Color coding: `rgba(63,185,80,0.15)` for additions, `rgba(248,81,73,0.15)` for deletions
+- Reference design: `examples/kanban/web-ui/src/components/shared/diff-renderer.tsx`
+
+### Reactive Status Badge
+- Use `$derived(getStatusBadge(task))` instead of `$state()` + manual `onMount` assignment
+- This ensures the badge updates automatically when `task.status_state` changes (e.g., idle → running → completed)
+
+### Sticky Section Headers
+- Use `position: sticky; top: 0; z-index: 5;` on section headers within scrollable containers
+- Add matching `background` color so scrolling content doesn't show through
+- Add `border-bottom` for visual separation from content below
+
 ## Debugging Checklist
 1. Server running? `ps aux | grep kanban`
 2. Config correct? `curl /api/config`
@@ -206,3 +230,4 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 5. Browser cache cleared? Hard refresh
 6. Check logs: server stdout or `/tmp/kanban.log`
 7. Tests passing? `npx playwright test`
+8. Stale mock LLM? `lsof -i :9999` — kill if present
