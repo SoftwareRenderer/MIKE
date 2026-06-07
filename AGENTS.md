@@ -198,11 +198,6 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - Edit mode: replace message + discard conversation tree
 - Stats format: `X tokens · Ys · Z tok/s` (completion tokens, not total)
 
-### Git/Worktree
-- Worktrees in `/home/mwren/projects/kanban/worktrees/`
-- Baseline branch: `__kanban_baseline_<taskID>`
-- Always checkout to `main` before recreating baseline branch
-
 ## Debugging Checklist
 1. Server running? `ps aux | grep kanban`
 2. Config correct? `curl /api/config`
