@@ -1,13 +1,19 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Task } from '$lib/types';
-    import { board as boardStore } from '$lib/store';
+    import { board as boardStore, selectedTask } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
     import TaskChat from './Chat/TaskChat.svelte';
 
     let { task, tasks: columnTasks, onClose }: { task: Task; tasks: Task[]; onClose: () => void } = $props();
 
     let allTasks: Task[] = $state([]);
+
+    const overviewSections = [
+        { id: 'backlog', title: 'Backlog' },
+        { id: 'in_progress', title: 'In Progress' },
+        { id: 'review', title: 'Review' },
+    ];
     let diffText = $state('');
     let loadingDiff = $state(false);
     let editingTitle = $state(false);
@@ -64,9 +70,8 @@
         badge = getStatusBadge(task);
 
         const unsubBoard = boardStore.subscribe(b => {
-            if (b && task) {
-                allTasks = b.tasks.filter(t => t.status === task.status)
-                    .sort((a, b) => a.column_order - b.column_order);
+            if (b) {
+                allTasks = b.tasks;
             } else {
                 allTasks = [];
             }
@@ -142,9 +147,7 @@
         }
     }
 
-    function getColumnTitle(status: string): string {
-        return status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
-    }
+
 </script>
 
     <div class="task-detail-page">
@@ -186,7 +189,7 @@
                     </button>
                 {/if}
                 <button class="btn-icon" onclick={handleDelete} title="Delete task">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V3h6v1M6 4v1H4l1 9h6l1-9H6M9 7v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             </div>
         </div>
@@ -199,7 +202,7 @@
                     onclick={() => activeTab = 'context'}
                 >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2"/></svg>
-                    Context
+                    Board
                 </button>
                 <button
                     class="tab-btn {activeTab === 'chat' ? 'active' : ''}"
@@ -222,23 +225,34 @@
         <div class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp}>
             <!-- Column 1: Board Overview -->
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'}>
-                <div class="column-header" style="border-bottom-color: var(--color-border)">
-                    <span class="column-title">{getColumnTitle(task.status)}</span>
+                <div class="column-header">
+                    <span class="column-title">Board</span>
                     <span class="column-count">{allTasks.length}</span>
                 </div>
                 <div class="task-list">
-                    {#each allTasks as t (t.id)}
-                        <div
-                            class={`task-item${t.id === task.id ? ' selected' : ''}`}
-                            onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); }}
-                        >
-                            <div class="task-item-title">{t.title || '(untitled)'}</div>
-                            {#if t.status_state !== 'idle' && t.status_state !== ''}
-                                <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
-                                    {getStatusBadge(t).text}
-                                </span>
-                            {/if}
-                        </div>
+                    {#each overviewSections as section}
+                        {@const sectionTasks = allTasks.filter(t => t.status === section.id).sort((a, b) => a.column_order - b.column_order)}
+                        {#if sectionTasks.length > 0}
+                            <div class="section-group">
+                                <div class="section-header">
+                                    <span class="section-title">{section.title}</span>
+                                    <span class="section-count">{sectionTasks.length}</span>
+                                </div>
+                                {#each sectionTasks as t (t.id)}
+                                    <div
+                                        class={`task-item${t.id === task.id ? ' selected' : ''}`}
+                                        onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
+                                    >
+                                        <div class="task-item-title">{t.title || '(untitled)'}</div>
+                                        {#if t.status_state !== 'idle' && t.status_state !== ''}
+                                            <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
+                                                {getStatusBadge(t).text}
+                                            </span>
+                                        {/if}
+                                    </div>
+                                {/each}
+                            </div>
+                        {/if}
                     {/each}
                 </div>
             </div>
@@ -437,6 +451,26 @@
         overflow-y: auto;
         padding: 4px;
     }
+    .section-group {
+        margin-bottom: 4px;
+    }
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 6px 2px 6px;
+    }
+    .section-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--color-text-tertiary);
+    }
+    .section-count {
+        font-size: 10px;
+        color: var(--color-text-tertiary);
+    }
     .task-item {
         padding: 8px 10px;
         border-radius: var(--radius-sm);
@@ -577,6 +611,23 @@
         }
         .column-chat {
             border-right: none;
+        }
+        .task-list {
+            padding: 8px;
+        }
+        .section-header {
+            padding: 8px 4px 4px 4px;
+        }
+        .section-title {
+            font-size: 11px;
+        }
+        .task-item {
+            padding: 10px 12px;
+            min-height: 44px;
+            align-items: center;
+        }
+        .task-item-title {
+            font-size: 13px;
         }
     }
 </style>
