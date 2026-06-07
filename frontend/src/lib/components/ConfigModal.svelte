@@ -6,23 +6,9 @@
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
     let workspaceDir = $state(config?.workspace_dir || '');
+    let defaultModel = $state(config?.default_model || '');
     let loading = $state(false);
     let error = $state('');
-
-    interface EndpointLimit { url: string; max: number; }
-    let endpointLimits = $state<EndpointLimit[]>([]);
-
-    if (config?.endpoint_limits) {
-        endpointLimits = Object.entries(config.endpoint_limits).map(([url, max]) => ({ url, max }));
-    }
-
-    function addEndpointLimit() {
-        endpointLimits.push({ url: '', max: 2 });
-    }
-
-    function removeEndpointLimit(idx: number) {
-        endpointLimits.splice(idx, 1);
-    }
 
     // -- Provider management --
     interface ModelEntry {
@@ -35,6 +21,7 @@
         display_name: string;
         url: string;
         models: ModelEntry[];
+        concurrency: number;
         fetchingModels: boolean;
         fetchError: string;
     }
@@ -77,6 +64,7 @@
     let providers = $state<ProviderDraft[]>(
         (config?.providers || []).map(p => ({
             ...p,
+            concurrency: p.concurrency || 1,
             fetchingModels: false,
             fetchError: '',
             models: (p.models || []).map(m => ({ name: m, readonly: false })),
@@ -89,6 +77,7 @@
             display_name: '',
             url: '',
             models: [],
+            concurrency: 1,
             fetchingModels: false,
             fetchError: '',
         });
@@ -130,10 +119,6 @@
         loading = true;
         error = '';
         try {
-            const limits: Record<string, number> = {};
-            for (const el of endpointLimits) {
-                if (el.url.trim()) limits[el.url.trim()] = el.max;
-            }
             const savedProviders: Provider[] = providers
                 .filter(p => p.url.trim())
                 .map(p => {
@@ -143,12 +128,13 @@
                         display_name: p.display_name.trim(),
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => m.name.trim()),
+                        concurrency: p.concurrency || 1,
                     };
                 });
             const cfg = await updateConfig({
                 workspace_dir: workspaceDir.trim(),
-                endpoint_limits: limits,
                 providers: savedProviders,
+                default_model: defaultModel,
             });
             configStore.set(cfg);
             onSaved();
@@ -156,6 +142,14 @@
             error = String(e);
         } finally {
             loading = false;
+        }
+    }
+
+    function setDefaultModel(modelName: string) {
+        if (defaultModel === modelName) {
+            defaultModel = ''; // toggle off
+        } else {
+            defaultModel = modelName;
         }
     }
 
@@ -192,6 +186,10 @@
                             {#if p.fetchError}
                                 <div class="fetch-error">{p.fetchError}</div>
                             {/if}
+                            <div class="concurrency-row">
+                                <label class="concurrency-label">Concurrency</label>
+                                <input type="number" bind:value={p.concurrency} min="1" max="20" class="concurrency-input" />
+                            </div>
                             <div class="models-section">
                                 <div class="models-header">
                                     <span class="models-label">Models ({p.models.length})</span>
@@ -200,11 +198,17 @@
                                 {#each p.models as model, mi}
                                     {#if model.readonly}
                                         <div class="model-row model-row-readonly">
+                                            <button type="button" class="btn-star" class:active={defaultModel === model.name} onclick={() => setDefaultModel(model.name)} title="Set as default model">
+                                                {defaultModel === model.name ? '★' : '☆'}
+                                            </button>
                                             <span class="model-name-label">{model.name}</span>
                                             <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)}>✕</button>
                                         </div>
                                     {:else}
                                         <div class="model-row">
+                                            <button type="button" class="btn-star" class:active={model.name && defaultModel === model.name} onclick={() => model.name && setDefaultModel(model.name)} title="Set as default model">
+                                                {model.name && defaultModel === model.name ? '★' : '☆'}
+                                            </button>
                                             <input type="text" bind:value={model.name} placeholder="Model name" />
                                             <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)}>✕</button>
                                         </div>
@@ -224,20 +228,6 @@
                 Workspace Directory
                 <input type="text" bind:value={workspaceDir} placeholder="./workspace" />
             </label>
-
-            <div class="endpoint-limits">
-                <div class="section-header">
-                    <label style="margin:0">Endpoint Concurrency Limits</label>
-                    <button type="button" class="btn-small" onclick={addEndpointLimit}>+ Add</button>
-                </div>
-                {#each endpointLimits as el, i}
-                    <div class="limit-row">
-                        <input type="text" bind:value={el.url} placeholder="Endpoint URL" style="flex:1" />
-                        <input type="number" bind:value={el.max} min="1" max="10" style="width:60px" />
-                        <button type="button" class="btn-remove" onclick={() => removeEndpointLimit(i)}>✕</button>
-                    </div>
-                {/each}
-            </div>
 
             {#if error}
                 <div class="error">{error}</div>
@@ -449,6 +439,22 @@
         font-size: 12px;
         flex-shrink: 0;
     }
+    .btn-star {
+        background: none;
+        border: none;
+        padding: 2px 4px;
+        font-size: 14px;
+        cursor: pointer;
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+        line-height: 1;
+    }
+    .btn-star:hover {
+        color: var(--color-status-yellow);
+    }
+    .btn-star.active {
+        color: var(--color-status-yellow);
+    }
     .btn-remove-provider {
         color: var(--color-status-red);
         padding: 4px 8px;
@@ -460,19 +466,20 @@
         background: var(--color-status-red)22;
     }
 
-    /* Endpoint limits */
-    .endpoint-limits {
+    /* Concurrency */
+    .concurrency-row {
         display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .limit-row {
-        display: flex;
-        gap: 8px;
         align-items: center;
+        gap: 8px;
     }
-    .btn-remove {
-        color: var(--color-status-red);
+    .concurrency-label {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+        min-width: 70px;
+    }
+    .concurrency-input {
+        width: 70px;
+        font-size: 12px;
         padding: 4px 8px;
     }
 

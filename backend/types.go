@@ -34,12 +34,12 @@ type Board struct {
 
 // Config represents global server configuration.
 type Config struct {
-	LlamaServerURL string         `json:"llama_server_url"`
-	ModelName      string         `json:"model_name"`
-	WorkspaceDir   string         `json:"workspace_dir"`
-	EndpointLimits map[string]int `json:"endpoint_limits"`
-	Providers      []Provider     `json:"providers"`          // named provider presets
-	DefaultProvider string        `json:"default_provider"`   // name of default provider
+	LlamaServerURL  string     `json:"llama_server_url"`
+	ModelName       string     `json:"model_name"`
+	WorkspaceDir    string     `json:"workspace_dir"`
+	Providers       []Provider `json:"providers"`          // named provider presets
+	DefaultProvider string     `json:"default_provider"`   // name of default provider
+	DefaultModel    string     `json:"default_model"`      // default model name (across all providers)
 }
 
 // Provider is a named LLM server preset with a list of available models.
@@ -48,6 +48,7 @@ type Provider struct {
 	DisplayName string   `json:"display_name"` // human-readable label (e.g., "Neptune")
 	URL         string   `json:"url"`          // server URL (e.g., "http://neptune:8010/v1")
 	Models      []string `json:"models"`       // available model names
+	Concurrency int      `json:"concurrency"`  // max concurrent LLM API requests (default 1)
 }
 
 // Project represents a workspace project.
@@ -133,18 +134,6 @@ type HomeAgentMessage struct {
 // CreateHomeAgentMessageRequest is the request body for sending a home agent message.
 type CreateHomeAgentMessageRequest struct {
 	Content string `json:"content"`
-}
-
-// ConversationHistory represents a persisted message from a task execution.
-type ConversationHistory struct {
-	ID         int       `json:"id"`
-	TaskID     string    `json:"task_id"`
-	TurnIndex  int       `json:"turn_index"`
-	Role       string    `json:"role"`
-	Content    string    `json:"content"`
-	ToolCalls  string    `json:"tool_calls"`
-	ToolResult string    `json:"tool_result"`
-	CreatedAt  time.Time `json:"created_at"`
 }
 
 // GitCommit represents a git commit in the log.

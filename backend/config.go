@@ -45,18 +45,6 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	endpointLimitsRaw, err := cs.store.GetConfigValue("endpoint_limits")
-	if err != nil {
-		return nil, err
-	}
-
-	endpointLimits := make(map[string]int)
-	if endpointLimitsRaw != "" {
-		if err := json.Unmarshal([]byte(endpointLimitsRaw), &endpointLimits); err != nil {
-			return nil, err
-		}
-	}
-
 	providersRaw, err := cs.store.GetConfigValue("providers")
 	if err != nil {
 		return nil, err
@@ -72,23 +60,23 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	defaultModel, err := cs.store.GetConfigValue("default_model")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Config{
 		LlamaServerURL:  llamaURL,
 		ModelName:       modelName,
 		WorkspaceDir:    workspaceDir,
-		EndpointLimits:  endpointLimits,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
+		DefaultModel:    defaultModel,
 	}, nil
 }
 
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
 func (cs *ConfigStore) UpdateConfig(c *Config) error {
-	endpointLimitsJSON, err := json.Marshal(c.EndpointLimits)
-	if err != nil {
-		return err
-	}
 	providersJSON, err := json.Marshal(c.Providers)
 	if err != nil {
 		return err
@@ -102,13 +90,13 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 	if err := cs.store.SetConfigValue("workspace_dir", c.WorkspaceDir); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("endpoint_limits", string(endpointLimitsJSON)); err != nil {
-		return err
-	}
 	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
 		return err
 	}
 	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("default_model", c.DefaultModel); err != nil {
 		return err
 	}
 	// Also update in-memory override if set (so tests see the new values)
@@ -151,12 +139,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		if workspace, ok := updates["workspace_dir"]; ok {
 			current.WorkspaceDir = workspace.(string)
 		}
-		if limits, ok := updates["endpoint_limits"]; ok {
-			if limits != nil {
-				limitsJSON, _ := json.Marshal(limits)
-				json.Unmarshal(limitsJSON, &current.EndpointLimits)
-			}
-		}
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)
@@ -168,6 +150,9 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if dp, ok := updates["default_provider"]; ok {
 			current.DefaultProvider = dp.(string)
+		}
+		if dm, ok := updates["default_model"]; ok {
+			current.DefaultModel = dm.(string)
 		}
 		if err := cs.UpdateConfig(current); err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to update config")
@@ -355,7 +340,16 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 				if serverURL == "" {
 					serverURL = p.URL
 				}
-				// If no model name yet, use the first available model
+				// If no model name yet, use the default model if it belongs to this provider
+				if modelName == "" && cfg.DefaultModel != "" {
+					for _, m := range p.Models {
+						if m == cfg.DefaultModel {
+							modelName = m
+							break
+						}
+					}
+				}
+				// Fallback: use the first available model
 				if modelName == "" && len(p.Models) > 0 {
 					modelName = p.Models[0]
 				}
@@ -369,7 +363,7 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 
 // HandleTestOverride handles POST /api/test/override.
 // Sets or clears an in-memory config override without modifying the database.
-// Preserves providers, default_provider, and endpoint_limits from the database.
+// Preserves providers and default_provider from the database.
 func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
@@ -380,18 +374,17 @@ func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request
 			jsonError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		// Get current config to preserve workspace_dir, providers, endpoint_limits
+		// Get current config to preserve workspace_dir and providers
 		current, err := cs.GetConfig()
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
 		cs.SetOverride(&Config{
-			LlamaServerURL: req.LlamaServerURL,
-			ModelName:      req.ModelName,
-			WorkspaceDir:   current.WorkspaceDir,
-			EndpointLimits: current.EndpointLimits,
-			Providers:      current.Providers,
+			LlamaServerURL:  req.LlamaServerURL,
+			ModelName:       req.ModelName,
+			WorkspaceDir:    current.WorkspaceDir,
+			Providers:       current.Providers,
 			DefaultProvider: current.DefaultProvider,
 		})
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "override set"})

@@ -43,6 +43,8 @@
         const unsubConfig = showConfig.subscribe(v => showConfigVal = v);
         const unsubTerminal = showTerminal.subscribe(v => showTerminalVal = v);
         const unsubCard = showCardDetail.subscribe(v => showCardDetailVal = v);
+        // Sync config store changes to local cfg (e.g., after ConfigModal saves)
+        const unsubCfgStore = configStore.subscribe(v => { if (v) cfg = v; });
         const unsubTask = selectedTask.subscribe(t => {
             selectedTaskVal = t;
             // Update URL when task changes
@@ -75,7 +77,7 @@
         window.addEventListener('popstate', handlePopState);
 
         return () => {
-            unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask();
+            unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask(); unsubCfgStore();
             window.removeEventListener('popstate', handlePopState);
         };
     });

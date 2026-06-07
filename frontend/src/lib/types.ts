@@ -37,9 +37,9 @@ export interface Config {
     llama_server_url: string;
     model_name: string;
     workspace_dir: string;
-    endpoint_limits: Record<string, number>;
     providers: Provider[];
     default_provider: string;
+    default_model: string;
 }
 
 export interface Provider {
@@ -47,6 +47,7 @@ export interface Provider {
     display_name: string;
     url: string;
     models: string[];
+    concurrency: number;
 }
 
 export interface TaskDependency {

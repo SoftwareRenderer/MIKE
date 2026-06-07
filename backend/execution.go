@@ -251,9 +251,10 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	go te.executeTaskWithInitialMessage(ctx, task, wtPath, serverURL, modelName, b, userMsgChan, content)
 }
 
-// executeTaskWithInitialMessage starts the conversation with an initial user message.
+// executeTaskWithInitialMessage starts the executor for a lazy-start scenario.
+// The initial message is already persisted in task_messages by the WebSocket handler,
+// so executeTask will load it from there. No need to modify task.Prompt.
 func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage, initialMessage string) {
-	task.Prompt = task.Prompt + "\n\nUser follow-up: " + initialMessage
 	te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
 }
 
@@ -351,7 +352,6 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	}
 	task.StatusState = "idle"
 	te.store.UpdateTask(task)
-	te.store.ClearConversationHistory(taskID)
 	return te.StartTask(projectID, taskID)
 }
 
@@ -379,12 +379,35 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		systemPrompt = BuildSystemPrompt(worktreePath)
 	}
 
-	history, _ := te.store.GetConversationHistory(task.ID)
+	// Load conversation from task_messages (deletion-aware, replaces conversation_history).
+	// task_messages already includes the initial prompt and all follow-ups as separate entries.
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID)
 	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
-	for _, h := range history {
-		messages = append(messages, ChatMessage{Role: h.Role, Content: h.Content})
+	for _, m := range taskMsgs {
+		switch m.Role {
+		case "user", "assistant":
+			messages = append(messages, ChatMessage{Role: m.Role, Content: m.Content})
+		case "tool_call":
+			// Map tool_call entry to a tool result message for LLM context.
+			// Parse tool_calls JSON to get tool_id, tool_result JSON to get output.
+			if m.ToolResult != "" {
+				var resultMap map[string]interface{}
+				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
+					output := resultMap["output"].(string)
+					toolID := ""
+					if m.ToolCalls != "" {
+						var tcMap map[string]interface{}
+						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
+							if tid, ok := tcMap["tool_id"].(string); ok {
+								toolID = tid
+							}
+						}
+					}
+					messages = append(messages, ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
+				}
+			}
+		}
 	}
-	messages = append(messages, ChatMessage{Role: "user", Content: task.Prompt})
 
 	consecutiveFailures := 0
 	maxFailures := task.MaxConsecutiveFailedTurns

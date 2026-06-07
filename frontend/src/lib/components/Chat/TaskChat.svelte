@@ -247,12 +247,12 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         try {
             const cfg = await getConfig();
             providers = cfg.providers || [];
-            // Initialize model selection from task or config default
-            if (cfg.default_provider && providers.length > 0) {
+            // Initialize model selection from config default (only if default_model is set)
+            if (cfg.default_model && cfg.default_provider && providers.length > 0) {
                 const defaultP = providers.find(p => p.name === cfg.default_provider);
-                if (defaultP && defaultP.models.length > 0) {
+                if (defaultP && defaultP.models.includes(cfg.default_model)) {
                     selectedUrl = defaultP.url;
-                    selectedModel = defaultP.models[0];
+                    selectedModel = cfg.default_model;
                 }
             }
             if (!selectedUrl && cfg.llama_server_url) {
@@ -379,6 +379,17 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
 
     async function handleStartTask() {
         if (isStarting || disabled) return;
+        // Ensure model is set on the task before starting
+        if (selectedModel || selectedUrl) {
+            try {
+                await updateTask(projectId, taskId, {
+                    model_name: selectedModel,
+                    llama_server_url: selectedUrl,
+                });
+            } catch (e) {
+                console.error('Failed to update task model before start:', e);
+            }
+        }
         isStarting = true;
         isLoading = true;
         // Add the prompt as the first user message
@@ -442,7 +453,10 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     async function handleEdit(entryId: string, newContent: string) {
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
-        const messageAfterIdx = idx + 1;
+        // Find the first PERSISTED message after this one (backend IDs are UUIDs).
+        // Frontend-optimistic entries (streaming assistant) use random IDs not in the DB.
+        const isBackendId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const firstPersistedAfter = entries.slice(idx + 1).find(e => isBackendId(e.id));
         // Optimistic update: update local state immediately
         lastSentMessage = newContent;
         entries[idx].content = newContent;
@@ -450,8 +464,8 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         if (ws) ws.send(newContent);
         isLoading = true;
         // Fire-and-forget API calls with error handling
-        if (messageAfterIdx < entries.length) {
-            deleteTaskMessagesAfter(projectId, taskId, entries[messageAfterIdx].id).catch(e => showToast(String(e)));
+        if (firstPersistedAfter) {
+            deleteTaskMessagesAfter(projectId, taskId, firstPersistedAfter.id).catch(e => showToast(String(e)));
         }
         updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
     }
@@ -562,7 +576,17 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     {/if}
     {#if isNewTask && !isLoading}
         <div class="chat-start">
-            <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled}>
+            {#if providers.length > 0}
+                <div class="start-model-row">
+                    <ModelSelector
+                        providers={providers}
+                        currentModel={selectedModel}
+                        currentUrl={selectedUrl}
+                        onSelect={handleModelSelect}
+                    />
+                </div>
+            {/if}
+            <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)}>
                 {#if isStarting}
                     <span class="spinner-inline"></span> Starting...
                 {:else}
@@ -724,11 +748,17 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     }
     .chat-start {
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 10px;
         padding: 16px 12px;
         border-top: 1px solid var(--color-border);
         flex-shrink: 0;
+    }
+    .start-model-row {
+        display: flex;
+        align-items: center;
     }
     .btn-start-task {
         display: inline-flex;

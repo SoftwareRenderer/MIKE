@@ -80,18 +80,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS conversation_history (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id    TEXT NOT NULL,
-    turn_index INTEGER NOT NULL,
-    role       TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    tool_calls TEXT,
-    tool_result TEXT,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -146,7 +134,6 @@ CREATE TABLE IF NOT EXISTS task_messages (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_conversation_history_task ON conversation_history(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(parent_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_child ON task_dependencies(child_task_id);
 CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
@@ -179,7 +166,6 @@ func (s *Store) initConfigDefaults() error {
 		"llama_server_url": "http://localhost:8081/v1",
 		"model_name":       "",
 		"workspace_dir":    "./worktrees",
-		"endpoint_limits":  `{"http://localhost:8081/v1":2}`,
 	}
 	for k, v := range defaults {
 		_, err := s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)`, k, v)
@@ -437,49 +423,6 @@ func (s *Store) ReorderTasks(projectID string, reorders []ReorderRequest) error 
 		}
 	}
 	return tx.Commit()
-}
-
-// -- Conversation history operations --
-
-func (s *Store) SaveConversationHistory(ch *ConversationHistory) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(
-		`INSERT INTO conversation_history (task_id, turn_index, role, content, tool_calls, tool_result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		ch.TaskID, ch.TurnIndex, ch.Role, ch.Content, ch.ToolCalls, ch.ToolResult, ch.CreatedAt.Format(time.RFC3339),
-	)
-	return err
-}
-
-func (s *Store) GetConversationHistory(taskID string) ([]ConversationHistory, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, turn_index, role, content, tool_calls, tool_result, created_at FROM conversation_history WHERE task_id = ? ORDER BY turn_index ASC, id ASC`,
-		taskID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	history := []ConversationHistory{}
-	for rows.Next() {
-		var ch ConversationHistory
-		var createdAt string
-		if err := rows.Scan(&ch.ID, &ch.TaskID, &ch.TurnIndex, &ch.Role, &ch.Content, &ch.ToolCalls, &ch.ToolResult, &createdAt); err != nil {
-			return nil, err
-		}
-		ch.CreatedAt = scanTime(createdAt)
-		history = append(history, ch)
-	}
-	return history, rows.Err()
-}
-
-func (s *Store) ClearConversationHistory(taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(`DELETE FROM conversation_history WHERE task_id = ?`, taskID)
-	return err
 }
 
 // -- Task dependency operations --
@@ -796,7 +739,6 @@ func (s *Store) ResetData() error {
 		"home_agent_messages",
 		"review_comments",
 		"task_dependencies",
-		"conversation_history",
 		"tasks",
 	}
 	for _, table := range tables {

@@ -1,7 +1,10 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { get } from 'svelte/store';
-    import { createTask, getBoard } from '$lib/api';
+    import type { Provider } from '$lib/types';
+    import { createTask, getBoard, getConfig } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
+    import ModelSelector from './Chat/ModelSelector.svelte';
 
     let { projectId, onClose, onTaskCreated }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void } = $props();
 
@@ -12,17 +15,48 @@
     let loading = $state(false);
     let error = $state('');
 
+    // Model selection state
+    let providers: Provider[] = $state([]);
+    let selectedModel = $state('');
+    let selectedUrl = $state('');
+    let hasProviders = $derived(providers.length > 0);
+
+    onMount(async () => {
+        try {
+            const cfg = await getConfig();
+            providers = cfg.providers || [];
+            // Pre-select default model only if explicitly set (default_model)
+            if (cfg.default_model && cfg.default_provider && providers.length > 0) {
+                const defaultP = providers.find(p => p.name === cfg.default_provider);
+                if (defaultP && defaultP.models.includes(cfg.default_model)) {
+                    selectedUrl = defaultP.url;
+                    selectedModel = cfg.default_model;
+                }
+            }
+        } catch {
+            providers = [];
+        }
+    });
+
+    function handleModelSelect(providerName: string, modelName: string, providerUrl: string) {
+        selectedModel = modelName;
+        selectedUrl = providerUrl;
+    }
+
     async function handleSubmit() {
         if (!projectId || !prompt.trim()) return;
         loading = true;
         error = '';
         try {
-            await createTask(projectId, {
+            const taskData: Record<string, unknown> = {
                 prompt: prompt.trim(),
                 auto_commit: autoCommit,
                 auto_pr: autoPr,
                 plan_mode: planMode,
-            });
+            };
+            if (selectedModel) taskData.model_name = selectedModel;
+            if (selectedUrl) taskData.llama_server_url = selectedUrl;
+            await createTask(projectId, taskData);
             // Refresh the board
             const board = await getBoard(projectId);
             boardStore.set(board);
@@ -52,6 +86,17 @@
                 Description
                 <textarea bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required></textarea>
             </label>
+            {#if hasProviders}
+                <div class="model-select-row">
+                    <label style="margin:0">Model</label>
+                    <ModelSelector
+                        providers={providers}
+                        currentModel={selectedModel}
+                        currentUrl={selectedUrl}
+                        onSelect={handleModelSelect}
+                    />
+                </div>
+            {/if}
             <div class="options">
                 <label class="checkbox-label">
                     <input type="checkbox" bind:checked={planMode} />
@@ -74,7 +119,7 @@
             {/if}
             <div class="modal-footer">
                 <button type="button" onclick={handleClose}>Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim()}>
+                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)}>
                     {loading ? 'Creating...' : 'Create Task'}
                 </button>
             </div>
@@ -151,6 +196,15 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+    }
+    .model-select-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--color-text-secondary);
     }
     .checkbox-label {
         flex-direction: row !important;

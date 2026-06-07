@@ -36,14 +36,6 @@ func TestConfigDefaults(t *testing.T) {
 	if url != "http://localhost:8081/v1" {
 		t.Errorf("expected default llama_server_url, got %q", url)
 	}
-
-	limits, err := s.GetConfigValue("endpoint_limits")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if limits != `{"http://localhost:8081/v1":2}` {
-		t.Errorf("unexpected endpoint_limits: %q", limits)
-	}
 }
 
 func TestSetConfigValue(t *testing.T) {
@@ -411,69 +403,6 @@ func TestTaskCascadeOnProjectDelete(t *testing.T) {
 	_, err = s.GetTask(p.ID, task.ID)
 	if err == nil {
 		t.Fatal("task should have been cascade deleted")
-	}
-}
-
-// -- Conversation History Tests --
-
-func TestSaveAndGetConversationHistory(t *testing.T) {
-	s := newTestStore(t)
-	p := createTestProject(t, s)
-	task := createTestTask(t, s, p.ID)
-
-	entries := []ConversationHistory{
-		{TaskID: task.ID, TurnIndex: 0, Role: "user", Content: "Do the task"},
-		{TaskID: task.ID, TurnIndex: 1, Role: "assistant", Content: "Working on it"},
-	}
-	for i := range entries {
-		entries[i].CreatedAt = time.Now().UTC()
-		if err := s.SaveConversationHistory(&entries[i]); err != nil {
-			t.Fatalf("failed to save history: %v", err)
-		}
-	}
-
-	history, err := s.GetConversationHistory(task.ID)
-	if err != nil {
-		t.Fatalf("failed to get history: %v", err)
-	}
-	if len(history) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(history))
-	}
-	if history[0].Role != "user" {
-		t.Errorf("first entry should be user, got %s", history[0].Role)
-	}
-}
-
-func TestClearConversationHistory(t *testing.T) {
-	s := newTestStore(t)
-	p := createTestProject(t, s)
-	task := createTestTask(t, s, p.ID)
-
-	s.SaveConversationHistory(&ConversationHistory{TaskID: task.ID, TurnIndex: 0, Role: "user", Content: "test", CreatedAt: time.Now().UTC()})
-
-	err := s.ClearConversationHistory(task.ID)
-	if err != nil {
-		t.Fatalf("failed to clear history: %v", err)
-	}
-
-	history, _ := s.GetConversationHistory(task.ID)
-	if len(history) != 0 {
-		t.Errorf("expected 0 entries after clear, got %d", len(history))
-	}
-}
-
-func TestConversationHistoryCascadeOnTaskDelete(t *testing.T) {
-	s := newTestStore(t)
-	p := createTestProject(t, s)
-	task := createTestTask(t, s, p.ID)
-
-	s.SaveConversationHistory(&ConversationHistory{TaskID: task.ID, TurnIndex: 0, Role: "user", Content: "test", CreatedAt: time.Now().UTC()})
-
-	s.DeleteTask(p.ID, task.ID)
-
-	history, _ := s.GetConversationHistory(task.ID)
-	if len(history) != 0 {
-		t.Errorf("history should be cascade deleted, got %d entries", len(history))
 	}
 }
 
