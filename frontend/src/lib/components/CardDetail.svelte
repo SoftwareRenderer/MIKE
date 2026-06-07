@@ -438,6 +438,7 @@
         border-bottom: 1px solid;
         flex-shrink: 0;
         background: var(--color-surface-1);
+        height: 34px;
     }
     .column-header-left {
         display: flex;
@@ -533,7 +534,7 @@
         border: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        padding: 4px;
+        padding: 2px;
         border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
