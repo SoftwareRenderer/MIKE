@@ -53,6 +53,13 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
 		worktreesDir = wtDir
 	}
+	// Ensure absolute path so git and Go resolve it the same way
+	if !filepath.IsAbs(worktreesDir) {
+		abs, err := filepath.Abs(worktreesDir)
+		if err == nil {
+			worktreesDir = abs
+		}
+	}
 	worktreePath := filepath.Join(worktreesDir, taskID)
 
 	// Acquire per-project mutex with timeout

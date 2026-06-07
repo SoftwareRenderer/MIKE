@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -510,7 +511,13 @@ func (gm *GitManager) HandleTaskDiff(w http.ResponseWriter, r *http.Request, pro
 		jsonError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	worktreePath := fmt.Sprintf("%s/%s", getEnv("WORKTREES_DIR", "./worktrees"), task.ID)
+	worktreesDir := getEnv("WORKTREES_DIR", "./worktrees")
+	if !filepath.IsAbs(worktreesDir) {
+		if abs, err := filepath.Abs(worktreesDir); err == nil {
+			worktreesDir = abs
+		}
+	}
+	worktreePath := fmt.Sprintf("%s/%s", worktreesDir, task.ID)
 	c := exec.Command("git", "-C", worktreePath, "diff")
 	out, err := c.CombinedOutput()
 	if err != nil {

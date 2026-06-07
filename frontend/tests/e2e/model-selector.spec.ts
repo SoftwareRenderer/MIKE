@@ -170,6 +170,50 @@ test.describe.serial('Model Selector', () => {
   });
 });
 
+test.describe.serial('Dropdown flip positioning', () => {
+  test.beforeEach(async ({ page }) => {
+    await apiPutConfig({
+      providers: [{ name: 'test-provider', display_name: 'Test Provider', url: 'http://localhost:8080/v1', models: ['model-alpha', 'model-beta'] }],
+      default_provider: 'test-provider',
+    });
+    await waitForSettle(200);
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+  });
+
+  test('should flip dropdown upward when trigger is near the bottom of the viewport', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Use a small viewport so the model trigger is near the bottom
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await createAndOpenTask(page, projectId);
+    // Scroll to ensure trigger is visible, then get position via evaluate
+    const triggerRect = await page.evaluate(() => {
+      const el = document.querySelector('.model-trigger');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: r.height };
+    });
+    expect(triggerRect).not.toBeNull();
+    const triggerTop = triggerRect!.top;
+    // Open the model dropdown
+    await page.locator('.model-trigger').click();
+    await waitForSettle(500);
+    await expect(page.locator('.portal-model-dropdown')).toBeVisible();
+    // Get the dropdown position via evaluate
+    const dropdownRect = await page.evaluate(() => {
+      const el = document.querySelector('.portal-model-dropdown');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: r.height };
+    });
+    expect(dropdownRect).not.toBeNull();
+    const dropdownBottom = dropdownRect!.bottom;
+    // When flipped, the dropdown should be positioned above the trigger
+    // i.e., dropdown bottom should be at or above the trigger's top
+    expect(dropdownBottom).toBeLessThanOrEqual(triggerTop + 10); // 10px tolerance
+  });
+});
+
 test.describe.serial('Config Providers', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');

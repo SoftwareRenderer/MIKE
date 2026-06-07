@@ -29,7 +29,10 @@
     );
 
     let availableModels = $derived(
-        selectedProvider?.models.map(m => typeof m === 'string' ? m : m.name).filter(m => m.trim()) || []
+        selectedProvider?.models
+            .map(m => typeof m === 'string' ? m : m.name)
+            .filter(m => m.trim())
+            .toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) || []
     );
 
     let activeProviders = $derived(
@@ -53,6 +56,20 @@
         if (!el) return null;
         const r = el.getBoundingClientRect();
         return { top: r.bottom + 6, left: r.left };
+    }
+
+    // After dropdown renders, measure actual height and flip if it would overflow
+    function adjustDropdownPosition(portalClass: string, triggerEl: HTMLElement | null, rect: { top: number; left: number } | null, setRect: (r: { top: number; left: number } | null) => void) {
+        if (!triggerEl || !rect) return;
+        const portal = document.querySelector(portalClass);
+        if (!portal) return;
+        const triggerTop = triggerEl.getBoundingClientRect().top;
+        const dropdownHeight = portal.getBoundingClientRect().height;
+        const spaceBelow = window.innerHeight - (triggerTop + triggerEl.getBoundingClientRect().height);
+        // If dropdown would extend beyond viewport, flip it above
+        if (spaceBelow < dropdownHeight + 12) {
+            setRect({ top: triggerTop - dropdownHeight - 6, left: rect.left });
+        }
     }
 
     function toggleProviderDropdown() {
@@ -169,6 +186,25 @@
     $effect(() => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
+    });
+
+    // Measure and adjust dropdown positions after render
+    $effect(() => {
+        if (providerDropdownOpen && providerRect) {
+            const raf = requestAnimationFrame(() => {
+                adjustDropdownPosition('.portal-provider-dropdown', providerTriggerEl, providerRect, (r) => { providerRect = r; });
+            });
+            return () => cancelAnimationFrame(raf);
+        }
+    });
+
+    $effect(() => {
+        if (modelDropdownOpen && modelRect) {
+            const raf = requestAnimationFrame(() => {
+                adjustDropdownPosition('.portal-model-dropdown', modelTriggerEl, modelRect, (r) => { modelRect = r; });
+            });
+            return () => cancelAnimationFrame(raf);
+        }
     });
 </script>
 
