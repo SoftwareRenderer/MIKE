@@ -43,7 +43,7 @@
 
 <div class="stream-section" style="border-left-color: {borderColor(type)}">
     {#if collapsible}
-        <button class="section-header" onclick={toggle}>
+        <button class="section-header" onclick={toggle} aria-expanded={!collapsed}>
             <span class="icon">{iconForType(type)}</span>
             <span class="label">{labelForType(type)}</span>
             {#if tokenCount}

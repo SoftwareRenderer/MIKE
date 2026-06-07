@@ -1,7 +1,9 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import type { Config, Provider } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
+    import { createFocusTrap } from '$lib/a11y';
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
@@ -93,6 +95,13 @@
 
     function toggleProvider(idx: number) {
         providers[idx].expanded = !providers[idx].expanded;
+    }
+
+    function handleProviderHeaderKeydown(e: KeyboardEvent, idx: number) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleProvider(idx);
+        }
     }
 
     async function testProviderConnection(idx: number) {
@@ -219,16 +228,35 @@
         }
     }
 
+    let modalEl: HTMLDivElement | null = null;
+    let focusTrap: ReturnType<typeof createFocusTrap> | null = null;
+    let triggerEl: HTMLElement | null = null;
+
+    onMount(() => {
+        // Store the element that triggered this modal for focus restoration
+        triggerEl = document.activeElement as HTMLElement;
+        // Setup focus trap after modal is rendered
+        if (modalEl) {
+            focusTrap = createFocusTrap(modalEl, handleClose);
+            // Focus the close button or first interactive element
+            setTimeout(() => focusTrap?.focusFirst(), 50);
+        }
+    });
+
     function handleClose() {
+        focusTrap?.destroy();
+        focusTrap = null;
         onClose();
+        // Restore focus to trigger element
+        setTimeout(() => triggerEl?.focus(), 50);
     }
 </script>
 
-<div class="overlay" onclick={handleClose}>
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+<div class="overlay" onclick={handleClose} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="config-modal-title" tabindex="-1">
         <div class="modal-header">
-            <h2>Settings</h2>
-            <button class="close-btn" onclick={handleClose}>✕</button>
+            <h2 id="config-modal-title">Settings</h2>
+            <button class="close-btn" onclick={handleClose} aria-label="Close settings">✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
             <!-- Providers Section -->
@@ -241,7 +269,7 @@
                     {#each providers as p, i}
                         <div class="provider-card">
                             <!-- Card header: always visible -->
-                            <div class="provider-card-header" onclick={() => toggleProvider(i)}>
+                            <div class="provider-card-header" onclick={() => toggleProvider(i)} aria-expanded={p.expanded}>
                                 <div class="reorder-buttons">
                                     <button type="button" class="btn-reorder btn-reorder-up" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'up'); }} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -284,7 +312,7 @@
                                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-label={p.expanded ? 'Collapse' : 'Expand'}>
+                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-expanded={p.expanded} aria-label={p.expanded ? 'Collapse provider details' : 'Expand provider details'}>
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={p.expanded}>
                                             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
@@ -437,35 +465,51 @@
                 <h3 class="section-label">Task Defaults</h3>
                 <p class="section-description">These settings apply to newly created tasks</p>
 
-                <label class="toggle-field">
+                <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span class="toggle-label">Auto-commit</span>
+                        <span id="toggle-autocommit" class="toggle-label">Auto-commit</span>
                         <span class="help-icon" title="Automatically commit changes when the task completes">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
                             </svg>
                         </span>
                     </div>
-                    <div class="toggle-switch" class:active={defaultAutoCommit} onclick={() => defaultAutoCommit = !defaultAutoCommit}>
+                    <button
+                        type="button"
+                        role="switch"
+                        class="toggle-switch"
+                        class:active={defaultAutoCommit}
+                        aria-checked={defaultAutoCommit}
+                        aria-labelledby="toggle-autocommit"
+                        onclick={() => defaultAutoCommit = !defaultAutoCommit}
+                    >
                         <span class="toggle-knob"></span>
-                    </div>
-                </label>
+                    </button>
+                </div>
 
-                <label class="toggle-field">
+                <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span class="toggle-label">Plan mode</span>
+                        <span id="toggle-planmode" class="toggle-label">Plan mode</span>
                         <span class="help-icon" title="Task describes its plan before making changes">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600">?</text>
                             </svg>
                         </span>
                     </div>
-                    <div class="toggle-switch" class:active={defaultPlanMode} onclick={() => defaultPlanMode = !defaultPlanMode}>
+                    <button
+                        type="button"
+                        role="switch"
+                        class="toggle-switch"
+                        class:active={defaultPlanMode}
+                        aria-checked={defaultPlanMode}
+                        aria-labelledby="toggle-planmode"
+                        onclick={() => defaultPlanMode = !defaultPlanMode}
+                    >
                         <span class="toggle-knob"></span>
-                    </div>
-                </label>
+                    </button>
+                </div>
 
                 <div class="field-row">
                     <div class="option-label-group">
@@ -482,7 +526,7 @@
             </fieldset>
 
             {#if error}
-                <div class="error">{error}</div>
+                <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
             {/if}
 
             <div class="modal-footer">
@@ -626,7 +670,6 @@
         align-items: center;
         justify-content: space-between;
         padding: 8px 0;
-        cursor: pointer;
     }
     .toggle-field + .toggle-field {
         border-top: 1px solid var(--color-border);
@@ -690,9 +733,8 @@
         padding: 8px 12px;
         color: var(--color-text-primary);
         font-size: 14px;
-        outline: none;
     }
-    input:focus, select:focus {
+    input:focus-visible, select:focus-visible {
         border-color: var(--color-accent);
     }
     select {

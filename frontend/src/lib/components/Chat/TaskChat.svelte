@@ -521,6 +521,10 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
 </script>
 
 <div class="task-chat">
+    <!-- Live region for screen reader announcements -->
+    <div class="sr-only" aria-live="polite" aria-atomic="true">
+        {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
+    </div>
     <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll}>
         {#if isNewTask && taskPrompt}
             <!-- New task: show prompt as first message -->
@@ -568,9 +572,9 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
     </div>
 
     {#if deleteConfirm}
-        <div class="delete-overlay">
+        <div class="delete-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-live="assertive">
             <div class="delete-dialog">
-                <h3>Delete Message</h3>
+                <h3 id="delete-dialog-title">Delete Message</h3>
                 <p>This will delete {deleteConfirm.count} message{deleteConfirm.count > 1 ? 's' : ''}. This action cannot be undone.</p>
                 <div class="delete-actions">
                     <button class="btn-cancel" onclick={() => deleteConfirm = null}>Cancel</button>
@@ -619,6 +623,18 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
 </div>
 
 <style>
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
     .task-chat {
         display: flex;
         flex-direction: column;

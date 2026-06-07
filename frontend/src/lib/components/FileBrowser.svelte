@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
+    import { createFocusTrap } from '$lib/a11y';
+
     let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void } = $props();
 
     let currentPath = $state('');
@@ -67,19 +70,38 @@
     function formatPath(p: string): string {
         return p || '/';
     }
+
+    let browserEl: HTMLDivElement | null = null;
+    let trap: ReturnType<typeof createFocusTrap> | null = null;
+    let triggerEl: HTMLElement | null = null;
+
+    onMount(() => {
+        triggerEl = document.activeElement as HTMLElement;
+        if (browserEl) {
+            trap = createFocusTrap(browserEl, handleClose);
+            setTimeout(() => trap?.focusFirst(), 50);
+        }
+    });
+
+    function handleClose() {
+        trap?.destroy();
+        trap = null;
+        onClose();
+        setTimeout(() => triggerEl?.focus(), 50);
+    }
 </script>
 
-<div class="overlay" onclick={onClose}>
-    <div class="browser" onclick={(e) => e.stopPropagation()}>
+<div class="overlay" onclick={handleClose} role="presentation">
+    <div class="browser" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={browserEl} role="dialog" aria-modal="true" aria-labelledby="file-browser-title" tabindex="-1">
         <div class="browser-header">
-            <h2>Select Project Directory</h2>
-            <button class="close-btn" onclick={onClose}>✕</button>
+            <h2 id="file-browser-title">Select Project Directory</h2>
+            <button class="close-btn" onclick={handleClose} aria-label="Close">✕</button>
         </div>
 
         <div class="browser-body">
             <!-- Path bar -->
             <div class="path-bar">
-                <button class="home-btn" onclick={() => loadDir('/home')} title="Home">🏠</button>
+                <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory">🏠</button>
                 <input
                     type="text"
                     class="path-input"
@@ -104,18 +126,20 @@
                 {/if}
 
                 <!-- File list -->
-                <div class="file-list">
+                <div class="file-list" role="list" aria-label="Directory contents">
                     {#each entries as entry}
-                        <div
+                        <button
+                            type="button"
                             class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
                             onclick={() => handleClick(entry)}
+                            aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
                         >
-                            <span class="icon">{entry.isDir ? '📁' : '📄'}</span>
+                            <span class="icon" aria-hidden="true">{entry.isDir ? '📁' : '📄'}</span>
                             <span class="name">{entry.name}</span>
                             {#if entry.isGitRepo}
                                 <span class="git-badge">git</span>
                             {/if}
-                        </div>
+                        </button>
                     {/each}
                 </div>
             {/if}
@@ -124,7 +148,7 @@
         <div class="browser-footer">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
-                <button class="btn-cancel" onclick={onClose}>Cancel</button>
+                <button class="btn-cancel" onclick={handleClose}>Cancel</button>
                 <button
                     class="btn-select"
                     onclick={handleSelect}
@@ -202,9 +226,8 @@
         color: var(--color-text-primary);
         font-size: 13px;
         font-family: var(--font-mono);
-        outline: none;
     }
-    .path-input:focus {
+    .path-input:focus-visible {
         border-color: var(--color-accent);
     }
     .error {
@@ -240,6 +263,12 @@
         border-radius: var(--radius-sm);
         cursor: pointer;
         font-size: 14px;
+        text-align: left;
+        width: 100%;
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: none;
     }
     .file-entry:hover {
         background: var(--color-surface-2);

@@ -122,23 +122,23 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" onclick={handleCopy} title="Copy">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button class="action-btn" onclick={handleCopy} aria-label="Copy message">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
                     </button>
                     {#if onEdit}
-                        <button class="action-btn" onclick={startEdit} title="Edit">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <button class="action-btn" onclick={startEdit} aria-label="Edit message">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                         </button>
                     {/if}
                     {#if onDelete}
-                        <button class="action-btn" onclick={handleDelete} title="Delete">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <polyline points="3 6 5 6 21 6"/>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                             </svg>
@@ -159,15 +159,16 @@
                 <div class="message-stats">
                     <span class="stats-model-name">{stats.model_name || 'model'}</span>
                     <div class="stats-row">
-                        <div class="stats-toggle">
+                        <div class="stats-toggle" role="group" aria-label="Statistics view">
                             <button
                                 type="button"
                                 class="toggle-btn {statsView === 'reading' ? 'active' : ''}"
                                 data-view="reading"
                                 onclick={() => statsView = 'reading'}
-                                title="Reading (prompt processing)"
+                                aria-label="Reading stats (prompt processing)"
+                                aria-pressed={statsView === 'reading'}
                             >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
                                 </svg>
                             </button>
@@ -176,9 +177,10 @@
                                 class="toggle-btn {statsView === 'generation' ? 'active' : ''}"
                                 data-view="generation"
                                 onclick={() => statsView = 'generation'}
-                                title="Generation (token output)"
+                                aria-label="Generation stats (token output)"
+                                aria-pressed={statsView === 'generation'}
                             >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
                                     <path d="M19 15l.5 1.5L21 17l-1.5.5L19 19l-.5-1.5L17 17l1.5-.5L19 15z"/>
                                     <path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"/>
@@ -207,15 +209,15 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" onclick={handleCopy} title="Copy">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button class="action-btn" onclick={handleCopy} aria-label="Copy message">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
                     </button>
                     {#if onRegenerate && !isStreaming}
-                        <button class="action-btn" onclick={onRegenerate} title="Regenerate">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M21 2v6h-6"/>
                                 <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
                                 <path d="M3 22v-6h6"/>
@@ -224,8 +226,8 @@
                         </button>
                     {/if}
                     {#if onDelete}
-                        <button class="action-btn" onclick={handleDelete} title="Delete">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <polyline points="3 6 5 6 21 6"/>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                             </svg>
@@ -455,9 +457,8 @@
         line-height: 1.5rem;
         font-family: inherit;
         resize: vertical;
-        outline: none;
     }
-    .edit-form textarea:focus {
+    .edit-form textarea:focus-visible {
         border-color: var(--color-accent);
         box-shadow: 0 0 0 2px var(--color-accent)22;
     }

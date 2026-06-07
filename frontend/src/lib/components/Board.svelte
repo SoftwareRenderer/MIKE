@@ -41,7 +41,7 @@
     }
 </script>
 
-<div class="board">
+<div class="board" role="region" aria-label="Task board">
     {#each columns as col}
         <Column
             columnId={col.id}
@@ -51,6 +51,7 @@
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
+            {projectId}
         />
     {/each}
 </div>

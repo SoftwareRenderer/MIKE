@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask }: {
+    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId }: {
         columnId: string;
         title: string;
         color: string;
@@ -10,6 +10,7 @@
         onDragStart: (taskId: string) => void;
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
+        projectId?: string;
     } = $props();
 
     let isOver = $state(false);
@@ -32,7 +33,7 @@
     }
 </script>
 
-<div class={`column${isOver ? ' is-over' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop}>
+<div class={`column${isOver ? ' is-over' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={`${title} column`}>
     <div class="column-header" style="--col-color: {color}">
         <h3>{title}</h3>
         <span class="count">{tasks.length}</span>
@@ -42,7 +43,7 @@
             <button class="add-task-btn" onclick={onAddTask}>+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} {columnId} />
+            <Card {task} {columnId} {projectId} />
         {/each}
     </div>
 </div>

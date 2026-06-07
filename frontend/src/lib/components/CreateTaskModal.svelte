@@ -5,6 +5,7 @@
     import { createTask, getBoard, getConfig } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
+    import { createFocusTrap } from '$lib/a11y';
 
     let { projectId, onClose, onTaskCreated }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void } = $props();
 
@@ -22,6 +23,7 @@
     let hasProviders = $derived(providers.length > 0);
 
     onMount(async () => {
+        triggerEl = document.activeElement as HTMLElement;
         try {
             const cfg = await getConfig();
             providers = cfg.providers || [];
@@ -39,6 +41,15 @@
             }
         } catch {
             providers = [];
+        }
+        // Setup focus trap after modal is rendered
+        if (modalEl) {
+            trap = createFocusTrap(modalEl, handleClose);
+            // Focus the description textarea
+            setTimeout(() => {
+                const textarea = modalEl?.querySelector('textarea') as HTMLElement;
+                textarea?.focus();
+            }, 50);
         }
     });
 
@@ -75,24 +86,31 @@
     }
 
     function handleClose() {
+        trap?.destroy();
+        trap = null;
         onClose();
+        setTimeout(() => triggerEl?.focus(), 50);
     }
+
+    let modalEl: HTMLDivElement | null = null;
+    let trap: ReturnType<typeof createFocusTrap> | null = null;
+    let triggerEl: HTMLElement | null = null;
 </script>
 
-<div class="overlay" onclick={handleClose}>
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+<div class="overlay" onclick={handleClose} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="create-task-title" tabindex="-1">
         <div class="modal-header">
-            <h2>Create Task</h2>
-            <button class="close-btn" onclick={handleClose}>✕</button>
+            <h2 id="create-task-title">Create Task</h2>
+            <button class="close-btn" onclick={handleClose} aria-label="Close">✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-            <label>
+            <label for="task-description">
                 Description
-                <textarea bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required></textarea>
+                <textarea id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined}></textarea>
             </label>
             {#if hasProviders}
                 <div class="model-select-row">
-                    <label style="margin:0">Model</label>
+                    <span id="model-label" class="model-label" style="margin:0">Model</span>
                     <ModelSelector
                         providers={providers}
                         currentModel={selectedModel}
@@ -119,7 +137,7 @@
                 </label>
             </div>
             {#if error}
-                <div class="error">{error}</div>
+                <div id="task-error" class="error" role="alert">{error}</div>
             {/if}
             <div class="modal-footer">
                 <button type="button" onclick={handleClose}>Cancel</button>
@@ -187,9 +205,8 @@
         padding: 8px 12px;
         color: var(--color-text-primary);
         font-size: 14px;
-        outline: none;
     }
-    input[type="text"]:focus, textarea:focus {
+    input[type="text"]:focus-visible, textarea:focus-visible {
         border-color: var(--color-accent);
     }
     textarea {

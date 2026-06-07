@@ -209,24 +209,27 @@
 </script>
 
 <div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
+    <!-- Skip navigation link -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
     <!-- Mobile sidebar backdrop -->
     {#if isMobile && mobileMenuOpen}
-        <div class="sidebar-backdrop" onclick={() => mobileMenuOpen = false}></div>
+        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu"></button>
     {/if}
 
     <!-- Sidebar -->
-    <aside class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen}>
+    <aside id="sidebar" class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
         <div class="sidebar-header">
             <h2 class:collapsed>Kanban</h2>
             {#if isMobile}
-                <button class="toggle-btn" onclick={() => mobileMenuOpen = false}>✕</button>
+                <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu">✕</button>
             {:else}
-                <button class="toggle-btn" onclick={toggleSidebar}>
+                <button class="toggle-btn" onclick={toggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
                     {collapsed ? '▸' : '◂'}
                 </button>
             {/if}
         </div>
-        <nav class="project-list">
+        <nav class="project-list" aria-label="Projects">
             {#each projects as p (p.id)}
                 <div class="project-item-wrapper" class:active={currentProject?.id === p.id}>
                     <button
@@ -238,7 +241,7 @@
                     <button
                         class="project-remove-btn"
                         onclick={(e) => { e.stopPropagation(); removeProject(p); }}
-                        title="Remove project"
+                        aria-label={`Remove project ${p.name}`}
                     >
                         ✕
                     </button>
@@ -246,17 +249,17 @@
             {/each}
         </nav>
         <div class="sidebar-footer">
-            <button class="add-project-btn" onclick={openAddProject} title="Add Project">+ Project</button>
+            <button class="add-project-btn" onclick={openAddProject} aria-label="Add Project">+ Project</button>
         </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="main">
+    <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            <top-bar>
+            <header class="top-bar">
                 {#if isMobile}
-                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} title="Menu">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="3" y1="6" x2="21" y2="6"/>
                             <line x1="3" y1="12" x2="21" y2="12"/>
                             <line x1="3" y1="18" x2="21" y2="18"/>
@@ -265,10 +268,15 @@
                 {/if}
                 <span class="project-title">{currentProject.name}</span>
                 <div class="actions">
-                    <button class="icon-btn" onclick={() => showConfig.set(true)} title="Settings">⚙</button>
+                    <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                        </svg>
+                    </button>
                 </div>
-            </top-bar>
-            <board-container>
+            </header>
+            <section class="board-container" aria-label="Kanban board">
                 {#if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} onClose={() => {
                         showCardDetail.set(false);
@@ -282,7 +290,7 @@
                         onAddTask={() => showCreateTask.set(true)}
                     />
                 {/if}
-            </board-container>
+            </section>
         {:else}
             <div class="empty-state">
                 <h2>No Projects</h2>
@@ -357,6 +365,23 @@
             min-width: 44px;
             min-height: 44px;
         }
+    }
+
+    .skip-link {
+        position: absolute;
+        top: -100%;
+        left: 16px;
+        z-index: 10000;
+        padding: 8px 16px;
+        background: var(--color-accent);
+        color: white;
+        font-weight: 600;
+        border-radius: var(--radius-md);
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .skip-link:focus {
+        top: 16px;
     }
 
     .app {
@@ -478,7 +503,7 @@
         flex-direction: column;
         overflow: hidden;
     }
-    top-bar {
+    .top-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -503,7 +528,7 @@
     .icon-btn:hover {
         background: var(--color-accent);
     }
-    board-container {
+    .board-container {
         flex: 1;
         overflow: hidden;
     }
@@ -578,7 +603,7 @@
             align-items: center;
             justify-content: center;
         }
-        top-bar {
+        .top-bar {
             padding: 8px 12px;
             gap: 8px;
         }

@@ -154,8 +154,8 @@
         <!-- Header -->
         <div class="header">
             <div class="header-left">
-                <button class="btn-back" onclick={onClose} title="Back to board (Esc)">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <button class="btn-back" onclick={onClose} aria-label="Back to board (Esc)">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
@@ -167,12 +167,12 @@
                             onblur={saveTitle}
                             onkeydown={(e) => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') { e.stopPropagation(); editingTitle = false; } }}
                             placeholder="Task title"
-                            autofocus
+                            autofocus={true}
                         />
                     {:else}
-                        <h3 class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} title="Click to edit">
+                        <button type="button" class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} aria-label="Edit task title">
                             {task.title || '(untitled)'}
-                        </h3>
+                        </button>
                     {/if}
                     <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                         {badge.text}
@@ -181,15 +181,15 @@
             </div>
             <div class="header-actions">
                 {#if task.status === 'review'}
-                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} title="Approve">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} aria-label="Approve and move to Done">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
-                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} title="Reject">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} aria-label="Reject and return to In Progress">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
-                <button class="btn-icon" onclick={handleDelete} title="Delete task">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V3h6v1M6 4v1H4l1 9h6l1-9H6M9 7v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <button class="btn-icon" onclick={handleDelete} aria-label="Delete task">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4h12M5 4V3h6v1M6 4v1H4l1 9h6l1-9H6M9 7v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             </div>
         </div>
@@ -222,7 +222,7 @@
         {/if}
 
         <!-- 3-Column Layout -->
-        <div class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp}>
+        <div class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp} role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'}>
                 <div class="column-header">
@@ -239,17 +239,20 @@
                                     <span class="section-count">{sectionTasks.length}</span>
                                 </div>
                                 {#each sectionTasks as t (t.id)}
-                                    <div
+                                    <button
+                                        type="button"
                                         class={`task-item${t.id === task.id ? ' selected' : ''}`}
                                         onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
+                                        aria-label={`Select task: ${t.title || '(untitled)'}`}
+                                        aria-current={t.id === task.id ? 'task' : undefined}
                                     >
-                                        <div class="task-item-title">{t.title || '(untitled)'}</div>
+                                        <span class="task-item-title">{t.title || '(untitled)'}</span>
                                         {#if t.status_state !== 'idle' && t.status_state !== ''}
                                             <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
                                                 {getStatusBadge(t).text}
                                             </span>
                                         {/if}
-                                    </div>
+                                    </button>
                                 {/each}
                             </div>
                         {/if}
@@ -261,7 +264,7 @@
             <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'}>
                 <div class="column-header">
                     <div class="column-header-left">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
                         <span class="column-title">Agent</span>
                     </div>
                 </div>
@@ -279,11 +282,11 @@
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'}>
                 <div class="column-header">
                     <div class="column-header-left">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="column-title">Changes</span>
                     </div>
-                    <button class="btn-icon-sm" onclick={loadDiff} disabled={loadingDiff} title="Refresh diff">
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    <button class="btn-icon-sm" onclick={loadDiff} disabled={loadingDiff} aria-label="Refresh diff">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 </div>
                 <div class="diff-content">
@@ -358,6 +361,12 @@
         text-overflow: ellipsis;
         min-width: 0;
         color: var(--color-text-primary);
+        background: none;
+        border: none;
+        padding: 0;
+        text-align: left;
+        width: 100%;
+        font: inherit;
     }
     .title:hover { color: var(--color-accent); }
     .title-input {
@@ -480,6 +489,12 @@
         align-items: baseline;
         gap: 8px;
         transition: background 0.1s ease;
+        text-align: left;
+        width: 100%;
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: none;
     }
     .task-item:hover { background: var(--color-surface-2); }
     .task-item.selected {

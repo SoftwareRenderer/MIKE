@@ -105,6 +105,66 @@
         }
     }
 
+    function handleProviderKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape') {
+            providerDropdownOpen = false;
+            providerTriggerEl?.focus();
+            return;
+        }
+        if (!providerDropdownOpen && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            providerDropdownOpen = true;
+            modelDropdownOpen = false;
+            return;
+        }
+        if (providerDropdownOpen && e.key === 'ArrowDown') {
+            e.preventDefault();
+            const options = document.querySelectorAll('.portal-provider-dropdown [role="option"]');
+            const current = document.activeElement as HTMLElement;
+            const idx = Array.from(options).indexOf(current as never);
+            const next = options[(idx + 1) % options.length] as HTMLElement;
+            next?.focus();
+        }
+        if (providerDropdownOpen && e.key === 'ArrowUp') {
+            e.preventDefault();
+            const options = document.querySelectorAll('.portal-provider-dropdown [role="option"]');
+            const current = document.activeElement as HTMLElement;
+            const idx = Array.from(options).indexOf(current as never);
+            const prev = options[(idx - 1 + options.length) % options.length] as HTMLElement;
+            prev?.focus();
+        }
+    }
+
+    function handleModelKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape') {
+            modelDropdownOpen = false;
+            modelTriggerEl?.focus();
+            return;
+        }
+        if (!modelDropdownOpen && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            modelDropdownOpen = true;
+            providerDropdownOpen = false;
+            return;
+        }
+        if (modelDropdownOpen && e.key === 'ArrowDown') {
+            e.preventDefault();
+            const options = document.querySelectorAll('.portal-model-dropdown [role="option"]');
+            const current = document.activeElement as HTMLElement;
+            const idx = Array.from(options).indexOf(current as never);
+            const next = options[(idx + 1) % options.length] as HTMLElement;
+            next?.focus();
+        }
+        if (modelDropdownOpen && e.key === 'ArrowUp') {
+            e.preventDefault();
+            const options = document.querySelectorAll('.portal-model-dropdown [role="option"]');
+            const current = document.activeElement as HTMLElement;
+            const idx = Array.from(options).indexOf(current as never);
+            const prev = options[(idx - 1 + options.length) % options.length] as HTMLElement;
+            prev?.focus();
+        }
+    }
+
     $effect(() => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -120,16 +180,19 @@
             class:disabled={disabled}
             bind:this={providerTriggerEl}
             onclick={toggleProviderDropdown}
-            title="Select provider"
+            onkeydown={handleProviderKeydown}
+            aria-label="Select provider"
+            aria-haspopup="listbox"
+            aria-expanded={providerDropdownOpen}
         >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
                 <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <span class="selector-label">
                 {selectedProvider?.display_name || selectedProvider?.name || 'Provider'}
             </span>
-            <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </button>
@@ -142,15 +205,18 @@
         class:disabled={disabled}
         bind:this={modelTriggerEl}
         onclick={toggleModelDropdown}
-        title="Select model"
+        onkeydown={handleModelKeydown}
+        aria-label="Select model"
+        aria-haspopup="listbox"
+        aria-expanded={modelDropdownOpen}
     >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2 4l6 5 6-5M2 4v8l6 5 6-5V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span class="selector-label model-name" class:current={!!currentModel}>
             {currentModel || 'Select model'}
         </span>
-        <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none">
+        <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     </button>
@@ -158,13 +224,13 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this="div" class="portal-provider-dropdown" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this="div" class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#each activeProviders as provider}
-            <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)}>
+            <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)} role="option" aria-selected={provider.url === selectedProviderUrl}>
                 <span class="provider-name">{provider.display_name || provider.name}</span>
                 <span class="model-count">{provider.models.length} model{provider.models.length !== 1 ? 's' : ''}</span>
                 {#if provider.url === selectedProviderUrl}
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 {/if}
@@ -175,15 +241,15 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this="div" class="portal-model-dropdown" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this="div" class="portal-model-dropdown" role="listbox" aria-label="Select model" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if availableModels.length === 0}
             <div class="empty">No models available</div>
         {:else}
             {#each availableModels as model}
-                <button type="button" class="model-option" class:active={model === currentModel} onclick={() => selectModel(model)}>
+                <button type="button" class="model-option" class:active={model === currentModel} onclick={() => selectModel(model)} role="option" aria-selected={model === currentModel}>
                     <span class="option-name">{model}</span>
                     {#if model === currentModel}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     {/if}

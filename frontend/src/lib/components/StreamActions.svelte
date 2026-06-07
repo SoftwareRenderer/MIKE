@@ -27,10 +27,10 @@
 </script>
 
 <div class="stream-actions">
-    <button class="action-btn" onclick={copy} title="Copy output">
+    <button class="action-btn" onclick={copy} aria-label="Copy output">
         {#if copied}✓ Copied{:else}📋 Copy{/if}
     </button>
-    <button class="action-btn" onclick={toggleRaw} title="Toggle raw view">
+    <button class="action-btn" onclick={toggleRaw} aria-label="Toggle raw view">
         Raw
     </button>
     {#if tokens.total > 0}
