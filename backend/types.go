@@ -38,8 +38,7 @@ type Config struct {
 	ModelName       string     `json:"model_name"`
 	WorkspaceDir    string     `json:"workspace_dir"`
 	Providers       []Provider `json:"providers"`          // named provider presets
-	DefaultProvider string     `json:"default_provider"`   // name of default provider
-	DefaultModel    string     `json:"default_model"`      // default model name (across all providers)
+	DefaultProvider string     `json:"default_provider"`   // name of default provider (legacy, kept for compat)
 }
 
 // Provider is a named LLM server preset with a list of available models.
@@ -49,6 +48,7 @@ type Provider struct {
 	URL         string   `json:"url"`          // server URL (e.g., "http://neptune:8010/v1")
 	Models      []string `json:"models"`       // available model names
 	Concurrency int      `json:"concurrency"`  // max concurrent LLM API requests (default 1)
+	DefaultModel string  `json:"default_model"` // default model for this provider (empty = none)
 }
 
 // Project represents a workspace project.

@@ -39,7 +39,6 @@ export interface Config {
     workspace_dir: string;
     providers: Provider[];
     default_provider: string;
-    default_model: string;
 }
 
 export interface Provider {
@@ -48,6 +47,7 @@ export interface Provider {
     url: string;
     models: string[];
     concurrency: number;
+    default_model?: string;
 }
 
 export interface TaskDependency {

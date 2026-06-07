@@ -25,12 +25,16 @@
         try {
             const cfg = await getConfig();
             providers = cfg.providers || [];
-            // Pre-select default model only if explicitly set (default_model)
-            if (cfg.default_model && cfg.default_provider && providers.length > 0) {
-                const defaultP = providers.find(p => p.name === cfg.default_provider);
-                if (defaultP && defaultP.models.includes(cfg.default_model)) {
-                    selectedUrl = defaultP.url;
-                    selectedModel = cfg.default_model;
+            // Pre-select highest-priority provider's default model
+            if (providers.length > 0) {
+                const firstProvider = providers[0];
+                if (firstProvider.default_model && firstProvider.models.includes(firstProvider.default_model)) {
+                    selectedUrl = firstProvider.url;
+                    selectedModel = firstProvider.default_model;
+                } else if (firstProvider.models.length > 0) {
+                    // Fallback: first available model of highest-priority provider
+                    selectedUrl = firstProvider.url;
+                    selectedModel = firstProvider.models[0];
                 }
             }
         } catch {

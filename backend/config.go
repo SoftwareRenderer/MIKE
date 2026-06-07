@@ -60,10 +60,6 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	defaultModel, err := cs.store.GetConfigValue("default_model")
-	if err != nil {
-		return nil, err
-	}
 
 	return &Config{
 		LlamaServerURL:  llamaURL,
@@ -71,7 +67,6 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 		WorkspaceDir:    workspaceDir,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
-		DefaultModel:    defaultModel,
 	}, nil
 }
 
@@ -94,9 +89,6 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 		return err
 	}
 	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
-		return err
-	}
-	if err := cs.store.SetConfigValue("default_model", c.DefaultModel); err != nil {
 		return err
 	}
 	// Also update in-memory override if set (so tests see the new values)
@@ -150,9 +142,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if dp, ok := updates["default_provider"]; ok {
 			current.DefaultProvider = dp.(string)
-		}
-		if dm, ok := updates["default_model"]; ok {
-			current.DefaultModel = dm.(string)
 		}
 		if err := cs.UpdateConfig(current); err != nil {
 			jsonError(w, http.StatusInternalServerError, "failed to update config")
@@ -317,9 +306,10 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 }
 
 // ResolveModel resolves a model selection to the actual server URL and model name.
-// Resolution order: task override -> default provider.
+// Resolution order: task override -> highest-priority provider's default model.
 // If the task has explicit llama_server_url/model_name set, those take priority.
-// Otherwise, if default_provider is set, look up the provider and use its URL.
+// Otherwise, use the first provider (highest priority) and its default model.
+// Fallback: first available model of the first provider.
 func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *Config) (serverURL, modelName string) {
 	// 1. Task-level override (explicit values set on the task)
 	if taskLlamaURL != "" {
@@ -333,28 +323,24 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 		return serverURL, modelName
 	}
 
-	// 2. Default provider
-	if defaultProviderName != "" && len(cfg.Providers) > 0 {
-		for _, p := range cfg.Providers {
-			if p.Name == defaultProviderName {
-				if serverURL == "" {
-					serverURL = p.URL
+	// 2. Use highest-priority provider (first in list)
+	if len(cfg.Providers) > 0 {
+		p := cfg.Providers[0]
+		if serverURL == "" {
+			serverURL = p.URL
+		}
+		// Use provider's default model if set
+		if modelName == "" && p.DefaultModel != "" {
+			for _, m := range p.Models {
+				if m == p.DefaultModel {
+					modelName = m
+					break
 				}
-				// If no model name yet, use the default model if it belongs to this provider
-				if modelName == "" && cfg.DefaultModel != "" {
-					for _, m := range p.Models {
-						if m == cfg.DefaultModel {
-							modelName = m
-							break
-						}
-					}
-				}
-				// Fallback: use the first available model
-				if modelName == "" && len(p.Models) > 0 {
-					modelName = p.Models[0]
-				}
-				break
 			}
+		}
+		// Fallback: use the first available model
+		if modelName == "" && len(p.Models) > 0 {
+			modelName = p.Models[0]
 		}
 	}
 

@@ -6,7 +6,6 @@
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
     let workspaceDir = $state(config?.workspace_dir || '');
-    let defaultModel = $state(config?.default_model || '');
     let loading = $state(false);
     let error = $state('');
 
@@ -22,6 +21,7 @@
         url: string;
         models: ModelEntry[];
         concurrency: number;
+        default_model: string; // per-provider default model
         fetchingModels: boolean;
         fetchError: string;
     }
@@ -61,14 +61,25 @@
         }
     }
 
+    // Migrate old global default_model to the matching provider's default_model
+    const oldGlobalDefault = config?.default_model || '';
+
     let providers = $state<ProviderDraft[]>(
-        (config?.providers || []).map(p => ({
-            ...p,
-            concurrency: p.concurrency || 1,
-            fetchingModels: false,
-            fetchError: '',
-            models: (p.models || []).map(m => ({ name: m, readonly: false })),
-        }))
+        (config?.providers || []).map(p => {
+            const draft: ProviderDraft = {
+                ...p,
+                concurrency: p.concurrency || 1,
+                default_model: p.default_model || '',
+                fetchingModels: false,
+                fetchError: '',
+                models: (p.models || []).map(m => ({ name: m, readonly: false })),
+            };
+            // Migrate: if old global default_model belongs to this provider and provider has no default set
+            if (!draft.default_model && oldGlobalDefault && p.models?.includes(oldGlobalDefault)) {
+                draft.default_model = oldGlobalDefault;
+            }
+            return draft;
+        })
     );
 
     function addProvider() {
@@ -78,6 +89,7 @@
             url: '',
             models: [],
             concurrency: 1,
+            default_model: '',
             fetchingModels: false,
             fetchError: '',
         });
@@ -85,6 +97,15 @@
 
     function removeProvider(idx: number) {
         providers.splice(idx, 1);
+    }
+
+    function reorderProvider(idx: number, direction: 'up' | 'down') {
+        const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (newIdx < 0 || newIdx >= providers.length) return;
+        // Swap providers at idx and newIdx
+        const temp = providers[idx];
+        providers[idx] = providers[newIdx];
+        providers[newIdx] = temp;
     }
 
     async function fetchModelsForProvider(idx: number) {
@@ -113,6 +134,20 @@
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
         providers[idx].models.splice(modelIdx, 1);
+        // Clear default if the removed model was the default
+        const p = providers[idx];
+        if (p.default_model === p.models[modelIdx]?.name) {
+            p.default_model = '';
+        }
+    }
+
+    function setProviderDefaultModel(idx: number, modelName: string) {
+        const p = providers[idx];
+        if (p.default_model === modelName) {
+            p.default_model = ''; // toggle off
+        } else {
+            p.default_model = modelName;
+        }
     }
 
     async function handleSave() {
@@ -129,12 +164,12 @@
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => m.name.trim()),
                         concurrency: p.concurrency || 1,
+                        default_model: p.default_model || '',
                     };
                 });
             const cfg = await updateConfig({
                 workspace_dir: workspaceDir.trim(),
                 providers: savedProviders,
-                default_model: defaultModel,
             });
             configStore.set(cfg);
             onSaved();
@@ -142,14 +177,6 @@
             error = String(e);
         } finally {
             loading = false;
-        }
-    }
-
-    function setDefaultModel(modelName: string) {
-        if (defaultModel === modelName) {
-            defaultModel = ''; // toggle off
-        } else {
-            defaultModel = modelName;
         }
     }
 
@@ -175,6 +202,18 @@
                     {#each providers as p, i}
                         <div class="provider-card">
                             <div class="provider-header">
+                                <div class="reorder-buttons">
+                                    <button type="button" class="btn-reorder btn-reorder-up" onclick={() => reorderProvider(i, 'up')} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
+                                        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                                            <path d="M8 4l4 5H4z" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                    <button type="button" class="btn-reorder btn-reorder-down" onclick={() => reorderProvider(i, 'down')} disabled={i === providers.length - 1} title="Move down (lower priority)" aria-label="Move provider down">
+                                        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                                            <path d="M8 11l4-5H4z" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                </div>
                                 <div class="provider-title-row">
                                     <label class="sr-only" for={`provider-url-${i}`}>Provider URL</label>
                                     <input id={`provider-url-${i}`} type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} />
@@ -185,7 +224,7 @@
                                 <button type="button" class="btn-remove-provider" onclick={() => removeProvider(i)} title="Remove provider" aria-label="Remove provider">✕</button>
                             </div>
                             {#if p.display_name}
-                                <div class="provider-meta">{p.display_name}</div>
+                                <div class="provider-meta">{p.display_name} {i === 0 && providers.length > 1 ? '<span class="priority-badge">highest priority</span>' : ''}</div>
                             {/if}
                             {#if p.fetchError}
                                 <div class="fetch-error">{p.fetchError}</div>
@@ -204,8 +243,8 @@
                                 <div class="models-list">
                                     {#each p.models as model, mi}
                                         <div class="model-row" class:readonly={model.readonly}>
-                                            <button type="button" class="btn-star" class:active={model.name && defaultModel === model.name} onclick={() => model.name && setDefaultModel(model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`}>
-                                                {model.name && defaultModel === model.name ? '★' : '☆'}
+                                            <button type="button" class="btn-star" class:active={model.name && p.default_model === model.name} onclick={() => model.name && setProviderDefaultModel(i, model.name)} title="Set as default model for this provider" aria-label={`Set ${model.name} as default for ${p.display_name}`}>
+                                                {model.name && p.default_model === model.name ? '★' : '☆'}
                                             </button>
                                             {#if model.readonly}
                                                 <span class="model-name-label">{model.name}</span>
@@ -400,10 +439,10 @@
         gap: 10px;
     }
 
-    /* Provider header: URL + Fetch on left, remove on right */
+    /* Provider header: reorder + URL + Fetch on left, remove on right */
     .provider-header {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
     }
     .provider-title-row {
@@ -418,12 +457,50 @@
         min-width: 0;
     }
 
+    /* Reorder buttons */
+    .reorder-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        flex-shrink: 0;
+        padding-top: 4px;
+    }
+    .btn-reorder {
+        background: none;
+        border: none;
+        padding: 4px;
+        cursor: pointer;
+        color: var(--color-text-primary);
+        opacity: 0.85;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        border-radius: 4px;
+    }
+    .btn-reorder:hover:not(:disabled) {
+        color: var(--color-accent);
+        opacity: 1;
+        background: var(--color-surface-3);
+    }
+    .btn-reorder:disabled {
+        opacity: 0.2;
+        cursor: default;
+    }
+
     /* Provider meta (display name) */
     .provider-meta {
         font-size: 12px;
         color: #B0BAC4;
         font-family: var(--font-mono, monospace);
         padding-left: 2px;
+    }
+    .priority-badge {
+        color: var(--color-status-green);
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
     }
 
     /* Fetch button */
