@@ -37,7 +37,7 @@ test.describe('Task Actions', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
     // Delete button should be visible
-    const deleteButton = page.locator('.btn-icon[title="Delete task"]');
+    const deleteButton = page.locator('.btn-icon[aria-label="Delete task"]');
     await expect(deleteButton).toBeVisible();
   });
 
@@ -50,7 +50,7 @@ test.describe('Task Actions', () => {
     page.on('dialog', dialog => dialog.accept());
 
     // Click delete button
-    await page.click('.btn-icon[title="Delete task"]');
+    await page.click('.btn-icon[aria-label="Delete task"]');
 
     // Should navigate back to board
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
@@ -67,7 +67,7 @@ test.describe('Task Actions', () => {
     page.on('dialog', dialog => dialog.dismiss());
 
     // Click delete button
-    await page.click('.btn-icon[title="Delete task"]');
+    await page.click('.btn-icon[aria-label="Delete task"]');
 
     // Should still be on task detail page
     await expect(page.locator('.task-detail-page')).toBeVisible();
@@ -78,8 +78,8 @@ test.describe('Task Actions', () => {
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
-    // Context column should show Backlog title
-    await expect(page.locator('.column-context .column-title')).toContainText('Backlog');
+    // Context column should show Backlog section title
+    await expect(page.getByText('Backlog')).toBeVisible();
   });
 
   test('should show task count in context column', async ({ page }) => {

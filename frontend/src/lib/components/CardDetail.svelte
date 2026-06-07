@@ -2,9 +2,13 @@
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
     import type { Task } from '$lib/types';
+    import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, selectedTask, streamingTaskIds } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
+    import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import TaskChat from './Chat/TaskChat.svelte';
+    import ResizeHandle from './ResizeHandle.svelte';
+    import DiffViewer from './DiffViewer.svelte';
 
     let { task, tasks: columnTasks, projectName, onClose }: { task: Task; tasks: Task[]; projectName?: string; onClose: () => void } = $props();
 
@@ -15,20 +19,109 @@
         { id: 'in_progress', title: 'In Progress' },
         { id: 'review', title: 'Review' },
     ];
-    let diffText = $state('');
+
+    // Diff state
+    let diffFiles: DiffFile[] = $state([]);
     let loadingDiff = $state(false);
+
+    // Title editing
     let editingTitle = $state(false);
     let titleDraft = $state('');
+
+    // Status badge
     let badge = $derived.by(() => {
         const streaming = get(streamingTaskIds).has(task.id);
         if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
         if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         return { text: 'Idle', color: 'var(--color-text-tertiary)' };
     });
+
+    // Mobile tab
     let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
     let isMobile = $derived(false);
     let touchStartX = $state(0);
     let touchEndX = $state(0);
+
+    // Column resize
+    let columnsRef: HTMLDivElement | null = $state(null);
+    const BOARD_RATIO_KEY = 'kanban:detail:boardRatio';
+    const CHAT_RATIO_KEY = 'kanban:detail:chatRatio';
+    const DEFAULT_BOARD_RATIO = 0.22;  // ~220px out of ~1000px
+    const DEFAULT_CHAT_RATIO = 0.55;   // 55% of remaining space
+    const MIN_BOARD_RATIO = 0.12;
+    const MAX_BOARD_RATIO = 0.40;
+    const MIN_CHAT_RATIO = 0.15;
+    const MAX_CHAT_RATIO = 0.80;
+
+    let boardRatio = $state(loadRatio(BOARD_RATIO_KEY, DEFAULT_BOARD_RATIO));
+    let chatRatio = $state(loadRatio(CHAT_RATIO_KEY, DEFAULT_CHAT_RATIO));
+
+    function loadRatio(key: string, defaultVal: number): number {
+        try {
+            const stored = localStorage.getItem(key);
+            if (stored !== null) {
+                const val = Number.parseFloat(stored);
+                if (!isNaN(val) && val > 0) return val;
+            }
+        } catch {}
+        return defaultVal;
+    }
+
+    function saveRatio(key: string, value: number) {
+        try {
+            localStorage.setItem(key, String(value));
+        } catch {}
+    }
+
+    function clampBoardRatio(val: number): number {
+        return Math.max(MIN_BOARD_RATIO, Math.min(MAX_BOARD_RATIO, val));
+    }
+    function clampChatRatio(val: number): number {
+        return Math.max(MIN_CHAT_RATIO, Math.min(MAX_CHAT_RATIO, val));
+    }
+
+    // Computed column widths as percentages
+    let boardWidth = $derived(`${(boardRatio * 100).toFixed(1)}%`);
+    let remainingWidth = $derived(`${((1 - boardRatio) * 100).toFixed(1)}%`);
+    let chatWidth = $derived(`${(chatRatio * (1 - boardRatio) * 100).toFixed(1)}%`);
+    let diffWidth = $derived(`${(((1 - chatRatio) * (1 - boardRatio)) * 100).toFixed(1)}%`);
+
+    // Drag handlers for resize handles
+    let boardDragStartX = $state(0);
+    let boardDragStartRatio = $state(0);
+    let chatDragStartX = $state(0);
+    let chatDragStartRatio = $state(0);
+
+    function onBoardDragStart(_event: MouseEvent, startX: number) {
+        boardDragStartX = startX;
+        boardDragStartRatio = boardRatio;
+    }
+    function onBoardDragMove(pointerX: number) {
+        const container = columnsRef;
+        if (!container) return;
+        const containerWidth = Math.max(container.offsetWidth, 1);
+        const delta = (pointerX - boardDragStartX) / containerWidth;
+        boardRatio = clampBoardRatio(boardDragStartRatio + delta);
+    }
+    function onBoardDragEnd() {
+        saveRatio(BOARD_RATIO_KEY, boardRatio);
+    }
+
+    function onChatDragStart(_event: MouseEvent, startX: number) {
+        chatDragStartX = startX;
+        chatDragStartRatio = chatRatio;
+    }
+    function onChatDragMove(pointerX: number) {
+        const container = columnsRef;
+        if (!container) return;
+        // The chat column occupies (1 - boardRatio) of the container
+        const remainingWidth = Math.max(container.offsetWidth * (1 - boardRatio), 1);
+        const delta = (pointerX - chatDragStartX) / remainingWidth;
+        chatRatio = clampChatRatio(chatDragStartRatio + delta);
+    }
+    function onChatDragEnd() {
+        saveRatio(CHAT_RATIO_KEY, chatRatio);
+    }
 
     $effect(() => {
         const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
@@ -126,9 +219,10 @@
         if (!task || loadingDiff) return;
         loadingDiff = true;
         try {
-            diffText = await getTaskDiff(task.project_id, task.id);
+            const rawDiff = await getTaskDiff(task.project_id, task.id);
+            diffFiles = parseUnifiedDiff(rawDiff);
         } catch (e) {
-            diffText = 'Failed to load diff';
+            diffFiles = [];
         }
         loadingDiff = false;
     }
@@ -226,9 +320,9 @@
         {/if}
 
         <!-- 3-Column Layout -->
-        <div class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp} role="region" aria-label="Task detail panels">
+        <div bind:this={columnsRef} class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp} role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
-            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'}>
+            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <div class="column-header">
                     <span class="column-title">Board</span>
                     <span class="column-count">{allTasks.length}</span>
@@ -273,8 +367,18 @@
                 </div>
             </div>
 
+            <!-- Resize handle: Board ↔ Chat -->
+            {#if !isMobile}
+                <ResizeHandle
+                    ariaLabel="Resize board and agent panels"
+                    onDragStart={onBoardDragStart}
+                    onDragMove={onBoardDragMove}
+                    onDragEnd={onBoardDragEnd}
+                />
+            {/if}
+
             <!-- Column 2: Chat / Agent Interface -->
-            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'}>
+            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={chatWidth}>
                 <div class="column-header">
                     <div class="column-header-left">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
@@ -291,8 +395,18 @@
                 </div>
             </div>
 
+            <!-- Resize handle: Chat ↔ Diff -->
+            {#if !isMobile}
+                <ResizeHandle
+                    ariaLabel="Resize agent and changes panels"
+                    onDragStart={onChatDragStart}
+                    onDragMove={onChatDragMove}
+                    onDragEnd={onChatDragEnd}
+                />
+            {/if}
+
             <!-- Column 3: Working Changes (Diff) -->
-            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'}>
+            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="column-header">
                     <div class="column-header-left">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -303,16 +417,7 @@
                     </button>
                 </div>
                 <div class="diff-content">
-                    {#if loadingDiff}
-                        <div class="diff-loading">Loading diff...</div>
-                    {:else if diffText}
-                        <pre class="diff-view">{diffText}</pre>
-                    {:else}
-                        <div class="diff-empty">
-                            <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/></svg>
-                            <p>No changes yet</p>
-                        </div>
-                    {/if}
+                    <DiffViewer files={diffFiles} loading={loadingDiff} />
                 </div>
             </div>
         </div>
@@ -442,7 +547,6 @@
         overflow: hidden;
     }
     .column-context {
-        width: 220px;
         flex-shrink: 0;
         border-right: 1px solid var(--color-border);
         background: var(--color-surface-0);
@@ -549,50 +653,20 @@
         flex-shrink: 0;
     }
     .column-chat {
-        flex: 1.2;
         min-width: 0;
         border-right: 1px solid var(--color-border);
     }
     .column-diff {
-        flex: 1;
         min-width: 0;
     }
     .btn-icon-sm:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
     .btn-icon-sm:disabled { opacity: 0.4; cursor: not-allowed; }
     .diff-content {
         flex: 1;
-        overflow-y: auto;
-        min-height: 0;
-    }
-    .diff-view {
-        padding: 10px 12px;
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        overflow-x: auto;
-        white-space: pre;
-        margin: 0;
-        line-height: 1.5;
-        color: var(--color-text-primary);
-    }
-    .diff-empty {
         display: flex;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 32px 16px;
-        color: var(--color-text-tertiary);
-        text-align: center;
-    }
-    .diff-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
-    .diff-empty .hint { font-size: 0.75rem; color: var(--color-text-tertiary); }
-    .diff-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 32px;
-        color: var(--color-text-tertiary);
-        font-size: 0.875rem;
+        min-height: 0;
+        overflow: hidden;
     }
     .mobile-tab-bar {
         display: none;
@@ -640,6 +714,7 @@
         .columns.mobile-swipe .column {
             flex: 0 0 100% !important;
             min-width: 100% !important;
+            width: 100% !important;
             scroll-snap-align: start;
         }
         .column-context {
