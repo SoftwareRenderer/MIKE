@@ -167,10 +167,11 @@
     }
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
-        providers[idx].models.splice(modelIdx, 1);
-        // Clear default if the removed model was the default
         const p = providers[idx];
-        if (p.default_model === p.models[modelIdx]?.name) {
+        const removedModel = p.models[modelIdx]?.name || '';
+        p.models.splice(modelIdx, 1);
+        // Clear default if the removed model was the default
+        if (p.default_model === removedModel) {
             p.default_model = '';
         }
     }
@@ -209,6 +210,7 @@
                 default_max_failed_turns: defaultMaxFailedTurns,
             });
             configStore.set(cfg);
+            loading = false;
             onSaved();
         } catch (e) {
             error = String(e);

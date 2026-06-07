@@ -212,8 +212,7 @@ test.describe.serial('Provider Settings', () => {
     await expect(modelTrigger).toBeVisible({ timeout: 15000 });
     await modelTrigger.click();
     await waitForSettle();
-    await expect(page.locator('.dropdown')).toBeVisible();
-    await expect(page.locator('.provider-label')).toContainText('Newprovider.local:9999');
-    await expect(page.locator('.model-option')).toContainText('new-model-x');
+    await expect(page.locator('.portal-model-dropdown')).toBeVisible();
+    await expect(page.locator('.portal-model-dropdown .model-option')).toContainText('new-model-x');
   });
 });

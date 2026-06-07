@@ -104,9 +104,10 @@ test.describe.serial('Model Selector', () => {
     await createAndOpenTask(page, projectId);
     await page.locator('.model-trigger').click();
     await waitForSettle();
-    await expect(page.locator('.dropdown')).toBeVisible();
-    await expect(page.locator('.model-option')).toHaveCount(2);
-    await expect(page.locator('.provider-label')).toContainText('Test Provider');
+    await expect(page.locator('.portal-model-dropdown')).toBeVisible();
+    await expect(page.locator('.portal-model-dropdown .model-option')).toHaveCount(2);
+    // With single provider, no provider selector is shown (no .provider-label)
+    await expect(page.locator('.provider-trigger')).not.toBeVisible();
   });
 
   test('should update task when a model is selected', async ({ page }) => {
@@ -114,7 +115,7 @@ test.describe.serial('Model Selector', () => {
     const taskId = await createAndOpenTask(page, projectId);
     await page.locator('.model-trigger').click();
     await waitForSettle();
-    await page.locator('.model-option').filter({ hasText: 'model-beta' }).click();
+    await page.locator('.portal-model-dropdown .model-option').filter({ hasText: 'model-beta' }).click();
     await waitForSettle(1000);
     await expect(page.locator('.model-name')).toContainText('model-beta');
     // Wait for the API call to complete
@@ -136,11 +137,11 @@ test.describe.serial('Model Selector', () => {
     await expect(page.locator('.model-selector')).not.toBeVisible();
   });
 
-  test('should show models grouped by provider in dropdown', async ({ page }) => {
+  test('should show provider selector with multiple providers', async ({ page }) => {
     await apiPutConfig({
       providers: [
-        { name: 'provider-a', display_name: 'Provider A', url: 'http://a.example/v1', models: ['model-a1', 'model-a2'] },
-        { name: 'provider-b', display_name: 'Provider B', url: 'http://b.example/v1', models: ['model-b1'] },
+        { name: 'provider-a', display_name: 'Provider A', url: 'http://a.example/v1', models: ['model-a1', 'model-a2'], default_model: 'model-a1' },
+        { name: 'provider-b', display_name: 'Provider B', url: 'http://b.example/v1', models: ['model-b1'], default_model: 'model-b1' },
       ],
       default_provider: 'provider-a',
     });
@@ -148,12 +149,24 @@ test.describe.serial('Model Selector', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
     const projectId = await getProjectId(page);
     await createAndOpenTask(page, projectId);
+    // Provider selector should be visible (2+ providers)
+    await expect(page.locator('.provider-trigger')).toBeVisible();
+    await expect(page.locator('.provider-trigger')).toContainText('Provider A');
+    // Open provider dropdown
+    await page.locator('.provider-trigger').click();
+    await waitForSettle();
+    await expect(page.locator('.portal-provider-dropdown')).toBeVisible();
+    await expect(page.locator('.portal-provider-dropdown .provider-option')).toHaveCount(2);
+    // Switch to Provider B
+    await page.locator('.portal-provider-dropdown .provider-option').filter({ hasText: 'Provider B' }).click();
+    await waitForSettle(500);
+    // Model should switch to Provider B's default
+    await expect(page.locator('.model-trigger')).toContainText('model-b1');
+    // Open model dropdown - should only show Provider B's models
     await page.locator('.model-trigger').click();
     await waitForSettle();
-    await expect(page.locator('.provider-label')).toHaveCount(2);
-    await expect(page.locator('.provider-label').first()).toContainText('Provider A');
-    await expect(page.locator('.provider-label').last()).toContainText('Provider B');
-    await expect(page.locator('.model-option')).toHaveCount(3);
+    await expect(page.locator('.portal-model-dropdown .model-option')).toHaveCount(1);
+    await expect(page.locator('.portal-model-dropdown .model-option')).toContainText('model-b1');
   });
 });
 

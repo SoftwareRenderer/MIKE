@@ -11,32 +11,97 @@
 
     let { providers, currentModel, currentUrl, disabled = false, onSelect }: Props = $props();
 
-    let isOpen = $state(false);
-    let dropdownEl: HTMLDivElement | null = null;
+    let selectedProviderUrl = $state(currentUrl || '');
+    let providerDropdownOpen = $state(false);
+    let modelDropdownOpen = $state(false);
 
-    // Find which provider the current model belongs to
-    let currentProvider = $derived(
-        providers.find(p => p.url === currentUrl) || null
+    let providerTriggerEl: HTMLButtonElement | null = null;
+    let modelTriggerEl: HTMLButtonElement | null = null;
+
+    let providerRect = $state<{ top: number; left: number } | null>(null);
+    let modelRect = $state<{ top: number; left: number } | null>(null);
+
+    let selectedProvider = $derived(
+        providers.find(p => p.url === selectedProviderUrl) ||
+        providers.find(p => p.url === currentUrl) ||
+        providers[0] ||
+        null
     );
 
-    // All models grouped by provider
-    let allModels = $derived(
+    let availableModels = $derived(
+        selectedProvider?.models.filter(m => m.trim()) || []
+    );
+
+    let activeProviders = $derived(
         providers.filter(p => p.models.length > 0)
     );
 
-    function toggle() {
-        if (disabled) return;
-        isOpen = !isOpen;
+    $effect(() => {
+        selectedProviderUrl = currentUrl || '';
+    });
+
+    $effect(() => {
+        if (currentModel && providers.length > 0) {
+            const providerWithModel = providers.find(p => p.models.includes(currentModel));
+            if (providerWithModel && providerWithModel.url !== selectedProviderUrl) {
+                selectedProviderUrl = providerWithModel.url;
+            }
+        }
+    });
+
+    function getRect(el: HTMLElement | null): { top: number; left: number } | null {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.bottom + 6, left: r.left };
     }
 
-    function selectModel(provider: Provider, model: string) {
-        onSelect(provider.name, model, provider.url);
-        isOpen = false;
+    function toggleProviderDropdown() {
+        if (disabled) return;
+        if (!providerDropdownOpen) {
+            providerRect = getRect(providerTriggerEl);
+            modelDropdownOpen = false;
+        }
+        providerDropdownOpen = !providerDropdownOpen;
+    }
+
+    function toggleModelDropdown() {
+        if (disabled) return;
+        if (!modelDropdownOpen) {
+            modelRect = getRect(modelTriggerEl);
+            providerDropdownOpen = false;
+        }
+        modelDropdownOpen = !modelDropdownOpen;
+    }
+
+    function selectProvider(provider: Provider) {
+        selectedProviderUrl = provider.url;
+        providerDropdownOpen = false;
+        const modelToSelect = provider.default_model && provider.models.includes(provider.default_model)
+            ? provider.default_model
+            : provider.models[0];
+        if (modelToSelect) {
+            onSelect(provider.name, modelToSelect, provider.url);
+        }
+    }
+
+    function selectModel(model: string) {
+        if (!selectedProvider) return;
+        onSelect(selectedProvider.name, model, selectedProvider.url);
+        modelDropdownOpen = false;
     }
 
     function handleClickOutside(e: MouseEvent) {
-        if (dropdownEl && !dropdownEl.contains(e.target as Node)) {
-            isOpen = false;
+        const target = e.target as Node;
+        if (providerDropdownOpen && providerTriggerEl && !providerTriggerEl.contains(target)) {
+            // Check if click is inside the portal dropdown
+            const portal = document.querySelector('.portal-provider-dropdown');
+            if (portal && portal.contains(target)) return;
+            providerDropdownOpen = false;
+        }
+        if (modelDropdownOpen && modelTriggerEl && !modelTriggerEl.contains(target)) {
+            const portal = document.querySelector('.portal-model-dropdown');
+            if (portal && portal.contains(target)) return;
+            modelDropdownOpen = false;
         }
     }
 
@@ -46,62 +111,97 @@
     });
 </script>
 
-<div class="model-selector" bind:this={dropdownEl}>
+<div class="model-selector">
+    {#if activeProviders.length > 1}
+        <button
+            type="button"
+            class="selector-trigger provider-trigger"
+            class:open={providerDropdownOpen}
+            class:disabled={disabled}
+            bind:this={providerTriggerEl}
+            onclick={toggleProviderDropdown}
+            title="Select provider"
+        >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span class="selector-label">
+                {selectedProvider?.display_name || selectedProvider?.name || 'Provider'}
+            </span>
+            <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none">
+                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
+    {/if}
+
     <button
         type="button"
-        class="model-trigger"
-        class:open={isOpen}
+        class="selector-trigger model-trigger"
+        class:open={modelDropdownOpen}
         class:disabled={disabled}
-        onclick={toggle}
+        bind:this={modelTriggerEl}
+        onclick={toggleModelDropdown}
         title="Select model"
     >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
             <path d="M2 4l6 5 6-5M2 4v8l6 5 6-5V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="model-name" class:current={!!currentModel}>
+        <span class="selector-label model-name" class:current={!!currentModel}>
             {currentModel || 'Select model'}
         </span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none">
             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     </button>
-
-    {#if isOpen}
-        <div class="dropdown">
-            {#if allModels.length === 0}
-                <div class="empty">No providers configured</div>
-            {:else}
-                {#each allModels as provider}
-                    <div class="provider-group">
-                        <div class="provider-label">{provider.display_name || provider.name}</div>
-                        {#each provider.models as model}
-                            <button
-                                type="button"
-                                class="model-option"
-                                class:active={model === currentModel && provider.url === currentUrl}
-                                onclick={() => selectModel(provider, model)}
-                            >
-                                <span class="option-name">{model}</span>
-                                {#if model === currentModel && provider.url === currentUrl}
-                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                {/if}
-                            </button>
-                        {/each}
-                    </div>
-                {/each}
-            {/if}
-        </div>
-    {/if}
 </div>
+
+<!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
+{#if providerDropdownOpen && providerRect}
+    <svelte:element this="div" class="portal-provider-dropdown" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+        {#each activeProviders as provider}
+            <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)}>
+                <span class="provider-name">{provider.display_name || provider.name}</span>
+                <span class="model-count">{provider.models.length} model{provider.models.length !== 1 ? 's' : ''}</span>
+                {#if provider.url === selectedProviderUrl}
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                {/if}
+            </button>
+        {/each}
+    </svelte:element>
+{/if}
+
+<!-- Model dropdown -->
+{#if modelDropdownOpen && modelRect}
+    <svelte:element this="div" class="portal-model-dropdown" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+        {#if availableModels.length === 0}
+            <div class="empty">No models available</div>
+        {:else}
+            {#each availableModels as model}
+                <button type="button" class="model-option" class:active={model === currentModel} onclick={() => selectModel(model)}>
+                    <span class="option-name">{model}</span>
+                    {#if model === currentModel}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    {/if}
+                </button>
+            {/each}
+        {/if}
+    </svelte:element>
+{/if}
 
 <style>
     .model-selector {
-        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 4px;
         flex-shrink: 0;
     }
-    .model-trigger {
+
+    .selector-trigger {
         display: inline-flex;
         align-items: center;
         gap: 4px;
@@ -116,66 +216,85 @@
         transition: all 0.15s ease;
         white-space: nowrap;
     }
-    .model-trigger:hover:not(.disabled) {
+    .selector-trigger:hover:not(.disabled) {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
         border-color: var(--color-accent);
     }
-    .model-trigger.open {
+    .selector-trigger.open {
         background: var(--color-surface-3);
         border-color: var(--color-accent);
         color: var(--color-text-primary);
     }
-    .model-trigger.disabled {
+    .selector-trigger.disabled {
         opacity: 0.4;
         cursor: not-allowed;
     }
-    .model-name {
-        max-width: 120px;
+
+    .selector-label {
+        max-width: 140px;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .model-name.current {
+    .selector-label.current {
         font-weight: 600;
         color: var(--color-text-primary);
     }
+    .provider-trigger .selector-label {
+        max-width: 100px;
+    }
+
     .chevron {
         transition: transform 0.15s ease;
+        flex-shrink: 0;
     }
-    .model-trigger.open .chevron {
+    .selector-trigger.open .chevron {
         transform: rotate(180deg);
     }
-    .dropdown {
-        position: absolute;
-        bottom: calc(100% + 6px);
-        left: 0;
-        min-width: 200px;
-        max-height: 320px;
-        overflow-y: auto;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-        z-index: 50;
-        padding: 4px;
-    }
+
     .empty {
         padding: 12px 16px;
         font-size: 12px;
         color: var(--color-text-tertiary);
         text-align: center;
     }
-    .provider-group {
-        margin-bottom: 2px;
+
+    .provider-option {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        border: none;
+        background: none;
+        color: var(--color-text-primary);
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.1s ease;
     }
-    .provider-label {
-        padding: 4px 8px 2px;
+    .provider-option:hover {
+        background: var(--color-surface-3);
+    }
+    .provider-option.active {
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+        color: var(--color-accent);
+    }
+    .provider-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+    }
+    .model-count {
         font-size: 10px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
         color: var(--color-text-tertiary);
+        flex-shrink: 0;
     }
+
     .model-option {
         display: flex;
         align-items: center;
@@ -196,7 +315,7 @@
         background: var(--color-surface-3);
     }
     .model-option.active {
-        background: var(--color-accent)18;
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
         color: var(--color-accent);
     }
     .option-name {

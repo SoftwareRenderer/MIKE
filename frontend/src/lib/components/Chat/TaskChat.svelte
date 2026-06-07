@@ -6,6 +6,7 @@
 import { board as boardStore, config as configStore, showToast } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
+    import ModelSelector from './ModelSelector.svelte';
 
     interface ChatEntry {
         id: string;
