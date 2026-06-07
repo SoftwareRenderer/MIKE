@@ -4,6 +4,7 @@
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
+    import { REASONING_EFFORT_OPTIONS } from '$lib/types';
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
@@ -18,6 +19,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean; // true = fetched from API, not editable
+        reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
     }
 
     interface ProviderDraft {
@@ -83,10 +85,16 @@
                 expanded: !p.default_model, // collapse if already configured
                 testingConnection: false,
                 testResult: null,
-                models: (p.models || []).map(m => ({ name: m, readonly: false })),
+                models: (p.models || []).map(m => {
+                    // Handle both old format (string) and new format ({name, reasoning_effort})
+                    if (typeof m === 'string') {
+                        return { name: m, readonly: false, reasoning_effort: 'medium' as const };
+                    }
+                    return { name: m.name, readonly: false, reasoning_effort: m.reasoning_effort || 'medium' };
+                }),
             };
             // Migrate: if old global default_model belongs to this provider and provider has no default set
-            if (!draft.default_model && oldGlobalDefault && p.models?.includes(oldGlobalDefault)) {
+            if (!draft.default_model && oldGlobalDefault && p.models?.some(m => (typeof m === 'string' ? m : m.name) === oldGlobalDefault)) {
                 draft.default_model = oldGlobalDefault;
             }
             return draft;
@@ -162,7 +170,7 @@
                 p.fetchError = result.error;
             } else {
                 // Replace: clear existing models and use fetched list (readonly)
-                p.models = result.models.map(m => ({ name: m, readonly: true }));
+                p.models = result.models.map(m => ({ name: m, readonly: true, reasoning_effort: 'medium' as const }));
             }
         } catch (e) {
             p.fetchError = String(e);
@@ -172,7 +180,7 @@
     }
 
     function addModelToProvider(idx: number) {
-        providers[idx].models.push({ name: '', readonly: false });
+        providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'medium' });
     }
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
@@ -206,7 +214,10 @@
                         name: p.name.trim(),
                         display_name: p.display_name.trim(),
                         url: p.url.trim(),
-                        models: p.models.filter(m => m.name.trim()).map(m => m.name.trim()),
+                        models: p.models.filter(m => m.name.trim()).map(m => ({
+                            name: m.name.trim(),
+                            reasoning_effort: m.reasoning_effort || 'medium',
+                        })),
                         concurrency: p.concurrency || 1,
                         default_model: p.default_model || '',
                     };
@@ -420,6 +431,17 @@
                                                             <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" />
                                                         {/if}
                                                     </div>
+                                                    <select
+                                                        class="reasoning-effort-select"
+                                                        value={model.reasoning_effort || 'medium'}
+                                                        oninput={(e) => { model.reasoning_effort = (e.target as HTMLSelectElement).value as 'off' | 'low' | 'medium' | 'high' | 'max'; }}
+                                                        aria-label="Reasoning effort for {model.name || 'this model'}"
+                                                        title="Reasoning effort (thinking budget)"
+                                                    >
+                                                        {#each REASONING_EFFORT_OPTIONS as option}
+                                                            <option value={option.value}>{option.label}</option>
+                                                        {/each}
+                                                    </select>
                                                     <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`}>
                                                         ✕
                                                     </button>
@@ -1176,7 +1198,7 @@
     /* Model row */
     .model-row {
         display: grid;
-        grid-template-columns: 90px 1fr 28px;
+        grid-template-columns: 90px 1fr 120px 28px;
         align-items: center;
         gap: 8px;
     }
@@ -1218,6 +1240,29 @@
         padding: 5px 8px;
         font-size: 13px;
         width: 100%;
+    }
+
+    /* Reasoning effort select */
+    .reasoning-effort-select {
+        background: var(--color-surface-0);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 4px 6px;
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        width: 100%;
+        min-width: 0;
+        font-family: inherit;
+        transition: border-color 0.15s ease, color 0.15s ease;
+    }
+    .reasoning-effort-select:hover {
+        border-color: var(--color-border-bright);
+        color: var(--color-text-primary);
+    }
+    .reasoning-effort-select:focus-visible {
+        border-color: var(--color-accent);
+        outline: none;
     }
 
     /* Default model button */

@@ -250,7 +250,7 @@ export async function fetchModels(llamaServerUrl: string): Promise<{ models: str
 
 /** Resolve a provider+model selection to the actual server URL and model name. */
 export function resolveProviderModel(
-    providers: { name: string; url: string; models: string[] }[],
+    providers: { name: string; url: string; models: Array<{ name: string; reasoning_effort?: string }> }[],
     providerName: string,
     modelName: string
 ): { llama_server_url: string; model_name: string } | null {

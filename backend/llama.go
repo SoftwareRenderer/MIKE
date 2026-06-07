@@ -13,19 +13,35 @@ import (
 	"time"
 )
 
+// Reasoning effort to token budget mapping.
+var reasoningEffortTokens = map[string]int{
+	"off":    -1,
+	"low":    512,
+	"medium": 2048,
+	"high":   8192,
+	"max":    -1, // unlimited
+}
+
 // LlamaClient handles communication with llama.cpp OpenAI-compatible API.
 type LlamaClient struct {
-	baseURL   string
-	modelName string
-	httpClient *http.Client
+	baseURL         string
+	modelName       string
+	reasoningEffort string // "off", "low", "medium", "high", "max"
+	httpClient      *http.Client
 }
 
 // NewLlamaClient creates a new LlamaClient.
-func NewLlamaClient(baseURL, modelName string) *LlamaClient {
+// reasoningEffort controls the thinking budget: "off", "low", "medium", "high", "max".
+// If empty, defaults to "medium".
+func NewLlamaClient(baseURL, modelName, reasoningEffort string) *LlamaClient {
+	if reasoningEffort == "" {
+		reasoningEffort = DefaultReasoningEffort
+	}
 	return &LlamaClient{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		modelName: modelName,
-		httpClient: &http.Client{Timeout: 0}, // No timeout for streaming
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		modelName:       modelName,
+		reasoningEffort: reasoningEffort,
+		httpClient:      &http.Client{Timeout: 0}, // No timeout for streaming
 	}
 }
 
@@ -159,6 +175,18 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []ChatMessage, to
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
 		reqBody["tool_choice"] = toolChoice
+	}
+
+	// Reasoning effort / thinking budget
+	if c.reasoningEffort != "off" {
+		budget, ok := reasoningEffortTokens[c.reasoningEffort]
+		if ok {
+			reqBody["thinking_budget_tokens"] = budget
+			reqBody["reasoning_control"] = true
+			reqBody["chat_template_kwargs"] = map[string]interface{}{
+				"enable_thinking": true,
+			}
+		}
 	}
 
 	data, err := json.Marshal(reqBody)

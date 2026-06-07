@@ -377,15 +377,15 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 		// Use provider's default model if set
 		if modelName == "" && p.DefaultModel != "" {
 			for _, m := range p.Models {
-				if m == p.DefaultModel {
-					modelName = m
+				if m.Name == p.DefaultModel {
+					modelName = m.Name
 					break
 				}
 			}
 		}
 		// Fallback: use the first available model
 		if modelName == "" && len(p.Models) > 0 {
-			modelName = p.Models[0]
+			modelName = p.Models[0].Name
 		}
 	}
 
@@ -449,4 +449,77 @@ func parseIntPtr(s string) (*int, error) {
 		return nil, err
 	}
 	return &v, nil
+}
+
+// DefaultReasoningEffort is the default reasoning effort for models without an explicit setting.
+const DefaultReasoningEffort = "medium"
+
+// UnmarshalJSON implements backward-compatible JSON unmarshaling for Provider.
+// Accepts both the new format (models as []ModelConfig) and the old format (models as []string).
+func (p *Provider) UnmarshalJSON(data []byte) error {
+	// Use an alias type to avoid infinite recursion
+	type providerAlias Provider
+	var raw struct {
+		*providerAlias
+		Models json.RawMessage `json:"models"`
+	}
+	raw.providerAlias = (*providerAlias)(p)
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Try new format: []ModelConfig
+	var newModels []ModelConfig
+	if err := json.Unmarshal(raw.Models, &newModels); err == nil && len(newModels) > 0 {
+		// Check if at least one entry has a name field (distinguish from []string)
+		if newModels[0].Name != "" || len(newModels) == 0 {
+			p.Models = newModels
+			// Set default reasoning effort for models without one
+			for i := range p.Models {
+				if p.Models[i].ReasoningEffort == "" {
+					p.Models[i].ReasoningEffort = DefaultReasoningEffort
+				}
+			}
+			return nil
+		}
+	}
+
+	// Try old format: []string
+	var oldModels []string
+	if err := json.Unmarshal(raw.Models, &oldModels); err == nil {
+		p.Models = make([]ModelConfig, len(oldModels))
+		for i, name := range oldModels {
+			p.Models[i] = ModelConfig{Name: name, ReasoningEffort: DefaultReasoningEffort}
+		}
+		return nil
+	}
+
+	// Fallback: empty array
+	if err := json.Unmarshal(raw.Models, &[]ModelConfig{}); err == nil {
+		p.Models = []ModelConfig{}
+		return nil
+	}
+
+	return fmt.Errorf("invalid models format")
+}
+
+// GetModelReasoningEffort looks up the reasoning effort for a model by name across all providers.
+// Returns DefaultReasoningEffort if the model is not found.
+func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return DefaultReasoningEffort
+	}
+	for _, provider := range cfg.Providers {
+		for _, m := range provider.Models {
+			if m.Name == modelName {
+				if m.ReasoningEffort == "" {
+					return DefaultReasoningEffort
+				}
+				return m.ReasoningEffort
+			}
+		}
+	}
+	return DefaultReasoningEffort
 }

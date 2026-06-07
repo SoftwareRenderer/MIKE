@@ -218,7 +218,7 @@ func (s *Store) migrateDefaultModelToProviders() error {
 			continue // already has a default
 		}
 		for _, m := range providers[i].Models {
-			if m == globalDefaultModel {
+			if m.Name == globalDefaultModel {
 				providers[i].DefaultModel = globalDefaultModel
 				migrated = true
 				break

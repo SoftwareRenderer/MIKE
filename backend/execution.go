@@ -370,7 +370,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 	}()
 
 	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
-	client := NewLlamaClient(serverURL, modelName)
+	reasoningEffort := te.configStore.GetModelReasoningEffort(modelName)
+	client := NewLlamaClient(serverURL, modelName, reasoningEffort)
 	tools := GetToolDefinitions()
 	var systemPrompt string
 	if task.PlanMode {
@@ -444,7 +445,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 					newModel = curModel
 				}
 				mc.set(newURL, newModel)
-				client = NewLlamaClient(newURL, newModel)
+				newReasoningEffort := te.configStore.GetModelReasoningEffort(newModel)
+				client = NewLlamaClient(newURL, newModel, newReasoningEffort)
 				log.Printf("[model-switch] task=%s url=%s model=%s", task.ID, newURL, newModel)
 			}
 		}

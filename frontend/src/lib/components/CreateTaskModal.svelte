@@ -30,13 +30,14 @@
             // Pre-select highest-priority provider's default model
             if (providers.length > 0) {
                 const firstProvider = providers[0];
-                if (firstProvider.default_model && firstProvider.models.includes(firstProvider.default_model)) {
+                const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
+                if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
                     selectedUrl = firstProvider.url;
                     selectedModel = firstProvider.default_model;
                 } else if (firstProvider.models.length > 0) {
                     // Fallback: first available model of highest-priority provider
                     selectedUrl = firstProvider.url;
-                    selectedModel = firstProvider.models[0];
+                    selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
         } catch {

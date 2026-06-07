@@ -29,7 +29,7 @@
     );
 
     let availableModels = $derived(
-        selectedProvider?.models.filter(m => m.trim()) || []
+        selectedProvider?.models.map(m => typeof m === 'string' ? m : m.name).filter(m => m.trim()) || []
     );
 
     let activeProviders = $derived(
@@ -42,7 +42,7 @@
 
     $effect(() => {
         if (currentModel && providers.length > 0) {
-            const providerWithModel = providers.find(p => p.models.includes(currentModel));
+            const providerWithModel = providers.find(p => p.models.some(m => (typeof m === 'string' ? m : m.name) === currentModel));
             if (providerWithModel && providerWithModel.url !== selectedProviderUrl) {
                 selectedProviderUrl = providerWithModel.url;
             }
@@ -76,9 +76,10 @@
     function selectProvider(provider: Provider) {
         selectedProviderUrl = provider.url;
         providerDropdownOpen = false;
-        const modelToSelect = provider.default_model && provider.models.includes(provider.default_model)
+        const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
+        const modelToSelect = provider.default_model && provider.models.some(m => getModelName(m) === provider.default_model)
             ? provider.default_model
-            : provider.models[0];
+            : provider.models.length > 0 ? getModelName(provider.models[0]) : null;
         if (modelToSelect) {
             onSelect(provider.name, modelToSelect, provider.url);
         }

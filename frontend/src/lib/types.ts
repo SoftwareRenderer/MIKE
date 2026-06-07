@@ -44,11 +44,25 @@ export interface Config {
     default_max_failed_turns?: number;
 }
 
+export interface ProviderModel {
+    name: string;
+    reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+}
+
+/** Reasoning effort options for the settings UI. */
+export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tokens: string }> = [
+    { value: 'off', label: 'Off', tokens: 'Disabled' },
+    { value: 'low', label: 'Low', tokens: '512 tokens' },
+    { value: 'medium', label: 'Medium', tokens: '2,048 tokens' },
+    { value: 'high', label: 'High', tokens: '8,192 tokens' },
+    { value: 'max', label: 'Max', tokens: 'Unlimited' },
+];
+
 export interface Provider {
     name: string;
     display_name: string;
     url: string;
-    models: string[];
+    models: ProviderModel[];
     concurrency: number;
     default_model?: string;
 }

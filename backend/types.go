@@ -44,14 +44,20 @@ type Config struct {
 	DefaultMaxFailedTurns     *int       `json:"default_max_failed_turns,omitempty"`    // default max consecutive failed turns for new tasks
 }
 
+// ModelConfig represents a model with its per-model settings.
+type ModelConfig struct {
+	Name             string `json:"name"`              // model name
+	ReasoningEffort  string `json:"reasoning_effort"`  // "off", "low", "medium", "high", "max"
+}
+
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
-	Name        string   `json:"name"`         // internal identifier (e.g., "neptune")
-	DisplayName string   `json:"display_name"` // human-readable label (e.g., "Neptune")
-	URL         string   `json:"url"`          // server URL (e.g., "http://neptune:8010/v1")
-	Models      []string `json:"models"`       // available model names
-	Concurrency int      `json:"concurrency"`  // max concurrent LLM API requests (default 1)
-	DefaultModel string  `json:"default_model"` // default model for this provider (empty = none)
+	Name         string      `json:"name"`         // internal identifier (e.g., "neptune")
+	DisplayName  string      `json:"display_name"` // human-readable label (e.g., "Neptune")
+	URL          string      `json:"url"`          // server URL (e.g., "http://neptune:8010/v1")
+	Models       []ModelConfig `json:"models"`     // available models with per-model settings
+	Concurrency  int         `json:"concurrency"`  // max concurrent LLM API requests (default 1)
+	DefaultModel string      `json:"default_model"` // default model for this provider (empty = none)
 }
 
 // Project represents a workspace project.
