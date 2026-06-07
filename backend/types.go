@@ -271,19 +271,20 @@ type StreamErrorEvent struct {
 
 // TaskMessage represents a chat message for a task.
 type TaskMessage struct {
-	ID              string    `json:"id"`
-	TaskID          string    `json:"task_id"`
-	Role            string    `json:"role"`
-	Content         string    `json:"content"`
-	ToolCalls       string    `json:"tool_calls,omitempty"`
-	ToolResult      string    `json:"tool_result,omitempty"`
-	ModelName       string    `json:"model_name,omitempty"`
-	PromptTokens    int       `json:"prompt_tokens,omitempty"`
-	PredictedTokens int       `json:"predicted_tokens,omitempty"`
-	PromptMs        int       `json:"prompt_ms,omitempty"`
-	PredictedMs     int       `json:"predicted_ms,omitempty"`
-	Duration        int64     `json:"duration,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	TaskID           string    `json:"task_id"`
+	Role             string    `json:"role"`
+	Content          string    `json:"content"`
+	ReasoningContent string    `json:"reasoning_content,omitempty"`
+	ToolCalls        string    `json:"tool_calls,omitempty"`
+	ToolResult       string    `json:"tool_result,omitempty"`
+	ModelName        string    `json:"model_name,omitempty"`
+	PromptTokens     int       `json:"prompt_tokens,omitempty"`
+	PredictedTokens  int       `json:"predicted_tokens,omitempty"`
+	PromptMs         int       `json:"prompt_ms,omitempty"`
+	PredictedMs      int       `json:"predicted_ms,omitempty"`
+	Duration         int64     `json:"duration,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // -- Home Agent WebSocket types --

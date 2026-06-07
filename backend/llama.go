@@ -47,9 +47,10 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort string) *LlamaClient {
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	ToolCallID       string `json:"tool_call_id,omitempty"`
 }
 
 // ChatTool represents a tool definition.
@@ -124,8 +125,9 @@ func MergeToolCalls(existing []ChatToolCall, deltas []ChatToolCall) []ChatToolCa
 
 // ChatChoiceDelta is the delta in a streaming response.
 type ChatChoiceDelta struct {
-	Content   *string        `json:"content"`
-	ToolCalls []ChatToolCall `json:"tool_calls,omitempty"`
+	Content          *string        `json:"content"`
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
 // ChatChoice is a single choice in the response.
@@ -171,6 +173,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []ChatMessage, to
 		"stream":      true,
 		"temperature": 0.7,
 		"max_tokens":  8192,
+		"reasoning_format": "auto",
 	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools

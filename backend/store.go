@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS task_messages (
     task_id            TEXT NOT NULL,
     role               TEXT NOT NULL,
     content            TEXT NOT NULL,
+    reasoning_content  TEXT DEFAULT NULL,
     model_name         TEXT DEFAULT NULL,
     prompt_tokens      INTEGER DEFAULT 0,
     predicted_tokens   INTEGER DEFAULT 0,
@@ -159,6 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN duration INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_calls TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_result TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN reasoning_content TEXT DEFAULT NULL`)
 	return nil
 }
 
@@ -738,8 +740,8 @@ func (s *Store) CreateTaskMessage(m *TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, role, content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, m.Role, m.Content, m.ToolCalls, m.ToolResult, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -749,7 +751,7 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, role, content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -760,9 +762,12 @@ func (s *Store) GetTaskMessages(taskID string) ([]TaskMessage, error) {
 	for rows.Next() {
 		var m TaskMessage
 		var createdAt string
-		var modelName, toolCalls, toolResult sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &toolCalls, &toolResult, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
+		var modelName, toolCalls, toolResult, reasoningContent sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
 			return nil, err
+		}
+		if reasoningContent.Valid {
+			m.ReasoningContent = reasoningContent.String
 		}
 		if modelName.Valid {
 			m.ModelName = modelName.String

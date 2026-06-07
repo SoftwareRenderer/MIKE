@@ -417,6 +417,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 	}
 
 	var assistantContent strings.Builder
+	var reasoningContent strings.Builder
 	var pendingToolCalls []ChatToolCall
 	startTime := time.Now()
 
@@ -459,6 +460,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 		_, activeModel := mc.get()
 
 		usage, err := client.ChatStream(ctx, messages, tools, func(choice ChatChoice) {
+			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+				reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+				b.send(StreamEvent{Type: WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+			}
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				assistantContent.WriteString(*choice.Delta.Content)
 				b.send(StreamEvent{Type: WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
@@ -492,6 +497,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				case <-time.After(time.Duration(i+1) * 2 * time.Second):
 				}
 				usage, err = client.ChatStream(ctx, messages, tools, func(choice ChatChoice) {
+					if choice.Delta.ReasoningContent != nil {
+						reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+						b.send(StreamEvent{Type: WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+					}
 					if choice.Delta.Content != nil {
 						b.send(StreamEvent{Type: WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 					}
@@ -595,7 +604,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				}
 			}
 			msgCountBefore := len(messages)
-			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
+			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
 			// Feed back each tool result with its tool_call_id so the LLM can see the actual output
 			for _, tr := range toolResults {
 				messages = append(messages, ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
@@ -611,22 +620,24 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			}
 			// Persist assistant message with stats
 			te.store.CreateTaskMessage(&TaskMessage{
-				ID:              generateUUID(),
-				TaskID:          task.ID,
-				Role:            "assistant",
-				Content:         assistantText,
-				ModelName:       activeModel,
-				PromptTokens:    promptTokens,
-				PredictedTokens: predictedTokens,
-				PromptMs:        promptMs,
-				PredictedMs:     predictedMs,
-				Duration:        time.Since(startTime).Milliseconds(),
-				CreatedAt:       time.Now().UTC(),
+				ID:               generateUUID(),
+				TaskID:           task.ID,
+				Role:             "assistant",
+				Content:          assistantText,
+				ReasoningContent: reasoningContent.String(),
+				ModelName:        activeModel,
+				PromptTokens:     promptTokens,
+				PredictedTokens:  predictedTokens,
+				PromptMs:         promptMs,
+				PredictedMs:      predictedMs,
+				Duration:         time.Since(startTime).Milliseconds(),
+				CreatedAt:        time.Now().UTC(),
 			})
 			pendingToolCalls = nil
 			assistantContent.Reset()
+			reasoningContent.Reset()
 		} else if assistantText != "" {
-			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText})
+			messages = append(messages, ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
 			// Compute stats from usage (fall back to estimation if LLM didn't provide usage)
 			promptTokens, predictedTokens, promptMs, predictedMs := 0, 0, 0, 0
 			if usage != nil {
@@ -639,19 +650,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			duration := time.Since(startTime).Milliseconds()
 			// Persist assistant message with stats
 			te.store.CreateTaskMessage(&TaskMessage{
-				ID:              generateUUID(),
-				TaskID:          task.ID,
-				Role:            "assistant",
-				Content:         assistantText,
-				ModelName:       activeModel,
-				PromptTokens:    promptTokens,
-				PredictedTokens: predictedTokens,
-				PromptMs:        promptMs,
-				PredictedMs:     predictedMs,
-				Duration:        duration,
-				CreatedAt:       time.Now().UTC(),
+				ID:               generateUUID(),
+				TaskID:           task.ID,
+				Role:             "assistant",
+				Content:          assistantText,
+				ReasoningContent: reasoningContent.String(),
+				ModelName:        activeModel,
+				PromptTokens:     promptTokens,
+				PredictedTokens:  predictedTokens,
+				PromptMs:         promptMs,
+				PredictedMs:      predictedMs,
+				Duration:         duration,
+				CreatedAt:        time.Now().UTC(),
 			})
 			assistantContent.Reset()
+			reasoningContent.Reset()
 			// LLM responded with text but no tools - signal completion so UI stops streaming
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)

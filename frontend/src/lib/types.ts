@@ -99,6 +99,7 @@ export interface TaskMessage {
     task_id: string;
     role: string;
     content: string;
+    reasoning_content?: string;
     tool_calls?: string;
     tool_result?: string;
     model_name?: string;

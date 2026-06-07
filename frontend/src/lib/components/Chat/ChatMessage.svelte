@@ -4,6 +4,7 @@
     interface Props {
         role: string;
         content: string;
+        reasoningContent?: string;
         isStreaming?: boolean;
         timestamp?: string;
         messageId?: string;
@@ -14,7 +15,9 @@
         onRegenerate?: () => void;
     }
 
-    let { role, content, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+
+    let reasoningExpanded = $state(false);
 
     function formatTime(isoStr: string): string {
         const date = new Date(isoStr);
@@ -149,6 +152,19 @@
         </div>
     {:else if role === 'assistant'}
         <div class="message-wrapper assistant-wrapper">
+            {#if reasoningContent}
+                <div class="reasoning-block" class:expanded={reasoningExpanded}>
+                    <button class="reasoning-toggle" onclick={() => reasoningExpanded = !reasoningExpanded} aria-expanded={reasoningExpanded}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
+                        </svg>
+                        {reasoningExpanded ? 'Hide' : 'Show'} reasoning
+                    </button>
+                    {#if reasoningExpanded}
+                        <div class="reasoning-content">{reasoningContent}</div>
+                    {/if}
+                </div>
+            {/if}
             <div class="message-text" class:streaming={isStreaming}>
                 {@html renderedHtml}
                 {#if isStreaming}
@@ -288,6 +304,37 @@
         font-style: italic;
         font-size: 0.8125rem;
         line-height: 1.5rem;
+    }
+    .reasoning-block {
+        margin-bottom: 6px;
+    }
+    .reasoning-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        transition: all 0.15s ease;
+    }
+    .reasoning-toggle:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .reasoning-content {
+        margin-top: 4px;
+        padding: 8px 12px;
+        background: var(--color-surface-0);
+        border-radius: var(--radius-sm);
+        font-size: 0.8125rem;
+        line-height: 1.5rem;
+        color: var(--color-text-secondary);
+        white-space: pre-wrap;
+        font-style: italic;
     }
     .assistant .message-text :global(pre) {
         background: var(--color-surface-0);

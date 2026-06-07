@@ -12,6 +12,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
         id: string;
         role: string;
         content: string;
+        reasoningContent?: string;
         isStreaming?: boolean;
         toolCall?: {
             toolName: string;
@@ -116,7 +117,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
             case 'reasoning': {
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
-                entry.content += data.text;
+                entry.reasoningContent = (entry.reasoningContent || '') + data.text;
                 break;
             }
             case 'tool_call': {
@@ -300,7 +301,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
                     };
                 }
                 return {
-                    id: m.id, role: m.role, content: m.content, isStreaming: false, createdAt: m.created_at,
+                    id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, isStreaming: false, createdAt: m.created_at,
                     stats: m.model_name ? {
                         model_name: m.model_name,
                         prompt_tokens: m.prompt_tokens ?? 0,
@@ -566,7 +567,7 @@ import { board as boardStore, config as configStore, showToast } from '$lib/stor
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => handleEdit(entry.id, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onCopy={() => navigator.clipboard.writeText(entry.content)} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => handleEdit(entry.id, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}
