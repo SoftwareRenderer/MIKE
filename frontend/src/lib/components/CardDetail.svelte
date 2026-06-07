@@ -240,7 +240,16 @@
                         {#if sectionTasks.length > 0}
                             <div class="section-group">
                                 <div class="section-header">
-                                    <span class="section-title">{section.title}</span>
+                                    <span class="section-title">
+                                        {#if section.id === 'backlog'}
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-backlog)"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                                        {:else if section.id === 'in_progress'}
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-in-progress)"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                                        {:else if section.id === 'review'}
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-review)"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                                        {/if}
+                                        {section.title}
+                                    </span>
                                     <span class="section-count">{sectionTasks.length}</span>
                                 </div>
                                 {#each sectionTasks as t (t.id)}
@@ -488,11 +497,17 @@
         border-bottom: 1px solid var(--color-border);
     }
     .section-title {
+        display: flex;
+        align-items: center;
+        gap: 5px;
         font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.4px;
         color: var(--color-text-tertiary);
+    }
+    .section-title .col-icon {
+        flex-shrink: 0;
     }
     .section-count {
         font-size: 0.75rem;
