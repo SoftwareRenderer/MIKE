@@ -6,11 +6,12 @@
     import { board as boardStore, selectedTask, streamingTaskIds } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
+import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
 
-    let { task, tasks: columnTasks, projectName, onClose }: { task: Task; tasks: Task[]; projectName?: string; onClose: () => void } = $props();
+    let { task, tasks: columnTasks, projectPath, workspaceDir, onClose }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; onClose: () => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -254,7 +255,7 @@
                 </button>
                 <div class="header-main">
                     {#if editingTitle}
-                        <span class="project-prefix">{projectName} / </span>
+                        <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)} / </span>
                         <input
                             class="title-input"
                             bind:value={titleDraft}
@@ -264,7 +265,7 @@
                             autofocus={true}
                         />
                     {:else}
-                        <span class="project-prefix">{projectName}{#if task.title || task.title === ''} / {/if}</span>
+                        <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)}{#if task.title || task.title === ''} / {/if}</span>
                         <button type="button" class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} aria-label="Edit task title">
                             {task.title || '(untitled)'}
                         </button>

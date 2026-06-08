@@ -3,6 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail, selectedTask } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
+import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import TerminalPanel from './TerminalPanel.svelte';
@@ -289,7 +290,7 @@
                         </svg>
                     </button>
                 {/if}
-                <span class="project-title">{currentProject.name}</span>
+                <span class="project-title">{getHomeRelativePath(currentProject.path)}</span>
                 <div class="actions">
                     <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -302,7 +303,7 @@
             {/if}
             <section class="board-container" aria-label="Kanban board">
                 {#if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectName={currentProject?.name} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         history.pushState({ task: null }, '', location.pathname);
