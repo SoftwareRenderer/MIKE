@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/coder/websocket"
@@ -67,12 +68,20 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.boardStreamMgr = NewBoardStreamManager(store)
 	s.boardMgr = NewBoardManager(store, s.boardStreamMgr)
 	s.terminalMgr = NewTerminalManager(store, cfgStore)
-	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore, s.terminalMgr)
+	s.executor = NewTaskExecutor(store, cfgStore, s.boardStreamMgr)
+	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, s.executor.worktreeMgr)
 	s.depMgr = NewDependencyManager(store)
 	s.reviewMgr = NewReviewManager(store)
 	s.gitMgr = NewGitManager(store)
-	s.executor = NewTaskExecutor(store, cfgStore, s.boardStreamMgr)
 	s.homeAgentMgr = NewHomeAgentManager(store, cfgStore)
+
+	// Run garbage collector on startup
+	dryRun := os.Getenv("KANBAN_GC_DRY_RUN") == "1"
+	if removed, err := s.executor.worktreeMgr.GarbageCollect(dryRun); err != nil {
+		log.Printf("[gc] startup error: %v", err)
+	} else if removed > 0 {
+		log.Printf("[gc] startup: %d orphaned worktrees cleaned", removed)
+	}
 
 	s.setupRoutes()
 
@@ -95,6 +104,12 @@ func (s *Server) setupRoutes() {
 
 	// Test database reset (clears all data except config)
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
+
+	// Test: create an orphaned worktree directory (for e2e GC testing)
+	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
+
+	// Garbage collector (manual trigger)
+	s.mux.HandleFunc("/api/gc", s.handleGC)
 
 	// Filesystem browser
 	s.mux.HandleFunc("/api/fs", s.handleFS)
@@ -304,6 +319,46 @@ func (s *Server) handleTestReset(w http.ResponseWriter, r *http.Request) {
 	// Reset executors and streams
 	s.executor.ResetForTest()
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "reset"})
+}
+
+// handleGC triggers the garbage collector manually.
+func (s *Server) handleGC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	removed, err := s.executor.worktreeMgr.GarbageCollect(false)
+	if err != nil {
+		log.Printf("[gc] manual trigger error: %v", err)
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"removed": removed})
+}
+
+// handleCreateOrphan creates a fake orphaned worktree directory for e2e testing.
+func (s *Server) handleCreateOrphan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "failed to get config")
+		return
+	}
+	worktreesDir := cfg.WorkspaceDir
+	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
+		worktreesDir = wtDir
+	}
+	// Create a uniquely named orphan directory
+	orphanName := fmt.Sprintf("orphan-test-%d", time.Now().UnixNano())
+	orphanPath := filepath.Join(worktreesDir, orphanName)
+	if err := os.MkdirAll(orphanPath, 0o755); err != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("create orphan dir: %v", err))
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"orphan": orphanName, "path": orphanPath})
 }
 
 // handleFS lists directory contents for the file browser.

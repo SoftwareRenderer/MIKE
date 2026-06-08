@@ -52,7 +52,7 @@ test.describe.serial('Settings Redesign', () => {
         },
       ],
       default_provider: 'test-localhost-9999',
-      workspace_dir: './worktrees',
+      workspace_dir: './.worktrees',
       default_auto_commit: false,
       default_plan_mode: false,
       default_max_failed_turns: 3,

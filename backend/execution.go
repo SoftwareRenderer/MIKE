@@ -177,6 +177,11 @@ func (te *TaskExecutor) HandleStream(w http.ResponseWriter, r *http.Request, pro
 	te.streamMgr.HandleStream(w, r, taskID)
 }
 
+// RemoveStream removes and closes the broadcaster for a task. Called during task deletion.
+func (te *TaskExecutor) RemoveStream(taskID string) {
+	te.streamMgr.Remove(taskID)
+}
+
 // ResetForTest stops all running executors and clears state. Used by e2e tests.
 func (te *TaskExecutor) ResetForTest() {
 	te.taskMu.Lock()

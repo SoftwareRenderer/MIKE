@@ -304,7 +304,7 @@ test.describe.serial('CreateTaskModal Provider Selector', () => {
         },
       ],
       default_provider: '',
-      workspace_dir: './worktrees',
+      workspace_dir: './.worktrees',
     });
     await waitForSettle(500);
     await expect(async () => {

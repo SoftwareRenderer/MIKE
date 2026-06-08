@@ -2,6 +2,7 @@ package backend
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,6 +205,114 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 	wm.gitRun(project.Path, "worktree", "prune")
 
 	return nil
+}
+
+// RemoveWorktreeDir removes a task's worktree directory and prunes git worktree tracking.
+// Does NOT delete the branch. Used during task deletion for cleanup.
+func (wm *WorktreeManager) RemoveWorktreeDir(projectID, taskID string) error {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return err
+	}
+
+	// Remove worktree directory (no error if it doesn't exist)
+	if err := os.RemoveAll(worktreePath); err != nil {
+		return fmt.Errorf("remove worktree dir: %w", err)
+	}
+
+	// Prune worktree tracking from main repo
+	wm.gitRun(project.Path, "worktree", "prune")
+
+	return nil
+}
+
+// GarbageCollect removes worktree directories that have no matching task in the database.
+// If dryRun is true, only logs what would be removed. Returns the count of worktrees removed.
+func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
+	cfg, err := wm.configStore.GetConfig()
+	if err != nil {
+		return 0, fmt.Errorf("get config: %w", err)
+	}
+
+	worktreesDir := cfg.WorkspaceDir
+	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
+		worktreesDir = wtDir
+	}
+	if !filepath.IsAbs(worktreesDir) {
+		if abs, err := filepath.Abs(worktreesDir); err == nil {
+			worktreesDir = abs
+		}
+	}
+
+	// Check if worktrees dir exists
+	if _, err := os.Stat(worktreesDir); os.IsNotExist(err) {
+		return 0, nil
+	}
+
+	// Get all active task IDs from DB
+	activeTaskIDs, err := wm.store.GetAllTaskIDs()
+	if err != nil {
+		return 0, fmt.Errorf("get task IDs: %w", err)
+	}
+	activeSet := make(map[string]bool, len(activeTaskIDs))
+	for _, id := range activeTaskIDs {
+		activeSet[id] = true
+	}
+
+	// Scan worktrees directory for orphaned entries
+	entries, err := os.ReadDir(worktreesDir)
+	if err != nil {
+		return 0, fmt.Errorf("read worktrees dir: %w", err)
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Skip hidden directories
+		if name[0] == '.' {
+			continue
+		}
+		if !activeSet[name] {
+			orphanPath := filepath.Join(worktreesDir, name)
+			if dryRun {
+				log.Printf("[gc] would remove orphaned worktree: %s", orphanPath)
+				removed++
+			} else {
+				log.Printf("[gc] removing orphaned worktree: %s", orphanPath)
+				if err := os.RemoveAll(orphanPath); err != nil {
+					log.Printf("[gc] error removing %s: %v", orphanPath, err)
+				} else {
+					removed++
+				}
+			}
+		}
+	}
+
+	// Run git worktree prune on all projects
+	projects, err := wm.store.ListProjects()
+	if err != nil {
+		log.Printf("[gc] error listing projects for prune: %v", err)
+		return removed, nil
+	}
+	for _, p := range projects {
+		wm.gitRun(p.Path, "worktree", "prune")
+	}
+
+	if dryRun {
+		log.Printf("[gc] dry-run complete: %d orphaned worktrees would be removed", removed)
+	} else {
+		log.Printf("[gc] complete: %d orphaned worktrees removed", removed)
+	}
+
+	return removed, nil
 }
 
 // GetDiff returns the git diff for a task's worktree.

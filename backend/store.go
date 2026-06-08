@@ -170,7 +170,28 @@ func (s *Store) initConfigDefaults() error {
 	defaults := map[string]string{
 		"llama_server_url": "http://localhost:8081/v1",
 		"model_name":       "",
-		"workspace_dir":    "./worktrees",
+		"workspace_dir":    "./.worktrees",
+	}
+
+	// Migrate old default worktrees path to hidden .worktrees
+	var wsDir string
+	if err := s.db.QueryRow(`SELECT value FROM config WHERE key = 'workspace_dir'`).Scan(&wsDir); err == nil {
+		if wsDir == "./worktrees" || wsDir == "worktrees" {
+			oldAbs := wsDir
+			if !filepath.IsAbs(oldAbs) {
+				if abs, err := filepath.Abs(oldAbs); err == nil {
+					oldAbs = abs
+				}
+			}
+			newAbs, _ := filepath.Abs("./.worktrees")
+			if _, err := os.Stat(oldAbs); err == nil {
+				if _, err := os.Stat(newAbs); os.IsNotExist(err) {
+					if err := os.Rename(oldAbs, newAbs); err == nil {
+						_, _ = s.db.Exec(`UPDATE config SET value = ? WHERE key = 'workspace_dir'`, "./.worktrees")
+					}
+				}
+			}
+		}
 	}
 	for k, v := range defaults {
 		_, err := s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)`, k, v)
@@ -477,6 +498,26 @@ func (s *Store) DeleteTask(projectID, taskID string) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`DELETE FROM tasks WHERE id = ? AND project_id = ?`, taskID, projectID)
 	return err
+}
+
+// GetAllTaskIDs returns all task IDs across all projects.
+func (s *Store) GetAllTaskIDs() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT id FROM tasks`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *Store) ReorderTasks(projectID string, reorders []ReorderRequest) error {

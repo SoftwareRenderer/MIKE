@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"os/exec"
@@ -57,11 +58,13 @@ type TaskManager struct {
 	boardStreamMgr *BoardStreamManager
 	configStore    *ConfigStore
 	terminalMgr    *TerminalManager
+	executor       *TaskExecutor
+	worktreeMgr    *WorktreeManager
 }
 
 // NewTaskManager creates a new TaskManager.
-func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager, configStore *ConfigStore, terminalMgr *TerminalManager) *TaskManager {
-	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr}
+func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager, configStore *ConfigStore, terminalMgr *TerminalManager, executor *TaskExecutor, worktreeMgr *WorktreeManager) *TaskManager {
+	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr}
 }
 
 // HandleList lists or creates tasks for a project.
@@ -146,11 +149,33 @@ func (tm *TaskManager) HandleByID(w http.ResponseWriter, r *http.Request, projec
 		tm.boardStreamMgr.Broadcast(projectID)
 		jsonResponse(w, http.StatusOK, task)
 	case http.MethodDelete:
+		// Verify task exists before cleanup
+		if _, err := tm.store.GetTask(projectID, taskID); err != nil {
+			jsonError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		// 1. Stop running executor (best-effort)
+		if tm.executor != nil {
+			_ = tm.executor.StopTask(taskID)
+		}
+		// 2. Remove stream broadcaster (best-effort)
+		if tm.executor != nil {
+			tm.executor.RemoveStream(taskID)
+		}
+		// 3. Remove worktree directory (best-effort, log errors)
+		if tm.worktreeMgr != nil {
+			if err := tm.worktreeMgr.RemoveWorktreeDir(projectID, taskID); err != nil {
+				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
+			}
+		}
+		// 4. Remove terminal session
+		tm.terminalMgr.removeSession(taskID)
+		// 5. Delete from database (CASCADE removes messages, dependencies, review comments)
 		if err := tm.store.DeleteTask(projectID, taskID); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		tm.terminalMgr.removeSession(taskID)
+		// 6. Broadcast board update
 		tm.boardStreamMgr.Broadcast(projectID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -513,7 +538,7 @@ func (gm *GitManager) HandleTaskDiff(w http.ResponseWriter, r *http.Request, pro
 		jsonError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	worktreesDir := getEnv("WORKTREES_DIR", "./worktrees")
+	worktreesDir := getEnv("WORKTREES_DIR", "./.worktrees")
 	if !filepath.IsAbs(worktreesDir) {
 		if abs, err := filepath.Abs(worktreesDir); err == nil {
 			worktreesDir = abs

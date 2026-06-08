@@ -14,7 +14,8 @@ test.describe('Chat send button with no model selected', () => {
       const config = {
         llama_server_url: '',
         model_name: '',
-        workspace_dir: '/home/mwren/projects/kanban/worktrees',
+
+        workspace_dir: '/home/mwren/projects/kanban/.worktrees',
         providers: [
           {
             name: 'test-provider',
