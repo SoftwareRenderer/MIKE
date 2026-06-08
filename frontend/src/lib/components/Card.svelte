@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import { get } from 'svelte/store';
-    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds } from '$lib/store';
+    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore } from '$lib/store';
     import { moveTask, updateTask } from '$lib/api';
 
     let { task, columnId, projectId }: { task: Task; columnId: string; projectId?: string } = $props();
@@ -32,6 +32,107 @@
         if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
         if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         return null;
+    });
+
+    // Model badge: configurable via card_model_badge setting
+    // "auto" = model only (1 provider) or provider+model (2+), "always" = provider+model, "model" = model only, "none" = hidden
+    // Shows even when no model is set (displays default model as placeholder)
+    let modelBadge = $derived.by(() => {
+        const cfg = get(configStore);
+        const style = (cfg?.card_model_badge || '').trim() || 'auto';
+        if (style === 'none') return null;
+        const providers = cfg?.providers || [];
+        if (providers.length === 0) return null;
+        // Use task model if set, otherwise fall back to default model
+        const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
+        const activeModel = task.model_name || (providers[0]?.default_model && providers[0]?.models.some(m => getModelName(m) === providers[0].default_model) ? providers[0].default_model : providers[0]?.models.length > 0 ? getModelName(providers[0].models[0]) : null);
+        if (!activeModel) return null;
+        // Find matching provider by URL
+        const provider = providers.find(p => p.url === task.llama_server_url);
+        const showProvider = style === 'always' || (style === 'auto' && providers.length > 1);
+        if (showProvider && provider) {
+            return `${provider.display_name} · ${activeModel}`;
+        }
+        return activeModel;
+    });
+
+    // Model picker dropdown — only in Backlog column (task not yet started)
+    let modelPickerOpen = $state(false);
+    let modelBadgeRef: HTMLButtonElement | null = $state(null);
+    let pickerRect = $state<{ top: number; left: number } | null>(null);
+    let providers = $derived(get(configStore)?.providers || []);
+    let isConfigurable = $derived(columnId === 'backlog');
+
+    function togglePicker(e: MouseEvent) {
+        e.stopPropagation(); // Prevent card from opening when clicking the model badge
+        if (!isConfigurable) return;
+        if (modelPickerOpen) {
+            modelPickerOpen = false;
+            pickerRect = null;
+            return;
+        }
+        if (!modelBadgeRef || providers.length === 0) return;
+        const r = modelBadgeRef.getBoundingClientRect();
+        pickerRect = { top: r.bottom + 4, left: r.left };
+        modelPickerOpen = true;
+    }
+
+    function closePicker() {
+        modelPickerOpen = false;
+        pickerRect = null;
+    }
+
+    async function selectModel(providerUrl: string, modelName: string) {
+        if (!projectId) return;
+        try {
+            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl });
+            task.model_name = updated.model_name;
+            task.llama_server_url = updated.llama_server_url;
+            boardStore.update(b => {
+                if (!b) return b;
+                const idx = b.tasks.findIndex(t => t.id === task.id);
+                if (idx !== -1) b.tasks[idx] = updated;
+                return { ...b };
+            });
+        } catch (err) {
+            console.error('Failed to update model:', err);
+        }
+        closePicker();
+    }
+
+    $effect(() => {
+        if (!modelPickerOpen) return;
+        function handleClick(e: MouseEvent) {
+            if (modelBadgeRef && modelBadgeRef.contains(e.target as Node)) return;
+            const portal = document.querySelector('.portal-card-model-picker');
+            if (portal && portal.contains(e.target as Node)) return;
+            closePicker();
+        }
+        function handleKey(e: KeyboardEvent) {
+            if (e.key === 'Escape') closePicker();
+        }
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    });
+
+    // Adjust dropdown position after render (flip if overflowing)
+    $effect(() => {
+        if (!modelPickerOpen || !pickerRect || !modelBadgeRef) return;
+        const raf = requestAnimationFrame(() => {
+            const portal = document.querySelector('.portal-card-model-picker');
+            if (!portal) return;
+            const triggerTop = modelBadgeRef!.getBoundingClientRect().top;
+            const dropdownHeight = portal.getBoundingClientRect().height;
+            const spaceBelow = window.innerHeight - (triggerTop + modelBadgeRef!.getBoundingClientRect().height);
+            if (spaceBelow < dropdownHeight + 12) {
+                pickerRect = { top: triggerTop - dropdownHeight - 6, left: pickerRect.left };
+            }
+        });
+        return () => cancelAnimationFrame(raf);
     });
 
     let isSelected = $state(false);
@@ -139,9 +240,35 @@
         <div class="card-title">{truncate(task.title, 50)}</div>
     {/if}
     <div class="card-preview">{truncate(task.prompt, 80)}</div>
-    {#if statusBadge}
-        <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
-            {statusBadge.text}
+    {#if statusBadge || modelBadge}
+        <div class="badges-row">
+            {#if statusBadge}
+                <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
+                    {statusBadge.text}
+                </div>
+            {/if}
+            {#if modelBadge}
+                {#if isConfigurable}
+                    <button
+                        type="button"
+                        class="badge model-badge"
+                        class:open={modelPickerOpen}
+                        style="background: var(--color-text-tertiary)22; color: var(--color-text-tertiary)"
+                        onclick={togglePicker}
+                        bind:this={modelBadgeRef}
+                        aria-label="Change model"
+                        aria-haspopup="listbox"
+                        aria-expanded={modelPickerOpen}
+                    >
+                        {modelBadge}
+                        <svg class="badge-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                {:else}
+                    <div class="badge model-badge" style="background: var(--color-text-tertiary)22; color: var(--color-text-tertiary)">
+                        {modelBadge}
+                    </div>
+                {/if}
+            {/if}
         </div>
     {/if}
     <button
@@ -163,6 +290,26 @@
         ↗
     </button>
 </div>
+
+<!-- Model picker dropdown (portal to escape card overflow) -->
+{#if modelPickerOpen && pickerRect && providers.length > 0}
+    <svelte:element this="div" class="portal-card-model-picker" role="listbox" aria-label="Select model" style="position:fixed;top:{pickerRect.top}px;left:{pickerRect.left}px;z-index:10000;min-width:200px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+        {#each providers as provider}
+            {#if provider.models.length > 0}
+                <div class="picker-provider-header">{provider.display_name || provider.name}</div>
+                {#each provider.models as model}
+                    {@const modelName = typeof model === 'string' ? model : model.name}
+                    <button type="button" class="picker-model-option" class:active={modelName === task.model_name} onclick={() => selectModel(provider.url, modelName)} role="option" aria-selected={modelName === task.model_name}>
+                        <span class="option-name">{modelName}</span>
+                        {#if modelName === task.model_name}
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        {/if}
+                    </button>
+                {/each}
+            {/if}
+        {/each}
+    </svelte:element>
+{/if}
 
 <style>
     .card {
@@ -215,13 +362,81 @@
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
+    .badges-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
+    }
     .badge {
-        display: inline-block;
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
         font-size: 0.75rem;
         padding: 2px 6px;
         border-radius: var(--radius-sm);
-        margin-top: 8px;
         font-weight: 500;
+        font-family: inherit;
+    }
+    .badge[model-badge] {
+        /* read-only badge (div) */
+    }
+    button.badge {
+        border: none;
+        cursor: pointer;
+        transition: background 0.1s ease;
+    }
+    button.badge:hover {
+        background: var(--color-text-tertiary)33 !important;
+    }
+    button.badge.open {
+        background: var(--color-text-tertiary)44 !important;
+    }
+    .badge-chevron {
+        flex-shrink: 0;
+        opacity: 0.5;
+        transition: transform 0.15s ease;
+    }
+    .badge.open .badge-chevron {
+        transform: rotate(180deg);
+    }
+
+    /* Model picker dropdown styles */
+    .picker-provider-header {
+        padding: 6px 8px 2px;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--color-text-tertiary);
+    }
+    .picker-model-option {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        border: none;
+        background: none;
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: inherit;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.1s ease;
+    }
+    .picker-model-option:hover {
+        background: var(--color-surface-3);
+    }
+    .picker-model-option.active {
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+        color: var(--color-accent);
+    }
+    .option-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .edit-btn,
     .move-btn {

@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 // These tests modify the shared server config (PUT /api/config) and must run
 // serially to avoid overwriting each other's state.
-const configTests = ['model-selector.spec.ts', 'provider-priority.spec.ts', 'settings-redesign.spec.ts'];
+const configTests = ['model-selector.spec.ts', 'provider-priority.spec.ts', 'settings-redesign.spec.ts', 'task-card-model-badge.spec.ts'];
 
 export default defineConfig({
   testDir: './tests/e2e',

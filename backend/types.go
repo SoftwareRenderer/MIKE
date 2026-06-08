@@ -42,6 +42,7 @@ type Config struct {
 	DefaultAutoCommit         *bool      `json:"default_auto_commit,omitempty"`         // default auto-commit for new tasks
 	DefaultPlanMode           *bool      `json:"default_plan_mode,omitempty"`           // default plan mode for new tasks
 	DefaultMaxFailedTurns     *int       `json:"default_max_failed_turns,omitempty"`    // default max consecutive failed turns for new tasks
+	CardModelBadge            string     `json:"card_model_badge"`   // badge style on task cards: "auto", "always", "model", "none"
 }
 
 // ModelConfig represents a model with its per-model settings.

@@ -42,6 +42,7 @@ export interface Config {
     default_auto_commit?: boolean;
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
+    card_model_badge?: 'auto' | 'always' | 'model' | 'none';
 }
 
 export interface ProviderModel {

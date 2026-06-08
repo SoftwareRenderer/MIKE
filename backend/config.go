@@ -71,6 +71,7 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
+	cardModelBadgeRaw, _ := cs.store.GetConfigValue("card_model_badge")
 
 	cfg := &Config{
 		LlamaServerURL:  llamaURL,
@@ -88,6 +89,7 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
 	}
+	cfg.CardModelBadge = cardModelBadgeRaw
 	return cfg, nil
 }
 
@@ -126,6 +128,9 @@ func (cs *ConfigStore) UpdateConfig(c *Config) error {
 		if err := cs.store.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
 			return err
 		}
+	}
+	if err := cs.store.SetConfigValue("card_model_badge", c.CardModelBadge); err != nil {
+		return err
 	}
 	// Also update in-memory override if set (so tests see the new values)
 	cs.overrideMu.Lock()
@@ -193,6 +198,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			if f, ok := dmft.(float64); ok {
 				v := int(f)
 				current.DefaultMaxFailedTurns = &v
+			}
+		}
+		if cmb, ok := updates["card_model_badge"]; ok {
+			if s, ok := cmb.(string); ok {
+				current.CardModelBadge = s
 			}
 		}
 		if err := cs.UpdateConfig(current); err != nil {
