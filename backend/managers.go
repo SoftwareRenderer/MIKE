@@ -29,7 +29,7 @@ var taskWords = []string{
 	"gold", "silver", "bronze", "copper", "ivory", "pearl", "onyx", "jade",
 	// Space
 	"nova", "comet", "meteor", "galaxy", "nebula", "planet", "star", "cosmos",
-	"orbit", "pulse", "zenith", "eclipse", "lunar", "solar", "stellar", "orbit",
+	"orbit", "pulse", "zenith", "eclipse", "lunar", "solar", "stellar",
 	// Elements
 	"flame", "stone", "iron", "steel", "crystal", "diamond", "obsidian", "marble",
 	"granite", "basalt", "quartz", "flint", "coal", "ash", "ember", "spark",

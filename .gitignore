@@ -6,3 +6,7 @@ worktrees/*
 frontend/test-results
 test-results
 .worktrees/*
+
+# Compiled binaries
+kanban
+backend/kanban_binary

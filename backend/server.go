@@ -203,7 +203,6 @@ var (
 	reTaskResume      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
 	reTaskStream      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
-	reTaskMessagesRegenerate = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/regenerate$`)
 	reTaskMessages    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
 	reTaskMessageByID = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/([^/]+)$`)
 	reTaskDeps        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
@@ -227,27 +226,9 @@ var (
 	reTaskWorktreeExists = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/worktree-exists$`)
 )
 
-func (s *Server) handleTaskMessagesRegenerate(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		MessageID string `json:"message_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
-		jsonError(w, http.StatusBadRequest, "message_id required")
-		return
-	}
-	if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	if r.Method == http.MethodDelete {
+	if r.Method == http.MethodDelete || r.Method == http.MethodPost {
+		// DELETE and POST both delete the message and all messages after it (regenerate)
 		var req struct {
 			MessageID string `json:"message_id"`
 		}
@@ -515,10 +496,6 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Task messages
-	if m := reTaskMessagesRegenerate.FindStringSubmatch(path); m != nil {
-		s.handleTaskMessagesRegenerate(w, r, m[1], m[2])
-		return
-	}
 	if m := reTaskMessageByID.FindStringSubmatch(path); m != nil {
 		s.handleTaskMessageByID(w, r, m[1], m[2], m[3])
 		return

@@ -1,0 +1,74 @@
+package backend
+
+// MoveTaskRequest is the request body for moving a task.
+type MoveTaskRequest struct {
+	Status string `json:"status"`
+}
+
+// ReorderRequest is the request body for reordering a task.
+type ReorderRequest struct {
+	ID          string `json:"id"`
+	ColumnOrder int    `json:"column_order"`
+}
+
+// CreateProjectRequest is the request body for creating a project.
+type CreateProjectRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name,omitempty"`
+}
+
+// UpdateProjectRequest is the request body for updating a project.
+type UpdateProjectRequest struct {
+	Name string `json:"name"`
+}
+
+// CreateDependencyRequest is the request body for creating a dependency.
+type CreateDependencyRequest struct {
+	ChildTaskID string `json:"child_task_id"`
+	AutoStart   bool   `json:"auto_start"`
+}
+
+// CreateReviewCommentRequest is the request body for creating a review comment.
+type CreateReviewCommentRequest struct {
+	FilePath string `json:"file_path"`
+	LineNum  int    `json:"line_num"`
+	Comment  string `json:"comment"`
+}
+
+// UpdateReviewCommentRequest is the request body for updating a review comment.
+type UpdateReviewCommentRequest struct {
+	Comment  *string `json:"comment"`
+	Resolved *bool   `json:"resolved"`
+}
+
+// CreateHomeAgentMessageRequest is the request body for sending a home agent message.
+type CreateHomeAgentMessageRequest struct {
+	Content string `json:"content"`
+}
+
+// GitLogRequest is the request body for git log.
+type GitLogRequest struct {
+	Branch string `json:"branch,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// GitDiffRequest is the request body for git diff.
+type GitDiffRequest struct {
+	Ref  string `json:"ref"`
+	Path string `json:"path,omitempty"`
+}
+
+// GitCheckoutRequest is the request body for git checkout.
+type GitCheckoutRequest struct {
+	Branch string `json:"branch"`
+}
+
+// GitPullRequest is the request body for git pull.
+type GitPullRequest struct {
+	Branch string `json:"branch,omitempty"`
+}
+
+// GitPushRequest is the request body for git push.
+type GitPushRequest struct {
+	Branch string `json:"branch,omitempty"`
+}

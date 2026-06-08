@@ -1,7 +1,18 @@
 /**
- * Convert an absolute path to a home-relative path with `~/` prefix.
+ * Convert an absolute path to a `~/` prefixed display path.
  * e.g. `/home/mwren/projects/hasc` → `~/projects/hasc`
- * Falls back to the basename if the path doesn't match a home directory pattern.
+ * Falls back to the raw path if it doesn't match a home directory pattern.
+ */
+export function toHomeRelative(path: string): string {
+    if (!path) return '';
+    const match = path.match(/^\/home\/[^/]+\/(.+)$/);
+    if (match) return '~/' + match[1];
+    return path;
+}
+
+/**
+ * Alias for backward compatibility. Prefer `toHomeRelative` for consistency.
+ * Unlike toHomeRelative, this falls back to the basename instead of the raw path.
  */
 export function getHomeRelativePath(absolutePath: string): string {
     if (!absolutePath) return '';
@@ -20,15 +31,4 @@ export function getWorktreeDisplayPath(workspaceDir: string, taskId: string): st
     if (!workspaceDir || !taskId) return '';
     const worktreePath = workspaceDir.replace(/\/+$/, '') + '/' + taskId;
     return toHomeRelative(worktreePath);
-}
-
-/**
- * Convert an absolute path to a `~/` prefixed display path.
- * e.g. `/home/mwren/projects/kanban/worktrees/abc` → `~/projects/kanban/worktrees/abc`
- * Falls back to the raw path if it doesn't match a home directory pattern.
- */
-function toHomeRelative(path: string): string {
-    const match = path.match(/^\/home\/[^/]+\/(.+)$/);
-    if (match) return '~/' + match[1];
-    return path;
 }

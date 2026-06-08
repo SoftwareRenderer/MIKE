@@ -196,14 +196,8 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
     if (!res.ok) throw await apiError(res, 'Failed to delete messages');
 }
 
-export async function regenerateTaskMessages(projectId: string, taskId: string, messageId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message_id: messageId }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to regenerate messages');
-}
+/** Regenerate from a message: deletes it and all messages after it. Alias for deleteTaskMessagesAfter. */
+export const regenerateTaskMessages = deleteTaskMessagesAfter;
 
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {

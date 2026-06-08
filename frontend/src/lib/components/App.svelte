@@ -20,8 +20,6 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     let collapsed = $state(false);
     let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
-
-    // Local state mirroring stores
     let showCreateTaskVal = $state(false);
     let showConfigVal = $state(false);
     let showTerminalVal = $state(false);
@@ -39,49 +37,46 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         return () => window.removeEventListener('resize', check);
     });
 
-    // Subscribe to Svelte 4 stores on mount
-    onMount(() => {
-        const unsubCreate = showCreateTask.subscribe(v => showCreateTaskVal = v);
-        const unsubConfig = showConfig.subscribe(v => showConfigVal = v);
-        const unsubTerminal = showTerminal.subscribe(v => showTerminalVal = v);
-        const unsubCard = showCardDetail.subscribe(v => showCardDetailVal = v);
-        // Sync config store changes to local cfg (e.g., after ConfigModal saves)
-        const unsubCfgStore = configStore.subscribe(v => { if (v) cfg = v; });
-        const unsubTask = selectedTask.subscribe(t => {
-            selectedTaskVal = t;
-            // Update URL when task changes
-            if (t) {
-                const currentUrl = new URL(location.href);
-                if (currentUrl.searchParams.get('task') !== t.id) {
-                    history.pushState({ task: t.id }, '', '?task=' + t.id);
+    // Sync Svelte 4 stores → local $state (single subscription, no onMount needed)
+    $effect(() => {
+        const unsub = [
+            sidebarCollapsed.subscribe(v => collapsed = v),
+            showCreateTask.subscribe(v => showCreateTaskVal = v),
+            showConfig.subscribe(v => showConfigVal = v),
+            showTerminal.subscribe(v => showTerminalVal = v),
+            showCardDetail.subscribe(v => showCardDetailVal = v),
+            configStore.subscribe(v => { if (v) cfg = v; }),
+            selectedTask.subscribe(t => {
+                selectedTaskVal = t;
+                if (t) {
+                    const url = new URL(location.href);
+                    if (url.searchParams.get('task') !== t.id) {
+                        history.pushState({ task: t.id }, '', '?task=' + t.id);
+                    }
                 }
-            }
-            // Don't clear URL here - let popstate handler manage it
-        });
+            }),
+        ].map(unsub => unsub);
+        return () => unsub.forEach(u => u());
+    });
 
-        // Handle browser back/forward
+    // Handle browser back/forward
+    $effect(() => {
         function handlePopState() {
             const params = new URLSearchParams(location.search);
             const taskId = params.get('task');
             if (taskId) {
                 const task = tasks.find(t => t.id === taskId);
                 if (task) {
-                    selectedTaskVal = task;
-                    showCardDetailVal = true;
                     selectedTask.set(task);
+                    showCardDetail.set(true);
                 }
             } else {
-                selectedTaskVal = null;
-                showCardDetailVal = false;
                 selectedTask.set(null);
+                showCardDetail.set(false);
             }
         }
         window.addEventListener('popstate', handlePopState);
-
-        return () => {
-            unsubCreate(); unsubConfig(); unsubTerminal(); unsubCard(); unsubTask(); unsubCfgStore();
-            window.removeEventListener('popstate', handlePopState);
-        };
+        return () => window.removeEventListener('popstate', handlePopState);
     });
 
     onMount(async () => {

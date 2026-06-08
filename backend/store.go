@@ -390,42 +390,28 @@ func (s *Store) GetTask(projectID, taskID string) (*Task, error) {
 func (s *Store) GetTaskByTaskID(taskID string) (*Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var t Task
-	var autoCommit, autoPR, planMode int
-	var createdAt, updatedAt string
-	err := s.db.QueryRow(
+	row := s.db.QueryRow(
 		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at FROM tasks WHERE id = ?`,
 		taskID,
-	).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
+	)
+	var t Task
+	err := scanTask(row, &t)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
 	}
-	t.AutoCommit = i2b(autoCommit)
-	t.AutoPR = i2b(autoPR)
-	t.PlanMode = i2b(planMode)
-	t.CreatedAt = scanTime(createdAt)
-	t.UpdatedAt = scanTime(updatedAt)
 	return &t, err
 }
 
 func (s *Store) queryTask(projectID, taskID string) (*Task, error) {
-	var t Task
-	var autoCommit, autoPR, planMode int
-	var createdAt, updatedAt string
-	err := s.db.QueryRow(
+	row := s.db.QueryRow(
 		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?`,
 		taskID, projectID,
-	).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
+	)
+	var t Task
+	err := scanTask(row, &t)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
 	}
-	t.AutoCommit = i2b(autoCommit)
-	t.AutoPR = i2b(autoPR)
-	t.PlanMode = i2b(planMode)
-	t.CreatedAt = scanTime(createdAt)
-	t.UpdatedAt = scanTime(updatedAt)
 	return &t, err
 }
 
@@ -447,17 +433,9 @@ func (s *Store) queryTasksByProject(projectID string) ([]Task, error) {
 	tasks := []Task{}
 	for rows.Next() {
 		var t Task
-		var autoCommit, autoPR, planMode int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder, &t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-			&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns, &autoCommit, &autoPR, &planMode, &createdAt, &updatedAt); err != nil {
+		if err := scanTask(rows, &t); err != nil {
 			return nil, err
 		}
-		t.AutoCommit = i2b(autoCommit)
-		t.AutoPR = i2b(autoPR)
-		t.PlanMode = i2b(planMode)
-		t.CreatedAt = scanTime(createdAt)
-		t.UpdatedAt = scanTime(updatedAt)
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
@@ -601,13 +579,9 @@ func (s *Store) GetDependencies(taskID string) ([]TaskDependency, error) {
 	deps := []TaskDependency{}
 	for rows.Next() {
 		var d TaskDependency
-		var autoStart int
-		var createdAt string
-		if err := rows.Scan(&d.ID, &d.ParentTaskID, &d.ChildTaskID, &autoStart, &createdAt); err != nil {
+		if err := scanTaskDependency(rows, &d); err != nil {
 			return nil, err
 		}
-		d.AutoStart = i2b(autoStart)
-		d.CreatedAt = scanTime(createdAt)
 		deps = append(deps, d)
 	}
 	return deps, rows.Err()
@@ -627,13 +601,9 @@ func (s *Store) GetDependents(taskID string) ([]TaskDependency, error) {
 	deps := []TaskDependency{}
 	for rows.Next() {
 		var d TaskDependency
-		var autoStart int
-		var createdAt string
-		if err := rows.Scan(&d.ID, &d.ParentTaskID, &d.ChildTaskID, &autoStart, &createdAt); err != nil {
+		if err := scanTaskDependency(rows, &d); err != nil {
 			return nil, err
 		}
-		d.AutoStart = i2b(autoStart)
-		d.CreatedAt = scanTime(createdAt)
 		deps = append(deps, d)
 	}
 	return deps, rows.Err()
@@ -683,14 +653,9 @@ func (s *Store) GetReviewComments(taskID string) ([]ReviewComment, error) {
 	comments := []ReviewComment{}
 	for rows.Next() {
 		var c ReviewComment
-		var resolved int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&c.ID, &c.TaskID, &c.FilePath, &c.LineNum, &c.Comment, &resolved, &createdAt, &updatedAt); err != nil {
+		if err := scanReviewComment(rows, &c); err != nil {
 			return nil, err
 		}
-		c.Resolved = i2b(resolved)
-		c.CreatedAt = scanTime(createdAt)
-		c.UpdatedAt = scanTime(updatedAt)
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
@@ -710,14 +675,9 @@ func (s *Store) GetUnresolvedReviewComments(taskID string) ([]ReviewComment, err
 	comments := []ReviewComment{}
 	for rows.Next() {
 		var c ReviewComment
-		var resolved int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&c.ID, &c.TaskID, &c.FilePath, &c.LineNum, &c.Comment, &resolved, &createdAt, &updatedAt); err != nil {
+		if err := scanReviewComment(rows, &c); err != nil {
 			return nil, err
 		}
-		c.Resolved = i2b(resolved)
-		c.CreatedAt = scanTime(createdAt)
-		c.UpdatedAt = scanTime(updatedAt)
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
@@ -753,14 +713,9 @@ func (s *Store) UpdateReviewComment(id string, comment *string, resolved *bool) 
 	defer rows.Close()
 	if rows.Next() {
 		var c ReviewComment
-		var resolved int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&c.ID, &c.TaskID, &c.FilePath, &c.LineNum, &c.Comment, &resolved, &createdAt, &updatedAt); err != nil {
+		if err := scanReviewComment(rows, &c); err != nil {
 			return nil, err
 		}
-		c.Resolved = i2b(resolved)
-		c.CreatedAt = scanTime(createdAt)
-		c.UpdatedAt = scanTime(updatedAt)
 		return &c, nil
 	}
 	return nil, fmt.Errorf("comment not found")
@@ -899,6 +854,57 @@ func (s *Store) ResetData() error {
 			return fmt.Errorf("clear %s: %w", table, err)
 		}
 	}
+	return nil
+}
+
+// scanner is the common interface for sql.Row and sql.Rows.
+type scanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// scanTaskDependency scans a row into a TaskDependency, handling bool/time conversions.
+func scanTaskDependency(s scanner, d *TaskDependency) error {
+	var autoStart int
+	var createdAt string
+	err := s.Scan(&d.ID, &d.ParentTaskID, &d.ChildTaskID, &autoStart, &createdAt)
+	if err != nil {
+		return err
+	}
+	d.AutoStart = i2b(autoStart)
+	d.CreatedAt = scanTime(createdAt)
+	return nil
+}
+
+// scanReviewComment scans a row into a ReviewComment, handling bool/time conversions.
+func scanReviewComment(s scanner, c *ReviewComment) error {
+	var resolved int
+	var createdAt, updatedAt string
+	err := s.Scan(&c.ID, &c.TaskID, &c.FilePath, &c.LineNum, &c.Comment, &resolved, &createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	c.Resolved = i2b(resolved)
+	c.CreatedAt = scanTime(createdAt)
+	c.UpdatedAt = scanTime(updatedAt)
+	return nil
+}
+
+// scanTask scans a row into a Task, handling bool/time conversions.
+func scanTask(s scanner, t *Task) error {
+	var autoCommit, autoPR, planMode int
+	var createdAt, updatedAt string
+	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
+		&t.SessionID, &t.Branch, &t.Output, &t.StatusState,
+		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns,
+		&autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	t.AutoCommit = i2b(autoCommit)
+	t.AutoPR = i2b(autoPR)
+	t.PlanMode = i2b(planMode)
+	t.CreatedAt = scanTime(createdAt)
+	t.UpdatedAt = scanTime(updatedAt)
 	return nil
 }
 
