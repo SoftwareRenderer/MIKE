@@ -8,16 +8,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/creack/pty"
-	"github.com/coder/websocket"
 )
 
 // Server is the main HTTP server.
@@ -618,9 +614,9 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Project terminal (legacy)
+	// Project terminal (persistent)
 	if m := reProjectTerminal.FindStringSubmatch(path); m != nil {
-		s.handleTerminal(w, r, m[1])
+		s.terminalMgr.HandleProjectTerminal(w, r, m[1])
 		return
 	}
 
@@ -648,87 +644,3 @@ func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, pr
 	jsonResponse(w, http.StatusOK, map[string]bool{"exists": exists})
 }
 
-// -- Terminal handler --
-
-func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request, projectID string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	project, err := s.store.GetProject(projectID)
-	if err != nil {
-		jsonError(w, http.StatusNotFound, "project not found")
-		return
-	}
-
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
-	if err != nil {
-		log.Printf("terminal accept error: %v", err)
-		return
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "closed")
-
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell)
-	cmd.Dir = project.Path
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
-	if err != nil {
-		log.Printf("terminal pty error: %v", err)
-		return
-	}
-	defer ptmx.Close()
-
-	sz := &pty.Winsize{Rows: 40, Cols: 120}
-
-	ctx := r.Context()
-
-	// PTY → WebSocket
-	go func() {
-		buf := make([]byte, 32768)
-		for {
-			n, err := ptmx.Read(buf)
-			if err != nil {
-				return
-			}
-			msg := TerminalMessage{Type: "output", Data: string(buf[:n])}
-			data, _ := json.Marshal(msg)
-			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
-				return
-			}
-		}
-	}()
-
-	// WebSocket → PTY
-	for {
-		msgType, data, err := conn.Read(ctx)
-		if err != nil {
-			break
-		}
-		if msgType != websocket.MessageText {
-			continue
-		}
-		var tm TerminalMessage
-		if err := json.Unmarshal(data, &tm); err != nil {
-			continue
-		}
-		switch tm.Type {
-		case "input":
-			ptmx.Write([]byte(tm.Data))
-		case "resize":
-			sz.Rows = uint16(tm.Rows)
-			sz.Cols = uint16(tm.Cols)
-			if err := pty.Setsize(ptmx, sz); err != nil {
-				log.Printf("terminal resize error: %v", err)
-			}
-		}
-	}
-}

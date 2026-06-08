@@ -4,7 +4,7 @@
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { showTerminal, selectedProject, selectedTask } from '$lib/store';
-    import { createTerminal } from '$lib/api';
+    import { createTerminal, createProjectTerminal } from '$lib/api';
     import { createFocusTrap } from '$lib/a11y';
     import { startDrag } from '$lib/utils/use-resize-drag';
     import '@xterm/xterm/css/xterm.css';
@@ -96,7 +96,8 @@
             ws = createTerminal(proj.id, task.id, term);
             ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
         } else if (proj) {
-            term.writeln('No task selected');
+            ws = createProjectTerminal(proj.id, term);
+            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
         } else {
             term.writeln('No project selected');
         }

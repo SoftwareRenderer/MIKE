@@ -332,7 +332,17 @@ export async function checkWorktreeExists(projectId: string, taskId: string): Pr
 
 // -- Terminal --
 export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal): WebSocket {
-    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`);
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term);
+}
+
+// -- Project Terminal (shell in project root) --
+export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal): WebSocket {
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term);
+}
+
+// Shared WebSocket setup for terminal connections
+function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): WebSocket {
+    const ws = new WebSocket(url);
     ws.onopen = () => {
         console.log('Terminal WebSocket connected');
     };

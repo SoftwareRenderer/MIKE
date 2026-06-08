@@ -300,6 +300,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 {/if}
                 <span class="project-title">{getHomeRelativePath(currentProject.path)}</span>
                 <div class="actions">
+                    <button class="icon-btn" onclick={() => showTerminal.set(true)} aria-label="Open terminal">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                            <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
                     <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="3"/>

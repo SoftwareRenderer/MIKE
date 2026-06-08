@@ -174,6 +174,35 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	tm.handleTerminalWS(w, r, session)
+}
+
+// HandleProjectTerminal handles WebSocket connections for a project-level terminal (persistent).
+func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request, projectID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	project, err := tm.store.GetProject(projectID)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	sessionKey := "proj:" + projectID
+	session, err := tm.getOrCreate(sessionKey, project.Path)
+	if err != nil {
+		log.Printf("terminal pty error for project %s: %v", projectID, err)
+		jsonError(w, http.StatusInternalServerError, "failed to start terminal")
+		return
+	}
+
+	tm.handleTerminalWS(w, r, session)
+}
+
+// handleTerminalWS is the shared WebSocket handler for both task and project terminals.
+func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Request, session *taskTerminal) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
