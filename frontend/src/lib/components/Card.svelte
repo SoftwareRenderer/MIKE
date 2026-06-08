@@ -183,6 +183,21 @@
         return s.length > max ? s.slice(0, max) + '...' : s;
     }
 
+    const statusColors: Record<string, string> = {
+        backlog: 'var(--color-column-backlog)',
+        in_progress: 'var(--color-column-in-progress)',
+        review: 'var(--color-column-review)',
+        done: 'var(--color-column-done)',
+    };
+
+    function getNextStatus(): string {
+        const currentIdx = statuses.indexOf(task.status as typeof statuses[number]);
+        const nextIdx = (currentIdx + 1) % statuses.length;
+        return statuses[nextIdx];
+    }
+
+    let nextStatus = $derived(getNextStatus());
+
     function handleCardKeydown(e: KeyboardEvent) {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -284,10 +299,19 @@
         type="button"
         class="move-btn"
         onclick={cycleStatus}
-        aria-label={`Move to ${statusLabels[statuses[(statuses.indexOf(task.status as typeof statuses[number]) + 1) % statuses.length]]}`}
-        title={`Move to ${statusLabels[statuses[(statuses.indexOf(task.status as typeof statuses[number]) + 1) % statuses.length]]}`}
+        aria-label={`Move to ${statusLabels[nextStatus]}`}
+        title={`Move to ${statusLabels[nextStatus]}`}
+        style="color: {statusColors[nextStatus]}"
     >
-        ↗
+        {#if nextStatus === 'backlog'}
+            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+        {:else if nextStatus === 'in_progress'}
+            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+        {:else if nextStatus === 'review'}
+            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+        {:else if nextStatus === 'done'}
+            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+        {/if}
     </button>
 </div>
 
@@ -336,6 +360,7 @@
         font-size: 0.875rem;
         font-weight: 500;
         margin-bottom: 6px;
+        padding-right: 64px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -349,6 +374,7 @@
         border: 1px solid var(--color-accent);
         border-radius: var(--radius-sm);
         padding: 2px 6px;
+        padding-right: 64px;
         color: var(--color-text-primary);
         font-family: inherit;
         outline: none;
@@ -468,9 +494,12 @@
     .card.selected .edit-btn {
         opacity: 1;
     }
-    .edit-btn:hover,
-    .move-btn:hover {
+    .edit-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    .move-btn:hover {
+        background: var(--color-surface-3);
+        /* keep column color from inline style */
     }
 </style>
