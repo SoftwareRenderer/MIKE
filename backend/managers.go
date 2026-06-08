@@ -56,11 +56,12 @@ type TaskManager struct {
 	store          *Store
 	boardStreamMgr *BoardStreamManager
 	configStore    *ConfigStore
+	terminalMgr    *TerminalManager
 }
 
 // NewTaskManager creates a new TaskManager.
-func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager, configStore *ConfigStore) *TaskManager {
-	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore}
+func NewTaskManager(store *Store, boardStreamMgr *BoardStreamManager, configStore *ConfigStore, terminalMgr *TerminalManager) *TaskManager {
+	return &TaskManager{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr}
 }
 
 // HandleList lists or creates tasks for a project.
@@ -149,6 +150,7 @@ func (tm *TaskManager) HandleByID(w http.ResponseWriter, r *http.Request, projec
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		tm.terminalMgr.removeSession(taskID)
 		tm.boardStreamMgr.Broadcast(projectID)
 		w.WriteHeader(http.StatusNoContent)
 	default:

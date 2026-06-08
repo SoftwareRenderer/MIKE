@@ -1,12 +1,18 @@
-
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
+    import { get } from 'svelte/store';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
-    import { showTerminal, selectedProject } from '$lib/store';
+    import { showTerminal, selectedProject, selectedTask } from '$lib/store';
     import { createTerminal } from '$lib/api';
     import { createFocusTrap } from '$lib/a11y';
+    import { startDrag } from '$lib/utils/use-resize-drag';
     import '@xterm/xterm/css/xterm.css';
+
+    const HEIGHT_KEY = 'kanban:terminal:height';
+    const DEFAULT_HEIGHT = 360;
+    const MIN_HEIGHT = 180;
+    const MAX_HEIGHT = 800;
 
     let term: Terminal | null = null;
     let container: HTMLElement | null = null;
@@ -14,6 +20,24 @@
     let panelEl: HTMLDivElement | null = null;
     let trap: ReturnType<typeof createFocusTrap> | null = null;
     let triggerEl: HTMLElement | null = null;
+    let panelHeight = $state(loadHeight());
+
+    function loadHeight(): number {
+        try {
+            const stored = localStorage.getItem(HEIGHT_KEY);
+            if (stored !== null) {
+                const val = Number.parseInt(stored, 10);
+                if (!isNaN(val) && val >= MIN_HEIGHT && val <= MAX_HEIGHT) return val;
+            }
+        } catch {}
+        return DEFAULT_HEIGHT;
+    }
+
+    function saveHeight(value: number) {
+        try {
+            localStorage.setItem(HEIGHT_KEY, String(value));
+        } catch {}
+    }
 
     function close() {
         trap?.destroy();
@@ -21,6 +45,23 @@
         showTerminal.set(false);
         if (ws) ws.close();
         setTimeout(() => triggerEl?.focus(), 50);
+    }
+
+    function onResizeStart(event: MouseEvent) {
+        const startY = event.clientY;
+        const startHeight = panelHeight;
+
+        startDrag(event, {
+            axis: 'y',
+            cursor: 'ns-resize',
+            onMove: (pointerY: number) => {
+                const delta = startY - pointerY; // dragging up increases height
+                panelHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
+            },
+            onEnd: () => {
+                saveHeight(panelHeight);
+            },
+        });
     }
 
     onMount(() => {
@@ -33,7 +74,8 @@
         term = new Terminal({
             cursorBlink: true,
             fontSize: 13,
-            fontFamily: 'var(--font-mono)',
+            lineHeight: 1.4,
+            fontFamily: '"Noto Sans Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
             theme: {
                 background: '#1F2428',
                 foreground: '#E6EDF3',
@@ -46,10 +88,17 @@
         term.loadAddon(fit);
         term.open(container);
         fit.fit();
+        term.focus();
 
-        const proj = selectedProject.get();
-        if (proj) {
-            ws = createTerminal(proj.id, term);
+        const proj = get(selectedProject);
+        const task = get(selectedTask);
+        if (proj && task) {
+            ws = createTerminal(proj.id, task.id, term);
+            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
+        } else if (proj) {
+            term.writeln('No task selected');
+        } else {
+            term.writeln('No project selected');
         }
 
         const observer = new ResizeObserver(() => {
@@ -72,8 +121,9 @@
 </script>
 
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal"></button>
-<div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal">
+<div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
     <div class="terminal-header">
+        <div class="resize-handle" onmousedown={onResizeStart} role="separator" aria-orientation="horizontal" aria-label="Resize terminal"></div>
         <span class="title">Terminal</span>
         <button class="close-btn" onclick={close} aria-label="Close terminal">✕</button>
     </div>
@@ -97,7 +147,6 @@
         bottom: 0;
         left: 0;
         right: 0;
-        height: 360px;
         background: var(--color-surface-0);
         border-top: 1px solid var(--color-border);
         z-index: 200;
@@ -108,10 +157,20 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 6px 12px;
+        padding: 4px 12px;
         background: var(--color-surface-2);
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
+        position: relative;
+    }
+    .resize-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 8px;
+        cursor: ns-resize;
+        z-index: 1;
     }
     .title {
         font-size: 0.875rem;
@@ -129,8 +188,12 @@
     .terminal-container {
         flex: 1;
         padding: 4px;
+        min-height: 0;
     }
     :global(.terminal) {
         height: 100%;
+    }
+    :global(.xterm-text) {
+        line-height: 1.4 !important;
     }
 </style>

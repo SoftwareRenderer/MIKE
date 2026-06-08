@@ -323,16 +323,35 @@ export async function getHomeAgentMessages(projectId: string): Promise<HomeAgent
     return res.json();
 }
 
+// -- Worktree --
+export async function checkWorktreeExists(projectId: string, taskId: string): Promise<{ exists: boolean }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/worktree-exists`);
+    if (!res.ok) throw await apiError(res, 'Failed to check worktree');
+    return res.json();
+}
+
 // -- Terminal --
-export function createTerminal(projectId: string, term: import('@xterm/xterm').Terminal): WebSocket {
-    const fitAddon = new (import('@xterm/addon-fit').FitAddon)();
-    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`);
+export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal): WebSocket {
+    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`);
     ws.onopen = () => {
-        term.loadAddon(fitAddon);
-        fitAddon.fit();
-        term.onData((data) => ws.send(JSON.stringify({ type: 'input', data })));
-        term.onResize(({ cols, rows }) => ws.send(JSON.stringify({ type: 'resize', cols, rows })));
+        console.log('Terminal WebSocket connected');
     };
+    ws.onerror = (e) => {
+        console.error('Terminal WebSocket error:', e);
+    };
+    ws.onclose = (e) => {
+        console.log('Terminal WebSocket closed:', e.code, e.reason);
+    };
+    term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', data }));
+        }
+    });
+    term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+    });
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'output') term.write(msg.data);

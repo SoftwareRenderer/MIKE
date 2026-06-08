@@ -32,6 +32,7 @@ type Server struct {
 	gitMgr         *GitManager
 	executor       *TaskExecutor
 	homeAgentMgr   *HomeAgentManager
+	terminalMgr    *TerminalManager
 	mux            *http.ServeMux
 	addr           string
 }
@@ -65,7 +66,8 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.projectMgr = NewProjectManager(store)
 	s.boardStreamMgr = NewBoardStreamManager(store)
 	s.boardMgr = NewBoardManager(store, s.boardStreamMgr)
-	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore)
+	s.terminalMgr = NewTerminalManager(store, cfgStore)
+	s.taskMgr = NewTaskManager(store, s.boardStreamMgr, cfgStore, s.terminalMgr)
 	s.depMgr = NewDependencyManager(store)
 	s.reviewMgr = NewReviewManager(store)
 	s.gitMgr = NewGitManager(store)
@@ -209,7 +211,9 @@ var (
 	reProjectHomeAgentMsg = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/message$`)
 	reProjectHomeAgentMsgs = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/messages$`)
 	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
-	reProjectTerminal = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
+	reProjectTerminal     = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
+	reTaskTerminal        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
+	reTaskWorktreeExists = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/worktree-exists$`)
 )
 
 func (s *Server) handleTaskMessagesRegenerate(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
@@ -547,13 +551,46 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Terminal
+	// Worktree exists check
+	if m := reTaskWorktreeExists.FindStringSubmatch(path); m != nil {
+		s.handleWorktreeExists(w, r, m[1], m[2])
+		return
+	}
+
+	// Task terminal (persistent, per-task)
+	if m := reTaskTerminal.FindStringSubmatch(path); m != nil {
+		s.terminalMgr.HandleTerminal(w, r, m[1], m[2])
+		return
+	}
+
+	// Project terminal (legacy)
 	if m := reProjectTerminal.FindStringSubmatch(path); m != nil {
 		s.handleTerminal(w, r, m[1])
 		return
 	}
 
 	http.NotFound(w, r)
+}
+
+// -- Worktree exists handler --
+
+func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "failed to get config")
+		return
+	}
+
+	worktreePath := filepath.Join(cfg.WorkspaceDir, taskID)
+	_, err = os.Stat(worktreePath)
+	exists := err == nil
+
+	jsonResponse(w, http.StatusOK, map[string]bool{"exists": exists})
 }
 
 // -- Terminal handler --

@@ -3,8 +3,8 @@
     import { get } from 'svelte/store';
     import type { Task } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, selectedTask, streamingTaskIds } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask } from '$lib/api';
+    import { board as boardStore, selectedTask, streamingTaskIds, showTerminal } from '$lib/store';
+    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask, checkWorktreeExists } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -24,6 +24,19 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let loadingDiff = $state(false);
+
+    // Terminal
+    let worktreeExists = $state(true);
+
+    async function checkWorktree() {
+        if (!task.project_id) return;
+        try {
+            const result = await checkWorktreeExists(task.project_id, task.id);
+            worktreeExists = result.exists;
+        } catch {
+            worktreeExists = false;
+        }
+    }
 
     // Inline title editing for task list items
     let editingTaskId = $state<string | null>(null);
@@ -209,6 +222,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             }
         });
 
+        checkWorktree();
+
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') onClose();
         }
@@ -296,6 +311,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
+                <button class="btn-icon" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                        <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
                 <button class="btn-icon" onclick={handleDelete} aria-label="Delete task">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -534,6 +555,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .btn-icon { padding: 6px; }
     .btn-icon-sm { padding: 2px; }
     .btn-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-icon:disabled:hover { background: none; color: var(--color-text-secondary); }
     .btn-success-icon:hover { background: var(--color-status-green)22; color: var(--color-status-green); }
     .columns {
         display: flex;
