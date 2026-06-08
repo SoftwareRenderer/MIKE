@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// These tests modify the shared server config (PUT /api/config) and must run
+// serially to avoid overwriting each other's state.
+const configTests = ['model-selector.spec.ts', 'provider-priority.spec.ts', 'settings-redesign.spec.ts'];
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -15,9 +19,15 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'config',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: configTests,
+      fullyParallel: false,
+    },
+    {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /.*\.mobile\.spec\.ts/,
+      testIgnore: [/\.mobile\.spec\.ts$/, ...configTests],
     },
     {
       name: 'mobile',

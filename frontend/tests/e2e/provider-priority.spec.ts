@@ -42,18 +42,24 @@ const multiProviderConfig = {
 test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
   test.beforeEach(async ({ page }) => {
     await apiPutConfig(multiProviderConfig);
-    await waitForSettle(200);
+    await waitForSettle(500);
+    // Verify config propagated (poll API)
+    await expect(async () => {
+      const config = await apiGetConfig();
+      expect(config.providers).toHaveLength(2);
+      expect(config.providers[0].name).toBe('provider-alpha');
+    }).toPass({ timeout: 5000 });
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
   test('settings: up/down arrows reorder providers', async ({ page }) => {
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
     await expect(page.locator('.provider-card')).toHaveCount(2);
 
     // Verify initial order: Alpha first, Beta second
-    const labels = page.locator('.provider-meta');
+    const labels = page.locator('.provider-display-name');
     await expect(labels.first()).toContainText('Alpha');
     await expect(labels.last()).toContainText('Beta');
 
@@ -90,7 +96,7 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
   });
 
   test('settings: up arrow disabled on first provider, down arrow disabled on last', async ({ page }) => {
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const firstCard = page.locator('.provider-card').first();
@@ -111,11 +117,17 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
         { name: 'star-test', display_name: 'Star Test', url: 'http://star.local/v1', models: ['model-x', 'model-y'], default_model: '' },
       ],
     });
-    await waitForSettle(200);
+    await waitForSettle(500);
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
+    // Verify config took effect (poll API to ensure propagation)
+    await expect(async () => {
+      const config = await apiGetConfig();
+      expect(config.providers).toHaveLength(1);
+      expect(config.providers[0].name).toBe('star-test');
+    }).toPass({ timeout: 5000 });
 
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -124,7 +136,7 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
 
     // Find star button for model-y (2nd row)
     const yRow = modelRows.nth(1);
-    const yStar = yRow.locator('.btn-star');
+    const yStar = yRow.locator('.btn-default');
     await expect(yStar).toBeVisible();
     await expect(yStar).not.toHaveClass(/active/);
 
@@ -137,7 +149,7 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
 
     // model-x star should NOT be active (only one default per provider)
     const xRow = modelRows.nth(0);
-    const xStar = xRow.locator('.btn-star');
+    const xStar = xRow.locator('.btn-default');
     await expect(xStar).not.toHaveClass(/active/);
 
     // Save and verify
@@ -158,12 +170,18 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
+    // Expand card if collapsed (cards with default_model start collapsed)
+    if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+      await card.locator('.provider-card-header').click();
+      await waitForSettle(300);
+    }
+
     const aRow = card.locator('.model-row').nth(0);
-    const aStar = aRow.locator('.btn-star');
+    const aStar = aRow.locator('.btn-default');
     await expect(aStar).toHaveClass(/active/);
 
     // Toggle off
@@ -190,18 +208,28 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
-    // Alpha card: a1 should be starred
-    const alphaCard = page.locator('.provider-card').nth(0);
-    await expect(alphaCard.locator('.model-row').nth(0).locator('.btn-star')).toHaveClass(/active/);
-    await expect(alphaCard.locator('.model-row').nth(1).locator('.btn-star')).not.toHaveClass(/active/);
+    // Expand cards (cards with default_model start collapsed)
+    const cards = page.locator('.provider-card');
+    for (let i = 0; i < 2; i++) {
+      const card = cards.nth(i);
+      if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+        await card.locator('.provider-card-header').click();
+        await waitForSettle(200);
+      }
+    }
 
-    // Beta card: b2 should be starred
+    // Alpha card: a1 should be default
+    const alphaCard = page.locator('.provider-card').nth(0);
+    await expect(alphaCard.locator('.model-row').nth(0).locator('.btn-default')).toHaveClass(/active/);
+    await expect(alphaCard.locator('.model-row').nth(1).locator('.btn-default')).not.toHaveClass(/active/);
+
+    // Beta card: b2 should be default
     const betaCard = page.locator('.provider-card').nth(1);
-    await expect(betaCard.locator('.model-row').nth(0).locator('.btn-star')).not.toHaveClass(/active/);
-    await expect(betaCard.locator('.model-row').nth(1).locator('.btn-star')).toHaveClass(/active/);
+    await expect(betaCard.locator('.model-row').nth(0).locator('.btn-default')).not.toHaveClass(/active/);
+    await expect(betaCard.locator('.model-row').nth(1).locator('.btn-default')).toHaveClass(/active/);
 
     // Save and verify both defaults persist
     await page.getByRole('button', { name: 'Save' }).click();
@@ -262,7 +290,7 @@ test.describe.serial('Provider Priority and Per-Provider Default Model', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
     // Open settings, reorder: move Reorder A down so B is first
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const firstCard = page.locator('.provider-card').first();

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm, createAndOpenTask } from './helpers';
+import { ensureChatForm, createAndOpenTask, getProjectId } from './helpers';
 
 test.describe.serial('Task Message Actions', () => {
   test.beforeEach(async ({ page }) => {
@@ -23,9 +23,9 @@ test.describe.serial('Task Message Actions', () => {
 
     // All three action buttons should be visible on the message
     const message = page.locator('.chat-message.user').last();
-    await expect(message.locator('.action-btn[title="Copy"]')).toBeVisible();
-    await expect(message.locator('.action-btn[title="Edit"]')).toBeVisible();
-    await expect(message.locator('.action-btn[title="Delete"]')).toBeVisible();
+    await expect(message.locator('.action-btn[aria-label*="Copy"]')).toBeVisible();
+    await expect(message.locator('.action-btn[aria-label*="Edit"]')).toBeVisible();
+    await expect(message.locator('.action-btn[aria-label*="Delete"]')).toBeVisible();
   });
 
   test('should copy message content to clipboard', async ({ page }) => {
@@ -41,7 +41,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Grant clipboard permission and click copy
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-    const copyBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Copy"]');
+    const copyBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Copy"]');
     await copyBtn.click();
     await page.waitForTimeout(100);
 
@@ -61,7 +61,7 @@ test.describe.serial('Task Message Actions', () => {
     await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
     // Click delete button
-    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Delete"]');
+    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Delete"]');
     await deleteBtn.click();
 
     // Check that delete dialog appears
@@ -91,7 +91,7 @@ test.describe.serial('Task Message Actions', () => {
     const userCountBefore = await page.locator('.chat-message.user').count();
 
     // Click delete and confirm
-    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Delete"]');
+    const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Delete"]');
     await deleteBtn.click();
     await page.locator('.delete-dialog .btn-delete').click();
 
@@ -113,7 +113,7 @@ test.describe.serial('Task Message Actions', () => {
     await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
     // Click edit button
-    const editBtn = page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]');
+    const editBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Edit"]');
     await editBtn.click();
 
     // Edit form should appear with original content
@@ -131,7 +131,7 @@ test.describe.serial('Task Message Actions', () => {
     await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
     // Enter edit mode
-    await page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]').click();
+    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Edit"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible();
 
     // Cancel edit
@@ -151,7 +151,7 @@ test.describe.serial('Task Message Actions', () => {
     await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
 
     // Edit the message
-    await page.locator('.chat-message.user').last().locator('.action-btn[title="Edit"]').click();
+    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Edit"]').click();
     await page.locator('.edit-form textarea').fill('Edited content');
     await page.locator('.btn-edit-submit').click();
 
@@ -185,7 +185,82 @@ test.describe.serial('Task Message Actions', () => {
 
     // Regenerate button should be visible on the last assistant message
     const lastAssistant = page.locator('.chat-message.assistant').last();
-    const regenerateBtn = lastAssistant.locator('.action-btn[title="Regenerate"]');
+    const regenerateBtn = lastAssistant.locator('.action-btn[aria-label*="Regenerate"]');
     await expect(regenerateBtn).toBeVisible();
+  });
+});
+
+test.describe.serial('Executor Context (task_messages)', () => {
+  let taskId: string | null = null;
+  let projectId: string | null = null;
+
+  test('should not include deleted messages in task_messages', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Create a fresh task and open it
+    const taskTitle = `context_test_${Date.now()}`;
+    await createAndOpenTask(page, taskTitle);
+
+    // Capture IDs
+    taskId = (await page.url()).match(/task=([^&]+)/)?.[1] || null;
+    projectId = await getProjectId(page);
+    expect(taskId).toBeTruthy();
+    expect(projectId).toBeTruthy();
+
+    // Wait for chat form to be ready
+    await ensureChatForm(page, 15000);
+
+    const textarea = page.locator('textarea[placeholder*="message"]');
+
+    // Send first message
+    const firstMsg = `first_message_${Date.now()}`;
+    await textarea.fill(firstMsg);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+    await page.waitForTimeout(2000);
+
+    // Verify first message is in task_messages via API
+    let apiRes = await page.request.get(`http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages`);
+    let messages = await apiRes.json() as any[];
+    const firstMsgInDb = messages.find((m: any) => m.role === 'user' && m.content === firstMsg);
+    expect(firstMsgInDb, 'First message should be in task_messages').toBeTruthy();
+
+    // Delete the first message
+    const userMsgs = page.locator('.chat-message.user');
+    await expect(userMsgs.last()).toBeVisible({ timeout: 10000 });
+    await userMsgs.last().locator('.action-btn[aria-label*="Delete"]').click();
+    await page.locator('.delete-dialog .btn-delete').click();
+    await expect(page.locator('.delete-dialog')).not.toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(1000);
+
+    // Verify first message is removed from task_messages via API
+    apiRes = await page.request.get(`http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages`);
+    messages = await apiRes.json() as any[];
+    const deletedMsgInDb = messages.find((m: any) => m.role === 'user' && m.content === firstMsg);
+    expect(deletedMsgInDb, 'Deleted message should NOT be in task_messages').toBeFalsy();
+
+    // Send a second message
+    await textarea.fill(`second_message_${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+    await page.waitForTimeout(2000);
+
+    // Verify task_messages has the second message but NOT the deleted first message
+    apiRes = await page.request.get(`http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages`);
+    messages = await apiRes.json() as any[];
+    const userMessagesInDb = messages.filter((m: any) => m.role === 'user');
+    const hasDeleted = userMessagesInDb.some((m: any) => m.content === firstMsg);
+    const hasSecond = userMessagesInDb.some((m: any) => m.content?.startsWith('second_message_'));
+    expect(hasDeleted, 'task_messages should NOT contain deleted message').toBeFalsy();
+    expect(hasSecond, 'task_messages should contain second message').toBeTruthy();
+
+    // Reload page and verify the deleted message does not reappear in the chat
+    await page.goto(`/?task=${taskId}`);
+    await page.waitForSelector('.task-detail-page', { timeout: 15000 });
+    await page.waitForTimeout(2000);
+
+    const chatContent = await page.locator('.chat-messages').textContent();
+    expect(chatContent, 'Chat should NOT show deleted message after reload').not.toContain(firstMsg);
   });
 });

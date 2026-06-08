@@ -87,7 +87,13 @@ test.describe.serial('Model Selector', () => {
       providers: [{ name: 'test-provider', display_name: 'Test Provider', url: 'http://localhost:8080/v1', models: ['model-alpha', 'model-beta'] }],
       default_provider: 'test-provider',
     });
-    await waitForSettle(200); // ensure config propagates to in-memory override
+    await waitForSettle(500);
+    // Verify config propagated
+    await expect(async () => {
+      const config = await apiGetConfig();
+      expect(config.providers).toHaveLength(1);
+      expect(config.providers[0].name).toBe('test-provider');
+    }).toPass({ timeout: 5000 });
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
   });
@@ -176,7 +182,12 @@ test.describe.serial('Dropdown flip positioning', () => {
       providers: [{ name: 'test-provider', display_name: 'Test Provider', url: 'http://localhost:8080/v1', models: ['model-alpha', 'model-beta'] }],
       default_provider: 'test-provider',
     });
-    await waitForSettle(200);
+    await waitForSettle(500);
+    await expect(async () => {
+      const config = await apiGetConfig();
+      expect(config.providers).toHaveLength(1);
+      expect(config.providers[0].name).toBe('test-provider');
+    }).toPass({ timeout: 5000 });
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
   });
@@ -227,7 +238,7 @@ test.describe.serial('Config Providers', () => {
     // Reload page to pick up config change
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
     await page.getByText('+ Add Provider').click();
     await waitForSettle();
@@ -256,7 +267,7 @@ test.describe.serial('Config Providers', () => {
     await waitForSettle(500);
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
-    await page.getByTitle('Settings').click();
+    await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
     await page.getByText('+ Add Provider').click();
     await waitForSettle();
@@ -266,5 +277,104 @@ test.describe.serial('Config Providers', () => {
     await expect(fetchBtn).toBeVisible();
     await expect(fetchBtn).toBeEnabled();
     await expect(fetchBtn).toContainText('Fetch Models');
+  });
+});
+
+test.describe.serial('CreateTaskModal Provider Selector', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await waitForSettle(200);
+    await apiPutConfig({
+      providers: [
+        {
+          name: 'provider-alpha',
+          display_name: 'Alpha Server',
+          url: 'http://alpha.local:8080/v1',
+          models: ['alpha-model-1', 'alpha-model-2'],
+          concurrency: 1,
+          default_model: 'alpha-model-1',
+        },
+        {
+          name: 'provider-beta',
+          display_name: 'Beta Server',
+          url: 'http://beta.local:9090/v1',
+          models: ['beta-model-1', 'beta-model-2', 'beta-model-3'],
+          concurrency: 1,
+          default_model: 'beta-model-1',
+        },
+      ],
+      default_provider: '',
+      workspace_dir: './worktrees',
+    });
+    await waitForSettle(500);
+    await expect(async () => {
+      const config = await apiGetConfig();
+      expect(config.providers).toHaveLength(2);
+      expect(config.providers[0].name).toBe('provider-alpha');
+    }).toPass({ timeout: 5000 });
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+  });
+
+  test('create task modal shows provider selector with multiple providers', async ({ page }) => {
+    await page.getByText('+ Add Task').click();
+    await page.waitForSelector('.modal', { timeout: 5000 });
+
+    // Provider selector should be visible (more than 1 provider)
+    const providerTrigger = page.locator('.provider-trigger');
+    await expect(providerTrigger).toBeVisible();
+    await expect(providerTrigger).toContainText('Alpha Server');
+
+    // Model selector should show the first provider's default model
+    const modelTrigger = page.locator('.model-trigger');
+    await expect(modelTrigger).toBeVisible();
+    await expect(modelTrigger).toContainText('alpha-model-1');
+  });
+
+  test('switching provider updates model list in create task modal', async ({ page }) => {
+    await page.getByText('+ Add Task').click();
+    await page.waitForSelector('.modal', { timeout: 5000 });
+
+    // Click provider dropdown
+    await page.locator('.provider-trigger').click();
+    await page.waitForSelector('.portal-provider-dropdown', { timeout: 5000 });
+
+    // Should show both providers
+    const providerOptions = page.locator('.portal-provider-dropdown .provider-option');
+    await expect(providerOptions).toHaveCount(2);
+
+    // Select Beta Server
+    await providerOptions.nth(1).click();
+    await waitForSettle(300);
+
+    // Model selector should now show beta-model-1 (Beta's default)
+    await expect(page.locator('.model-trigger')).toContainText('beta-model-1');
+  });
+
+  test('single provider hides provider selector in create task modal', async ({ page }) => {
+    await apiPutConfig({
+      providers: [
+        {
+          name: 'only-provider',
+          display_name: 'Only Server',
+          url: 'http://only.local:7070/v1',
+          models: ['only-model'],
+          concurrency: 1,
+        },
+      ],
+      default_provider: '',
+    });
+    await waitForSettle(200);
+    await page.reload();
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    await page.getByText('+ Add Task').click();
+    await page.waitForSelector('.modal', { timeout: 5000 });
+
+    // Provider selector should NOT be visible (only 1 provider)
+    await expect(page.locator('.provider-trigger')).not.toBeVisible();
+
+    // Model selector should still be visible
+    await expect(page.locator('.model-trigger')).toBeVisible();
   });
 });

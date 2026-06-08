@@ -93,7 +93,7 @@ test.describe('Mobile Responsive Features', () => {
     // Tab labels
     const tabTexts = await tabs.allTextContents();
     const trimmedTexts = tabTexts.map(t => t.trim());
-    expect(trimmedTexts).toContain('Context');
+    expect(trimmedTexts).toContain('Board');
     expect(trimmedTexts).toContain('Agent');
     expect(trimmedTexts).toContain('Changes');
   });
@@ -106,10 +106,10 @@ test.describe('Mobile Responsive Features', () => {
     const tabBar = page.locator('.mobile-tab-bar');
     const tabs = tabBar.locator('.tab-btn');
 
-    // Click Context tab (first tab)
+    // Click Board tab (first tab)
     await tabs.nth(0).click();
     await expect(tabs.nth(0)).toHaveClass(/active/);
-    // Context column should be visible
+    // Board column should be visible
     await expect(page.locator('.column-context')).toBeVisible();
 
     // Click Changes tab (third tab)
@@ -207,7 +207,7 @@ test.describe('Mobile Responsive Features', () => {
   });
 
   test('should show ConfigModal full-screen on mobile', async ({ page }) => {
-    await page.click('[title="Settings"]');
+    await page.click('[aria-label="Settings"]');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
 
     const modal = page.locator('.modal');

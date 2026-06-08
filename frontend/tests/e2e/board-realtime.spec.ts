@@ -46,8 +46,8 @@ test.describe('Board Real-time Updates', () => {
     // Intercept browser confirm dialog
     page.on('dialog', dialog => dialog.accept());
 
-    // Click delete button (title="Delete task")
-    await page.click('button[title="Delete task"]');
+    // Click delete button
+    await page.click('[aria-label="Delete task"]');
 
     // Navigate back to board
     await page.goto('/');
