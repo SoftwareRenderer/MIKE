@@ -134,6 +134,14 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             const b = await getBoard(currentProject.id);
             tasks = b.tasks || [];
             boardStore.set(b);
+            // Update selected task reference to point to fresh object from API
+            if (selectedTaskVal) {
+                const fresh = tasks.find(t => t.id === selectedTaskVal.id);
+                if (fresh) {
+                    selectedTaskVal = fresh;
+                    selectedTask.set(fresh);
+                }
+            }
         } catch (e) {
             console.error('Failed to refresh board:', e);
         }

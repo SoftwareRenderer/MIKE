@@ -38,6 +38,15 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     }
 
+    // Re-check worktree when the board is refreshed (task status may have changed)
+    // Uses $boardStore (store $-prefix) which is guaranteed reactive in Svelte 5
+    $effect(() => {
+        const currentTaskId = $boardStore?.tasks?.find(t => t.id === task.id)?.id;
+        if (currentTaskId) {
+            checkWorktree();
+        }
+    });
+
     // Inline title editing for task list items
     let editingTaskId = $state<string | null>(null);
     let editingTitleDraft = $state('');
@@ -79,7 +88,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     // Status badge
     let badge = $derived.by(() => {
-        const streaming = get(streamingTaskIds).has(task.id);
+        const streaming = $streamingTaskIds.has(task.id);
         if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
         if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         return { text: 'Idle', color: 'var(--color-text-tertiary)' };
