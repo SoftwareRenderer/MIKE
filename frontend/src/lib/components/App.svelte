@@ -594,6 +594,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         height: 100%;
         gap: 12px;
         color: var(--color-text-secondary);
+        text-align: center;
     }
     .empty-state h2 {
         font-size: 1.25rem;

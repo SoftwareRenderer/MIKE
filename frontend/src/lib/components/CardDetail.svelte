@@ -296,7 +296,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     </svg>
                 </button>
                 <div class="header-main">
-                    <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)}</span>
+                    <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', task.id)}>{getWorktreeDisplayPath(workspaceDir || '', task.id)}</span>
                     <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                         {badge.text}
                     </span>
@@ -524,7 +524,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         font-weight: 400;
         color: var(--color-text-tertiary);
         white-space: nowrap;
-        flex-shrink: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1 1 0;
+        min-width: 0;
     }
     .badge {
         padding: 2px 8px;

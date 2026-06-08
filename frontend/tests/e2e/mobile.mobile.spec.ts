@@ -206,6 +206,28 @@ test.describe('Mobile Responsive Features', () => {
     expect(boundingBox?.height).toBe(viewport?.height);
   });
 
+  test('should truncate long worktree path with ellipsis in task detail header', async ({ page }) => {
+    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.click('.card');
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+
+    const prefix = page.locator('.project-prefix');
+    await expect(prefix).toBeVisible();
+
+    // Check text-overflow is ellipsis
+    const textOverflow = await prefix.evaluate(el => getComputedStyle(el).textOverflow);
+    expect(textOverflow).toBe('ellipsis');
+
+    // Check overflow is hidden
+    const overflow = await prefix.evaluate(el => getComputedStyle(el).overflow);
+    expect(overflow).toBe('hidden');
+
+    // Check title attribute is set (tooltip for full path)
+    const title = await prefix.getAttribute('title');
+    expect(title).toBeTruthy();
+    expect(title!.length).toBeGreaterThan(0);
+  });
+
   test('should show ConfigModal full-screen on mobile', async ({ page }) => {
     await page.click('[aria-label="Settings"]');
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
