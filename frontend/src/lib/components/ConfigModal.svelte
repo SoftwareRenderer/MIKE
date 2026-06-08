@@ -150,13 +150,94 @@
         providers.splice(idx, 1);
     }
 
+    function swapProviders(fromIdx: number, toIdx: number) {
+        if (fromIdx === toIdx || toIdx < 0 || toIdx >= providers.length) return;
+        const [item] = providers.splice(fromIdx, 1);
+        providers.splice(toIdx, 0, item);
+    }
+
     function reorderProvider(idx: number, direction: 'up' | 'down') {
         const newIdx = direction === 'up' ? idx - 1 : idx + 1;
         if (newIdx < 0 || newIdx >= providers.length) return;
-        // Swap providers at idx and newIdx
-        const temp = providers[idx];
-        providers[idx] = providers[newIdx];
-        providers[newIdx] = temp;
+        swapProviders(idx, newIdx);
+    }
+
+    // -- Drag-and-drop reordering --
+    let dragIndex = $state(-1);
+    let dragDropIndex = $state(-1);
+    let dragPreview: HTMLElement | null = null;
+    let providerCards: HTMLDivElement[] = $state([]);
+
+    /** Find the provider card index under the given pointer coordinates. */
+    function getCardIndexAt(x: number, y: number): number {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return -1;
+        const card = el.closest('.provider-card');
+        if (!card) return -1;
+        return parseInt(card.getAttribute('data-index') || '-1', 10);
+    }
+
+    function handleDragStart(e: PointerEvent, idx: number) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (providers.length < 2) return;
+
+        dragIndex = idx;
+        dragDropIndex = -1;
+
+        // Create drag preview element
+        dragPreview = document.createElement('div');
+        dragPreview.className = 'drag-preview';
+        dragPreview.style.left = `${e.clientX - 12}px`;
+        dragPreview.style.top = `${e.clientY - 12}px`;
+        document.body.appendChild(dragPreview);
+
+        const startY = e.clientY;
+        const startIdx = idx;
+
+        // Mark card as dragging
+        const card = providerCards[idx];
+        if (card) card.classList.add('dragging');
+
+        function onPointerMove(ev: PointerEvent) {
+            ev.preventDefault();
+            // Update preview position
+            if (dragPreview) {
+                dragPreview.style.left = `${ev.clientX - 12}px`;
+                dragPreview.style.top = `${ev.clientY - 12}px`;
+            }
+            // Find drop target
+            const targetIdx = getCardIndexAt(ev.clientX, ev.clientY);
+            if (targetIdx >= 0 && targetIdx !== dragIndex && targetIdx !== dragDropIndex) {
+                // Adjust index if dragging downwards and target is the old position
+                let adjustedIdx = targetIdx;
+                if (dragIndex < targetIdx && targetIdx !== startIdx) {
+                    // target is below drag source — no adjustment needed
+                }
+                dragDropIndex = adjustedIdx;
+                swapProviders(dragIndex, adjustedIdx);
+                dragIndex = adjustedIdx;
+            }
+        }
+
+        function onPointerUp(ev: PointerEvent) {
+            ev.preventDefault();
+            document.removeEventListener('pointermove', onPointerMove as any);
+            document.removeEventListener('pointerup', onPointerUp as any);
+
+            // Remove drag preview
+            if (dragPreview) {
+                dragPreview.remove();
+                dragPreview = null;
+            }
+            // Clear dragging class from all cards
+            for (const c of providerCards) c.classList.remove('dragging');
+            dragIndex = -1;
+            dragDropIndex = -1;
+        }
+
+        document.addEventListener('pointermove', onPointerMove, { passive: false });
+        document.addEventListener('pointerup', onPointerUp);
     }
 
     async function fetchModelsForProvider(idx: number) {
@@ -278,10 +359,20 @@
                 </div>
                 <div class="providers-list">
                     {#each providers as p, i}
-                        <div class="provider-card">
+                        <div class="provider-card" data-index={i} bind:this={providerCards[i]} class:dragging={dragIndex === i}>
                             <!-- Card header: always visible -->
                             <div class="provider-card-header" onclick={() => toggleProvider(i)} aria-expanded={p.expanded}>
                                 <div class="reorder-buttons">
+                                    <button type="button" class="btn-drag-handle" onpointerdown={(e) => handleDragStart(e, i)} title="Drag to reorder" aria-label="Drag to reorder provider">
+                                        <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
+                                            <circle cx="5" cy="3" r="1.5"/>
+                                            <circle cx="11" cy="3" r="1.5"/>
+                                            <circle cx="5" cy="10" r="1.5"/>
+                                            <circle cx="11" cy="10" r="1.5"/>
+                                            <circle cx="5" cy="17" r="1.5"/>
+                                            <circle cx="11" cy="17" r="1.5"/>
+                                        </svg>
+                                    </button>
                                     <button type="button" class="btn-reorder btn-reorder-up" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'up'); }} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                                             <path d="M8 4l4 5H4z" fill="currentColor"/>
@@ -970,6 +1061,7 @@
     .reorder-buttons {
         display: flex;
         flex-direction: column;
+        align-items: center;
         gap: 1px;
         flex-shrink: 0;
         padding-top: 2px;
@@ -995,6 +1087,50 @@
     .btn-reorder:disabled {
         opacity: 0.15;
         cursor: default;
+    }
+
+    /* Drag handle button */
+    .btn-drag-handle {
+        background: none;
+        border: none;
+        padding: 3px;
+        cursor: grab;
+        color: var(--color-text-primary);
+        opacity: 0.4;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        border-radius: 3px;
+        touch-action: none;
+    }
+    .btn-drag-handle:hover {
+        color: var(--color-accent);
+        opacity: 1;
+        background: var(--color-surface-3);
+    }
+    .btn-drag-handle:active {
+        cursor: grabbing;
+    }
+
+    /* Provider card dragging state */
+    .provider-card.dragging {
+        opacity: 0.4;
+        border-color: var(--color-accent);
+    }
+
+    /* Drag preview (follows cursor) */
+    .drag-preview {
+        position: fixed;
+        pointer-events: none;
+        z-index: 10001;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-accent);
+        opacity: 0.8;
     }
 
     /* Remove provider button */
@@ -1353,8 +1489,8 @@
         .modal {
             width: 100vw;
             max-width: none;
-            max-height: 100vh;
-            height: 100vh;
+            max-height: 100dvh;
+            height: 100dvh;
             border-radius: 0;
             border: none;
         }
@@ -1394,6 +1530,45 @@
         .btn-test,
         .btn-add-model {
             min-height: 44px;
+        }
+        /* Exclude toggle-switch from min-height/padding — it has its own designed size */
+        button.toggle-switch {
+            min-height: 0 !important;
+            padding: 0;
+            width: 40px;
+            height: 22px;
+        }
+        /* Make the entire toggle row a proper touch target */
+        .toggle-field {
+            min-height: 44px;
+        }
+
+        /* Provider card header — compact on mobile */
+        .btn-reorder {
+            display: none;
+        }
+        .btn-drag-handle {
+            display: flex;
+            min-height: 0 !important;
+            padding: 8px 3px;
+        }
+        .priority-badge {
+            display: none;
+        }
+        .model-count-badge {
+            display: none;
+        }
+        .default-model-badge {
+            display: none;
+        }
+        /* Icon-only buttons should not be stretched to 44px */
+        button.btn-remove-provider,
+        button.btn-expand {
+            min-height: 0 !important;
+            padding: 5px;
+        }
+        .provider-actions {
+            flex-wrap: wrap;
         }
     }
 </style>
