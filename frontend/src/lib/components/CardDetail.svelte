@@ -411,7 +411,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                         >
                                             <span class="task-item-title">{t.title || '(untitled)'}</span>
                                             <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} role="button" aria-label="Edit title" title="Edit title" tabindex="0">
-                                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                                             </span>
                                             {#if getStatusBadge(t).text}
                                                 <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
@@ -694,8 +694,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 20px;
-        height: 20px;
+        width: 28px;
+        height: 28px;
         padding: 0;
         background: transparent;
         border: none;
@@ -713,6 +713,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .task-item-edit-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    @media (hover: none) {
+        .task-item-edit-btn {
+            opacity: 1;
+            transition: background 0.15s ease;
+        }
     }
     .task-item-editing {
         padding: 4px 6px;

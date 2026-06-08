@@ -293,7 +293,7 @@
         aria-label="Edit task title"
         title="Edit title"
     >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
     </button>
     <button
         type="button"
@@ -304,13 +304,13 @@
         style="color: {statusColors[nextStatus]}"
     >
         {#if nextStatus === 'backlog'}
-            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
         {:else if nextStatus === 'in_progress'}
-            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
         {:else if nextStatus === 'review'}
-            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
         {:else if nextStatus === 'done'}
-            <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
         {/if}
     </button>
 </div>
@@ -468,8 +468,8 @@
     .move-btn {
         position: absolute;
         top: 8px;
-        width: 24px;
-        height: 24px;
+        width: 32px;
+        height: 32px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -484,7 +484,7 @@
         cursor: pointer;
     }
     .edit-btn {
-        right: 36px;
+        right: 48px;
     }
     .move-btn {
         right: 8px;
@@ -501,5 +501,12 @@
     .move-btn:hover {
         background: var(--color-surface-3);
         /* keep column color from inline style */
+    }
+    @media (hover: none) {
+        .edit-btn,
+        .move-btn {
+            opacity: 1;
+            transition: background 0.15s ease;
+        }
     }
 </style>

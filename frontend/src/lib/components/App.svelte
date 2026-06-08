@@ -500,13 +500,13 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 32px;
+        height: 32px;
         padding: 0;
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: 1.125rem;
         opacity: 0;
         transition: opacity 0.15s ease;
         flex-shrink: 0;
@@ -515,6 +515,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     .project-remove-btn:hover {
         background: var(--color-status-red);
         color: white;
+    }
+    @media (hover: none) {
+        .project-remove-btn {
+            opacity: 1;
+            transition: none;
+        }
     }
     .project-name {
         white-space: nowrap;
