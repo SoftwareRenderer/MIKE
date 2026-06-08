@@ -45,7 +45,7 @@ test.describe('Task Management', () => {
 
     // Verify task detail view is shown
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.title')).toBeVisible();
+    await expect(page.locator('.project-prefix')).toBeVisible();
   });
 
   test('should navigate back to board from task detail', async ({ page }) => {

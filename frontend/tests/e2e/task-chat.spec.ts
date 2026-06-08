@@ -84,16 +84,6 @@ test.describe('Task Chat', () => {
     await expect(deleteButton).toBeVisible();
   });
 
-  test('should allow editing task title', async ({ page }) => {
-    await createAndOpenTask(page);
-
-    // Click on title to edit
-    await page.click('.title');
-
-    // Title input should appear
-    await expect(page.locator('.title-input')).toBeVisible();
-  });
-
   test('should show assistant streaming indicator immediately after sending a message', async ({ page }) => {
     await createAndOpenTask(page);
     await ensureChatForm(page);

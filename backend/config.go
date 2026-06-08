@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,12 @@ func (cs *ConfigStore) GetConfig() (*Config, error) {
 	workspaceDir, err := cs.store.GetConfigValue("workspace_dir")
 	if err != nil {
 		return nil, err
+	}
+	// Resolve relative paths to absolute so the frontend can display them correctly
+	if workspaceDir != "" && !filepath.IsAbs(workspaceDir) {
+		if abs, err := filepath.Abs(workspaceDir); err == nil {
+			workspaceDir = abs
+		}
 	}
 	providersRaw, err := cs.store.GetConfigValue("providers")
 	if err != nil {

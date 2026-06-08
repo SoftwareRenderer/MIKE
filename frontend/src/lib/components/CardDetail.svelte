@@ -4,7 +4,7 @@
     import type { Task } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, selectedTask, streamingTaskIds } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, getBoard } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -25,9 +25,44 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     let diffFiles: DiffFile[] = $state([]);
     let loadingDiff = $state(false);
 
-    // Title editing
-    let editingTitle = $state(false);
-    let titleDraft = $state('');
+    // Inline title editing for task list items
+    let editingTaskId = $state<string | null>(null);
+    let editingTitleDraft = $state('');
+    let editingTitleInput: HTMLInputElement | null = $state(null);
+
+    function startEditTaskTitle(taskId: string, currentTitle: string, e: MouseEvent) {
+        e.stopPropagation();
+        editingTaskId = taskId;
+        editingTitleDraft = currentTitle;
+    }
+
+    function finishEditTaskTitle() {
+        if (editingTaskId && editingTitleDraft.trim() && task.project_id) {
+            const trimmed = editingTitleDraft.trim();
+            const targetTask = allTasks.find(t => t.id === editingTaskId);
+            if (targetTask && targetTask.title !== trimmed) {
+                targetTask.title = trimmed;
+                updateTask(task.project_id, editingTaskId, { title: trimmed }).catch(err => {
+                    targetTask.title = editingTitleDraft;
+                    console.error('Failed to update title:', err);
+                });
+            }
+        }
+        editingTaskId = null;
+        editingTitleDraft = '';
+    }
+
+    function cancelEditTaskTitle() {
+        editingTaskId = null;
+        editingTitleDraft = '';
+    }
+
+    $effect(() => {
+        if (editingTaskId && editingTitleInput) {
+            editingTitleInput.focus();
+            editingTitleInput.select();
+        }
+    });
 
     // Status badge
     let badge = $derived.by(() => {
@@ -166,8 +201,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     onMount(() => {
-        titleDraft = task.title;
-
         const unsubBoard = boardStore.subscribe(b => {
             if (b) {
                 allTasks = b.tasks;
@@ -228,12 +261,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         loadingDiff = false;
     }
 
-    function saveTitle() {
-        if (!task || !titleDraft.trim()) return;
-        editingTitle = false;
-        task.title = titleDraft.trim();
-    }
-
     function getStatusBadge(t: Task): { text: string; color: string } {
         const streaming = get(streamingTaskIds).has(t.id);
         if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
@@ -254,22 +281,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     </svg>
                 </button>
                 <div class="header-main">
-                    {#if editingTitle}
-                        <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)} / </span>
-                        <input
-                            class="title-input"
-                            bind:value={titleDraft}
-                            onblur={saveTitle}
-                            onkeydown={(e) => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') { e.stopPropagation(); editingTitle = false; } }}
-                            placeholder="Task title"
-                            autofocus={true}
-                        />
-                    {:else}
-                        <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)}{#if task.title || task.title === ''} / {/if}</span>
-                        <button type="button" class="title" onclick={() => { editingTitle = true; titleDraft = task.title; }} aria-label="Edit task title">
-                            {task.title || '(untitled)'}
-                        </button>
-                    {/if}
+                    <span class="project-prefix">{getWorktreeDisplayPath(workspaceDir || '', task.id)}</span>
                     <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                         {badge.text}
                     </span>
@@ -347,20 +359,37 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                     <span class="section-count">{sectionTasks.length}</span>
                                 </div>
                                 {#each sectionTasks as t (t.id)}
-                                    <button
-                                        type="button"
-                                        class={`task-item${t.id === task.id ? ' selected' : ''}`}
-                                        onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
-                                        aria-label={`Select task: ${t.title || '(untitled)'}`}
-                                        aria-current={t.id === task.id ? 'task' : undefined}
-                                    >
-                                        <span class="task-item-title">{t.title || '(untitled)'}</span>
-                                        {#if getStatusBadge(t).text}
-                                            <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
-                                                {getStatusBadge(t).text}
+                                    {#if editingTaskId === t.id}
+                                        <div class="task-item task-item-editing">
+                                            <input
+                                                class="task-item-title-input"
+                                                type="text"
+                                                bind:value={editingTitleDraft}
+                                                onblur={finishEditTaskTitle}
+                                                onkeydown={(e) => { if (e.key === 'Enter') finishEditTaskTitle(); if (e.key === 'Escape') cancelEditTaskTitle(); e.stopPropagation(); }}
+                                                bind:this={editingTitleInput}
+                                                placeholder="Task title"
+                                            />
+                                        </div>
+                                    {:else}
+                                        <button
+                                            type="button"
+                                            class={`task-item${t.id === task.id ? ' selected' : ''}`}
+                                            onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
+                                            aria-label={`Select task: ${t.title || '(untitled)'}`}
+                                            aria-current={t.id === task.id ? 'task' : undefined}
+                                        >
+                                            <span class="task-item-title">{t.title || '(untitled)'}</span>
+                                            <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} role="button" aria-label="Edit title" title="Edit title" tabindex="0">
+                                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                                             </span>
-                                        {/if}
-                                    </button>
+                                            {#if getStatusBadge(t).text}
+                                                <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
+                                                    {getStatusBadge(t).text}
+                                                </span>
+                                            {/if}
+                                        </button>
+                                    {/if}
                                 {/each}
                             </div>
                         {/if}
@@ -476,35 +505,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         white-space: nowrap;
         flex-shrink: 0;
     }
-    .title {
-        font-size: 0.875rem;
-        font-weight: 600;
-        cursor: pointer;
-        margin: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        min-width: 0;
-        color: var(--color-text-primary);
-        background: none;
-        border: none;
-        padding: 0;
-        text-align: left;
-        width: 100%;
-        font-family: inherit;
-    }
-    .title:hover { color: var(--color-accent); }
-    .title-input {
-        flex: 1;
-        padding: 4px 8px;
-        font-size: 0.875rem;
-        font-weight: 600;
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-accent);
-        border-radius: var(--radius-sm);
-        color: var(--color-text-primary);
-        min-width: 0;
-    }
     .badge {
         padding: 2px 8px;
         border-radius: 10px;
@@ -619,6 +619,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
     .task-item {
         padding: 8px 10px;
+        margin: 2px 0;
         border-radius: var(--radius-sm);
         cursor: pointer;
         display: flex;
@@ -632,11 +633,15 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         color: inherit;
         background: none;
         border: none;
+        box-sizing: border-box;
     }
     .task-item:hover { background: var(--color-surface-2); }
     .task-item.selected {
         background: var(--color-accent)18;
-        outline: 1px solid var(--color-accent)40;
+        outline: 1px solid var(--color-accent);
+        outline-offset: 1px;
+        color: var(--color-accent);
+        font-weight: 600;
     }
     .task-item-title {
         font-size: 0.75rem;
@@ -646,6 +651,48 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         text-overflow: ellipsis;
         flex: 1;
         min-width: 0;
+    }
+    .task-item.selected .task-item-title {
+        color: var(--color-accent);
+    }
+    .task-item-edit-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s ease, background 0.15s ease;
+        flex-shrink: 0;
+    }
+    .task-item:hover .task-item-edit-btn,
+    .task-item.selected .task-item-edit-btn {
+        opacity: 1;
+    }
+    .task-item-edit-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .task-item-editing {
+        padding: 4px 6px;
+    }
+    .task-item-title-input {
+        width: 100%;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-accent);
+        border-radius: var(--radius-sm);
+        padding: 3px 6px;
+        font-family: inherit;
+        outline: none;
     }
     .task-item-badge {
         font-size: 0.75rem;

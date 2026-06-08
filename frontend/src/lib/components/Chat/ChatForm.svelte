@@ -29,7 +29,7 @@
     }: Props = $props();
 
     let textareaEl: HTMLTextAreaElement | undefined;
-    let canSend = $derived(value.trim().length > 0 && !disabled);
+    let canSend = $derived(value.trim().length > 0 && !disabled && !(providers.length > 0 && !selectedModel));
     let showModelSelector = $derived(providers.length > 0);
 
     export function focus() {
