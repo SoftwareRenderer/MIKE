@@ -5,4 +5,4 @@ frontend/dist
 worktrees/*
 frontend/test-results
 test-results
-
+.worktrees/*
