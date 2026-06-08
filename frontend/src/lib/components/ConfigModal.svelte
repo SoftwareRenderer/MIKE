@@ -156,12 +156,6 @@
         providers.splice(toIdx, 0, item);
     }
 
-    function reorderProvider(idx: number, direction: 'up' | 'down') {
-        const newIdx = direction === 'up' ? idx - 1 : idx + 1;
-        if (newIdx < 0 || newIdx >= providers.length) return;
-        swapProviders(idx, newIdx);
-    }
-
     // -- Drag-and-drop reordering --
     let dragIndex = $state(-1);
     let dragDropIndex = $state(-1);
@@ -371,16 +365,6 @@
                                             <circle cx="11" cy="10" r="1.5"/>
                                             <circle cx="5" cy="17" r="1.5"/>
                                             <circle cx="11" cy="17" r="1.5"/>
-                                        </svg>
-                                    </button>
-                                    <button type="button" class="btn-reorder btn-reorder-up" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'up'); }} disabled={i === 0} title="Move up (higher priority)" aria-label="Move provider up">
-                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                                            <path d="M8 4l4 5H4z" fill="currentColor"/>
-                                        </svg>
-                                    </button>
-                                    <button type="button" class="btn-reorder btn-reorder-down" onclick={(e) => { e.stopPropagation(); reorderProvider(i, 'down'); }} disabled={i === providers.length - 1} title="Move down (lower priority)" aria-label="Move provider down">
-                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                                            <path d="M8 11l4-5H4z" fill="currentColor"/>
                                         </svg>
                                     </button>
                                 </div>
@@ -1066,29 +1050,6 @@
         flex-shrink: 0;
         padding-top: 2px;
     }
-    .btn-reorder {
-        background: none;
-        border: none;
-        padding: 3px;
-        cursor: pointer;
-        color: var(--color-text-primary);
-        opacity: 0.5;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-        border-radius: 3px;
-    }
-    .btn-reorder:hover:not(:disabled) {
-        color: var(--color-accent);
-        opacity: 1;
-        background: var(--color-surface-3);
-    }
-    .btn-reorder:disabled {
-        opacity: 0.15;
-        cursor: default;
-    }
-
     /* Drag handle button */
     .btn-drag-handle {
         background: none;
@@ -1544,9 +1505,6 @@
         }
 
         /* Provider card header — compact on mobile */
-        .btn-reorder {
-            display: none;
-        }
         .btn-drag-handle {
             display: flex;
             min-height: 0 !important;
