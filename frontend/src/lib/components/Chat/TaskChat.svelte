@@ -59,16 +59,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
 
-    // isLoading: derived from boardStore + streamingTaskIds for real-time accuracy.
-    // Shows stop button when task is actively running (LLM responding).
-    let isLoading = $derived.by(() => {
-        if (entries.length === 0) return false;
-        if ($streamingTaskIds.has(taskId)) return true;
-        const board = $boardStore;
-        if (!board) return false;
-        const t = board.tasks.find(t => t.id === taskId);
-        return t?.status === 'in_progress' && ['running', 'queued'].includes(t?.status_state ?? '');
-    });
+    // isLoading: only true when LLM is actively streaming tokens.
+    // Shows stop button only during token generation, not during tool execution.
+    let isLoading = $derived($streamingTaskIds.has(taskId));
 
     // A task is "new" (show "Start Task" button) only when:
     // - There are no entries yet (no messages loaded from backend)
