@@ -58,6 +58,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let deleteConfirm = $state<{ entryId: string; count: number } | null>(null);
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
+    let firstConnectDone = $state(false); // track if initial onopen has fired
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -485,6 +486,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         } catch (e) {
             console.error('Failed to stop task:', e);
         }
+        // Reload history from DB to discard any unpersisted (streaming) entries
+        // so they don't appear as duplicates when the task is restarted
+        await loadHistory();
     }
 
     async function handleDelete() {
@@ -530,8 +534,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         ws.ws.onopen = () => {
             connecting = false;
             connected = true;
-            // Remove any connection lost error entries on successful reconnect
-            entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+            if (!firstConnectDone) {
+                // First connection — just remove any connection errors
+                firstConnectDone = true;
+                entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+            } else {
+                // Reconnect — reload history from DB to discard any stale
+                // unpersisted entries (e.g., partial assistant message from
+                // a disconnected stream) that would appear as duplicates
+                loadHistory();
+            }
         };
         ws.ws.onclose = (event: CloseEvent) => {
             const wasConnected = connected;

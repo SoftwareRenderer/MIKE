@@ -342,4 +342,66 @@ test.describe.serial('Task Status States', () => {
     const badge = card.locator('.badge:has-text("Failed")');
     await expect(badge).toBeVisible({ timeout: 5000 });
   });
+
+  test('should not show duplicate messages after stop and restart', async ({ page }) => {
+    // Create a task via API with a slow-response prompt
+    const task = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `stop-restart-${Date.now()}`, prompt: 'stop button test', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId });
+    const taskId = task.id;
+
+    // Navigate to task detail page
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    // Click Start Task
+    const startButton = page.locator('.btn-start-task');
+    await expect(startButton).toBeVisible({ timeout: 10000 });
+    await startButton.click();
+
+    // Wait for LLM response to start streaming (stop button appears)
+    const stopButton = page.locator('.btn-stop');
+    await expect(stopButton).toBeVisible({ timeout: 10000 });
+
+    // Count assistant messages BEFORE stop (should be 1 streaming entry)
+    const assistantCountBefore = await page.locator('.chat-message').count();
+
+    // Stop the task
+    await stopButton.click();
+
+    // Wait for stop to process
+    await page.waitForTimeout(2000);
+
+    // Verify task is stopped
+    let taskData = await getTaskData(page, projectId, taskId);
+    expect(taskData.status_state).toBe('stopped');
+
+    // Count assistant messages AFTER stop (streaming entry should be removed by history reload)
+    // The user message persists, but the partial assistant (unpersisted) should be gone
+    const userMessagesAfterStop = await page.locator('.chat-message:has-text("stop button test")').count();
+    expect(userMessagesAfterStop).toBe(1); // User message should remain
+
+    // Now restart via resume (retry) API
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/retry`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId });
+
+    // Wait for the new executor to respond
+    await expect(async () => {
+      taskData = await getTaskData(page, projectId, taskId);
+      expect(['idle', 'running']).toContain(taskData.status_state);
+    }).toPass({ timeout: 15000 });
+
+    // Wait a moment for WebSocket to deliver messages
+    await page.waitForTimeout(1000);
+
+    // Count user messages — should still be exactly 1 (no duplicates)
+    const userMessagesAfterRestart = await page.locator('.chat-message:has-text("stop button test")').count();
+    expect(userMessagesAfterRestart).toBe(1);
+  });
 });

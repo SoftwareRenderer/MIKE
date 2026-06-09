@@ -332,14 +332,18 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		return err
 	}
 
-	// Persist the initial prompt as a user message so it appears in chat history
-	_ = te.store.CreateTaskMessage(&TaskMessage{
-		ID:        generateUUID(),
-		TaskID:    taskID,
-		Role:      "user",
-		Content:   task.Prompt,
-		CreatedAt: time.Now().UTC(),
-	})
+	// Persist the initial prompt as a user message so it appears in chat history.
+	// Only persist if there are no existing messages (avoids duplicates on retry).
+	existingMsgs, _ := te.store.GetTaskMessages(taskID)
+	if len(existingMsgs) == 0 {
+		_ = te.store.CreateTaskMessage(&TaskMessage{
+			ID:        generateUUID(),
+			TaskID:    taskID,
+			Role:      "user",
+			Content:   task.Prompt,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
 
 	b := te.streamMgr.GetOrCreate(taskID)
 	b.send(StreamEvent{Type: WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
