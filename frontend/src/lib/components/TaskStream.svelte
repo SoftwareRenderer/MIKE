@@ -27,6 +27,21 @@
         return Math.random().toString(36).slice(2, 10);
     }
 
+    /** Split raw text into paragraphs: `\n\n` → paragraph break, `\n` → <br> */
+    function splitParagraphs(text: string): string[] {
+        if (!text) return [];
+        return text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+    }
+
+    /** Escape HTML and convert single newlines to <br> */
+    function escapeHtml(str: string): string {
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>');
+    }
+
     function ensureTextSection() {
         if (!currentTextSection) {
             currentTextSection = { id: genId(), type: 'text', content: '', isStreaming: true };
@@ -190,7 +205,14 @@
                     tokenCount={sec.tokenCount}
                 >
                     {#if sec.type === 'text'}
-                        <div class="stream-text">{sec.content}</div>
+                        <div class="stream-text" class:streaming={sec.isStreaming}>
+                            {#each splitParagraphs(sec.content) as para}
+                                <p>{@html escapeHtml(para)}</p>
+                            {/each}
+                            {#if sec.isStreaming}
+                                <span class="cursor-blink"></span>
+                            {/if}
+                        </div>
                     {:else if sec.type === 'reasoning'}
                         <div class="stream-reasoning">{sec.content}</div>
                     {:else if sec.type === 'tool_call' && sec.toolCall}
@@ -247,9 +269,34 @@
     }
     .stream-text {
         font-size: 0.875rem;
-        line-height: 1.6;
-        white-space: pre-wrap;
+        line-height: 1.7;
         color: var(--color-text-primary);
+    }
+    .stream-text p {
+        margin: 0.75rem 0;
+        line-height: 1.7;
+    }
+    .stream-text p:first-child {
+        margin-top: 0;
+    }
+    .stream-text p:last-child {
+        margin-bottom: 0;
+    }
+    .stream-text.streaming {
+        border-left: 2px solid var(--color-accent);
+        padding-left: 12px;
+    }
+    .stream-text .cursor-blink {
+        display: inline-block;
+        width: 2px;
+        height: 1em;
+        background: var(--color-accent);
+        vertical-align: text-bottom;
+        animation: blink 0.8s step-end infinite;
+    }
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
     }
     .stream-reasoning {
         font-size: 0.875rem;

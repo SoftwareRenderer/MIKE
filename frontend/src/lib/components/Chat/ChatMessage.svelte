@@ -358,26 +358,73 @@
         padding: 0;
     }
     .assistant .message-text :global(p) {
-        margin: 0.125rem;
-        line-height: 1.25;
+        margin: 0.75rem 0;
+        line-height: 1.7;
+    }
+    .assistant .message-text :global(p:first-child) {
+        margin-top: 0;
     }
     .assistant .message-text :global(p:last-child) {
         margin-bottom: 0;
     }
+    .assistant .message-text :global(h1),
+    .assistant .message-text :global(h2),
+    .assistant .message-text :global(h3),
+    .assistant .message-text :global(h4),
+    .assistant .message-text :global(h5),
+    .assistant .message-text :global(h6) {
+        margin: 1rem 0 0.5rem;
+        font-weight: 600;
+        line-height: 1.4;
+        color: var(--color-text-primary);
+    }
+    .assistant .message-text :global(h1) { font-size: 1.25rem; }
+    .assistant .message-text :global(h2) { font-size: 1.125rem; }
+    .assistant .message-text :global(h3) { font-size: 1rem; }
+    .assistant .message-text :global(h4) { font-size: 0.9375rem; }
+    .assistant .message-text :global(h5) { font-size: 0.875rem; }
+    .assistant .message-text :global(h6) { font-size: 0.875rem; color: var(--color-text-secondary); }
+    .assistant .message-text :global(h1:first-child),
+    .assistant .message-text :global(h2:first-child),
+    .assistant .message-text :global(h3:first-child) {
+        margin-top: 0;
+    }
+    .assistant .message-text :global(hr) {
+        border: none;
+        border-top: 1px solid var(--color-border);
+        margin: 1.25rem 0;
+    }
+    .assistant .message-text :global(a) {
+        color: var(--color-accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    .assistant .message-text :global(a:hover) {
+        color: var(--color-accent-hover);
+    }
     .assistant .message-text :global(ul),
     .assistant .message-text :global(ol) {
-        margin: 0.5rem 0;
+        margin: 0.75rem 0;
         padding-left: 1.5rem;
         white-space: normal;
-        line-height: 1.25;
+        line-height: 1.7;
+    }
+    .assistant .message-text :global(ul:first-child),
+    .assistant .message-text :global(ol:first-child) {
+        margin-top: 0;
+    }
+    .assistant .message-text :global(ul:last-child),
+    .assistant .message-text :global(ol:last-child) {
+        margin-bottom: 0;
     }
     .assistant .message-text :global(li) {
-        margin: 0;
-        line-height: 1.25;
+        margin: 0.125rem 0;
+        line-height: 1.7;
         white-space: normal;
     }
     .assistant .message-text :global(li > p) {
-        margin: 0;
+        margin: 0.25rem 0;
+        line-height: 1.7;
     }
     .assistant .message-text :global(blockquote) {
         border-left: 3px solid var(--color-border);
