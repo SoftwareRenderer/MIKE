@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider } from '$lib/types';
-    import { createTaskStream, getTaskMessages, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -22,6 +22,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             success?: boolean;
             duration?: number;
             isPending?: boolean;
+        };
+        error?: {
+            code: string;
+            message: string;
         };
         stats?: {
             model_name: string;
@@ -220,6 +224,27 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 closeCurrentAssistant();
                 connected = false;
                 isLoading = false;
+                const data = event.data as { message: string; code?: string };
+                const code = data.code || 'error';
+                // Skip ws_error from createTaskStream's onerror — the onclose handler
+                // will show a more descriptive "Connection lost" message instead
+                if (code === 'ws_error') {
+                    break;
+                }
+                const message = data.message || 'An error occurred';
+                const entry: ChatEntry = {
+                    id: genId(),
+                    role: 'error',
+                    content: message,
+                    isStreaming: false,
+                    error: { code, message },
+                    createdAt: new Date().toISOString(),
+                };
+                entries.push(entry);
+                // Persist to backend (except ws_disconnected which is ephemeral)
+                if (code !== 'ws_disconnected') {
+                    createTaskMessage(projectId, taskId, 'error', `[${code}] ${message}`).catch(() => {});
+                }
                 break;
             }
             case 'status': {
@@ -296,6 +321,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             const messages = await getTaskMessages(projectId, taskId);
             entries = messages.map(m => {
+                // Restore error entries from persisted data
+                if (m.role === 'error') {
+                    const content = m.content || '';
+                    const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
+                    const code = match ? match[1] : 'error';
+                    const message = match ? match[2] : content;
+                    return {
+                        id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
+                        error: { code, message },
+                    };
+                }
                 // Restore tool call entries from persisted data
                 if (m.role === 'tool_call' && m.tool_calls) {
                     const tc = JSON.parse(m.tool_calls);
@@ -342,6 +378,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function handleSend(msg: string) {
         if (!msg || disabled) return;
+        // Remove all error entries (cleared by next user action)
+        entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically
         entries.push({ id: genId(), role: 'user', content: msg, isStreaming: false, createdAt: new Date().toISOString() });
         // Create assistant entry immediately so streaming UI appears
@@ -495,8 +533,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         if (ws) return;
         connecting = true;
         ws = createTaskStream(projectId, taskId, (event) => handleEvent(event));
-        ws.ws.onopen = () => { connecting = false; connected = true; };
-        ws.ws.onclose = () => {
+        ws.ws.onopen = () => {
+            connecting = false;
+            connected = true;
+            // Remove any connection lost error entries on successful reconnect
+            entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+        };
+        ws.ws.onclose = (event: CloseEvent) => {
+            const wasConnected = connected;
             markNotStreaming();
             connected = false;
             closeCurrentAssistant();
@@ -504,9 +548,33 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             isStarting = false;
             lastSentMessage = null;
             ws = null;
+            // Show connection lost error if this was an unexpected disconnect
+            if (!event.wasClean && (wasConnected || connecting) && !destroyed) {
+                const entry: ChatEntry = {
+                    id: genId(),
+                    role: 'error',
+                    content: 'Connection lost. Reconnecting...',
+                    isStreaming: false,
+                    error: { code: 'ws_disconnected', message: 'Connection lost. Reconnecting...' },
+                    createdAt: new Date().toISOString(),
+                };
+                entries.push(entry);
+            }
+            // Auto-retry after 3 seconds
             setTimeout(() => { if (!ws && !destroyed) connect(); }, 3000);
         };
         ws.ws.onerror = () => { connecting = false; };
+    }
+
+    /** Force immediate WebSocket reconnect. */
+    function handleRetryConnect() {
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        // Remove existing connection lost errors
+        entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+        connect();
     }
 
     let destroyed = $state(false);
@@ -578,6 +646,32 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                                 <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>
                                     {entry.toolCall.result}
                                 </pre>
+                            {/if}
+                        </div>
+                    </div>
+                {:else if entry.role === 'error'}
+                    <div class="error-entry">
+                        <div class="error-card">
+                            <div class="error-header">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                    <line x1="12" y1="9" x2="12" y2="13"/>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                </svg>
+                                <span class="error-code">{entry.error?.code || 'error'}</span>
+                                {#if entry.error?.code === 'ws_disconnected'}
+                                    <span class="error-reconnecting"><span class="spinner"></span> Reconnecting...</span>
+                                {/if}
+                            </div>
+                            <div class="error-message">{entry.content}</div>
+                            {#if entry.error?.code === 'ws_disconnected'}
+                                <button class="btn-retry" onclick={handleRetryConnect}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <polyline points="23 4 23 10 17 10"/>
+                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                                    </svg>
+                                    Retry now
+                                </button>
                             {/if}
                         </div>
                     </div>
@@ -728,6 +822,62 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
     .tool-result.success { border-left: 3px solid var(--color-status-green); }
     .tool-result.failure { border-left: 3px solid var(--color-status-red); }
+
+    /* Error entry styles */
+    .error-entry { padding: 6px 0; }
+    .error-card {
+        background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-status-red) 30%, transparent);
+        border-left: 3px solid var(--color-status-red);
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
+    }
+    .error-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+        color: var(--color-status-red);
+    }
+    .error-header svg { flex-shrink: 0; }
+    .error-code {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .error-reconnecting {
+        font-size: 0.75rem;
+        color: var(--color-status-yellow);
+        margin-left: 4px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .error-message {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .btn-retry {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 500;
+        background: var(--color-status-red);
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .btn-retry:hover { opacity: 0.85; }
+
     .delete-overlay {
         position: fixed;
         inset: 0;

@@ -187,6 +187,16 @@ export async function getTaskMessages(projectId: string, taskId: string): Promis
     return res.json();
 }
 
+export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, content }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to create message');
+    return res.json();
+}
+
 export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',

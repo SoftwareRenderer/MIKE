@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Server is the main HTTP server.
@@ -227,8 +229,7 @@ var (
 )
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	if r.Method == http.MethodDelete || r.Method == http.MethodPost {
-		// DELETE and POST both delete the message and all messages after it (regenerate)
+	if r.Method == http.MethodDelete {
 		var req struct {
 			MessageID string `json:"message_id"`
 		}
@@ -241,6 +242,26 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			return
 		}
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var msg TaskMessage
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if msg.Role == "" || msg.Content == "" {
+			jsonError(w, http.StatusBadRequest, "role and content required")
+			return
+		}
+		msg.TaskID = taskID
+		msg.ID = uuid.New().String()
+		msg.CreatedAt = time.Now()
+		if err := s.store.CreateTaskMessage(&msg); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		jsonResponse(w, http.StatusCreated, msg)
 		return
 	}
 	if r.Method != http.MethodGet {

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
@@ -50,6 +52,23 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 	defer mc.mu.Unlock()
 	mc.serverURL = serverURL
 	mc.modelName = modelName
+}
+
+// sendAndPersistError sends an error event via WebSocket and persists it to the database.
+func (te *TaskExecutor) sendAndPersistError(b *broadcaster, taskID, message, code string) {
+	// Persist error message to task_messages
+	errMsg := &TaskMessage{
+		ID:        uuid.New().String(),
+		TaskID:    taskID,
+		Role:      "error",
+		Content:   fmt.Sprintf("[%s] %s", code, message),
+		CreatedAt: time.Now(),
+	}
+	if err := te.store.CreateTaskMessage(errMsg); err != nil {
+		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
+	}
+	// Send WebSocket event
+	b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": message, "code": code}})
 }
 
 // parseModelMetadata extracts optional model metadata from a user message.
@@ -372,7 +391,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
-			b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": fmt.Sprintf("Internal error: %v", r), "code": "panic"}})
+			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
@@ -438,7 +457,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": "Task stopped", "code": "stopped"}})
+			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
 			return
 		default:
 		}
@@ -537,7 +556,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				task.StatusState = "failed"
 				task.Output = fmt.Sprintf("Connection failed: %v", err)
 				te.store.UpdateTask(task)
-				b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": err.Error(), "code": "connection_failed"}})
+				te.sendAndPersistError(b, task.ID, err.Error(), "connection_failed")
 				return
 			}
 		}
@@ -593,7 +612,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 						task.StatusState = "failed"
 						task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 						te.store.UpdateTask(task)
-						b.send(StreamEvent{Type: WSTypeError, Data: map[string]string{"message": "Max failures", "code": "max_failures"}})
+						te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
 						return
 					}
 				} else {
