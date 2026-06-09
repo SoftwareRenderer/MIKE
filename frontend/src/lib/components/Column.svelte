@@ -54,7 +54,9 @@
             <button class="add-task-btn" onclick={onAddTask}>+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} {columnId} {projectId} />
+            {#key task.id + '-' + task.status_state}
+                <Card {task} {columnId} {projectId} />
+            {/key}
         {/each}
     </div>
 </div>

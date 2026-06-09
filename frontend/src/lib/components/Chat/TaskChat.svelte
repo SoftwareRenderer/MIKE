@@ -460,9 +460,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const updated = await startTask(projectId, taskId);
             boardStore.update(b => {
                 if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === taskId);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b };
+                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
             });
         } catch (e) {
             console.error('Failed to start task:', e);

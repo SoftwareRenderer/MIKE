@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import { get } from 'svelte/store';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore } from '$lib/store';
-    import { moveTask, updateTask } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask } from '$lib/api';
 
     let { task, columnId, projectId }: { task: Task; columnId: string; projectId?: string } = $props();
 
@@ -216,6 +216,63 @@
         }
     }
 
+    // Pause/Resume for In Progress column
+    // Subscribe to boardStore via $effect so status_state updates reactively
+    // when WebSocket broadcasts a board refresh. Tracks both status_state AND status
+    // (column) so the effect re-runs when the task moves columns even if state is unchanged.
+    const RUNNING_STATES = ['running', 'queued', 'idle'];
+    const STOPPED_STATES = ['stopped', 'paused', 'failed'];
+    let liveStatusState: string = $state(task.status_state);
+
+    $effect(() => {
+        // Read both task.status and task.status_state to track changes.
+        // task.status changes when the card moves columns (e.g., backlog → in_progress).
+        // task.status_state changes when execution starts/stops.
+        // Reading both ensures the effect re-runs on either change.
+        const _status = task.status;
+        liveStatusState = task.status_state;
+        const unsubscribe = boardStore.subscribe(board => {
+            if (board) {
+                const fresh = board.tasks.find(t => t.id === task.id);
+                if (fresh && fresh.status_state !== liveStatusState) {
+                    liveStatusState = fresh.status_state;
+                }
+            }
+        });
+        return unsubscribe;
+    });
+
+    let isPausable = $derived(columnId === 'in_progress' && RUNNING_STATES.includes(liveStatusState));
+    let isResumable = $derived(columnId === 'in_progress' && STOPPED_STATES.includes(liveStatusState));
+
+    async function handlePause(e: MouseEvent) {
+        e.stopPropagation();
+        if (!projectId) return;
+        try {
+            const updated = await stopTask(projectId, task.id);
+            boardStore.update(b => {
+                if (!b) return b;
+                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
+            });
+        } catch (err) {
+            console.error('Failed to pause task:', err);
+        }
+    }
+
+    async function handleResume(e: MouseEvent) {
+        e.stopPropagation();
+        if (!projectId) return;
+        try {
+            const updated = await resumeTask(projectId, task.id);
+            boardStore.update(b => {
+                if (!b) return b;
+                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
+            });
+        } catch (err) {
+            console.error('Failed to resume task:', err);
+        }
+    }
+
     async function cycleStatus(e: MouseEvent) {
         e.stopPropagation();
         if (!projectId) return;
@@ -224,13 +281,9 @@
         const nextStatus = statuses[nextIdx];
         try {
             const updated = await moveTask(projectId, task.id, nextStatus);
-            task.status = updated.status;
-            task.column_order = updated.column_order;
             boardStore.update(b => {
                 if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === task.id);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b, tasks: [...b.tasks] };
+                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
             });
         } catch (err) {
             console.error('Failed to move task:', err);
@@ -305,24 +358,48 @@
     >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
     </button>
-    <button
-        type="button"
-        class="move-btn"
-        onclick={cycleStatus}
-        aria-label={`Move to ${statusLabels[nextStatus]}`}
-        title={`Move to ${statusLabels[nextStatus]}`}
-        style="color: {statusColors[nextStatus]}"
-    >
-        {#if nextStatus === 'backlog'}
-            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-        {:else if nextStatus === 'in_progress'}
+    {#if isPausable}
+        <button
+            type="button"
+            class="move-btn"
+            onclick={handlePause}
+            aria-label="Pause task"
+            title="Pause task"
+            style="color: var(--color-column-in-progress)"
+        >
+            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
+        </button>
+    {:else if isResumable}
+        <button
+            type="button"
+            class="move-btn"
+            onclick={handleResume}
+            aria-label="Resume task"
+            title="Resume task"
+            style="color: var(--color-column-in-progress)"
+        >
             <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-        {:else if nextStatus === 'review'}
-            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-        {:else if nextStatus === 'done'}
-            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
-        {/if}
-    </button>
+        </button>
+    {:else}
+        <button
+            type="button"
+            class="move-btn"
+            onclick={cycleStatus}
+            aria-label={`Move to ${statusLabels[nextStatus]}`}
+            title={`Move to ${statusLabels[nextStatus]}`}
+            style="color: {statusColors[nextStatus]}"
+        >
+            {#if nextStatus === 'backlog'}
+                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+            {:else if nextStatus === 'in_progress'}
+                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+            {:else if nextStatus === 'review'}
+                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+            {:else if nextStatus === 'done'}
+                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+            {/if}
+        </button>
+    {/if}
 </div>
 
 <!-- Model picker dropdown (portal to escape card overflow) -->

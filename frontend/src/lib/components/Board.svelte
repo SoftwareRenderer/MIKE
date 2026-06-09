@@ -31,9 +31,11 @@
         if (!task || task.status === targetStatus) return;
         try {
             const updated = await moveTask(projectId, taskId, targetStatus);
-            const idx = tasks.findIndex(t => t.id === taskId);
-            if (idx !== -1) tasks[idx] = updated;
-            boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
+            // Update boardStore with new task; WebSocket broadcast will refresh the full board
+            boardStore.update(b => {
+                if (!b) return b;
+                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+            });
         } catch (e) {
             console.error('Failed to move task:', e);
         }
