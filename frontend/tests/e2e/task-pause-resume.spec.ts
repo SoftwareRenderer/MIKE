@@ -195,10 +195,18 @@ test.describe.serial('Pause/Resume buttons in In Progress column', () => {
     await card.hover();
     await page.waitForTimeout(200);
 
+    // Task may be running (pause button) or idle (idle indicator) after LLM response
     const moveBtn = card.locator('.move-btn');
-    await expect(moveBtn).toBeVisible({ timeout: 10000 });
-    const ariaLabel = await moveBtn.getAttribute('aria-label');
-    expect(ariaLabel).toMatch(/pause|stop/i);
+    const idleIndicator = card.locator('.idle-indicator');
+    const hasPauseBtn = await moveBtn.isVisible().catch(() => false);
+    const hasIdleIndicator = await idleIndicator.isVisible().catch(() => false);
+    expect(hasPauseBtn || hasIdleIndicator).toBe(true);
+
+    if (hasPauseBtn) {
+      const ariaLabel = await moveBtn.getAttribute('aria-label');
+      expect(ariaLabel).toMatch(/pause|stop/i);
+    }
+    // If idle indicator, that's also valid (task finished LLM response in conversational mode)
   });
 
   test('should still show cycle-status button for Backlog tasks', async ({ page }) => {
@@ -223,5 +231,94 @@ test.describe.serial('Pause/Resume buttons in In Progress column', () => {
     await expect(moveBtn).toBeVisible({ timeout: 10000 });
     const ariaLabel = await moveBtn.getAttribute('aria-label');
     expect(ariaLabel).toMatch(/in progress/i);
+  });
+
+  test('should show Idle indicator for idle task in In Progress column', async ({ page }) => {
+    const title = `idle-${RUN_ID}`;
+    // Create task directly in in_progress with idle status_state
+    await page.evaluate(async ({ pid, title }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, prompt: 'idle indicator test', status: 'in_progress', status_state: 'idle' }),
+      });
+      return res.json();
+    }, { pid: projectId, title });
+
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    const card = page.locator('.card').filter({ has: page.locator(`.card-title:has-text("${title}")`) });
+    await card.hover();
+    await page.waitForTimeout(200);
+
+    // Should show Idle indicator, not a move-to-review button
+    const idleIndicator = card.locator('.idle-indicator');
+    await expect(idleIndicator).toBeVisible({ timeout: 10000 });
+    await expect(idleIndicator).toContainText('Idle');
+
+    // Should NOT show the cycle-status move button
+    const moveBtn = card.locator('.move-btn');
+    await expect(moveBtn).not.toBeVisible();
+  });
+
+  test('should show pause/idle button after moving task from Backlog to In Progress', async ({ page }) => {
+    const title = `move-${RUN_ID}`;
+    const task = await page.evaluate(async ({ pid, title }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, prompt: 'move to in progress test', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId, title });
+    const taskId = task.id;
+
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Find the card in Backlog and click the move button
+    const card = page.locator('.card').filter({ has: page.locator(`.card-title:has-text("${title}")`) });
+    await card.hover();
+    await page.waitForTimeout(200);
+
+    const moveBtn = card.locator('.move-btn');
+    await expect(moveBtn).toBeVisible({ timeout: 10000 });
+
+    // Verify it shows "Move to In Progress" before clicking
+    let ariaLabel = await moveBtn.getAttribute('aria-label');
+    expect(ariaLabel).toMatch(/in progress/i);
+
+    // Click to move to In Progress (auto-starts the task via backend)
+    await moveBtn.click();
+
+    // Wait for the API call and board update
+    await page.waitForTimeout(2000);
+
+    // Check task status via API
+    let taskData = await getTaskData(page, projectId, taskId);
+    expect(taskData.status).toBe('in_progress');
+
+    // Reload board view
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Find the card (now in In Progress column)
+    const cardInProgress = page.locator('.card').filter({ has: page.locator(`.card-title:has-text("${title}")`) });
+    await cardInProgress.hover();
+    await page.waitForTimeout(200);
+
+    // Should show Pause button or Idle indicator, NOT "Move to Review"
+    const moveBtnAfter = cardInProgress.locator('.move-btn');
+    const idleIndicator = cardInProgress.locator('.idle-indicator');
+    const hasPauseBtn = await moveBtnAfter.isVisible().catch(() => false);
+    const hasIdleIndicator = await idleIndicator.isVisible().catch(() => false);
+    expect(hasPauseBtn || hasIdleIndicator).toBe(true);
+
+    // If move button is visible, it should NOT be "Move to Review"
+    if (hasPauseBtn) {
+      ariaLabel = await moveBtnAfter.getAttribute('aria-label');
+      expect(ariaLabel).not.toMatch(/review/i);
+    }
   });
 });

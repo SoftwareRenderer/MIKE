@@ -41,7 +41,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let { projectId, taskId, taskPrompt = '', disabled = false }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean } = $props();
 
     let entries: ChatEntry[] = $state([]);
-    let isLoading = $state(false);
     let connected = $state(false);
     let connecting = $state(true);
     let ws: ReturnType<typeof createTaskStream> | null = null;
@@ -59,6 +58,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let deleteConfirm = $state<{ entryId: string; count: number } | null>(null);
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
+
+    // isLoading: derived from boardStore + streamingTaskIds for real-time accuracy.
+    // Shows stop button when task is actively running (LLM responding).
+    let isLoading = $derived.by(() => {
+        if (entries.length === 0) return false;
+        if ($streamingTaskIds.has(taskId)) return true;
+        const board = $boardStore;
+        if (!board) return false;
+        const t = board.tasks.find(t => t.id === taskId);
+        return t?.status === 'in_progress' && ['running', 'queued'].includes(t?.status_state ?? '');
+    });
 
     // A task is "new" (show "Start Task" button) only when:
     // - There are no entries yet (no messages loaded from backend)
@@ -216,14 +226,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
                 }
                 connected = false;
-                isLoading = false;
                 break;
             }
             case 'error': {
                 markNotStreaming();
                 closeCurrentAssistant();
                 connected = false;
-                isLoading = false;
                 const data = event.data as { message: string; code?: string };
                 const code = data.code || 'error';
                 // Skip ws_error from createTaskStream's onerror — the onclose handler
@@ -250,7 +258,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'status': {
                 const data = event.data as { state: string };
                 if (data.state === 'running') {
-                    isLoading = true;
                     // A new executor is starting (e.g., lazy-start after user follow-up).
                     // Clear pending tool calls and streaming state from any previous executor
                     // to avoid mixing tool call deltas from concurrent executors.
@@ -391,7 +398,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         } else if (ws) {
             ws.send(msg);
         }
-        isLoading = true;
         scroll();
     }
 
@@ -431,7 +437,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Re-send the user message to trigger a new LLM response
         lastSentMessage = lastUser.content;
         if (ws) ws.send(lastUser.content);
-        isLoading = true;
         scroll();
     }
 
@@ -449,7 +454,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
         }
         isStarting = true;
-        isLoading = true;
         // Add the prompt as the first user message
         entries.push({ id: genId(), role: 'user', content: taskPrompt, isStreaming: false, createdAt: new Date().toISOString() });
         // Create assistant entry immediately so streaming UI appears
@@ -464,13 +468,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             });
         } catch (e) {
             console.error('Failed to start task:', e);
-            isLoading = false;
             isStarting = false;
             return;
         }
-        // Reset loading state — WebSocket 'complete' event may not arrive
-        // (e.g., if connection drops or LLM endpoint is misconfigured)
-        isLoading = false;
         isStarting = false;
     }
 
@@ -481,7 +481,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             ws = null;
             connected = false;
         }
-        isLoading = false;
         closeCurrentAssistant();
         try {
             await stopTask(projectId, taskId);
@@ -519,7 +518,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         entries[idx].content = newContent;
         entries = entries.slice(0, idx + 1);
         if (ws) ws.send(newContent);
-        isLoading = true;
         // Fire-and-forget API calls with error handling
         if (firstPersistedAfter) {
             deleteTaskMessagesAfter(projectId, taskId, firstPersistedAfter.id).catch(e => showToast(String(e)));
@@ -542,7 +540,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             markNotStreaming();
             connected = false;
             closeCurrentAssistant();
-            isLoading = false;
             isStarting = false;
             lastSentMessage = null;
             ws = null;

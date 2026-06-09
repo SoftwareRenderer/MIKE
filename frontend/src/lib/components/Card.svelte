@@ -217,33 +217,16 @@
     }
 
     // Pause/Resume for In Progress column
-    // Subscribe to boardStore via $effect so status_state updates reactively
-    // when WebSocket broadcasts a board refresh. Tracks both status_state AND status
-    // (column) so the effect re-runs when the task moves columns even if state is unchanged.
-    const RUNNING_STATES = ['running', 'queued', 'idle'];
+    // Derive liveStatusState from boardStore so it updates reactively
+    // when WebSocket broadcasts a board refresh. Falls back to task prop.
     const STOPPED_STATES = ['stopped', 'paused', 'failed'];
-    let liveStatusState: string = $state(task.status_state);
+    let liveStatusState = $derived(
+        $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state
+    );
 
-    $effect(() => {
-        // Read both task.status and task.status_state to track changes.
-        // task.status changes when the card moves columns (e.g., backlog → in_progress).
-        // task.status_state changes when execution starts/stops.
-        // Reading both ensures the effect re-runs on either change.
-        const _status = task.status;
-        liveStatusState = task.status_state;
-        const unsubscribe = boardStore.subscribe(board => {
-            if (board) {
-                const fresh = board.tasks.find(t => t.id === task.id);
-                if (fresh && fresh.status_state !== liveStatusState) {
-                    liveStatusState = fresh.status_state;
-                }
-            }
-        });
-        return unsubscribe;
-    });
-
-    let isPausable = $derived(columnId === 'in_progress' && RUNNING_STATES.includes(liveStatusState));
+    let isPausable = $derived(columnId === 'in_progress' && liveStatusState !== 'idle' && !STOPPED_STATES.includes(liveStatusState));
     let isResumable = $derived(columnId === 'in_progress' && STOPPED_STATES.includes(liveStatusState));
+    let isIdle = $derived(columnId === 'in_progress' && liveStatusState === 'idle');
 
     async function handlePause(e: MouseEvent) {
         e.stopPropagation();
@@ -369,6 +352,10 @@
         >
             <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
         </button>
+    {:else if isIdle}
+        <span class="idle-indicator" aria-label="Idle" title="Idle">
+            Idle
+        </span>
     {:else if isResumable}
         <button
             type="button"
@@ -588,6 +575,29 @@
     .move-btn:hover {
         background: var(--color-surface-3);
         /* keep column color from inline style */
+    }
+    .idle-indicator {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-tertiary);
+        font-size: 0.625rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        pointer-events: none;
+    }
+    .card:hover .idle-indicator,
+    .card.selected .idle-indicator {
+        opacity: 1;
     }
     @media (hover: none) {
         .edit-btn,
