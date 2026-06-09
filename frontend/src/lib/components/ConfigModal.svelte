@@ -8,6 +8,19 @@
 
     let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
 
+    const MODEL_COLORS = [
+        '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
+        '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
+        '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
+    ];
+    function getModelColor(modelName: string): string {
+        let hash = 0;
+        for (let i = 0; i < modelName.length; i++) {
+            hash = ((hash << 5) - hash + modelName.charCodeAt(i)) | 0;
+        }
+        return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
+    }
+
     let workspaceDir = $state(config?.workspace_dir || '');
     let defaultAutoCommit = $state(config?.default_auto_commit ?? false);
     let defaultPlanMode = $state(config?.default_plan_mode ?? false);
@@ -392,7 +405,7 @@
                                 <div class="provider-actions">
                                     <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
                                     {#if p.default_model}
-                                        <span class="default-model-badge">{p.default_model}</span>
+                                        <span class="default-model-badge" style="color: {getModelColor(p.default_model)}; background: {getModelColor(p.default_model)}22">{p.default_model}</span>
                                     {/if}
                                     <button type="button" class="btn-remove-provider" onclick={(e) => { e.stopPropagation(); if (confirm('Remove this provider?')) removeProvider(i); }} title="Remove provider" aria-label="Remove provider">
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -492,7 +505,7 @@
                                             {#each [...p.models].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) as model, mi}
                                                 <div class="model-row" class:readonly={model.readonly}>
                                                     {#if model.name}
-                                                        <button type="button" class="btn-default" class:active={p.default_model === model.name} onclick={() => setProviderDefaultModel(i, model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`}>
+                                                        <button type="button" class="btn-default" class:active={p.default_model === model.name} onclick={() => setProviderDefaultModel(i, model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === model.name ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
                                                             {p.default_model === model.name ? 'Default' : 'Set default'}
                                                         </button>
                                                     {:else}
@@ -1101,8 +1114,6 @@
     }
     .default-model-badge {
         font-size: 0.75rem;
-        color: var(--color-status-yellow);
-        background: rgba(227, 179, 65, 0.1);
         padding: 2px 8px;
         border-radius: 10px;
         font-weight: 500;

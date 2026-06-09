@@ -37,23 +37,33 @@
     // Model badge: configurable via card_model_badge setting
     // "auto" = model only (1 provider) or provider+model (2+), "always" = provider+model, "model" = model only, "none" = hidden
     // Shows even when no model is set (displays default model as placeholder)
+    const MODEL_COLORS = [
+        '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
+        '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
+        '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
+    ];
+    function getModelColor(modelName: string): string {
+        let hash = 0;
+        for (let i = 0; i < modelName.length; i++) {
+            hash = ((hash << 5) - hash + modelName.charCodeAt(i)) | 0;
+        }
+        return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
+    }
     let modelBadge = $derived.by(() => {
         const cfg = get(configStore);
         const style = (cfg?.card_model_badge || '').trim() || 'auto';
-        if (style === 'none') return null;
+        if (style === 'none') return { text: null, color: '' };
         const providers = cfg?.providers || [];
-        if (providers.length === 0) return null;
+        if (providers.length === 0) return { text: null, color: '' };
         // Use task model if set, otherwise fall back to default model
         const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
         const activeModel = task.model_name || (providers[0]?.default_model && providers[0]?.models.some(m => getModelName(m) === providers[0].default_model) ? providers[0].default_model : providers[0]?.models.length > 0 ? getModelName(providers[0].models[0]) : null);
-        if (!activeModel) return null;
+        if (!activeModel) return { text: null, color: '' };
         // Find matching provider by URL
         const provider = providers.find(p => p.url === task.llama_server_url);
         const showProvider = style === 'always' || (style === 'auto' && providers.length > 1);
-        if (showProvider && provider) {
-            return `${provider.display_name} · ${activeModel}`;
-        }
-        return activeModel;
+        const text = showProvider && provider ? `${provider.display_name} · ${activeModel}` : activeModel;
+        return { text, color: getModelColor(activeModel) };
     });
 
     // Model picker dropdown — only in Backlog column (task not yet started)
@@ -255,32 +265,32 @@
         <div class="card-title">{truncate(task.title, 50)}</div>
     {/if}
     <div class="card-preview">{truncate(task.prompt, 80)}</div>
-    {#if statusBadge || modelBadge}
+    {#if statusBadge || modelBadge.text}
         <div class="badges-row">
             {#if statusBadge}
                 <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
                     {statusBadge.text}
                 </div>
             {/if}
-            {#if modelBadge}
+            {#if modelBadge.text}
                 {#if isConfigurable}
                     <button
                         type="button"
                         class="badge model-badge"
                         class:open={modelPickerOpen}
-                        style="background: var(--color-text-tertiary)22; color: var(--color-text-tertiary)"
+                        style="background: {modelBadge.color}22; color: {modelBadge.color}"
                         onclick={togglePicker}
                         bind:this={modelBadgeRef}
                         aria-label="Change model"
                         aria-haspopup="listbox"
                         aria-expanded={modelPickerOpen}
                     >
-                        {modelBadge}
+                        {modelBadge.text}
                         <svg class="badge-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                 {:else}
-                    <div class="badge model-badge" style="background: var(--color-text-tertiary)22; color: var(--color-text-tertiary)">
-                        {modelBadge}
+                    <div class="badge model-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
+                        {modelBadge.text}
                     </div>
                 {/if}
             {/if}
