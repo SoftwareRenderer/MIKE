@@ -201,8 +201,14 @@ func (tm *TaskManager) HandleMove(w http.ResponseWriter, r *http.Request, projec
 	}
 	task.Status = req.Status
 	task.UpdatedAt = time.Now()
-	if req.Status == "in_progress" && task.StatusState == "idle" {
-		// Just move, don't auto-start
+
+	if req.Status == "in_progress" && task.StatusState != "running" {
+		// Auto-start the task when moved to In Progress
+		if err := tm.executor.StartTask(projectID, taskID); err != nil {
+			log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
+			task.StatusState = "failed"
+			task.Output = err.Error()
+		}
 	}
 	if req.Status == "done" {
 		task.StatusState = "completed"
