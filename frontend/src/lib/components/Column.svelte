@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId }: {
+    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId, onClearAll }: {
         columnId: string;
         title: string;
         color: string;
@@ -11,6 +11,7 @@
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
         projectId?: string;
+        onClearAll?: () => void;
     } = $props();
 
     let isOver = $state(false);
@@ -47,7 +48,17 @@
             {/if}
             {title}
         </h3>
-        <span class="count">{tasks.length}</span>
+        <div class="header-right">
+            <span class="count">{tasks.length}</span>
+            {#if onClearAll && tasks.length > 0}
+                <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={`Clear all ${tasks.length} done tasks`} title={`Clear all ${tasks.length} done tasks`}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            {/if}
+        </div>
     </div>
     <div class="card-list">
         {#if onAddTask}
@@ -113,6 +124,29 @@
         padding: 2px 8px;
         font-size: 0.75rem;
         color: var(--color-text-secondary);
+    }
+    .header-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .clear-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        padding: 0;
+    }
+    .clear-btn:hover {
+        background: var(--color-status-red)22;
+        color: var(--color-status-red);
     }
     .card-list {
         flex: 1;

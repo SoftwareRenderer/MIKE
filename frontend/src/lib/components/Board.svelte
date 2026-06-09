@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
-    import { moveTask, reorderTasks } from '$lib/api';
+    import { moveTask, reorderTasks, clearDoneTasks, getBoard } from '$lib/api';
     import { board as boardStore } from '$lib/store';
 
     let { tasks, projectId, onAddTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void } = $props();
@@ -41,6 +41,19 @@
         }
         draggedTaskId = null;
     }
+
+    async function handleClearDone() {
+        const doneTasks = getTasksForColumn('done');
+        if (doneTasks.length === 0) return;
+        if (!confirm(`Permanently delete ${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        try {
+            await clearDoneTasks(projectId);
+            const board = await getBoard(projectId);
+            boardStore.set(board);
+        } catch (e) {
+            alert('Failed to clear done tasks: ' + String(e));
+        }
+    }
 </script>
 
 <div class="board" role="region" aria-label="Task board">
@@ -53,6 +66,7 @@
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
+            onClearAll={col.id === 'done' ? handleClearDone : undefined}
             {projectId}
         />
     {/each}

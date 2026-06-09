@@ -183,6 +183,55 @@ func (tm *TaskManager) HandleByID(w http.ResponseWriter, r *http.Request, projec
 	}
 }
 
+// HandleClearDone deletes all tasks with status 'done' for a project.
+func (tm *TaskManager) HandleClearDone(w http.ResponseWriter, r *http.Request, projectID string) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get all done tasks
+	tasks, err := tm.store.GetTasksByProject(projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "failed to get tasks")
+		return
+	}
+
+	var deleted int
+	for _, task := range tasks {
+		if task.Status != "done" {
+			continue
+		}
+		taskID := task.ID
+
+		// 1. Stop running executor (best-effort)
+		if tm.executor != nil {
+			_ = tm.executor.StopTask(taskID)
+		}
+		// 2. Remove stream broadcaster (best-effort)
+		if tm.executor != nil {
+			tm.executor.RemoveStream(taskID)
+		}
+		// 3. Remove worktree directory (best-effort, log errors)
+		if tm.worktreeMgr != nil {
+			if err := tm.worktreeMgr.RemoveWorktreeDir(projectID, taskID); err != nil {
+				log.Printf("clear done: worktree cleanup failed for %s: %v", taskID, err)
+			}
+		}
+		// 4. Remove terminal session
+		tm.terminalMgr.removeSession(taskID)
+		// 5. Delete from database (CASCADE removes messages, dependencies, review comments)
+		if err := tm.store.DeleteTask(projectID, taskID); err != nil {
+			log.Printf("clear done: db delete failed for %s: %v", taskID, err)
+		}
+		deleted++
+	}
+
+	// 6. Broadcast board update
+	tm.boardStreamMgr.Broadcast(projectID)
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"deleted": deleted})
+}
+
 // HandleMove moves a task to a different column.
 func (tm *TaskManager) HandleMove(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method != http.MethodPost {

@@ -213,6 +213,7 @@ var (
 	reTaskReview      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/review-comments$`)
 	reTaskReviewByID  = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/review-comments/([^/]+)$`)
 	reTaskReorder     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/reorder$`)
+	reTasksDone       = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/done$`)
 	reProjectGitLog   = regexp.MustCompile(`^/api/projects/([^/]+)/git/log$`)
 	reProjectGitBranches = regexp.MustCompile(`^/api/projects/([^/]+)/git/branches$`)
 	reProjectGitDiff  = regexp.MustCompile(`^/api/projects/([^/]+)/git/diff$`)
@@ -471,6 +472,12 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	// Task reorder
 	if m := reTaskReorder.FindStringSubmatch(path); m != nil {
 		s.boardMgr.HandleReorder(w, r, m[1])
+		return
+	}
+
+	// Clear done tasks
+	if m := reTasksDone.FindStringSubmatch(path); m != nil {
+		s.taskMgr.HandleClearDone(w, r, m[1])
 		return
 	}
 

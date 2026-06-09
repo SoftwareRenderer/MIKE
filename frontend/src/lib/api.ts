@@ -106,6 +106,12 @@ export async function moveTask(projectId: string, taskId: string, status: string
     return res.json();
 }
 
+export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
+    if (!res.ok) throw await apiError(res, 'Failed to clear done tasks');
+    return res.json();
+}
+
 // -- Task execution endpoints --
 export async function startTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
