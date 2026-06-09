@@ -29,8 +29,10 @@
 
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingTaskIds).has(task.id);
-        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
-        if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
+        if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return null;
     });
 

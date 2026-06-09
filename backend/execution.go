@@ -278,14 +278,14 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	})
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
-	go te.executeTaskWithInitialMessage(ctx, task, wtPath, serverURL, modelName, b, userMsgChan, content)
+	go te.executeTaskWithInitialMessage(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, content)
 }
 
 // executeTaskWithInitialMessage starts the executor for a lazy-start scenario.
 // The initial message is already persisted in task_messages by the WebSocket handler,
 // so executeTask will load it from there. No need to modify task.Prompt.
-func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage, initialMessage string) {
-	te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
+func (te *TaskExecutor) executeTaskWithInitialMessage(ctx context.Context, task *Task, projectID, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage, initialMessage string) {
+	te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan)
 }
 
 // StartTask begins AI execution for a task.
@@ -357,7 +357,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		}
 	})
 
-	go te.executeTask(ctx, task, worktreePath, serverURL, modelName, b, userMsgChan)
+	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan)
 	return nil
 }
 
@@ -387,7 +387,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 
 // executeTask runs the AI conversation loop.
 // Supports mid-conversation model/provider switching via modelConfig.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, projectID, worktreePath, serverURL, modelName string, b *broadcaster, userMsgChan chan UserMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -457,6 +457,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
 			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
 			return
 		default:
@@ -536,6 +537,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 					task.StatusState = "stopped"
 					task.Output = "Stopped by user"
 					te.store.UpdateTask(task)
+					te.boardStreamMgr.Broadcast(projectID)
 					return
 				case <-time.After(time.Duration(i+1) * 2 * time.Second):
 				}
@@ -556,6 +558,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 				task.StatusState = "failed"
 				task.Output = fmt.Sprintf("Connection failed: %v", err)
 				te.store.UpdateTask(task)
+				te.boardStreamMgr.Broadcast(projectID)
 				te.sendAndPersistError(b, task.ID, err.Error(), "connection_failed")
 				return
 			}
@@ -612,6 +615,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 						task.StatusState = "failed"
 						task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 						te.store.UpdateTask(task)
+						te.boardStreamMgr.Broadcast(projectID)
 						te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
 						return
 					}
@@ -645,6 +649,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 						predictedMs = int(time.Since(startTime).Milliseconds() * 3 / 10)
 					}
 					b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": task.StatusState, "summary": summary, "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": activeModel, "duration": time.Since(startTime).Milliseconds()}})
+					te.boardStreamMgr.Broadcast(projectID)
 					return
 				}
 			}
@@ -719,6 +724,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			// LLM responded with text but no tools - signal completion so UI stops streaming
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
 			b.send(StreamEvent{Type: WSTypeComplete, Data: map[string]interface{}{"state": "idle", "summary": "Agent finished responding", "prompt_tokens": promptTokens, "predicted_tokens": predictedTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs, "model_name": activeModel, "duration": duration}})
 			return
 		}
@@ -727,6 +733,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *Task, worktreePat
 			task.StatusState = "idle"
 			task.Output = "Conversation limit reached"
 			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
 			return
 		}
 	}

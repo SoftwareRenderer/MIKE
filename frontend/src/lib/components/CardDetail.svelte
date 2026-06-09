@@ -89,8 +89,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Status badge
     let badge = $derived.by(() => {
         const streaming = $streamingTaskIds.has(task.id);
-        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
-        if (task.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
+        if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return { text: 'Idle', color: 'var(--color-text-tertiary)' };
     });
 
@@ -287,8 +289,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     function getStatusBadge(t: Task): { text: string; color: string } {
         const streaming = get(streamingTaskIds).has(t.id);
-        if (streaming) return { text: 'Running', color: 'var(--color-status-blue)' };
-        if (t.status_state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        const state = $boardStore?.tasks.find(tt => tt.id === t.id)?.status_state ?? t.status_state;
+        if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return { text: '', color: 'var(--color-text-tertiary)' };
     }
 

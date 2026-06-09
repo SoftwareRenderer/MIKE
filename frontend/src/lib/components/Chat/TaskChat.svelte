@@ -258,6 +258,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     activeToolCalls.clear();
                     // Remove pending tool call entries (assistant entries with toolCall and isStreaming)
                     entries = entries.filter(e => !(e.toolCall && e.toolCall.isPending));
+                    // Mark task as streaming so badge updates on board view
+                    markStreaming();
+                } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
+                    // Executor finished — clear streaming state
+                    markNotStreaming();
                 }
                 break;
             }

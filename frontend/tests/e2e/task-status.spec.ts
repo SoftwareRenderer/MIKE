@@ -175,4 +175,171 @@ test.describe.serial('Task Status States', () => {
     expect(taskOnBoard).toBeDefined();
     expect(taskOnBoard.status).toBe('in_progress');
   });
+
+  test('should transition running -> idle after text-only LLM response', async ({ page }) => {
+    // Create a task via API
+    const task = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `transition-test-${Date.now()}`, prompt: 'hello', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId });
+    const taskId = task.id;
+
+    // Start the task
+    const startRes = await page.evaluate(async ({ pid, tid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+      return { status: res.status, data: await res.json() };
+    }, { pid: projectId, tid: taskId });
+    expect(startRes.status).toBe(200);
+    expect(startRes.data.status_state).toBe('running');
+
+    // Poll for the task to reach idle (text-only response ends with idle)
+    let taskData: Record<string, unknown>;
+    let iterations = 0;
+    const maxIterations = 30;
+    do {
+      await page.waitForTimeout(500);
+      taskData = await getTaskData(page, projectId, taskId);
+      iterations++;
+    } while (taskData.status_state === 'running' && iterations < maxIterations);
+
+    // Should transition to idle after text response
+    expect(taskData.status_state).toBe('idle');
+    expect(taskData.status).toBe('in_progress');
+  });
+
+  test('should update status_state in real time via board WebSocket (no page reload)', async ({ page }) => {
+    // Create a task via API
+    const task = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `realtime-test-${Date.now()}`, prompt: 'hello realtime', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId });
+    const taskId = task.id;
+
+    // Navigate to board and wait for it to load
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Start the task via API (triggers executor in background)
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId });
+
+    // Wait for executor to finish (text response -> idle)
+    await expect(async () => {
+      const data = await getTaskData(page, projectId, taskId);
+      expect(data.status_state).toBe('idle');
+    }).toPass({ timeout: 15000 });
+
+    // Now verify the board reflects the updated status_state WITHOUT a page reload
+    // The board WebSocket should have broadcast the update
+    const boardData = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/board`);
+      return res.json();
+    }, { pid: projectId });
+
+    const taskOnBoard = boardData.tasks.find((t: any) => t.id === taskId);
+    expect(taskOnBoard).toBeDefined();
+    expect(taskOnBoard.status_state).toBe('idle');
+    expect(taskOnBoard.status).toBe('in_progress');
+  });
+
+  test('should show Stopped badge for stopped task on board view', async ({ page }) => {
+    // Create a task via API
+    const task = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `stopped-badge-${Date.now()}`, prompt: 'stop button test', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId });
+    const taskId = task.id;
+
+    // Start the task
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId });
+
+    // Wait a moment for task to begin
+    await page.waitForTimeout(500);
+
+    // Stop the task
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/stop`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId });
+
+    // Wait for executor to process stop
+    await page.waitForTimeout(2000);
+
+    // Verify status_state is stopped via API
+    let taskData = await getTaskData(page, projectId, taskId);
+    expect(taskData.status_state).toBe('stopped');
+
+    // Navigate to board view (no TaskChat mounted)
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Find the task card and check for the Stopped badge
+    const card = page.locator('.card').filter({ hasText: task.title });
+    await card.hover();
+    await page.waitForTimeout(200);
+
+    // The badge should show "Stopped" (visible on hover)
+    const badge = card.locator('.badge:has-text("Stopped")');
+    await expect(badge).toBeVisible({ timeout: 5000 });
+  });
+
+  test('should show Failed badge for task that exceeded max tool failures', async ({ page }) => {
+    // Create a task via API
+    const task = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `failed-badge-${Date.now()}`, prompt: 'read a file that does not exist', llama_server_url: 'http://localhost:9999/v1', model_name: 'mock-model' }),
+      });
+      return res.json();
+    }, { pid: projectId });
+    const taskId = task.id;
+
+    // Set max_consecutive_failed_turns to 1
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_consecutive_failed_turns: 1 }),
+      });
+    }, { pid: projectId, tid: taskId });
+
+    // Start the task
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId });
+
+    // Wait for task to fail
+    await expect(async () => {
+      const data = await getTaskData(page, projectId, taskId);
+      expect(data.status_state).toBe('failed');
+    }).toPass({ timeout: 15000 });
+
+    // Navigate to board view
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Find the task card and check for the Failed badge
+    const card = page.locator('.card').filter({ hasText: task.title });
+    await card.hover();
+    await page.waitForTimeout(200);
+
+    // The badge should show "Failed"
+    const badge = card.locator('.badge:has-text("Failed")');
+    await expect(badge).toBeVisible({ timeout: 5000 });
+  });
 });
