@@ -22,6 +22,7 @@
     }
 
     let workspaceDir = $state(config?.workspace_dir || '');
+    let defaultProvider = $state(config?.default_provider || '');
     let defaultAutoCommit = $state(config?.default_auto_commit ?? false);
     let defaultPlanMode = $state(config?.default_plan_mode ?? false);
     let defaultMaxFailedTurns = $state(config?.default_max_failed_turns ?? 3);
@@ -291,6 +292,20 @@
         }
     }
 
+    function toggleDefaultProvider(providerName: string) {
+        if (defaultProvider === providerName) {
+            defaultProvider = '';
+        } else {
+            defaultProvider = providerName;
+            // Move default provider to top
+            const idx = providers.findIndex(p => p.name === providerName);
+            if (idx > 0) {
+                const [item] = providers.splice(idx, 1);
+                providers.unshift(item);
+            }
+        }
+    }
+
     async function handleSave() {
         loading = true;
         error = '';
@@ -314,6 +329,7 @@
             const cfg = await updateConfig({
                 workspace_dir: workspaceDir.trim(),
                 providers: savedProviders,
+                default_provider: defaultProvider,
                 default_auto_commit: defaultAutoCommit,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
@@ -385,15 +401,9 @@
                                 </div>
                                 <div class="provider-title-section">
                                     <div class="provider-title-main">
-                                        {#if config?.default_provider === p.name}
-                                            <span class="active-dot"></span>
-                                        {/if}
                                         <span class="provider-display-name">{p.display_name || 'New Provider'}</span>
-                                        {#if config?.default_provider === p.name}
-                                            <span class="active-badge">Active</span>
-                                        {/if}
                                         {#if i === 0 && providers.length > 1}
-                                            <span class="priority-badge">Highest priority</span>
+                                            <span class="priority-badge">Default</span>
                                         {/if}
                                     </div>
                                     {#if p.expanded}
@@ -450,6 +460,9 @@
                                                 </svg>
                                                 Test Connection
                                             {/if}
+                                        </button>
+                                        <button type="button" class="btn-default-provider" class:active={defaultProvider === p.name} onclick={() => toggleDefaultProvider(p.name)}>
+                                            {defaultProvider === p.name ? '✓ Default' : 'Set default'}
                                         </button>
                                     </div>
                                     {#if p.fetchError}
@@ -1036,27 +1049,6 @@
         font-weight: 600;
         color: var(--color-text-primary);
     }
-    /* Active provider indicator */
-    .active-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--color-status-green);
-        flex-shrink: 0;
-        box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.2);
-    }
-    .active-badge {
-        display: inline-flex;
-        align-items: center;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--color-status-green);
-        background: rgba(63, 185, 80, 0.1);
-        padding: 2px 6px;
-        border-radius: 3px;
-    }
     .priority-badge {
         display: inline-flex;
         align-items: center;
@@ -1264,6 +1256,28 @@
     .btn-test:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+    }
+    .btn-default-provider {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s ease, color 0.15s ease;
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        border: none;
+    }
+    .btn-default-provider:hover {
+        background: var(--color-surface-4);
+    }
+    .btn-default-provider.active {
+        color: var(--color-status-green);
+        background: rgba(63, 185, 80, 0.1);
     }
 
     /* Spin animation for loading icons */

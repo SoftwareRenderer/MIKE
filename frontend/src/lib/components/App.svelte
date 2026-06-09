@@ -543,7 +543,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         font-size: 0.6875rem;
         font-weight: 500;
         font-variant-numeric: tabular-nums;
-        opacity: 0.6;
+        opacity: 1;
     }
     .stat-badge svg {
         flex-shrink: 0;
