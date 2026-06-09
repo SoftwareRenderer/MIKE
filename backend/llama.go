@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bufio"
+	"kanban/backend/prompts"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -314,7 +315,7 @@ func GetToolDefinitions() []ChatTool {
 			Type: "function",
 			Function: &ToolDef{
 				Name:        "execute_command",
-				Description: "Execute a shell command in the worktree directory",
+				Description: "Execute a shell command in the worktree directory. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -355,73 +356,25 @@ func BuildPlanModeSystemPrompt(worktreePath string) string {
 }
 
 func buildSystemPrompt(worktreePath string, planMode bool) string {
-	planInstructions := ``
-	if planMode {
-		planInstructions = `
-
-## PLAN MODE — Follow this workflow strictly:
-
-### Phase 1: Analyze the Project
-Read the project structure silently. Check directory layout, config files (package.json, go.mod, etc.),
-dependencies, build system, README, and any existing TODO or issue files.
-
-### Phase 2: Ask Clarifying Questions
-Identify gaps that would block correct implementation. Ask at most 5 critical questions in a single message.
-Do not ask about things already answerable from the codebase.
-
-### Phase 3: Create TODO.md
-Write a TODO.md file in the project root with the following structure:
-
-# TODO
-
-## Goal
-One sentence describing what will be built or fixed.
-
-## Tasks
-
-### 1. <Phase Name>
-- [ ] <Concrete, measurable action>
-- [ ] <Concrete, measurable action>
-
-## Notes
-Any constraints, decisions, or known risks.
-
-Requirements:
-- Tasks must be small and independently verifiable (one logical change each)
-- Order tasks by dependency (prerequisites first)
-- Each task must be checkable as done/not done
-- No vague items like "fix things" or "improve code"
-
-After writing TODO.md, call task_complete() with summary: "Plan created in TODO.md. Awaiting approval to proceed."
-
-### Phase 4: Execute the Plan
-Once the user approves the plan (by editing the task prompt to include "APPROVED" or similar),
-work through tasks in order, one at a time. After completing each task, mark it done in TODO.md
-(change - [ ] to - [x]). Do not start the next task until the current one is complete.
-
-If you discover an unlisted task is required, add it to TODO.md and inform the user via text output.
-
-When all tasks are marked [x], call task_complete() with a full summary of work done.`
+	tools := GetToolDefinitions()
+	toolInfos := make([]prompts.ToolInfo, len(tools))
+	for i, t := range tools {
+		toolInfos[i] = prompts.ToolInfo{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+		}
 	}
 
-	return fmt.Sprintf(`You are an autonomous coding assistant working on a task in a git worktree.
-Your working directory is: %s
+	data := prompts.PromptData{
+		WorktreePath: worktreePath,
+		PlanMode:     planMode,
+		Tools:        toolInfos,
+	}
 
-You have access to the following tools via function calling:
-- read_file(path): Read the contents of a file
-- write_file(path, content): Write content to a file (creates directories as needed)
-- execute_command(command, timeout): Execute a shell command in the worktree
-- task_complete(summary): Signal that the task is complete with a summary of work done
-
-When the task is complete, call task_complete() with a summary including:
-- Files created or modified
-- Commands executed
-- Any issues encountered
-
-For the execute_command tool, always set the 'timeout' parameter:
-- 2s for fast commands (ls, cat, grep, git status)
-- 10s for package installs (npm install, pip install)
-- 30s for builds and tests (npm run build, npm test, make)
-- 60s for long-running operations (migrations, large downloads)
-Timeout is specified in seconds. The server will reject values above 300s.%s`, worktreePath, planInstructions)
+	result, err := prompts.RenderSystemPrompt(data)
+	if err != nil {
+		log.Printf("warning: rendering system prompt failed: %v", err)
+		return ""
+	}
+	return result
 }

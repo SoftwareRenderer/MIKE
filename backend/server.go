@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"kanban/backend/prompts"
 	"log"
 	"net/http"
 	"os"
@@ -91,6 +92,9 @@ func (s *Server) setupRoutes() {
 
 	// Health check
 	s.mux.HandleFunc("/api/health", s.handleHealth)
+
+	// Prompts
+	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
 
 	// Config
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
@@ -302,6 +306,28 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleReloadPrompts validates the prompt templates by parsing and dry-running them.
+// Templates are loaded from disk on every request, so this is a validation check,
+// not an actual cache invalidation.
+func (s *Server) handleReloadPrompts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	names, err := prompts.ValidateTemplates()
+	if err != nil {
+		log.Printf("[prompts] reload failed: %v", err)
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf("template error: %v", err))
+		return
+	}
+	log.Printf("[prompts] templates validated: %v", names)
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":  "ok",
+		"message": "Prompt templates validated successfully",
+		"files":   names,
+	})
 }
 
 // handleTestReset clears all data except config. Used by e2e tests for a clean slate.

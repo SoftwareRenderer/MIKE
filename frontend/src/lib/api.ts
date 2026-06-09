@@ -230,6 +230,15 @@ export async function getTaskDiff(projectId: string, taskId: string): Promise<st
     return res.text();
 }
 
+// -- Prompt endpoints --
+export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
+    const res = await fetch(`${API_BASE}/prompts/reload`, {
+        method: 'POST',
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to reload prompts');
+    return res.json();
+}
+
 // -- Configuration endpoints --
 export async function getConfig(): Promise<Config> {
     const res = await fetch(`${API_BASE}/config`);
