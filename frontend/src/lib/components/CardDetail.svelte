@@ -21,6 +21,28 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         { id: 'review', title: 'Review' },
     ];
 
+    // Collapsible sections
+    let collapsedSections: Set<string> = $state(new Set());
+
+    function toggleSection(sectionId: string) {
+        const next = new Set(collapsedSections);
+        if (next.has(sectionId)) {
+            next.delete(sectionId);
+        } else {
+            next.add(sectionId);
+        }
+        collapsedSections = next;
+    }
+
+    function getSectionColor(id: string): string {
+        const colors: Record<string, string> = {
+            backlog: 'var(--color-column-backlog)',
+            in_progress: 'var(--color-column-in-progress)',
+            review: 'var(--color-column-review)',
+        };
+        return colors[id] || 'var(--color-border)';
+    }
+
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let loadingDiff = $state(false);
@@ -378,21 +400,24 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     {#each overviewSections as section}
                         {@const sectionTasks = allTasks.filter(t => t.status === section.id).sort((a, b) => a.column_order - b.column_order)}
                         {#if sectionTasks.length > 0}
-                            <div class="section-group">
-                                <div class="section-header">
+                            <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
+                                <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)}>
                                     <span class="section-title">
                                         {#if section.id === 'backlog'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-backlog)"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
                                         {:else if section.id === 'in_progress'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-in-progress)"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                                         {:else if section.id === 'review'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="color: var(--color-column-review)"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                                         {/if}
                                         {section.title}
                                     </span>
                                     <span class="section-count">{sectionTasks.length}</span>
-                                </div>
-                                {#each sectionTasks as t (t.id)}
+                                    <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                </button>
+                                {#if !collapsedSections.has(section.id)}
+                                <div class="section-body">
+                                    {#each sectionTasks as t (t.id)}
                                     {#if editingTaskId === t.id}
                                         <div class="task-item task-item-editing">
                                             <input
@@ -424,7 +449,9 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                             {/if}
                                         </button>
                                     {/if}
-                                {/each}
+                                    {/each}
+                                </div>
+                                {/if}
                             </div>
                         {/if}
                     {/each}
@@ -623,38 +650,71 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .task-list {
         flex: 1;
         overflow-y: auto;
-        padding: 0 4px 4px 4px;
+        padding: 8px 6px 6px 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
     }
     .section-group {
-        margin-bottom: 4px;
+        background: var(--color-surface-1);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
     }
     .section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 6px 6px 2px 6px;
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        background: var(--color-surface-0);
-        border-bottom: 1px solid var(--color-border);
+        padding: 10px 12px;
+        cursor: pointer;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid var(--col-color);
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+    }
+    .section-header:hover {
+        background: var(--color-surface-2);
     }
     .section-title {
         display: flex;
         align-items: center;
-        gap: 5px;
-        font-size: 0.75rem;
+        gap: 6px;
+        font-size: 0.8rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.4px;
-        color: var(--color-text-tertiary);
+        color: var(--color-text-secondary);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .section-title .col-icon {
         flex-shrink: 0;
+        color: var(--col-color);
     }
     .section-count {
+        background: var(--color-surface-3);
+        border-radius: 10px;
+        padding: 2px 8px;
         font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+        margin-left: 8px;
+    }
+    .section-chevron {
+        flex-shrink: 0;
+        margin-left: 4px;
         color: var(--color-text-tertiary);
+        transition: transform 0.2s ease;
+    }
+    .section-header[aria-expanded="false"] .section-chevron {
+        transform: rotate(-90deg);
+    }
+    .section-body {
+        padding: 4px 6px 6px 6px;
     }
     .task-item {
         padding: 8px 10px;
@@ -820,8 +880,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             padding: 0 8px 8px 8px;
         }
         .section-header {
-            padding: 8px 4px 4px 4px;
-            top: 0;
+            padding: 12px 10px;
+        }
+        .section-body {
+            padding: 6px 8px 8px 8px;
         }
         .task-item {
             padding: 10px 12px;
