@@ -86,7 +86,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:    s.addr,
-		Handler: PanicRecoveryMiddleware(CORSMiddleware(s.mux)),
+		Handler: PanicRecoveryMiddleware(CORSMiddleware(CompressMiddleware(s.mux))),
 	}
 	log.Printf("Server starting on %s", s.addr)
 	return srv.ListenAndServe()

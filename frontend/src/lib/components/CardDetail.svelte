@@ -255,7 +255,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             }
         });
 
-        checkWorktree();
         loadDiff();
 
         function handleKey(e: KeyboardEvent) {
