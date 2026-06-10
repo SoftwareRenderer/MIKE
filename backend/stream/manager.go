@@ -100,7 +100,12 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 			if status != lastStatus {
 				log.Printf("[git poll] task=%s diff changed", taskID)
 				lastStatus = status
-				b.Send(types.StreamEvent{Type: types.WSTypeDiffChanged, Data: map[string]interface{}{}})
+				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID)
+				if err != nil {
+					log.Printf("[git poll] task=%s GetTaskDiff failed: %v", taskID, err)
+					continue
+				}
+				b.Send(types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
 			}
 		}
 	}

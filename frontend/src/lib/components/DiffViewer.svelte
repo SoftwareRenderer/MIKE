@@ -2,11 +2,12 @@
     import type { DiffFile } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
-    import { fade } from 'svelte/transition';
+
 
     let props = $props();
     let files = $derived(props.files || []);
     let untracked = $derived(props.untracked || []);
+    let version = $derived(props.version ?? 0);
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Track which collapsed blocks are expanded
@@ -43,11 +44,13 @@
     </div>
 {:else}
     <div class="diff-scroll">
+        {#key version}
+        <div class="diff-content-wrapper">
         {#each untracked as entry (entry.path)}
             {@const ufile = entry.file}
             {@const isUntrackedExpanded = expandedFiles[entry.path] ?? true}
             {@const isLarge = entry.fileSize !== undefined}
-            <section class="diff-file-section diff-file-section-untracked" transition:fade={{ duration: 150 }}>
+            <section class="diff-file-section diff-file-section-untracked diff-file-enter">
                 <button
                     type="button"
                     class="diff-file-header diff-file-header-untracked"
@@ -150,7 +153,7 @@
         {/each}
         {#each files as file (file.path)}
             {@const isFileExpanded = expandedFiles[file.path] ?? true}
-            <section class="diff-file-section" transition:fade={{ duration: 150 }}>
+            <section class="diff-file-section diff-file-enter">
                 <button
                     type="button"
                     class="diff-file-header"
@@ -242,10 +245,30 @@
                 {/if}
             </section>
         {/each}
+        </div>
+        {/key}
     </div>
 {/if}
 
 <style>
+    @keyframes diffWrapperIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    @keyframes diffFadeIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .diff-content-wrapper {
+        animation: diffWrapperIn 200ms ease-out;
+    }
+
+    .diff-file-enter {
+        animation: diffFadeIn 200ms ease-out;
+    }
+
     .diff-scroll {
         flex: 1;
         overflow-y: auto;

@@ -46,6 +46,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
+    let diffVersion = $state(0);
     // Terminal
     let worktreeExists = $state(true);
 
@@ -297,17 +298,24 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     }
 
+    type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
+
+    function updateDiff(data: DiffData) {
+        const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
+        diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path));
+        untrackedFiles = (data.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
+            path: u.path,
+            fileSize: u.file_size,
+            file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
+        }));
+        diffVersion++;
+    }
+
     async function loadDiff() {
         if (!task) return;
         try {
             const result = await getTaskDiff(task.project_id, task.id);
-            const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
-            diffFiles = parseUnifiedDiff(result.diff).filter(f => ignoreSwp(f.path));
-            untrackedFiles = (result.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
-                path: u.path,
-                fileSize: u.file_size,
-                file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
-            }));
+            updateDiff(result);
         } catch (e) {
             diffFiles = [];
             untrackedFiles = [];
@@ -477,7 +485,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         taskId={task.id}
                         taskPrompt={task.prompt}
                         disabled={task.status_state === 'completed'}
-                        onRefreshDiff={loadDiff}
+                        onRefreshDiff={updateDiff}
                     />
                 </div>
             </div>
@@ -495,7 +503,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
-                    <DiffViewer files={diffFiles} untracked={untrackedFiles} />
+                    <DiffViewer files={diffFiles} untracked={untrackedFiles} version={diffVersion} />
                 </div>
             </div>
         </div>

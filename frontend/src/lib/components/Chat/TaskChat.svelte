@@ -38,7 +38,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         createdAt?: string;
     }
 
-    let { projectId, taskId, taskPrompt = '', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean; onRefreshDiff?: () => void } = $props();
+    type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
+
+    let { projectId, taskId, taskPrompt = '', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -286,7 +288,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'diff_changed': {
-                onRefreshDiff?.();
+                const data = event.data as DiffData;
+                onRefreshDiff?.(data);
                 break;
             }
         }
