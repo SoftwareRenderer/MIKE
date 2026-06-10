@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"kanban/backend"
+	"kanban/backend/server"
 )
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("Failed to create worktrees directory: %v", err)
 	}
 
-	server, err := backend.NewServer(*dbPath, worktreesDir)
+	srv, err := server.NewServer(*dbPath, worktreesDir)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
@@ -47,7 +47,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		if err := server.Serve(); err != nil {
+		if err := srv.Serve(); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()

@@ -1,0 +1,67 @@
+package types
+
+// ChatMessage represents a message in the conversation.
+type ChatMessage struct {
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	ToolCallID       string `json:"tool_call_id,omitempty"`
+}
+
+// ChatTool represents a tool definition.
+type ChatTool struct {
+	Type     string `json:"type"`
+	Function *ToolDef `json:"function"`
+}
+
+// ToolDef defines a tool's schema.
+type ToolDef struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+// ChatToolCall represents a tool call (or delta) from the model.
+// In streaming responses, each chunk has an Index field to identify
+// which tool call the delta belongs to. The client must merge deltas
+// by index to reconstruct complete tool calls.
+type ChatToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+	Type string `json:"type"`
+}
+
+// ChatChoiceDelta is the delta in a streaming response.
+type ChatChoiceDelta struct {
+	Content          *string        `json:"content"`
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+}
+
+// ChatChoice is a single choice in the response.
+type ChatChoice struct {
+	Delta        ChatChoiceDelta `json:"delta"`
+	FinishReason string          `json:"finish_reason"`
+}
+
+// ChatUsage token usage stats.
+type ChatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	PromptMs         int `json:"prompt_ms"`
+	PredictedMs      int `json:"predicted_ms"`
+}
+
+// ChatResponse is a full streaming response frame.
+type ChatResponse struct {
+	Choices []ChatChoice `json:"choices"`
+	Usage   *ChatUsage   `json:"usage,omitempty"`
+}
+
+// StreamCallback is called for each streaming token/tool_call.
+type StreamCallback func(choice ChatChoice)

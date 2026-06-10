@@ -1,8 +1,29 @@
-package backend
+package types
 
 import "encoding/json"
 
-// -- WebSocket message types --
+// WSMessageType is the type of a WebSocket message.
+type WSMessageType string
+
+const (
+	WSTypeToken       WSMessageType = "token"
+	WSTypeReasoning   WSMessageType = "reasoning"
+	WSTypeReasoningEnd WSMessageType = "reasoning_end"
+	WSTypeToolCall    WSMessageType = "tool_call"
+	WSTypeToolResult  WSMessageType = "tool_result"
+	WSTypeStatus      WSMessageType = "status"
+	WSTypeQueue       WSMessageType = "queue"
+	WSTypeComplete    WSMessageType = "complete"
+	WSTypeError       WSMessageType = "error"
+	WSTypeUserMessage WSMessageType = "user_message"
+	WSTypeStats       WSMessageType = "stats"
+)
+
+// StreamEvent carries a typed payload to broadcast.
+type StreamEvent struct {
+	Type WSMessageType
+	Data interface{}
+}
 
 // WSMessage is the envelope for all WebSocket frames.
 type WSMessage struct {
@@ -70,8 +91,6 @@ type StreamErrorEvent struct {
 	Code    string `json:"code"`
 }
 
-// -- Home Agent WebSocket types --
-
 // HomeAgentWSMessage is the envelope for home agent WebSocket frames.
 type HomeAgentWSMessage struct {
 	Type string          `json:"type"`
@@ -97,8 +116,6 @@ type HomeAgentDoneEvent struct {
 		Total     int `json:"total"`
 	} `json:"tokens"`
 }
-
-// -- Terminal WebSocket types --
 
 // TerminalMessage is the envelope for terminal WebSocket frames.
 type TerminalMessage struct {

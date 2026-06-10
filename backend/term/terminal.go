@@ -1,4 +1,4 @@
-package backend
+package term
 
 import (
 	"context"
@@ -10,6 +10,11 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"kanban/backend/config"
+	"kanban/backend/httputil"
+	"kanban/backend/store"
+	"kanban/backend/types"
 
 	"github.com/creack/pty"
 	"github.com/coder/websocket"
@@ -26,20 +31,20 @@ type taskTerminal struct {
 	ptmx       *os.File
 	mu         sync.Mutex
 	conns      map[*websocket.Conn]bool
-	buf        [][]byte    // buffered output frames when no clients
-	lastActive time.Time   // when last client was connected
+	buf        [][]byte
+	lastActive time.Time
 }
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
 	mu       sync.RWMutex
-	sessions map[string]*taskTerminal // taskID -> session
-	store    *Store
-	cfgStore *ConfigStore
+	sessions map[string]*taskTerminal
+	store    *store.Store
+	cfgStore *config.ConfigStore
 }
 
 // NewTerminalManager creates a new TerminalManager.
-func NewTerminalManager(store *Store, cfgStore *ConfigStore) *TerminalManager {
+func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore) *TerminalManager {
 	return &TerminalManager{
 		sessions: make(map[string]*taskTerminal),
 		store:    store,
@@ -59,7 +64,6 @@ func (tm *TerminalManager) getOrCreate(taskID string, worktreePath string) (*tas
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Double-check after acquiring write lock.
 	if session, ok = tm.sessions[taskID]; ok {
 		return session, nil
 	}
@@ -87,14 +91,13 @@ func (tm *TerminalManager) getOrCreate(taskID string, worktreePath string) (*tas
 
 	tm.sessions[taskID] = session
 
-	// Start reading PTY output in background.
 	go session.readLoop()
 
 	return session, nil
 }
 
-// removeSession kills the PTY for a task (called when task is deleted).
-func (tm *TerminalManager) removeSession(taskID string) {
+// RemoveSession kills the PTY for a task (called when task is deleted).
+func (tm *TerminalManager) RemoveSession(taskID string) {
 	tm.mu.Lock()
 	session, ok := tm.sessions[taskID]
 	delete(tm.sessions, taskID)
@@ -113,16 +116,14 @@ func (t *taskTerminal) readLoop() {
 		if err != nil {
 			return
 		}
-		data := TerminalMessage{Type: "output", Data: string(buf[:n])}
+		data := types.TerminalMessage{Type: "output", Data: string(buf[:n])}
 		encoded, _ := json.Marshal(data)
 
 		t.mu.Lock()
-		// Always buffer the frame.
 		t.buf = append(t.buf, encoded)
 		if len(t.buf) > TerminalBufferSize {
 			t.buf = t.buf[len(t.buf)-TerminalBufferSize:]
 		}
-		// Broadcast to connected clients.
 		conns := make([]*websocket.Conn, 0, len(t.conns))
 		for c := range t.conns {
 			conns = append(conns, c)
@@ -159,10 +160,9 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Resolve worktree path.
 	cfg, err := tm.cfgStore.GetConfig()
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "failed to get config")
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to get config")
 		return
 	}
 	worktreePath := filepath.Join(cfg.WorkspaceDir, taskID)
@@ -170,14 +170,14 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 	session, err := tm.getOrCreate(taskID, worktreePath)
 	if err != nil {
 		log.Printf("terminal pty error for task %s: %v", taskID, err)
-		jsonError(w, http.StatusInternalServerError, "failed to start terminal")
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")
 		return
 	}
 
 	tm.handleTerminalWS(w, r, session)
 }
 
-// HandleProjectTerminal handles WebSocket connections for a project-level terminal (persistent).
+// HandleProjectTerminal handles WebSocket connections for a project-level terminal.
 func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request, projectID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -186,7 +186,7 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 
 	project, err := tm.store.GetProject(projectID)
 	if err != nil {
-		jsonError(w, http.StatusNotFound, "project not found")
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
@@ -194,7 +194,7 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 	session, err := tm.getOrCreate(sessionKey, project.Path)
 	if err != nil {
 		log.Printf("terminal pty error for project %s: %v", projectID, err)
-		jsonError(w, http.StatusInternalServerError, "failed to start terminal")
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")
 		return
 	}
 
@@ -211,7 +211,6 @@ func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Register this connection and replay full buffer.
 	session.mu.Lock()
 	session.conns[conn] = true
 	session.lastActive = time.Now()
@@ -221,12 +220,10 @@ func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Reque
 
 	ctx := context.Background()
 
-	// Replay all buffered frames as individual WebSocket messages.
 	for _, frame := range bufCopy {
 		_ = conn.Write(ctx, websocket.MessageText, frame)
 	}
 
-	// Client → PTY
 	defer func() {
 		session.mu.Lock()
 		delete(session.conns, conn)
@@ -244,7 +241,7 @@ func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
-		var msg TerminalMessage
+		var msg types.TerminalMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}

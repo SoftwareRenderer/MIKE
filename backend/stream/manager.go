@@ -1,0 +1,168 @@
+package stream
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"kanban/backend/store"
+	"kanban/backend/types"
+
+	"github.com/coder/websocket"
+	"github.com/google/uuid"
+)
+
+// StreamManager manages broadcasters for all active tasks.
+type StreamManager struct {
+	mu               sync.RWMutex
+	broadcasts       map[string]*Broadcaster
+	store            *store.Store
+	lazyStartHandler LazyStartHandler
+	lazyMu           sync.RWMutex
+}
+
+// NewStreamManager creates a new StreamManager.
+func NewStreamManager(store *store.Store) *StreamManager {
+	return &StreamManager{
+		broadcasts: make(map[string]*Broadcaster),
+		store:      store,
+	}
+}
+
+// SetLazyStartHandler sets the callback for lazy-starting an executor.
+func (sm *StreamManager) SetLazyStartHandler(h LazyStartHandler) {
+	sm.lazyMu.Lock()
+	defer sm.lazyMu.Unlock()
+	sm.lazyStartHandler = h
+}
+
+// GetOrCreate returns an existing broadcaster or creates a new one.
+func (sm *StreamManager) GetOrCreate(taskID string) *Broadcaster {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	b, ok := sm.broadcasts[taskID]
+	if !ok {
+		b = newBroadcaster(100)
+		sm.broadcasts[taskID] = b
+	}
+	return b
+}
+
+// Remove removes and closes a broadcaster.
+func (sm *StreamManager) Remove(taskID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if b, ok := sm.broadcasts[taskID]; ok {
+		b.close()
+		delete(sm.broadcasts, taskID)
+	}
+}
+
+// Get returns a broadcaster if it exists.
+func (sm *StreamManager) Get(taskID string) *Broadcaster {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.broadcasts[taskID]
+}
+
+// ResetForTest closes all broadcasters and clears state. Used by e2e tests.
+func (sm *StreamManager) ResetForTest() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for taskID, b := range sm.broadcasts {
+		b.close()
+		delete(sm.broadcasts, taskID)
+	}
+}
+
+// HandleStream upgrades a WebSocket connection and subscribes to a task stream.
+func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, taskID string) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+
+	b := sm.GetOrCreate(taskID)
+	b.add(conn)
+	defer b.remove(conn)
+
+	// Send buffered events on reconnect
+	if msg := r.URL.Query().Get("sync"); msg != "" {
+		buf := b.getBuffer(0)
+		for _, m := range buf {
+			frame, _ := json.Marshal(m)
+			if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+				return
+			}
+		}
+	}
+
+	// Keep reading to detect client close and handle user messages
+	for {
+		_, data, err := conn.Read(context.Background())
+		if err != nil {
+			break
+		}
+		var msg struct {
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "user_message" {
+			var payload struct {
+				Content        string `json:"content"`
+				ModelName      string `json:"model_name"`
+				LlamaServerURL string `json:"llama_server_url"`
+			}
+			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
+				log.Printf("[stream] task=%s user_message received (model=%s, url=%s)", taskID, payload.ModelName, payload.LlamaServerURL)
+				// Always persist the user message
+				msgID := uuid.New().String()
+				sm.store.CreateTaskMessage(&types.TaskMessage{
+					ID:        msgID,
+					TaskID:    taskID,
+					Role:      "user",
+					Content:   payload.Content,
+					CreatedAt: time.Now().UTC(),
+				})
+				// Always broadcast back to all clients (include backend-generated id)
+				b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}})
+				// If executor is running, forward to it (with model info)
+				handler := b.getUserMessageHandler()
+				if handler != nil {
+					log.Printf("[stream] task=%s forwarding to executor", taskID)
+					handler(UserMessage{
+						Content:   payload.Content,
+						ModelName: payload.ModelName,
+						ServerURL: payload.LlamaServerURL,
+					})
+				} else {
+					// No executor running — lazy-start one
+					log.Printf("[stream] task=%s no executor, trying lazy-start", taskID)
+					sm.lazyMu.RLock()
+					lazyHandler := sm.lazyStartHandler
+					sm.lazyMu.RUnlock()
+					if lazyHandler != nil {
+						task, err := sm.store.GetTaskByTaskID(taskID)
+						var projectID string
+						if err == nil && task != nil {
+							projectID = task.ProjectID
+						}
+						log.Printf("[stream] task=%s project=%s calling lazy-start (model=%s, url=%s)", taskID, projectID, payload.ModelName, payload.LlamaServerURL)
+						go lazyHandler(projectID, taskID, payload.Content, payload.ModelName, payload.LlamaServerURL)
+					} else {
+						log.Printf("[stream] task=%s no lazy-start handler registered", taskID)
+					}
+				}
+			}
+		}
+	}
+}

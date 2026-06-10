@@ -1,4 +1,4 @@
-package backend
+package git
 
 import (
 	"fmt"
@@ -9,17 +9,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"kanban/backend/config"
+	"kanban/backend/store"
 )
 
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
-	store        *Store
-	configStore  *ConfigStore
+	store        *store.Store
+	configStore  *config.ConfigStore
 	worktreeMu   sync.Map // per-project mutex for worktree creation
 }
 
 // NewWorktreeManager creates a new WorktreeManager.
-func NewWorktreeManager(store *Store, configStore *ConfigStore) *WorktreeManager {
+func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *WorktreeManager {
 	return &WorktreeManager{store: store, configStore: configStore}
 }
 
@@ -54,7 +57,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
 		worktreesDir = wtDir
 	}
-	// Ensure absolute path so git and Go resolve it the same way
 	if !filepath.IsAbs(worktreesDir) {
 		abs, err := filepath.Abs(worktreesDir)
 		if err == nil {
@@ -73,29 +75,22 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 
 	select {
 	case <-done:
-		// Got the lock
 	case <-time.After(30 * time.Second):
 		return "", fmt.Errorf("timeout waiting for worktree lock (another task is initializing)")
 	}
 	defer mu.Unlock()
 
-	// Ensure worktrees directory exists
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		return "", fmt.Errorf("create worktrees dir: %w", err)
 	}
 
-	// Check if worktree already exists
 	if _, err := os.Stat(worktreePath); err == nil {
 		return worktreePath, nil
 	}
 
-	// Create baseline branch capturing current working tree state (including uncommitted changes)
 	baselineBranch := fmt.Sprintf("__kanban_baseline_%s", taskID)
-
-	// Save original branch BEFORE any modifications
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
 
-	// Cleanup function: always restore original branch and clean up temp branch
 	cleanup := func() {
 		if originalBranch != "" {
 			wm.gitRun(project.Path, "checkout", originalBranch)
@@ -103,60 +98,46 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 		wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 	}
 
-	// Step 1: Check for uncommitted changes
 	hasChanges, err := wm.hasWorkingTreeChanges(project.Path)
 	if err != nil {
 		return "", fmt.Errorf("check working tree: %w", err)
 	}
 
-	// Delete any existing baseline branch (from failed previous attempts)
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
 	if hasChanges {
-		// Step 2a: Stash current changes
 		if err := wm.gitRun(project.Path, "stash", "push", "-m", "kanban baseline stash"); err != nil {
 			return "", fmt.Errorf("stash changes: %w", err)
 		}
 		defer func() {
-			// Always pop stash on exit
 			wm.gitRun(project.Path, "stash", "pop")
 		}()
 
-		// Step 2b: Create baseline branch from current HEAD (does NOT change HEAD)
 		if err := wm.gitRun(project.Path, "branch", baselineBranch); err != nil {
 			return "", fmt.Errorf("create baseline branch: %w", err)
 		}
 		defer cleanup()
 
-		// Step 2c: Checkout baseline branch to apply changes
 		if err := wm.gitRun(project.Path, "checkout", baselineBranch); err != nil {
 			return "", fmt.Errorf("checkout baseline: %w", err)
 		}
 
-		// Step 2d: Apply stashed changes
 		if err := wm.gitRun(project.Path, "stash", "pop"); err != nil {
-			// If stash pop fails (conflict), just continue
 			wm.gitRun(project.Path, "stash", "drop")
 		}
 
-		// Step 2e: Stage and commit changes on baseline branch
 		wm.gitRun(project.Path, "add", "-A")
 		wm.gitRun(project.Path, "commit", "-m", fmt.Sprintf("Baseline for task %s", taskID))
 
-		// Step 2f: Go back to original branch
 		if originalBranch != "" {
 			wm.gitRun(project.Path, "checkout", originalBranch)
 		}
-
-		// Re-stash for the deferred pop (the changes are now committed, stash is empty)
-		// Actually the stash was already popped above, so the deferred pop will fail harmlessly
 	}
 
-	// Step 3: Create worktree from the baseline branch (or current HEAD if clean)
 	sourceRef := baselineBranch
 	if !hasChanges {
 		sourceRef = "HEAD"
-		defer cleanup() // still need to clean up if worktree creation fails
+		defer cleanup()
 	}
 
 	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
@@ -165,17 +146,14 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 		return "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
 
-	// Step 4: Create the task branch from the worktree's HEAD
 	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-b", branchName); err != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
 		return "", fmt.Errorf("create branch: %s: %w", out, err)
 	}
 
-	// Step 5: Create initial baseline commit snapshot
 	wm.gitRun(worktreePath, "add", "-A")
 	wm.gitRun(worktreePath, "commit", "-m", "Initial baseline snapshot", "--allow-empty")
 
-	// Step 6: Cleanup baseline branch
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
 	return worktreePath, nil
@@ -193,22 +171,17 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 		return err
 	}
 
-	// Remove worktree directory
 	if err := os.RemoveAll(worktreePath); err != nil {
 		return fmt.Errorf("remove worktree dir: %w", err)
 	}
 
-	// Remove branch from main repo
 	wm.gitRun(project.Path, "branch", "-D", branchName)
-
-	// Remove worktree tracking
 	wm.gitRun(project.Path, "worktree", "prune")
 
 	return nil
 }
 
 // RemoveWorktreeDir removes a task's worktree directory and prunes git worktree tracking.
-// Does NOT delete the branch. Used during task deletion for cleanup.
 func (wm *WorktreeManager) RemoveWorktreeDir(projectID, taskID string) error {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
@@ -220,19 +193,16 @@ func (wm *WorktreeManager) RemoveWorktreeDir(projectID, taskID string) error {
 		return err
 	}
 
-	// Remove worktree directory (no error if it doesn't exist)
 	if err := os.RemoveAll(worktreePath); err != nil {
 		return fmt.Errorf("remove worktree dir: %w", err)
 	}
 
-	// Prune worktree tracking from main repo
 	wm.gitRun(project.Path, "worktree", "prune")
 
 	return nil
 }
 
 // GarbageCollect removes worktree directories that have no matching task in the database.
-// If dryRun is true, only logs what would be removed. Returns the count of worktrees removed.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	cfg, err := wm.configStore.GetConfig()
 	if err != nil {
@@ -249,12 +219,10 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		}
 	}
 
-	// Check if worktrees dir exists
 	if _, err := os.Stat(worktreesDir); os.IsNotExist(err) {
 		return 0, nil
 	}
 
-	// Get all active task IDs from DB
 	activeTaskIDs, err := wm.store.GetAllTaskIDs()
 	if err != nil {
 		return 0, fmt.Errorf("get task IDs: %w", err)
@@ -264,7 +232,6 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		activeSet[id] = true
 	}
 
-	// Scan worktrees directory for orphaned entries
 	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
 		return 0, fmt.Errorf("read worktrees dir: %w", err)
@@ -276,7 +243,6 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			continue
 		}
 		name := entry.Name()
-		// Skip hidden directories
 		if name[0] == '.' {
 			continue
 		}
@@ -296,7 +262,6 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		}
 	}
 
-	// Run git worktree prune on all projects
 	projects, err := wm.store.ListProjects()
 	if err != nil {
 		log.Printf("[gc] error listing projects for prune: %v", err)

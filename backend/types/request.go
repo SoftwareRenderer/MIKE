@@ -1,4 +1,4 @@
-package backend
+package types
 
 // MoveTaskRequest is the request body for moving a task.
 type MoveTaskRequest struct {

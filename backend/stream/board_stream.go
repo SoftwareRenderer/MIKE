@@ -1,4 +1,4 @@
-package backend
+package stream
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 
+	"kanban/backend/store"
+
 	"github.com/coder/websocket"
 )
 
@@ -14,11 +16,11 @@ import (
 type BoardStreamManager struct {
 	mu       sync.RWMutex
 	clients  map[string]map[*websocket.Conn]bool // projectID -> set of connections
-	store    *Store
+	store    *store.Store
 }
 
 // NewBoardStreamManager creates a new BoardStreamManager.
-func NewBoardStreamManager(store *Store) *BoardStreamManager {
+func NewBoardStreamManager(store *store.Store) *BoardStreamManager {
 	return &BoardStreamManager{
 		clients: make(map[string]map[*websocket.Conn]bool),
 		store:   store,
@@ -57,7 +59,6 @@ func (bsm *BoardStreamManager) remove(projectID string, conn *websocket.Conn) {
 // Broadcast sends a board_refresh event to all clients of a project,
 // and a project_counts event to ALL connected clients across all projects.
 func (bsm *BoardStreamManager) Broadcast(projectID string) {
-	// Send board_refresh to project-specific clients
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
 	bsm.mu.RUnlock()
@@ -69,7 +70,6 @@ func (bsm *BoardStreamManager) Broadcast(projectID string) {
 		}
 	}
 
-	// Broadcast updated counts to ALL clients
 	bsm.BroadcastProjectCounts()
 }
 
@@ -81,7 +81,7 @@ func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 	for _, conns := range bsm.clients {
 		for conn := range conns {
 			if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
-				// Client disconnected, will be cleaned up on read loop exit
+				// Client disconnected
 			}
 		}
 	}
@@ -94,8 +94,8 @@ func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 	}
 	counts := bsm.store.GetAllProjectCounts()
 	msg, _ := json.Marshal(map[string]interface{}{
-		"type":   "project_counts",
-		"data":   counts,
+		"type": "project_counts",
+		"data": counts,
 	})
 	bsm.BroadcastAll(msg)
 }
@@ -116,7 +116,6 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		conn.Close(websocket.StatusNormalClosure, "closed")
 	}()
 
-	// Keep reading to detect client close
 	for {
 		_, _, err := conn.Read(context.Background())
 		if err != nil {
