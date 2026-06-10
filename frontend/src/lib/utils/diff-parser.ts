@@ -77,6 +77,15 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
             continue;
         }
 
+        // Large/binary file size annotation (injected by backend)
+        if (line.startsWith('# binary or large file: ')) {
+            const match = line.match(/^# binary or large file: (\d+) bytes/);
+            if (currentFile && match) {
+                currentFile.fileSize = Number.parseInt(match[1], 10);
+            }
+            continue;
+        }
+
         // Hunk header: "@@ -old_start,old_count +new_start,new_count @@"
         if (line.startsWith('@@')) {
             inHunk = true;

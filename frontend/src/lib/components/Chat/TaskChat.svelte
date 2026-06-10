@@ -38,7 +38,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         createdAt?: string;
     }
 
-    let { projectId, taskId, taskPrompt = '', disabled = false }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean } = $props();
+    let { projectId, taskId, taskPrompt = '', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean; onRefreshDiff?: () => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -283,6 +283,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         };
                     }
                 }
+                break;
+            }
+            case 'diff_changed': {
+                onRefreshDiff?.();
                 break;
             }
         }

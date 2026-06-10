@@ -45,6 +45,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
+    let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
     let loadingDiff = $state(false);
 
     // Terminal
@@ -256,6 +257,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         });
 
         checkWorktree();
+        loadDiff();
 
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') onClose();
@@ -301,10 +303,16 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         if (!task || loadingDiff) return;
         loadingDiff = true;
         try {
-            const rawDiff = await getTaskDiff(task.project_id, task.id);
-            diffFiles = parseUnifiedDiff(rawDiff);
+            const result = await getTaskDiff(task.project_id, task.id);
+            diffFiles = parseUnifiedDiff(result.diff);
+            untrackedFiles = (result.untracked || []).map(u => ({
+                path: u.path,
+                fileSize: u.file_size,
+                file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
+            }));
         } catch (e) {
             diffFiles = [];
+            untrackedFiles = [];
         }
         loadingDiff = false;
     }
@@ -472,6 +480,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         taskId={task.id}
                         taskPrompt={task.prompt}
                         disabled={task.status_state === 'completed'}
+                        onRefreshDiff={loadDiff}
                     />
                 </div>
             </div>
@@ -489,7 +498,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
-                    <DiffViewer files={diffFiles} loading={loadingDiff} />
+                    <DiffViewer files={diffFiles} untracked={untrackedFiles} loading={loadingDiff} />
                 </div>
             </div>
         </div>

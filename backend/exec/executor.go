@@ -64,10 +64,10 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardS
 		store:          store,
 		configStore:    configStore,
 		boardStreamMgr: boardStreamMgr,
-		streamMgr:      stream.NewStreamManager(store),
 		tasks:          make(map[string]*executionState),
 	}
 	te.worktreeMgr = git.NewWorktreeManager(store, configStore)
+	te.streamMgr = stream.NewStreamManager(store, te.worktreeMgr)
 	te.streamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }

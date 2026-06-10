@@ -40,7 +40,7 @@ index abc1234..def5678 100644
 +const y = 2;
  const z = 3;
 `;
-      await route.fulfill({ body: mockDiff, status: 200, headers: { 'Content-Type': 'text/plain' } });
+      await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
     await page.waitForSelector('.card', { timeout: 10000 });
@@ -89,7 +89,7 @@ index abc1234..def5678 100644
 +const new = false;
  const w = 4;
 `;
-      await route.fulfill({ body: mockDiff, status: 200, headers: { 'Content-Type': 'text/plain' } });
+      await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
     await page.waitForSelector('.card', { timeout: 10000 });
@@ -118,7 +118,7 @@ index abc1234..def5678 100644
 -removed line
 +added line
 `;
-      await route.fulfill({ body: mockDiff, status: 200, headers: { 'Content-Type': 'text/plain' } });
+      await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
     await page.waitForSelector('.card', { timeout: 10000 });
@@ -168,7 +168,7 @@ index abc1234..def5678 100644
  line two
  line three
 `;
-      await route.fulfill({ body: mockDiff, status: 200, headers: { 'Content-Type': 'text/plain' } });
+      await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
     await page.waitForSelector('.card', { timeout: 10000 });

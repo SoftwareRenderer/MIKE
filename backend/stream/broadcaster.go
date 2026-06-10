@@ -21,6 +21,9 @@ type UserMessage struct {
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
 type LazyStartHandler func(projectID, taskID, content, modelName, serverURL string)
 
+// LifecycleCallback is called when the client count transitions to/from zero.
+type LifecycleCallback func(hasClients bool)
+
 // Broadcaster fans out events to multiple WebSocket clients.
 type Broadcaster struct {
 	mu             sync.RWMutex
@@ -32,6 +35,8 @@ type Broadcaster struct {
 	closed         atomic.Bool
 	userMsgHandler func(UserMessage)
 	handlerMu      sync.RWMutex
+	lifecycleCb    LifecycleCallback
+	lifecycleMu    sync.RWMutex
 }
 
 func newBroadcaster(bufSize int) *Broadcaster {
@@ -66,12 +71,37 @@ func (b *Broadcaster) getUserMessageHandler() func(UserMessage) {
 	return b.userMsgHandler
 }
 
+// SetLifecycleCallback sets the callback fired when clients connect/disconnect.
+func (b *Broadcaster) SetLifecycleCallback(h LifecycleCallback) {
+	b.lifecycleMu.Lock()
+	defer b.lifecycleMu.Unlock()
+	b.lifecycleCb = h
+}
+
+// getLifecycleCallback returns the current lifecycle callback.
+func (b *Broadcaster) getLifecycleCallback() LifecycleCallback {
+	b.lifecycleMu.RLock()
+	defer b.lifecycleMu.RUnlock()
+	return b.lifecycleCb
+}
+
+// fireLifecycle calls the lifecycle callback if set.
+func (b *Broadcaster) fireLifecycle(hasClients bool) {
+	if cb := b.getLifecycleCallback(); cb != nil {
+		cb(hasClients)
+	}
+}
+
 // add registers a new client.
 func (b *Broadcaster) add(conn *websocket.Conn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.closed.Load() {
+		wasEmpty := len(b.clients) == 0
 		b.clients[conn] = true
+		if wasEmpty && len(b.clients) > 0 {
+			go b.fireLifecycle(true)
+		}
 	}
 }
 
@@ -80,6 +110,9 @@ func (b *Broadcaster) remove(conn *websocket.Conn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.clients, conn)
+	if len(b.clients) == 0 {
+		go b.fireLifecycle(false)
+	}
 }
 
 // Send broadcasts an event to all connected clients and buffers it.
@@ -127,13 +160,35 @@ func (b *Broadcaster) getBuffer(fromSeq int64) []types.WSMessage {
 	return b.ringBuffer
 }
 
+// bufferLength returns the number of buffered messages (test helper).
+func (b *Broadcaster) bufferLength() int {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+	return len(b.ringBuffer)
+}
+
+// getLastMessage returns the most recent buffered message (test helper).
+func (b *Broadcaster) getLastMessage() *types.WSMessage {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+	if len(b.ringBuffer) == 0 {
+		return nil
+	}
+	last := b.ringBuffer[len(b.ringBuffer)-1]
+	return &last
+}
+
 // close stops the broadcaster.
 func (b *Broadcaster) close() {
 	b.closed.Store(true)
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	hadClients := len(b.clients) > 0
 	for conn := range b.clients {
 		conn.CloseNow()
 	}
 	b.clients = nil
+	b.mu.Unlock()
+	if hadClients {
+		go b.fireLifecycle(false)
+	}
 }

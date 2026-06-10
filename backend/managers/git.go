@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
+	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -15,12 +15,13 @@ import (
 
 // GitHandler handles git operations.
 type GitHandler struct {
-	store *store.Store
+	store       *store.Store
+	worktreeMgr *git.WorktreeManager
 }
 
 // NewGitHandler creates a new GitHandler.
-func NewGitHandler(store *store.Store) *GitHandler {
-	return &GitHandler{store: store}
+func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
+	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
 }
 
 // HandleLog returns commit log for a project.
@@ -165,26 +166,24 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request, projectI
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pushed"})
 }
 
-// HandleTaskDiff returns diff for a task's worktree.
+// HandleTaskDiff returns diff and untracked files for a task's worktree.
 func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	task, err := h.store.GetTask(projectID, taskID)
+	_, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	worktreesDir := getEnv("WORKTREES_DIR", "./.worktrees")
-	if !filepath.IsAbs(worktreesDir) {
-		if abs, err := filepath.Abs(worktreesDir); err == nil {
-			worktreesDir = abs
-		}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
 	}
-	worktreePath := fmt.Sprintf("%s/%s", worktreesDir, task.ID)
-	c := exec.Command("git", "-C", worktreePath, "diff")
-	out, err := c.CombinedOutput()
+	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write(out)
+	if taskDiff.Untracked == nil {
+		taskDiff.Untracked = []git.UntrackedFile{}
+	}
+	httputil.JSONResponse(w, http.StatusOK, taskDiff)
 }

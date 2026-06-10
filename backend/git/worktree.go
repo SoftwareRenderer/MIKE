@@ -280,6 +280,37 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
+// GitStatus returns the git status --porcelain output for a task's worktree.
+func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("worktree not found")
+	}
+
+	out, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("git status: %w", err)
+	}
+	return out, nil
+}
+
+// UntrackedFile holds the path and unified diff content for an untracked file.
+type UntrackedFile struct {
+	Path     string `json:"path"`
+	Diff     string `json:"diff"`
+	FileSize int64  `json:"file_size,omitempty"` // set when file is binary or >1MB (diff omitted)
+}
+
+// TaskDiff holds the diff output and list of untracked files for a task.
+type TaskDiff struct {
+	Diff      string          `json:"diff"`
+	Untracked []UntrackedFile `json:"untracked"`
+}
+
 // GetDiff returns the git diff for a task's worktree.
 func (wm *WorktreeManager) GetDiff(taskID string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
@@ -298,7 +329,147 @@ func (wm *WorktreeManager) GetDiff(taskID string) (string, error) {
 	return out, nil
 }
 
+// GetTaskDiff returns the git diff and untracked files for a task's worktree.
+func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("worktree not found")
+	}
+
+	// Get tracked file diff, filtering out large/binary files
+	diffOut, err := wm.gitRunOutput(worktreePath, "diff", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+	diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+
+	// Get untracked files from git status --porcelain (lines starting with "?? ")
+	statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+
+	var untracked []UntrackedFile
+	const maxDiffSize = 1 << 20 // 1MB
+	for _, line := range strings.Split(statusOut, "\n") {
+		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
+			path := strings.TrimSpace(line[3:])
+			if path == "" {
+				continue
+			}
+			fullPath := filepath.Join(worktreePath, path)
+			info, err := os.Stat(fullPath)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			fileSize := info.Size()
+			// Skip diff for large files or binary files
+			if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
+				untracked = append(untracked, UntrackedFile{Path: path, FileSize: fileSize})
+				continue
+			}
+			// Generate unified diff for the untracked file (compare against empty)
+			// git diff --no-index returns exit code 1 when files differ, which is expected
+			fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", path)
+			untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff})
+		}
+	}
+
+	return &TaskDiff{Diff: diffOut, Untracked: untracked}, nil
+}
+
 // -- Helper functions --
+
+// filterLargeBinaryDiffs replaces diff hunks for binary or >1MB files with a size annotation.
+func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string) string {
+	if diffText == "" {
+		return diffText
+	}
+	const maxDiffSize = 1 << 20 // 1MB
+	var result strings.Builder
+	lines := strings.Split(diffText, "\n")
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		// Detect file header: "diff --git a/path b/path"
+		if strings.HasPrefix(line, "diff --git ") {
+			// Extract file path from "diff --git a/X b/Y"
+			path := extractDiffPath(line)
+			fullPath := filepath.Join(worktreePath, path)
+			info, err := os.Stat(fullPath)
+			isLarge := err == nil && info.Mode().IsRegular() && (info.Size() > maxDiffSize || isBinaryFile(fullPath, info.Size()))
+
+			// Copy header lines until we hit the hunk or next file
+			for i < len(lines) {
+				l := lines[i]
+				if strings.HasPrefix(l, "@@ ") || strings.HasPrefix(l, "diff --git ") {
+					break
+				}
+				result.WriteString(l + "\n")
+				i++
+			}
+
+			// Replace hunk(s) for this file if large/binary
+			if isLarge {
+				fileSize := info.Size()
+				result.WriteString(fmt.Sprintf("# binary or large file: %s bytes\n", fileSize))
+				// Skip all hunk lines for this file
+				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
+					i++
+				}
+				continue
+			}
+		}
+		result.WriteString(line + "\n")
+		i++
+	}
+	// Remove trailing newline that Split+Join adds
+	out := result.String()
+	if len(out) > 0 && out[len(out)-1] == '\n' {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// extractDiffPath pulls the file path from "diff --git a/X b/Y" header.
+func extractDiffPath(line string) string {
+	// Format: "diff --git a/path b/path" or "diff --git a/path b/path\n"
+	line = strings.TrimPrefix(line, "diff --git ")
+	// Take the "a/..." part
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) >= 1 && strings.HasPrefix(parts[0], "a/") {
+		return strings.TrimPrefix(parts[0], "a/")
+	}
+	return ""
+}
+
+// isBinaryFile checks if a file is binary by scanning the first 8KB for null bytes.
+func isBinaryFile(path string, size int64) bool {
+	if size == 0 {
+		return false
+	}
+	limit := int64(8192)
+	if size < limit {
+		limit = size
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, limit)
+	n, _ := f.Read(buf)
+	for i := 0; i < n; i++ {
+		if buf[i] == 0 {
+			return true
+		}
+	}
+	return false
+}
 
 func (wm *WorktreeManager) hasWorkingTreeChanges(dir string) (bool, error) {
 	out, err := wm.gitRunOutput(dir, "status", "--porcelain")

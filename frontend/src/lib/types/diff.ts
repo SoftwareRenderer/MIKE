@@ -17,10 +17,12 @@ export interface DiffRow {
 export interface DiffFile {
     /** File path (e.g., "src/lib/utils.ts"). */
     path: string;
-    /** Diff rows for this file. */
+    /** Diff rows for this file. Empty for binary/large files. */
     rows: DiffRow[];
     /** Count of added lines. */
     added: number;
     /** Count of removed lines. */
     removed: number;
+    /** File size in bytes, set when file is binary or too large to diff. */
+    fileSize?: number;
 }

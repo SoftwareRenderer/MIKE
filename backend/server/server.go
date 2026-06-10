@@ -66,7 +66,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, s.executor.WorktreeMgr())
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
-	s.gitHandler = managers.NewGitHandler(store)
+	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.homeAgentMgr = managers.NewHomeAgentHandler(store, cfgStore)
 
 	// Run garbage collector on startup

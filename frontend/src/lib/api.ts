@@ -224,10 +224,10 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
     if (!res.ok) throw await apiError(res, 'Failed to update message');
 }
 
-export async function getTaskDiff(projectId: string, taskId: string): Promise<string> {
+export async function getTaskDiff(projectId: string, taskId: string): Promise<{ diff: string; untracked: Array<{ path: string; diff: string }> }> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
-    return res.text();
+    return res.json();
 }
 
 // -- Prompt endpoints --

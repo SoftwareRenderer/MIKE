@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/types"
 
@@ -22,13 +23,19 @@ type StreamManager struct {
 	store            *store.Store
 	lazyStartHandler LazyStartHandler
 	lazyMu           sync.RWMutex
+	worktreeMgr      *git.WorktreeManager
+	// pollers tracks the git status poller context per task (one poller per task, not per client)
+	pollersMu sync.Mutex
+	pollers   map[string]context.CancelFunc
 }
 
 // NewStreamManager creates a new StreamManager.
-func NewStreamManager(store *store.Store) *StreamManager {
+func NewStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *StreamManager {
 	return &StreamManager{
-		broadcasts: make(map[string]*Broadcaster),
-		store:      store,
+		broadcasts:  make(map[string]*Broadcaster),
+		store:       store,
+		worktreeMgr: worktreeMgr,
+		pollers:     make(map[string]context.CancelFunc),
 	}
 }
 
@@ -68,6 +75,37 @@ func (sm *StreamManager) Get(taskID string) *Broadcaster {
 	return sm.broadcasts[taskID]
 }
 
+// pollGitStatus runs a polling loop that checks git status --porcelain in the task's worktree.
+// When the output changes, it sends a diff_changed event to all connected clients.
+func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Broadcaster) {
+	var lastStatus string
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+
+	// Initial check to establish baseline
+	if status, err := sm.worktreeMgr.GitStatus(taskID); err == nil {
+		lastStatus = status
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			status, err := sm.worktreeMgr.GitStatus(taskID)
+			if err != nil {
+				log.Printf("[git poll] task=%s status check failed: %v", taskID, err)
+				continue
+			}
+			if status != lastStatus {
+				log.Printf("[git poll] task=%s diff changed", taskID)
+				lastStatus = status
+				b.Send(types.StreamEvent{Type: types.WSTypeDiffChanged, Data: map[string]interface{}{}})
+			}
+		}
+	}
+}
+
 // ResetForTest closes all broadcasters and clears state. Used by e2e tests.
 func (sm *StreamManager) ResetForTest() {
 	sm.mu.Lock()
@@ -89,6 +127,31 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	defer conn.CloseNow()
 
 	b := sm.GetOrCreate(taskID)
+
+	// Set up git status poller lifecycle: starts when first client connects, stops when last disconnects
+	if sm.worktreeMgr != nil {
+		b.SetLifecycleCallback(func(hasClients bool) {
+			if hasClients {
+				sm.pollersMu.Lock()
+				if _, exists := sm.pollers[taskID]; !exists {
+					ctx, cancel := context.WithCancel(context.Background())
+					sm.pollers[taskID] = cancel
+					sm.pollersMu.Unlock()
+					go sm.pollGitStatus(ctx, taskID, b)
+				} else {
+					sm.pollersMu.Unlock()
+				}
+			} else {
+				sm.pollersMu.Lock()
+				if cancel, exists := sm.pollers[taskID]; exists {
+					cancel()
+					delete(sm.pollers, taskID)
+				}
+				sm.pollersMu.Unlock()
+			}
+		})
+	}
+
 	b.add(conn)
 	defer b.remove(conn)
 
