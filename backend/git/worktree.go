@@ -280,6 +280,57 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
+// GitShortstat returns a snapshot of the worktree's change state for polling.
+// Combines tracked file changes (git diff HEAD --shortstat) with a hash of untracked
+// file paths + sizes. This detects both content changes to existing files AND
+// new/modified/deleted untracked files.
+func (wm *WorktreeManager) GitShortstat(taskID string) (string, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("worktree not found")
+	}
+
+	// Tracked file changes (line counts — changes when content changes)
+	trackedOut, err := wm.gitRunOutput(worktreePath, "diff", "HEAD", "--shortstat")
+	if err != nil {
+		return "", fmt.Errorf("git diff --shortstat: %w", err)
+	}
+
+	// Untracked files: list path + size to detect new/modified/deleted untracked files.
+	// git ls-files gives us the paths; we append file size as a content-change proxy.
+	untrackedOut, err := wm.gitRunOutput(worktreePath, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return "", fmt.Errorf("git ls-files: %w", err)
+	}
+	untrackedSnap := wm.buildUntrackedSnapshot(worktreePath, untrackedOut)
+
+	// Combine into a single snapshot string
+	return fmt.Sprintf("%s|%s", strings.TrimSpace(trackedOut), untrackedSnap), nil
+}
+
+// buildUntrackedSnapshot creates a deterministic string from untracked file paths and sizes.
+// When any untracked file is created, deleted, or modified (size changes), this string changes.
+func (wm *WorktreeManager) buildUntrackedSnapshot(worktreePath, untrackedList string) string {
+	var parts []string
+	for _, line := range strings.Split(untrackedList, "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
+		fullPath := filepath.Join(worktreePath, path)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d", path, info.Size()))
+	}
+	return strings.Join(parts, "\n")
+}
+
 // GitStatus returns the git status --porcelain output for a task's worktree.
 func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)

@@ -127,6 +127,37 @@ func TestGitStatusPoll(t *testing.T) {
 		t.Fatalf("expected diff_changed event, got type=%q", typ)
 	}
 
+	// --- Test: modifying the SAME file again also triggers a diff_changed event ---
+	// This verifies the fix for the bug where subsequent changes to the same file
+	// were not detected (because git status --porcelain shows identical output).
+	eventCountAfterFirst := b.bufferLength()
+
+	// Modify the same file again with different content
+	writeFile(t, worktreePath, "new_file.txt", "hello world\nsecond line\nthird line\n")
+
+	var sameFileDetected bool
+	for i := 0; i < 10; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if b.bufferLength() > eventCountAfterFirst {
+			sameFileDetected = true
+			break
+		}
+	}
+
+	if !sameFileDetected {
+		t.Fatalf("poller did not detect same-file modification within 5s; buffer length stayed at %d", eventCountAfterFirst)
+	}
+
+	// Verify the new event is also diff_changed
+	lastMsg = b.getLastMessage()
+	if lastMsg == nil || lastMsg.Type != string(types.WSTypeDiffChanged) {
+		typ := "<nil>"
+		if lastMsg != nil {
+			typ = lastMsg.Type
+		}
+		t.Fatalf("expected diff_changed event for same-file mod, got type=%q", typ)
+	}
+
 	// Stop the poller
 	cancel()
 	time.Sleep(500 * time.Millisecond)

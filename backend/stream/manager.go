@@ -75,16 +75,18 @@ func (sm *StreamManager) Get(taskID string) *Broadcaster {
 	return sm.broadcasts[taskID]
 }
 
-// pollGitStatus runs a polling loop that checks git status --porcelain in the task's worktree.
-// When the output changes, it sends a diff_changed event to all connected clients.
+// pollGitStatus runs a polling loop that checks git diff HEAD --shortstat in the task's worktree.
+// When the shortstat output changes (line counts differ), it sends a diff_changed event to all connected clients.
+// Using --shortstat instead of status --porcelain ensures we detect content changes to the same file
+// (e.g., "+5" becoming "+10" additions), not just new/modified file states.
 func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Broadcaster) {
-	var lastStatus string
+	var lastShortstat string
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 
 	// Initial check to establish baseline
-	if status, err := sm.worktreeMgr.GitStatus(taskID); err == nil {
-		lastStatus = status
+	if shortstat, err := sm.worktreeMgr.GitShortstat(taskID); err == nil {
+		lastShortstat = shortstat
 	}
 
 	for {
@@ -92,14 +94,14 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			status, err := sm.worktreeMgr.GitStatus(taskID)
+			shortstat, err := sm.worktreeMgr.GitShortstat(taskID)
 			if err != nil {
-				log.Printf("[git poll] task=%s status check failed: %v", taskID, err)
+				log.Printf("[git poll] task=%s shortstat check failed: %v", taskID, err)
 				continue
 			}
-			if status != lastStatus {
+			if shortstat != lastShortstat {
 				log.Printf("[git poll] task=%s diff changed", taskID)
-				lastStatus = status
+				lastShortstat = shortstat
 				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID)
 				if err != nil {
 					log.Printf("[git poll] task=%s GetTaskDiff failed: %v", taskID, err)
