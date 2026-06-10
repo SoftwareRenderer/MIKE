@@ -73,6 +73,23 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 				}
 			}
 		}
+		// Validate parent_task_id if provided
+		if task.ParentTaskID != "" {
+			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
+			if err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "parent task not found")
+				return
+			}
+			if parent.Status != "backlog" {
+				httputil.JSONError(w, http.StatusBadRequest, "parent task must be in backlog")
+				return
+			}
+			// Prevent self-reference (won't happen for new tasks, but guard anyway)
+			if task.ParentTaskID == task.ID {
+				httputil.JSONError(w, http.StatusBadRequest, "task cannot be its own parent")
+				return
+			}
+		}
 		if err := h.store.CreateTask(&task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return

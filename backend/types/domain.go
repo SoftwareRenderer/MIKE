@@ -20,6 +20,7 @@ type Task struct {
 	AutoCommit              bool      `json:"auto_commit"`
 	AutoPR                  bool      `json:"auto_pr"`
 	PlanMode                bool      `json:"plan_mode"`
+	ParentTaskID            string    `json:"parent_task_id,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }

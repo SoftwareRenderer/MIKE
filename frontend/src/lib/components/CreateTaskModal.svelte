@@ -2,12 +2,12 @@
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
     import type { Provider } from '$lib/types';
-    import { createTask, getBoard, getConfig } from '$lib/api';
+    import { createTask, getBoard, getConfig, getTask } from '$lib/api';
     import { board as boardStore, showCreateTask } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { createFocusTrap } from '$lib/a11y';
 
-    let { projectId, onClose, onTaskCreated }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void } = $props();
+    let { projectId, onClose, onTaskCreated, parentId }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string } = $props();
 
     let prompt = $state('');
     let autoCommit = $state(false);
@@ -15,6 +15,7 @@
     let planMode = $state(false);
     let loading = $state(false);
     let error = $state('');
+    let parentTitle = $state('');
 
     // Model selection state
     let providers: Provider[] = $state([]);
@@ -27,6 +28,15 @@
         try {
             const cfg = await getConfig();
             providers = cfg.providers || [];
+            // Fetch parent task title if creating a subtask
+            if (parentId && projectId) {
+                try {
+                    const parentTask = await getTask(projectId, parentId);
+                    parentTitle = parentTask.title;
+                } catch {
+                    parentTitle = 'Parent task';
+                }
+            }
             // Pre-select highest-priority provider's default model
             if (providers.length > 0) {
                 const firstProvider = providers[0];
@@ -72,6 +82,7 @@
             };
             if (selectedModel) taskData.model_name = selectedModel;
             if (selectedUrl) taskData.llama_server_url = selectedUrl;
+            if (parentId) taskData.parent_task_id = parentId;
             await createTask(projectId, taskData);
             // Refresh the board
             const board = await getBoard(projectId);
@@ -101,10 +112,13 @@
 <div class="overlay" onclick={handleClose} role="presentation">
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="create-task-title" tabindex="-1">
         <div class="modal-header">
-            <h2 id="create-task-title">Create Task</h2>
+            <h2 id="create-task-title">{parentId ? 'Create Subtask' : 'Create Task'}</h2>
             <button class="close-btn" onclick={handleClose} aria-label="Close">✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+            {#if parentId}
+                <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
+            {/if}
             <label for="task-description">
                 Description
                 <textarea id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined}></textarea>
@@ -214,6 +228,17 @@
     textarea {
         resize: vertical;
         min-height: 80px;
+    }
+    .parent-label {
+        font-size: 0.8125rem;
+        color: var(--color-text-tertiary);
+        padding: 6px 10px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+    }
+    .parent-label strong {
+        color: var(--color-text-secondary);
     }
     .options {
         display: flex;

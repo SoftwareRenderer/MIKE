@@ -80,9 +80,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     auto_commit                  INTEGER NOT NULL DEFAULT 0,
     auto_pr                      INTEGER NOT NULL DEFAULT 0,
     plan_mode                    INTEGER NOT NULL DEFAULT 0,
+    parent_task_id               TEXT NULL,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -163,6 +165,8 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_calls TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_result TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN reasoning_content TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT NULL`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
 	return nil
 }
 
@@ -293,6 +297,14 @@ func i2b(i int) bool {
 	return i != 0
 }
 
+// ptrStr returns a pointer to a string, or nil if empty.
+func ptrStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // scanTime scans a TEXT column (RFC3339) into a time.Time.
 func scanTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
@@ -306,16 +318,18 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoPR, planMode int
 	var createdAt, updatedAt string
+	var parentTaskID sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoPR, &planMode, &createdAt, &updatedAt)
+		&autoCommit, &autoPR, &planMode, &parentTaskID, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
 	t.AutoCommit = i2b(autoCommit)
 	t.AutoPR = i2b(autoPR)
 	t.PlanMode = i2b(planMode)
+	t.ParentTaskID = parentTaskID.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return nil

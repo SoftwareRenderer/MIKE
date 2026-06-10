@@ -25,6 +25,7 @@ export interface Task {
     auto_commit: boolean;
     auto_pr: boolean;
     plan_mode: boolean;
+    parent_task_id?: string;
     created_at: string;
     updated_at: string;
 }

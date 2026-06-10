@@ -4,7 +4,7 @@
     import { moveTask, reorderTasks, clearDoneTasks, getBoard } from '$lib/api';
     import { board as boardStore } from '$lib/store';
 
-    let { tasks, projectId, onAddTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void } = $props();
+    let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
     let draggedTaskId: string | null = $state(null);
 
@@ -15,10 +15,50 @@
         { id: 'done', title: 'Done', color: 'var(--color-column-done)' },
     ];
 
-    function getTasksForColumn(status: string): Task[] {
-        return tasks
-            .filter(t => t.status === status)
-            .sort((a, b) => a.column_order - b.column_order);
+    /**
+     * Get tasks for a column, ordered with parents first and children nested underneath.
+     * Returns tasks with a `depth` property for indentation.
+     */
+    function getTasksForColumn(status: string): (Task & { depth: number })[] {
+        const columnTasks = tasks.filter(t => t.status === status);
+        const taskMap = new Map<string, Task>();
+        for (const t of columnTasks) {
+            taskMap.set(t.id, t);
+        }
+
+        // Build children map
+        const childrenMap = new Map<string, Task[]>();
+        const rootTasks: Task[] = [];
+        for (const t of columnTasks) {
+            if (t.parent_task_id && taskMap.has(t.parent_task_id)) {
+                if (!childrenMap.has(t.parent_task_id)) {
+                    childrenMap.set(t.parent_task_id, []);
+                }
+                childrenMap.get(t.parent_task_id)!.push(t);
+            } else {
+                rootTasks.push(t);
+            }
+        }
+
+        // Sort root tasks by column_order
+        rootTasks.sort((a, b) => a.column_order - b.column_order);
+        // Sort children within each parent by column_order
+        for (const [, children] of childrenMap) {
+            children.sort((a, b) => a.column_order - b.column_order);
+        }
+
+        // Flatten: parent, then children (depth 1)
+        const result: (Task & { depth: number })[] = [];
+        for (const t of rootTasks) {
+            result.push({ ...t, depth: 0 });
+            const children = childrenMap.get(t.id);
+            if (children) {
+                for (const child of children) {
+                    result.push({ ...child, depth: 1 });
+                }
+            }
+        }
+        return result;
     }
 
     function handleDragStart(taskId: string) {
@@ -66,6 +106,7 @@
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
+            onCreateChildTask={col.id === 'backlog' ? onCreateChildTask : undefined}
             onClearAll={col.id === 'done' ? handleClearDone : undefined}
             {projectId}
         />

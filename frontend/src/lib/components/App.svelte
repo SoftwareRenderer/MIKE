@@ -27,6 +27,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
     let selectedTaskVal: Task | null = $state(null);
+    let creatingChildOf: string | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isMobile = $derived(false);
 
@@ -321,7 +322,8 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     <Board 
                         {tasks} 
                         projectId={currentProject.id}
-                        onAddTask={() => showCreateTask.set(true)}
+                        onAddTask={() => { creatingChildOf = null; showCreateTask.set(true); }}
+                        onCreateChildTask={(parentId: string) => { creatingChildOf = parentId; showCreateTask.set(true); }}
                     />
                 {/if}
             </section>
@@ -338,8 +340,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     {#if showCreateTaskVal}
         <CreateTaskModal
             projectId={currentProject?.id}
-            onClose={() => showCreateTask.set(false)}
-            onTaskCreated={() => refreshBoard()}
+            parentId={creatingChildOf ?? undefined}
+            onClose={() => { showCreateTask.set(false); creatingChildOf = null; }}
+            onTaskCreated={() => { refreshBoard(); creatingChildOf = null; }}
         />
     {/if}
     {#if showConfigVal}

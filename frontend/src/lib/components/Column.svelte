@@ -2,16 +2,17 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId, onClearAll }: {
+    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
         columnId: string;
         title: string;
         color: string;
-        tasks: Task[];
+        tasks: (Task & { depth?: number })[];
         onDragStart: (taskId: string) => void;
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
         projectId?: string;
         onClearAll?: () => void;
+        onCreateChildTask?: (parentId: string) => void;
     } = $props();
 
     let isOver = $state(false);
@@ -66,7 +67,7 @@
         {/if}
         {#each tasks as task (task.id)}
             {#key task.id + '-' + task.status_state}
-                <Card {task} {columnId} {projectId} />
+                <Card {task} {columnId} {projectId} depth={task.depth ?? 0} onCreateChildTask={onCreateChildTask} />
             {/key}
         {/each}
     </div>

@@ -4,7 +4,14 @@
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore } from '$lib/store';
     import { moveTask, updateTask, stopTask, resumeTask } from '$lib/api';
 
-    let { task, columnId, projectId }: { task: Task; columnId: string; projectId?: string } = $props();
+    let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
+
+    // Number of action icons in the title bar (for dynamic padding)
+    let actionCount = $derived(
+        (columnId === 'backlog' && !task.parent_task_id ? 1 : 0) // + subtask
+        + 1 // edit
+        + 1 // move/pause/resume/idle
+    );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
     const statusLabels: Record<string, string> = {
@@ -66,7 +73,7 @@
         return { text, color: getModelColor(activeModel) };
     });
 
-    // Model picker dropdown — only in Backlog column (task not yet started)
+    // Model picker dropdown - only in Backlog column (task not yet started)
     let modelPickerOpen = $state(false);
     let modelBadgeRef: HTMLButtonElement | null = $state(null);
     let pickerRect = $state<{ top: number; left: number } | null>(null);
@@ -272,11 +279,19 @@
             console.error('Failed to move task:', err);
         }
     }
+
+    function handleCreateChild(e: MouseEvent) {
+        e.stopPropagation();
+        if (onCreateChildTask) {
+            onCreateChildTask(task.id);
+        }
+    }
 </script>
 
 <div
     class="card"
     class:selected={isSelected}
+    class:indented={depth > 0}
     draggable={!isMobile}
     ondragstart={handleDragStart}
     onclick={() => { selectedTask.set(task); showCardDetail.set(true); }}
@@ -285,6 +300,7 @@
     tabindex="0"
     aria-label={`Open task: ${task.title || '(untitled)'}`}
     aria-current={isSelected ? 'page' : undefined}
+    style={`--depth: ${depth}; --actions: ${actionCount}`}
 >
     {#if editingTitle}
         <input
@@ -298,7 +314,73 @@
             placeholder="Task title"
         />
     {:else}
-        <div class="card-title">{truncate(task.title, 50)}</div>
+        <div class="card-title">
+            <span class="card-title-text">{truncate(task.title, 80)}</span>
+            <div class="card-actions">
+                {#if columnId === 'backlog' && !task.parent_task_id}
+                    <button
+                        type="button"
+                        class="action-icon"
+                        onclick={handleCreateChild}
+                        aria-label="Create subtask"
+                        title="Create subtask"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </button>
+                {/if}
+                <button
+                    type="button"
+                    class="action-icon"
+                    onclick={startEdit}
+                    aria-label="Edit task title"
+                    title="Edit title"
+                >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                </button>
+                {#if isPausable}
+                    <button
+                        type="button"
+                        class="action-icon"
+                        onclick={handlePause}
+                        aria-label="Pause task"
+                        title="Pause task"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
+                    </button>
+                {:else if isResumable}
+                    <button
+                        type="button"
+                        class="action-icon"
+                        onclick={handleResume}
+                        aria-label="Resume task"
+                        title="Resume task"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                    </button>
+                {:else if isIdle}
+                    <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                {:else}
+                    <button
+                        type="button"
+                        class="action-icon action-move"
+                        onclick={cycleStatus}
+                        aria-label={`Move to ${statusLabels[nextStatus]}`}
+                        title={`Move to ${statusLabels[nextStatus]}`}
+                        style="color: {statusColors[nextStatus]}"
+                    >
+                        {#if nextStatus === 'backlog'}
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                        {:else if nextStatus === 'in_progress'}
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                        {:else if nextStatus === 'review'}
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                        {:else if nextStatus === 'done'}
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+                        {/if}
+                    </button>
+                {/if}
+            </div>
+        </div>
     {/if}
     <div class="card-preview">{truncate(task.prompt, 80)}</div>
     {#if statusBadge || modelBadge.text}
@@ -332,61 +414,6 @@
             {/if}
         </div>
     {/if}
-    <button
-        type="button"
-        class="edit-btn"
-        onclick={startEdit}
-        aria-label="Edit task title"
-        title="Edit title"
-    >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-    </button>
-    {#if isPausable}
-        <button
-            type="button"
-            class="move-btn"
-            onclick={handlePause}
-            aria-label="Pause task"
-            title="Pause task"
-            style="color: var(--color-column-in-progress)"
-        >
-            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
-        </button>
-    {:else if isIdle}
-        <span class="idle-indicator" aria-label="Idle" title="Idle">
-            Idle
-        </span>
-    {:else if isResumable}
-        <button
-            type="button"
-            class="move-btn"
-            onclick={handleResume}
-            aria-label="Resume task"
-            title="Resume task"
-            style="color: var(--color-column-in-progress)"
-        >
-            <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-        </button>
-    {:else}
-        <button
-            type="button"
-            class="move-btn"
-            onclick={cycleStatus}
-            aria-label={`Move to ${statusLabels[nextStatus]}`}
-            title={`Move to ${statusLabels[nextStatus]}`}
-            style="color: {statusColors[nextStatus]}"
-        >
-            {#if nextStatus === 'backlog'}
-                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-            {:else if nextStatus === 'in_progress'}
-                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-            {:else if nextStatus === 'review'}
-                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-            {:else if nextStatus === 'done'}
-                <svg width="16" height="16" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
-            {/if}
-        </button>
-    {/if}
 </div>
 
 <!-- Model picker dropdown (portal to escape card overflow) -->
@@ -418,6 +445,21 @@
         cursor: grab;
         position: relative;
         transition: border-color 0.15s ease;
+        --depth: 0;
+    }
+    .card.indented {
+        padding-left: calc(12px + var(--depth) * 1.25rem);
+        border-left: 2px solid var(--color-border);
+    }
+    .card.indented::before {
+        content: '';
+        position: absolute;
+        left: calc(var(--depth) * 1.25rem - 0.5px);
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--color-border);
+        pointer-events: none;
     }
     .card:hover {
         border-color: var(--color-border-bright);
@@ -434,10 +476,69 @@
         font-size: 0.875rem;
         font-weight: 500;
         margin-bottom: 6px;
-        padding-right: 64px;
+        position: relative;
+    }
+    .card-title-text {
+        display: block;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        padding-right: 0;
+        transition: padding-right 0.15s ease;
+    }
+    .card:hover .card-title-text,
+    .card.selected .card-title-text {
+        padding-right: calc(var(--actions) * 28px + 6px);
+    }
+    .card-actions {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+    .card:hover .card-actions,
+    .card.selected .card-actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    .action-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-tertiary);
+        padding: 0;
+        border: none;
+        cursor: pointer;
+        transition: background 0.1s ease, color 0.1s ease;
+    }
+    .action-icon:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .action-icon.action-move:hover {
+        background: var(--color-surface-3);
+        /* keep column color from inline style */
+    }
+    .action-idle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.625rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: var(--color-text-tertiary);
+        padding: 0 4px;
+        pointer-events: none;
     }
     .card-title-input {
         font-size: 0.875rem;
@@ -538,72 +639,14 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .edit-btn,
-    .move-btn {
-        position: absolute;
-        top: 8px;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-tertiary);
-        font-size: 0.875rem;
-        opacity: 0;
-        transition: opacity 0.15s ease, background 0.15s ease;
-        padding: 0;
-        border: none;
-        cursor: pointer;
-    }
-    .edit-btn {
-        right: 48px;
-    }
-    .move-btn {
-        right: 8px;
-    }
-    .card:hover .edit-btn,
-    .card:hover .move-btn,
-    .card.selected .edit-btn {
-        opacity: 1;
-    }
-    .edit-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .move-btn:hover {
-        background: var(--color-surface-3);
-        /* keep column color from inline style */
-    }
-    .idle-indicator {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-sm);
-        color: var(--color-text-tertiary);
-        font-size: 0.625rem;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-        opacity: 0;
-        transition: opacity 0.15s ease;
-        pointer-events: none;
-    }
-    .card:hover .idle-indicator,
-    .card.selected .idle-indicator {
-        opacity: 1;
-    }
+
     @media (hover: none) {
-        .edit-btn,
-        .move-btn {
+        .card-actions {
             opacity: 1;
-            transition: background 0.15s ease;
+            transition: none;
+        }
+        .card-title-text {
+            padding-right: calc(var(--actions) * 28px + 6px);
         }
     }
 </style>
