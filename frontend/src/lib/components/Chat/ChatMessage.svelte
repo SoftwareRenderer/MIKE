@@ -22,7 +22,7 @@
     function formatTime(isoStr: string): string {
         const date = new Date(isoStr);
         if (isNaN(date.getTime())) return '';
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     }
 
     let isEditing = $state(false);
@@ -504,11 +504,14 @@
         justify-content: flex-start;
     }
     .message-timestamp {
+        display: flex;
+        align-items: center;
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.6;
         white-space: nowrap;
         margin: 0 4px;
+        padding: 4px 0;
     }
     .user-actions .message-timestamp {
         margin-left: 0;

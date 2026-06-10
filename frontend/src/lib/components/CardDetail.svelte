@@ -667,15 +667,17 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
     .section-body {
         padding: 4px 6px 6px 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
     }
     .task-item {
         padding: 8px 10px;
-        margin: 2px 0;
         border-radius: var(--radius-sm);
         cursor: pointer;
         display: flex;
         justify-content: space-between;
-        align-items: baseline;
+        align-items: center;
         gap: 8px;
         transition: background 0.1s ease;
         text-align: left;
