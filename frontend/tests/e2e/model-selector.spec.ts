@@ -377,4 +377,22 @@ test.describe.serial('CreateTaskModal Provider Selector', () => {
     // Model selector should still be visible
     await expect(page.locator('.model-trigger')).toBeVisible();
   });
+
+  // Restore config after all model-selector tests so other tests work correctly
+  test.afterAll(async () => {
+    await apiPutConfig({
+      providers: [
+        {
+          name: 'test-localhost-9999',
+          display_name: 'Test Server',
+          url: 'http://localhost:9999/v1',
+          models: ['model-a', 'model-b'],
+          concurrency: 2,
+          default_model: 'model-a',
+        },
+      ],
+      default_provider: 'test-localhost-9999',
+    });
+    await waitForSettle(500);
+  });
 });

@@ -117,15 +117,16 @@ export async function createAndOpenTask(page: Page, title?: string): Promise<str
   await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
   await page.fill('textarea', taskTitle);
   await page.click('button[type="submit"]');
-  await expect(page.locator('.modal')).not.toBeVisible();
+  // Wait for modal to close (removed from DOM) — use a longer timeout for heavy load
+  await expect(page.locator('.modal')).toBeHidden({ timeout: 10000 });
   await page.waitForSelector('.card', { timeout: 5000 });
 
   // Open the newly created task by finding the card with matching title
   // (using .last() is unreliable when many tasks share the same column_order)
   const taskCard = page.locator('.card').filter({ hasText: taskTitle });
-  await expect(taskCard).toBeVisible({ timeout: 5000 });
+  await expect(taskCard).toBeVisible({ timeout: 10000 });
   await taskCard.click();
-  await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
   return taskTitle;
 }

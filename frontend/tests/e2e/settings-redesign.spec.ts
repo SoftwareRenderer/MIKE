@@ -178,10 +178,20 @@ test.describe.serial('Settings Redesign', () => {
 
     const card = page.locator('.provider-card').first();
 
-    // Active dot and badge should be visible
-    await expect(card.locator('.active-dot')).toBeVisible();
-    await expect(card.locator('.active-badge')).toBeVisible();
-    await expect(card.locator('.active-badge')).toContainText('Active');
+    // Expand card if collapsed (collapsed when default_model is set)
+    const expandBtn = card.locator('.btn-expand');
+    if (await expandBtn.isVisible().catch(() => false)) {
+      const isExpanded = await expandBtn.getAttribute('aria-expanded');
+      if (isExpanded === 'false') {
+        await expandBtn.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // Default provider button should be visible and active
+    const defaultBtn = card.locator('.btn-default-provider');
+    await expect(defaultBtn).toBeVisible();
+    await expect(defaultBtn).toContainText('Default');
   });
 
   test('should show Test Connection button', async ({ page }) => {
@@ -455,7 +465,11 @@ test.describe.serial('Settings Redesign', () => {
 
     // Model selector should NOT be visible (no providers configured)
     const modelTrigger = page.locator('.model-trigger');
-    await expect(modelTrigger).not.toBeVisible();
+    await expect(modelTrigger).not.toBeVisible({ timeout: 10000 });
+
+    // Navigate back to board (settings button is only visible on board, not task detail)
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
 
     // Open settings and add a provider
     await page.locator('[aria-label="Settings"]').click();
@@ -488,5 +502,23 @@ test.describe.serial('Settings Redesign', () => {
     await waitForSettle();
     await expect(page.locator('.portal-model-dropdown')).toBeVisible();
     await expect(page.locator('.portal-model-dropdown .model-option')).toContainText('new-model-x');
+  });
+
+  // Restore config after all settings tests so chromium tests work correctly
+  test.afterAll(async () => {
+    await apiPutConfig({
+      providers: [
+        {
+          name: 'test-localhost-9999',
+          display_name: 'Test Server',
+          url: 'http://localhost:9999/v1',
+          models: ['model-a', 'model-b'],
+          concurrency: 2,
+          default_model: 'model-a',
+        },
+      ],
+      default_provider: 'test-localhost-9999',
+    });
+    await waitForSettle(500);
   });
 });

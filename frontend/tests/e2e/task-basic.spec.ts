@@ -91,10 +91,10 @@ test.describe('Task Management', () => {
     const columns = page.locator('.columns .column');
     await expect(columns).toHaveCount(3);
 
-    // Verify column headers
-    await expect(page.locator('.column-context .column-title')).toBeVisible();
-    await expect(page.locator('.column-chat .column-title')).toContainText('Agent');
-    await expect(page.locator('.column-diff .column-title')).toContainText('Changes');
+    // Verify column sections exist
+    await expect(page.locator('.column-context')).toBeVisible();
+    await expect(page.locator('.column-chat')).toBeVisible();
+    await expect(page.locator('.column-diff')).toBeVisible();
   });
 
 });

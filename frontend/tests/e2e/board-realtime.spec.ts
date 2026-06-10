@@ -15,7 +15,7 @@ test.describe('Board Real-time Updates', () => {
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
     await page.fill('textarea', `Real-time test ${Date.now()}`);
     await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
+    await expect(page.locator('.modal')).toBeHidden({ timeout: 10000 });
 
     // Wait for the board to update (card count increases)
     await expect(async () => {
@@ -33,7 +33,7 @@ test.describe('Board Real-time Updates', () => {
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
     await page.fill('textarea', uniqueTitle);
     await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
+    await expect(page.locator('.modal')).toBeHidden({ timeout: 10000 });
 
     // Wait for the specific card to appear (not affected by parallel workers)
     const newCard = page.locator(`.card:has-text("${uniqueId}")`);

@@ -18,7 +18,8 @@ curl -s http://localhost:3000/api/config
 ### Rules
 - **Always restart** after backend changes
 - **Never leave running** after a crash or panic
-- **Check server is running** before e2e tests
+- **E2E tests manage their own server** — global-setup starts/stops a test server automatically
+- **Restart manually after tests** — your dev server is killed during test runs
 - **Use background mode** (`&`) for development
 - **Test Driven Development** to validate functionality
 
@@ -58,7 +59,7 @@ test.describe.serial('Feature Name', () => {
 
 ### Running Tests
 ```bash
-# All tests
+# All tests (auto-starts test server + mock LLM)
 cd frontend && npx playwright test
 
 # Specific test file
@@ -69,23 +70,35 @@ npx playwright test --grep "should edit message"
 
 # With UI for debugging
 npx playwright test --ui
+
+# Use real LLM (Neptune) instead of mock
+USE_MOCK_LLM=0 npx playwright test
 ```
 
-### Test Environment Cleanup
-Before running tests, ensure no stale processes hold ports:
+### Test Server Lifecycle
+Tests run against a **dedicated test server** with an isolated database, fully managed by `global-setup.ts`:
+
+1. **Setup** (before tests): Kills any server on `:3000`, starts fresh kanban server with test DB (`/tmp/kanban-test.db`), creates test project, starts mock LLM
+2. **Teardown** (after tests): Stops mock LLM, stops test server, deletes test DB + worktrees (`/tmp/kanban-test-worktrees/`)
+
+**Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
-pkill -f "mock-llm" 2>/dev/null
-rm -f /tmp/kanban-test-setup.lock
+cd /home/mwren/projects/kanban && ./kanban &
 ```
-Tests fail with `ERR_CONNECTION_REFUSED` if the mock LLM port (9999) is held by a previous run.
+
+### Test Environment
+- **Test DB**: `/tmp/kanban-test.db` (deleted after each run)
+- **Test worktrees**: `/tmp/kanban-test-worktrees/` (deleted after each run)
+- **Test git repo**: `/tmp/kanban-test-repo/` (persistent, recreated if missing)
+- **Lock file**: `/tmp/kanban-test-setup.lock` (coordinates setup/teardown phases)
 
 ### Testing Rules
-- **Server must be running** on `:3000` before tests
+- **Server is auto-managed** — global-setup starts/stops the test server
 - **Mock LLM is enabled by default** — tests use pre-recorded responses, not real Neptune endpoint
 - **Tests must NOT depend on real LLM** — use mock fixtures for deterministic results
 - **Use timeouts** for async operations (LLM responses, network calls)
 - **Wait for selectors** instead of fixed delays where possible
-- **Clean up after tests** — Don't leave server in broken state
+- **Full teardown/rebuild** — test DB is deleted and recreated each run
 - **Serial tests** when modifying shared state (messages, tasks)
 
 ## Testing Workflow
@@ -105,11 +118,19 @@ Tests fail with `ERR_CONNECTION_REFUSED` if the mock LLM port (9999) is held by 
 
 ### Mock LLM Server
 - Tests rely on a **mock LLM server** (NOT the real Neptune endpoint) for deterministic, fast results
-- Managed by `frontend/tests/global-setup.ts` — auto-starts before tests, restores config after
+- Auto-managed by `frontend/tests/global-setup.ts` — started before tests, stopped after
 - Mock server: `frontend/tests/mock-llm.js` (Node.js HTTP server on port 9999)
 - Fixtures: `frontend/tests/fixtures/` — pre-recorded SSE streaming responses
 - Response routing: mock selects fixture based on request body (tools present + message keywords)
-- Disable mock: `USE_MOCK_LLM=0 cd frontend && npx playwright test` (uses real LLM)
+- Disable mock: `USE_MOCK_LLM=0 npx playwright test` (uses real Neptune endpoint)
+
+#### Recording New Fixtures from Neptune
+When new LLM response types are needed or behavior changes:
+1. Set `USE_MOCK_LLM=0` to route through the real Neptune endpoint
+2. Run the specific test: `USE_MOCK_LLM=0 npx playwright test --grep "test name"`
+3. Capture the SSE stream from browser DevTools Network tab or server logs
+4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
+5. Update `mock-llm.js` routing if the new fixture needs keyword matching
 
 #### Recording New Fixtures
 When the LLM behavior changes or new response types are needed:
@@ -225,9 +246,15 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 ## Debugging Checklist
 1. Server running? `ps aux | grep kanban`
 2. Config correct? `curl /api/config`
-3. Worktrees dir exists? `ls worktrees/`
+3. Worktrees dir exists? `ls .worktrees/`
 4. Frontend built? `npm run build`
 5. Browser cache cleared? Hard refresh
 6. Check logs: server stdout or `/tmp/kanban.log`
-7. Tests passing? `npx playwright test`
-8. Stale mock LLM? `lsof -i :9999` — kill if present
+7. Tests passing? `cd frontend && npx playwright test`
+8. Stale test state? `rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db`
+
+### Test Failures
+- **`ERR_CONNECTION_REFUSED`**: Test server didn't start — check `lsof -i :3000` for port conflicts
+- **`waiting for locator('.project-item')`**: Test project not created — check global-setup logs
+- **`waiting for locator('.card')`**: No tasks exist — test expects existing tasks
+- **Mock LLM routing wrong**: Check `mock-llm.js` keyword matching and fixture files

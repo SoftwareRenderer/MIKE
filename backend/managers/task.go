@@ -245,7 +245,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		cfg, err := h.configStore.GetConfig()
 		if err != nil || cfg.LlamaServerURL == "" || cfg.ModelName == "" {
 			log.Printf("[title-gen] task=%s skipping: no LLM config (%v)", taskID, err)
-			h.finishTitleGeneration(projectID, taskID, false)
+			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 
@@ -258,13 +258,13 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		title, err := client.ChatCompletion(ctx, messages)
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
-			h.finishTitleGeneration(projectID, taskID, false)
+			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 
 		if title == "" {
 			log.Printf("[title-gen] task=%s empty title from LLM", taskID)
-			h.finishTitleGeneration(projectID, taskID, false)
+			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 

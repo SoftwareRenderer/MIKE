@@ -7,8 +7,8 @@ test.describe.serial('Reasoning effort setting', () => {
     });
 
     test('should show reasoning effort select for each model in settings', async ({ page }) => {
-        // Open settings modal - look for the gear/settings icon in the header
-        await page.click('button[aria-label="Open settings"], .settings-btn, header button:last-child');
+        // Open settings modal
+        await page.click('[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand a provider card
@@ -41,7 +41,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should default to Medium for new models', async ({ page }) => {
         // Open settings
-        await page.click('button[aria-label="Open settings"], .settings-btn, header button:last-child');
+        await page.click('[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand first provider
@@ -74,7 +74,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should persist reasoning effort after save', async ({ page }) => {
         // Open settings
-        await page.click('button[aria-label="Open settings"], .settings-btn, header button:last-child');
+        await page.click('[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand first provider
@@ -101,7 +101,7 @@ test.describe.serial('Reasoning effort setting', () => {
             }
 
             // Reopen settings
-            await page.click('button[aria-label="Open settings"], .settings-btn, header button:last-child');
+            await page.click('[aria-label="Settings"]');
             await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
             // Expand first provider again

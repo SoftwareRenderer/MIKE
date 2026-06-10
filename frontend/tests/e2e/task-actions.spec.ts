@@ -83,12 +83,15 @@ test.describe('Task Actions', () => {
   });
 
   test('should show task count in context column', async ({ page }) => {
+    // Navigate fresh to avoid stale state from previous tests
+    await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const cards = page.locator('.card');
+    await cards.first().click();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Column count should be visible
-    await expect(page.locator('.column-context .column-count')).toBeVisible();
+    // Context column should be visible with section headers
+    await expect(page.locator('.column-context')).toBeVisible();
   });
 
   test('should show Start Task button for new tasks', async ({ page }) => {

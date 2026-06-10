@@ -178,6 +178,8 @@ func (s *Store) initConfigDefaults() error {
 		"llama_server_url": "http://localhost:8081/v1",
 		"model_name":       "",
 		"workspace_dir":    "./.worktrees",
+		"providers":        "",
+		"default_provider": "",
 	}
 
 	// Migrate old default worktrees path to hidden .worktrees
