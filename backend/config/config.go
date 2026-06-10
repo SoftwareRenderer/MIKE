@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"sync"
 
 	"kanban/backend/httputil"
 	"kanban/backend/store"
@@ -15,9 +14,7 @@ import (
 
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store      *store.Store
-	overrideMu sync.Mutex
-	override   *types.Config // in-memory override (e.g. for tests), nil = no override
+	store *store.Store
 }
 
 // NewConfigStore creates a new ConfigStore.
@@ -26,24 +23,7 @@ func NewConfigStore(store *store.Store) *ConfigStore {
 }
 
 // GetConfig retrieves the full server configuration.
-// If an in-memory override is set (e.g. for tests), it is returned instead.
 func (cs *ConfigStore) GetConfig() (*types.Config, error) {
-	cs.overrideMu.Lock()
-	if cs.override != nil {
-		o := *cs.override
-		cs.overrideMu.Unlock()
-		return &o, nil
-	}
-	cs.overrideMu.Unlock()
-
-	llamaURL, err := cs.store.GetConfigValue("llama_server_url")
-	if err != nil {
-		return nil, err
-	}
-	modelName, err := cs.store.GetConfigValue("model_name")
-	if err != nil {
-		return nil, err
-	}
 	workspaceDir, err := cs.store.GetConfigValue("workspace_dir")
 	if err != nil {
 		return nil, err
@@ -74,8 +54,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
 	cfg := &types.Config{
-		LlamaServerURL:  llamaURL,
-		ModelName:       modelName,
 		WorkspaceDir:    workspaceDir,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
@@ -96,12 +74,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	providersJSON, err := json.Marshal(c.Providers)
 	if err != nil {
-		return err
-	}
-	if err := cs.store.SetConfigValue("llama_server_url", c.LlamaServerURL); err != nil {
-		return err
-	}
-	if err := cs.store.SetConfigValue("model_name", c.ModelName); err != nil {
 		return err
 	}
 	if err := cs.store.SetConfigValue("workspace_dir", c.WorkspaceDir); err != nil {
@@ -128,12 +100,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	// Also update in-memory override if set (so tests see the new values)
-	cs.overrideMu.Lock()
-	if cs.override != nil {
-		*cs.override = *c
-	}
-	cs.overrideMu.Unlock()
 	return nil
 }
 
@@ -158,12 +124,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
 			return
-		}
-		if url, ok := updates["llama_server_url"]; ok {
-			current.LlamaServerURL = url.(string)
-		}
-		if model, ok := updates["model_name"]; ok {
-			current.ModelName = model.(string)
 		}
 		if workspace, ok := updates["workspace_dir"]; ok {
 			current.WorkspaceDir = workspace.(string)
@@ -204,26 +164,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// SetOverride sets an in-memory config override (e.g. for tests).
-// Does not persist to the database. Cleared on server restart.
-func (cs *ConfigStore) SetOverride(cfg *types.Config) {
-	cs.overrideMu.Lock()
-	defer cs.overrideMu.Unlock()
-	if cfg == nil {
-		cs.override = nil
-	} else {
-		c := *cfg
-		cs.override = &c
-	}
-}
-
-// ClearOverride removes any in-memory config override.
-func (cs *ConfigStore) ClearOverride() {
-	cs.overrideMu.Lock()
-	defer cs.overrideMu.Unlock()
-	cs.override = nil
 }
 
 // parseBoolPtr parses a string to a *bool. Returns nil pointer if the string is empty.

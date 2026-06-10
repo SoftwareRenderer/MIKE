@@ -315,12 +315,12 @@
         />
     {:else}
         <div class="card-title">
-            <span class="card-title-text">{truncate(task.title, 80)}</span>
             {#if task.title_generating}
                 <span class="title-spinner" aria-label="Generating title">
                     <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
                 </span>
             {/if}
+            <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
                 {#if columnId === 'backlog' && !task.parent_task_id}
                     <button
@@ -478,13 +478,16 @@
         cursor: grabbing;
     }
     .card-title {
+        display: flex;
+        align-items: center;
         font-size: 0.875rem;
         font-weight: 500;
         margin-bottom: 6px;
         position: relative;
     }
     .card-title-text {
-        display: inline;
+        flex: 1;
+        min-width: 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -495,8 +498,7 @@
         display: inline-flex;
         align-items: center;
         color: var(--color-text-tertiary);
-        margin-left: 6px;
-        vertical-align: middle;
+        margin-right: 6px;
         flex-shrink: 0;
         animation: spin 1s linear infinite;
     }

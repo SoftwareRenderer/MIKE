@@ -203,37 +203,3 @@ func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
 	return types.DefaultReasoningEffort
 }
 
-// HandleTestOverride handles POST /api/test/override.
-// Sets or clears an in-memory config override without modifying the database.
-// Preserves providers and default_provider from the database.
-func (cs *ConfigStore) HandleTestOverride(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		var req struct {
-			LlamaServerURL string `json:"llama_server_url"`
-			ModelName      string `json:"model_name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		// Get current config to preserve workspace_dir and providers
-		current, err := cs.GetConfig()
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
-			return
-		}
-		cs.SetOverride(&types.Config{
-			LlamaServerURL:  req.LlamaServerURL,
-			ModelName:       req.ModelName,
-			WorkspaceDir:    current.WorkspaceDir,
-			Providers:       current.Providers,
-			DefaultProvider: current.DefaultProvider,
-		})
-		httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "override set"})
-	} else if r.Method == http.MethodDelete {
-		cs.ClearOverride()
-		httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "override cleared"})
-	} else {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}

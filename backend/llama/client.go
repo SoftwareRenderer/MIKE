@@ -80,6 +80,10 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 				"enable_thinking": true,
 			}
 		}
+	} else {
+		reqBody["chat_template_kwargs"] = map[string]interface{}{
+			"enable_thinking": false,
+		}
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -154,12 +158,27 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	url := c.baseURL + "/chat/completions"
 
 	reqBody := map[string]interface{}{
-		"model":         c.modelName,
-		"messages":      messages,
-		"stream":        false,
-		"temperature":   0.3,
-		"max_tokens":    128,
-		"tool_choice":   map[string]interface{}{"type": "none"},
+		"model":            c.modelName,
+		"messages":         messages,
+		"stream":           false,
+		"temperature":      0.3,
+		"max_tokens":       128,
+		"tool_choice":      map[string]interface{}{"type": "none"},
+		"reasoning_format": "auto",
+	}
+	if c.reasoningEffort != "off" {
+		budget, ok := reasoningEffortTokens[c.reasoningEffort]
+		if ok {
+			reqBody["thinking_budget_tokens"] = budget
+			reqBody["reasoning_control"] = true
+			reqBody["chat_template_kwargs"] = map[string]interface{}{
+				"enable_thinking": true,
+			}
+		}
+	} else {
+		reqBody["chat_template_kwargs"] = map[string]interface{}{
+			"enable_thinking": false,
+		}
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -193,7 +212,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		return "", fmt.Errorf("no choices in response")
 	}
 
-	content := result.Choices[0].Delta.Content
+	content := result.Choices[0].Message.Content
 	if content == nil {
 		return "", fmt.Errorf("empty content in response")
 	}

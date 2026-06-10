@@ -241,15 +241,15 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Get LLM config
-		cfg, err := h.configStore.GetConfig()
-		if err != nil || cfg.LlamaServerURL == "" || cfg.ModelName == "" {
-			log.Printf("[title-gen] task=%s skipping: no LLM config (%v)", taskID, err)
+		// Get LLM config from the task itself
+		task, err := h.store.GetTask(projectID, taskID)
+		if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
+			log.Printf("[title-gen] task=%s skipping: no LLM config on task (%v)", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 
-		client := llama.NewLlamaClient(cfg.LlamaServerURL, cfg.ModelName, "off")
+		client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
 		messages := []types.ChatMessage{
 			{Role: "system", Content: "You are a title generator. Given a task description, generate a short, descriptive title (max 50 characters). Return only the title, nothing else. No quotes, no explanation."},
 			{Role: "user", Content: prompt},
@@ -269,11 +269,6 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		}
 
 		// Update the task with the generated title
-		task, err := h.store.GetTask(projectID, taskID)
-		if err != nil {
-			log.Printf("[title-gen] task=%s not found for update: %v", taskID, err)
-			return
-		}
 		task.Title = title
 		task.TitleGenerating = false
 		task.UpdatedAt = time.Now().UTC()

@@ -42,10 +42,16 @@ type ChatChoiceDelta struct {
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
+// ChatChoiceMessage is the full message in a non-streaming response.
+type ChatChoiceMessage struct {
+	Content *string `json:"content"`
+}
+
 // ChatChoice is a single choice in the response.
 type ChatChoice struct {
-	Delta        ChatChoiceDelta `json:"delta"`
-	FinishReason string          `json:"finish_reason"`
+	Delta        ChatChoiceDelta   `json:"delta"`
+	Message      ChatChoiceMessage `json:"message"`
+	FinishReason string            `json:"finish_reason"`
 }
 
 // ChatUsage token usage stats.

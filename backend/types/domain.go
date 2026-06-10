@@ -33,8 +33,6 @@ type Board struct {
 
 // Config represents global server configuration.
 type Config struct {
-	LlamaServerURL        string     `json:"llama_server_url"`
-	ModelName             string     `json:"model_name"`
 	WorkspaceDir          string     `json:"workspace_dir"`
 	Providers             []Provider `json:"providers"`
 	DefaultProvider       string     `json:"default_provider"`

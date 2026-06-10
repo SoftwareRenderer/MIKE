@@ -5,17 +5,16 @@
  *  1. Ensure test git repo exists
  *  2. Kill any existing kanban server on port 3000
  *  3. Start a fresh kanban server with a test-specific database
- *  4. Create a test project pointing to the test repo
- *  5. Create test tasks (so tests have cards to interact with)
- *  6. Start mock LLM server
- *  7. Set in-memory override to use mock LLM
+ *  4. Configure mock provider via API
+ *  5. Create a test project pointing to the test repo
+ *  6. Create test tasks with mock provider URL
+ *  7. Start mock LLM server
  *
  * Teardown phase:
- *  1. Clear in-memory override
- *  2. Stop mock LLM server
- *  3. Stop test kanban server
- *  4. Delete test database and worktrees
- *  5. Remove lock file
+ *  1. Stop mock LLM server
+ *  2. Stop test kanban server
+ *  3. Delete test database and worktrees
+ *  4. Remove lock file
  *
  * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock enabled).
  */
@@ -74,24 +73,45 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT, 15000);
     console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
-    // 6. Create test project
+    // 6. Configure mock provider via API (if using mock LLM)
+    const useMock = process.env.USE_MOCK_LLM !== '0';
+    const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
+    if (useMock) {
+        const config = await getJson(`${KANBAN_BASE}/api/config`);
+        await putJson(`${KANBAN_BASE}/api/config`, {
+            ...config,
+            providers: [{
+                name: 'mock',
+                display_name: 'Mock LLM',
+                url: mockUrl,
+                models: [{ name: 'mock-model', reasoning_effort: 'off' }],
+                concurrency: 1,
+                default_model: 'mock-model',
+            }],
+            default_provider: 'mock',
+        });
+        console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
+    }
+
+    // 7. Create test project
     const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
     });
     console.log(`[global-setup] Test project created: ${project.id}`);
 
-    // 7. Create test tasks so tests have cards to work with
-    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, {
-        prompt: 'Test task for e2e tests',
-    });
-    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, {
-        prompt: 'Second test task',
-    });
+    // 8. Create test tasks with provider URL
+    const taskPayload = useMock
+        ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Test task for e2e tests' };
+    const taskPayload2 = useMock
+        ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Second test task' };
+    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload);
+    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2);
     console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
-    // 8. Start mock LLM server (if enabled)
-    const useMock = process.env.USE_MOCK_LLM !== '0';
+    // 9. Start mock LLM server (if enabled)
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
         mockServer = spawn('node', ['tests/mock-llm.js', MOCK_PORT.toString()], {
@@ -100,15 +120,8 @@ async function setup(): Promise<void> {
         });
 
         mockServer.stderr.on('data', data => console.error('[mock]', data.toString().trim()));
-
         await waitForServer(MOCK_PORT);
-
-        // 9. Set in-memory override (does NOT modify the database)
-        await postJson(`${KANBAN_BASE}/api/test/override`, {
-            llama_server_url: `http://localhost:${MOCK_PORT}/v1`,
-            model_name: 'mock-model',
-        });
-        console.log(`[global-setup] In-memory override set to mock LLM on port ${MOCK_PORT}`);
+        console.log(`[global-setup] Mock LLM server ready on port ${MOCK_PORT}`);
     } else {
         console.log('[global-setup] Using real LLM endpoint (USE_MOCK_LLM=0)');
     }
@@ -118,19 +131,7 @@ async function setup(): Promise<void> {
 }
 
 async function teardown(): Promise<void> {
-    const useMock = process.env.USE_MOCK_LLM !== '0';
-
-    // 1. Clear in-memory override
-    if (useMock) {
-        try {
-            await deleteRequest(`${KANBAN_BASE}/api/test/override`);
-            console.log('[global-teardown] In-memory override cleared');
-        } catch (e) {
-            console.error('[global-teardown] Failed to clear override:', e);
-        }
-    }
-
-    // 2. Stop mock LLM server
+    // 1. Stop mock LLM server
     if (mockServer) {
         mockServer.kill('SIGTERM');
         console.log('[global-teardown] Mock LLM server stopped');
@@ -260,6 +261,42 @@ function postJson(url: string, body: any): Promise<any> {
         });
         req.on('error', reject);
         req.write(data);
+        req.end();
+    });
+}
+
+function putJson(url: string, body: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const req = http.request(url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data),
+            },
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
+
+function getJson(url: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const req = http.get(url, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
         req.end();
     });
 }

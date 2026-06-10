@@ -306,10 +306,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
-            if (!selectedUrl && cfg.llama_server_url) {
-                selectedUrl = cfg.llama_server_url;
-                selectedModel = cfg.model_name || '';
-            }
+
         } catch {
             providers = [];
         }

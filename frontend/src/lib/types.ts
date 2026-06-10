@@ -36,8 +36,6 @@ export interface Board {
 }
 
 export interface Config {
-    llama_server_url: string;
-    model_name: string;
     workspace_dir: string;
     providers: Provider[];
     default_provider: string;

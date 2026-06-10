@@ -175,8 +175,6 @@ func (s *Store) initConfigDefaults() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defaults := map[string]string{
-		"llama_server_url": "http://localhost:8081/v1",
-		"model_name":       "",
 		"workspace_dir":    "./.worktrees",
 		"providers":        "",
 		"default_provider": "",

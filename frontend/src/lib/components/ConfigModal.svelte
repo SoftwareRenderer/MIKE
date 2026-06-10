@@ -523,9 +523,6 @@
                                                         <span class="btn-default-placeholder"></span>
                                                     {/if}
                                                     <div class="model-name-cell">
-                                                        {#if model.name === config?.model_name}
-                                                            <span class="in-use-badge">In use</span>
-                                                        {/if}
                                                         {#if model.readonly}
                                                             <span class="model-name-label">{model.name}</span>
                                                         {:else}

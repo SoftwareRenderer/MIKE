@@ -54,7 +54,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
 	s.mux.HandleFunc("/api/config/fetch-models", s.configStore.HandleFetchModels)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
-	s.mux.HandleFunc("/api/test/override", s.configStore.HandleTestOverride)
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
