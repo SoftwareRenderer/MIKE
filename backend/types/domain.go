@@ -21,6 +21,7 @@ type Task struct {
 	AutoPR                  bool      `json:"auto_pr"`
 	PlanMode                bool      `json:"plan_mode"`
 	ParentTaskID            string    `json:"parent_task_id,omitempty"`
+	TitleGenerating         bool      `json:"title_generating"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }

@@ -316,6 +316,11 @@
     {:else}
         <div class="card-title">
             <span class="card-title-text">{truncate(task.title, 80)}</span>
+            {#if task.title_generating}
+                <span class="title-spinner" aria-label="Generating title">
+                    <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
+                </span>
+            {/if}
             <div class="card-actions">
                 {#if columnId === 'backlog' && !task.parent_task_id}
                     <button
@@ -479,12 +484,25 @@
         position: relative;
     }
     .card-title-text {
-        display: block;
+        display: inline;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         padding-right: 0;
         transition: padding-right 0.15s ease;
+    }
+    .title-spinner {
+        display: inline-flex;
+        align-items: center;
+        color: var(--color-text-tertiary);
+        margin-left: 6px;
+        vertical-align: middle;
+        flex-shrink: 0;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
     }
     .card:hover .card-title-text,
     .card.selected .card-title-text {

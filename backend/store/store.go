@@ -167,6 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN reasoning_content TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT NULL`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN title_generating INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -316,13 +317,13 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoPR, planMode int
+	var autoCommit, autoPR, planMode, titleGenerating int
 	var createdAt, updatedAt string
 	var parentTaskID sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoPR, &planMode, &parentTaskID, &createdAt, &updatedAt)
+		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
@@ -330,6 +331,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.AutoPR = i2b(autoPR)
 	t.PlanMode = i2b(planMode)
 	t.ParentTaskID = parentTaskID.String
+	t.TitleGenerating = i2b(titleGenerating)
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return nil

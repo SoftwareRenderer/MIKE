@@ -144,6 +144,63 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	return usage, scanner.Err()
 }
 
+// ChatCompletion sends a non-streaming chat completion request and returns the full text response.
+// Used for simple queries like title generation where streaming is not needed.
+func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage) (string, error) {
+	if c.baseURL == "" {
+		return "", fmt.Errorf("llama server URL not configured")
+	}
+
+	url := c.baseURL + "/chat/completions"
+
+	reqBody := map[string]interface{}{
+		"model":         c.modelName,
+		"messages":      messages,
+		"stream":        false,
+		"temperature":   0.3,
+		"max_tokens":    128,
+		"tool_choice":   map[string]interface{}{"type": "none"},
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("post to llama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result types.ChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", fmt.Errorf("no choices in response")
+	}
+
+	content := result.Choices[0].Delta.Content
+	if content == nil {
+		return "", fmt.Errorf("empty content in response")
+	}
+
+	return strings.TrimSpace(*content), nil
+}
+
 // HealthCheck pings the llama server.
 func (c *LlamaClient) HealthCheck() error {
 	url := c.baseURL + "/chat/completions"

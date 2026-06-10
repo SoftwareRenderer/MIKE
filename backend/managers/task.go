@@ -1,6 +1,7 @@
 package managers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/llama"
 	"kanban/backend/stream"
 	"kanban/backend/store"
 	"kanban/backend/term"
@@ -90,10 +92,13 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 				return
 			}
 		}
+		task.TitleGenerating = true
 		if err := h.store.CreateTask(&task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Spawn async goroutine to generate a better title via LLM
+		h.startTitleGeneration(projectID, task.ID, task.Prompt)
 		h.boardStreamMgr.Broadcast(projectID)
 		httputil.JSONResponse(w, http.StatusCreated, task)
 	default:
@@ -225,5 +230,79 @@ func (h *TaskHandler) cleanupTask(taskID string) {
 	task, err := h.store.GetTaskByTaskID(taskID)
 	if err == nil {
 		_ = h.store.DeleteTask(task.ProjectID, taskID)
+	}
+}
+
+// startTitleGeneration spawns a goroutine that uses the LLM to generate
+// a concise title for the task. On success, it updates the task title.
+// On failure or timeout, it keeps the existing (first-line) title.
+func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Get LLM config
+		cfg, err := h.configStore.GetConfig()
+		if err != nil || cfg.LlamaServerURL == "" || cfg.ModelName == "" {
+			log.Printf("[title-gen] task=%s skipping: no LLM config (%v)", taskID, err)
+			h.finishTitleGeneration(projectID, taskID, false)
+			return
+		}
+
+		client := llama.NewLlamaClient(cfg.LlamaServerURL, cfg.ModelName, "off")
+		messages := []types.ChatMessage{
+			{Role: "system", Content: "You are a title generator. Given a task description, generate a short, descriptive title (max 50 characters). Return only the title, nothing else. No quotes, no explanation."},
+			{Role: "user", Content: prompt},
+		}
+
+		title, err := client.ChatCompletion(ctx, messages)
+		if err != nil {
+			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
+			h.finishTitleGeneration(projectID, taskID, false)
+			return
+		}
+
+		if title == "" {
+			log.Printf("[title-gen] task=%s empty title from LLM", taskID)
+			h.finishTitleGeneration(projectID, taskID, false)
+			return
+		}
+
+		// Update the task with the generated title
+		task, err := h.store.GetTask(projectID, taskID)
+		if err != nil {
+			log.Printf("[title-gen] task=%s not found for update: %v", taskID, err)
+			return
+		}
+		task.Title = title
+		task.TitleGenerating = false
+		task.UpdatedAt = time.Now().UTC()
+		if err := h.store.UpdateTask(task); err != nil {
+			log.Printf("[title-gen] task=%s update failed: %v", taskID, err)
+			return
+		}
+
+		log.Printf("[title-gen] task=%s title updated to: %q", taskID, title)
+		h.boardStreamMgr.Broadcast(projectID)
+	}()
+}
+
+// finishTitleGeneration sets title_generating to false without changing the title.
+func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast bool) {
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		return
+	}
+	if !task.TitleGenerating {
+		return // already finished
+	}
+	task.TitleGenerating = false
+	task.UpdatedAt = time.Now().UTC()
+	if err := h.store.UpdateTask(task); err != nil {
+		log.Printf("[title-gen] task=%s finish update failed: %v", taskID, err)
+		return
+	}
+	if broadcast {
+		h.boardStreamMgr.Broadcast(projectID)
 	}
 }
