@@ -23,6 +23,19 @@ export async function getProjectCounts(): Promise<Record<string, ProjectCounts>>
     return res.json();
 }
 
+export async function getProjectStats(projectId: string): Promise<ProjectStats> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/stats`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch project stats');
+    return res.json();
+}
+
+export async function resetProjectStats(projectId: string, modelName: string, providerName?: string): Promise<void> {
+    const params = new URLSearchParams({ model_name: modelName });
+    if (providerName) params.set('provider_name', providerName);
+    const res = await fetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
+    if (!res.ok) throw await apiError(res, 'Failed to reset stats');
+}
+
 export async function createProject(path: string): Promise<Project> {
     const res = await fetch(`${API_BASE}/projects`, {
         method: 'POST',

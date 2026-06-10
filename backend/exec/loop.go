@@ -30,6 +30,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}()
 
 	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
+	providerName := te.configStore.GetProviderNameByURL(serverURL)
 	reasoningEffort := te.configStore.GetModelReasoningEffort(modelName)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort)
 	tools := llama.GetToolDefinitions()
@@ -104,6 +105,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				mc.set(newURL, newModel)
 				newReasoningEffort := te.configStore.GetModelReasoningEffort(newModel)
 				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort)
+				providerName = te.configStore.GetProviderNameByURL(newURL)
 				log.Printf("[model-switch] task=%s url=%s model=%s", task.ID, newURL, newModel)
 			}
 		}
@@ -254,10 +256,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 					task.Output = summary
 					te.store.UpdateTask(task)
-					promptTokens, predictedTokens, promptMs, predictedMs := computeStats(usage, messages, assistantText, reasoningContent.String(), startTime)
+					promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages, assistantText, reasoningContent.String(), startTime)
 					b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 						"state": task.StatusState, "summary": summary,
 						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+						"cache_tokens": cacheTokens,
 						"prompt_ms": promptMs, "predicted_ms": predictedMs,
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
@@ -270,11 +273,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			for _, tr := range toolResults {
 				messages = append(messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
-			promptTokens, predictedTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: uuid.New().String(), TaskID: task.ID, Role: "assistant",
 				Content: assistantText, ReasoningContent: reasoningContent.String(),
-				ModelName: activeModel, PromptTokens: promptTokens, PredictedTokens: predictedTokens,
+				ModelName: activeModel, ProviderName: providerName,
+				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
 				Duration: time.Since(startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 			})
@@ -283,12 +287,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			reasoningContent.Reset()
 		} else if assistantText != "" {
 			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
-			promptTokens, predictedTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)
 			duration := time.Since(startTime).Milliseconds()
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: uuid.New().String(), TaskID: task.ID, Role: "assistant",
 				Content: assistantText, ReasoningContent: reasoningContent.String(),
-				ModelName: activeModel, PromptTokens: promptTokens, PredictedTokens: predictedTokens,
+				ModelName: activeModel, ProviderName: providerName,
+				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
 				Duration: duration, CreatedAt: time.Now().UTC(),
 			})
@@ -300,6 +305,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+				"cache_tokens": cacheTokens,
 				"prompt_ms": promptMs, "predicted_ms": predictedMs,
 				"model_name": activeModel, "duration": duration,
 			}})
@@ -335,14 +341,15 @@ func (te *TaskExecutor) gitRun(dir string, args ...string) error {
 	return err
 }
 
-func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string, startTime time.Time) (promptTokens, predictedTokens, promptMs, predictedMs int) {
+func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string, startTime time.Time) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
 	if usage != nil {
-		return usage.PromptTokens, usage.CompletionTokens, usage.PromptMs, usage.PredictedMs
+		return usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, int(usage.PromptMs), int(usage.PredictedMs)
 	}
 	durationMs := int(time.Since(startTime).Milliseconds())
 	promptTokens = estimatePromptTokens(messages)
 	predictedTokens = estimateTotalTokens(assistantText, reasoningContent)
+	cacheTokens = 0
 	promptMs = durationMs * 7 / 10
 	predictedMs = durationMs * 3 / 10
-	return promptTokens, predictedTokens, promptMs, predictedMs
+	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
 }

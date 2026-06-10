@@ -40,6 +40,7 @@ var (
 	reProjectHomeAgentMsg  = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/message$`)
 	reProjectHomeAgentMsgs = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/messages$`)
 	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
+	reProjectStats         = regexp.MustCompile(`^/api/projects/([^/]+)/stats$`)
 	reProjectTerminal      = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 	reTaskTerminal         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
 	reTaskWorktreeExists   = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/worktree-exists$`)
@@ -97,6 +98,11 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 
 	if m := reProjectByID.FindStringSubmatch(path); m != nil {
 		s.projectHandler.HandleByID(w, r, m[1])
+		return
+	}
+
+	if m := reProjectStats.FindStringSubmatch(path); m != nil {
+		s.projectHandler.HandleStats(w, r, m[1])
 		return
 	}
 

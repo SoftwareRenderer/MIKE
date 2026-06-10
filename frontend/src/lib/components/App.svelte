@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showCardDetail, selectedTask } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import type { Project, Task, Config } from '$lib/types';
@@ -9,6 +9,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import TerminalPanel from './TerminalPanel.svelte';
     import CreateTaskModal from './CreateTaskModal.svelte';
     import ConfigModal from './ConfigModal.svelte';
+    import StatsModal from './StatsModal.svelte';
     import Board from './Board.svelte';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
@@ -23,6 +24,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     let showCreateTaskVal = $state(false);
     let showConfigVal = $state(false);
     let showTerminalVal = $state(false);
+    let showStatsVal = $state(false);
     let showCardDetailVal = $state(false);
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
@@ -46,6 +48,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             showCreateTask.subscribe(v => showCreateTaskVal = v),
             showConfig.subscribe(v => showConfigVal = v),
             showTerminal.subscribe(v => showTerminalVal = v),
+            showStats.subscribe(v => showStatsVal = v),
             showCardDetail.subscribe(v => showCardDetailVal = v),
             configStore.subscribe(v => { if (v) cfg = v; }),
             selectedTask.subscribe(t => {
@@ -303,6 +306,13 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                             <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
+                    <button class="icon-btn" onclick={() => showStats.set(true)} aria-label="Token usage stats">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
+                            <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
+                            <rect x="12" y="1" width="3" height="13" rx="0.5" fill="currentColor"/>
+                        </svg>
+                    </button>
                     <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="3"/>
@@ -367,6 +377,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     {/if}
     {#if showTerminalVal}
         <TerminalPanel />
+    {/if}
+    {#if showStatsVal}
+        <StatsModal
+            projectId={currentProject?.id}
+            onClose={() => showStats.set(false)}
+        />
     {/if}
     {#if showFileBrowserVal}
         <FileBrowser

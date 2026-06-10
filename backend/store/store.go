@@ -133,6 +133,8 @@ CREATE TABLE IF NOT EXISTS task_messages (
     model_name         TEXT DEFAULT NULL,
     prompt_tokens      INTEGER DEFAULT 0,
     predicted_tokens   INTEGER DEFAULT 0,
+    cache_tokens       INTEGER DEFAULT 0,
+    provider_name      TEXT DEFAULT NULL,
     prompt_ms          INTEGER DEFAULT 0,
     predicted_ms       INTEGER DEFAULT 0,
     duration           INTEGER DEFAULT 0,
@@ -168,6 +170,8 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT NULL`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN title_generating INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN cache_tokens INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN provider_name TEXT DEFAULT NULL`)
 	return nil
 }
 

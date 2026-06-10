@@ -12,8 +12,8 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.PromptTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -23,7 +23,7 @@ func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, prompt_tokens, predicted_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -34,8 +34,8 @@ func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
 	for rows.Next() {
 		var m types.TaskMessage
 		var createdAt string
-		var modelName, toolCalls, toolResult, reasoningContent sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &m.PromptTokens, &m.PredictedTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
+		var modelName, providerName, toolCalls, toolResult, reasoningContent sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
 			return nil, err
 		}
 		if reasoningContent.Valid {
@@ -43,6 +43,9 @@ func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
 		}
 		if modelName.Valid {
 			m.ModelName = modelName.String
+		}
+		if providerName.Valid {
+			m.ProviderName = providerName.String
 		}
 		if toolCalls.Valid {
 			m.ToolCalls = toolCalls.String

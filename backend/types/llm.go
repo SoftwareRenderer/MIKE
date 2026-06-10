@@ -54,19 +54,35 @@ type ChatChoice struct {
 	FinishReason string            `json:"finish_reason"`
 }
 
-// ChatUsage token usage stats.
+// PromptTokensDetails holds breakdown of prompt tokens.
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// ChatUsage token usage stats from the LLM response.
 type ChatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	PromptMs         int `json:"prompt_ms"`
-	PredictedMs      int `json:"predicted_ms"`
+	PromptTokens        int                 `json:"prompt_tokens"`
+	PromptTokensDetails PromptTokensDetails `json:"prompt_tokens_details"`
+	CompletionTokens    int                 `json:"completion_tokens"`
+	TotalTokens         int                 `json:"total_tokens"`
+	PromptMs            int64               `json:"-"` // populated from timings after parse
+	PredictedMs         int64               `json:"-"` // populated from timings after parse
+}
+
+// ChatTimings processing timings from the LLM response.
+type ChatTimings struct {
+	CacheN        int     `json:"cache_n"`        // tokens served from KV cache
+	PromptN       int     `json:"prompt_n"`        // tokens actually processed
+	PromptMs      float64 `json:"prompt_ms"`
+	PredictedN    int     `json:"predicted_n"`     // tokens generated
+	PredictedMs   float64 `json:"predicted_ms"`
 }
 
 // ChatResponse is a full streaming response frame.
 type ChatResponse struct {
-	Choices []ChatChoice `json:"choices"`
-	Usage   *ChatUsage   `json:"usage,omitempty"`
+	Choices  []ChatChoice `json:"choices"`
+	Usage    *ChatUsage   `json:"usage,omitempty"`
+	Timings  *ChatTimings `json:"timings,omitempty"`
 }
 
 // StreamCallback is called for each streaming token/tool_call.

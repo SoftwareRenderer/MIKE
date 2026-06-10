@@ -10,6 +10,7 @@ export const config = writable<Config | null>(null);
 export const showCreateTask = writable(false);
 export const showConfig = writable(false);
 export const showTerminal = writable(false);
+export const showStats = writable(false);
 export const showCardDetail = writable(false);
 
 // Task IDs that are actively streaming tokens (frontend-only, real-time)

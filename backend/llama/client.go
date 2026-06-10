@@ -130,8 +130,28 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 		if cr.Usage != nil {
 			usage = cr.Usage
-			log.Printf("[llama] usage: prompt_tokens=%d, completion_tokens=%d, prompt_ms=%d, predicted_ms=%d",
-				usage.PromptTokens, usage.CompletionTokens, usage.PromptMs, usage.PredictedMs)
+			if cr.Timings != nil {
+				usage.PromptMs = int64(cr.Timings.PromptMs)
+				usage.PredictedMs = int64(cr.Timings.PredictedMs)
+				// Fill cache tokens from timings if not in usage
+				if usage.PromptTokensDetails.CachedTokens == 0 && cr.Timings.CacheN > 0 {
+					usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
+				}
+			}
+			log.Printf("[llama] usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
+				usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
+		} else if cr.Timings != nil {
+			// Streaming response without usage object (e.g., llama.cpp) - build from timings
+			if usage == nil {
+				usage = &types.ChatUsage{}
+			}
+			// prompt_tokens = processed (prompt_n) + cached (cache_n)
+			usage.PromptTokens = cr.Timings.PromptN + cr.Timings.CacheN
+			usage.CompletionTokens = cr.Timings.PredictedN
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+			usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
+			usage.PromptMs = int64(cr.Timings.PromptMs)
+			usage.PredictedMs = int64(cr.Timings.PredictedMs)
 		}
 
 		for _, choice := range cr.Choices {
@@ -140,8 +160,8 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 
 	if usage != nil {
-		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, prompt_ms=%d, predicted_ms=%d",
-			usage.PromptTokens, usage.CompletionTokens, usage.PromptMs, usage.PredictedMs)
+		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
+			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	} else {
 		log.Printf("[llama] no usage data received")
 	}

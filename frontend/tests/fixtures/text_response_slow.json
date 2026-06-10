@@ -1,18 +1,178 @@
 [
-  {"choices": [{"delta": {"content": "This"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " is"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " a"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " longer"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " response"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " with"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " artificial"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " delay"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " to"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " allow"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " testing"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " of"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " the"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " stop"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " button"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": "."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 62, "completion_tokens": 16, "total_tokens": 78, "prompt_ms": 450, "predicted_ms": 2000}}
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "This"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " is"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " a"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " longer"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " response"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " with"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " artificial"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " delay"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " to"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " allow"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " testing"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " of"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " the"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " stop"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " button"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "."
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 62,
+      "completion_tokens": 16,
+      "total_tokens": 78,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 450,
+      "predicted_ms": 2000,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
 ]

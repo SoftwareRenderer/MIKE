@@ -94,6 +94,36 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusCreated, p)
 }
 
+// HandleStats returns aggregated token usage stats for a project.
+func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request, id string) {
+	switch r.Method {
+	case http.MethodGet:
+		stats, err := h.store.GetProjectStats(id)
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to get project stats")
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, stats)
+
+	case http.MethodDelete:
+		modelName := r.URL.Query().Get("model_name")
+		if modelName == "" {
+			httputil.JSONError(w, http.StatusBadRequest, "model_name query parameter is required")
+			return
+		}
+		providerName := r.URL.Query().Get("provider_name")
+		err := h.store.DeleteProjectStats(id, modelName, providerName)
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to reset stats")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // HandleByID handles GET, PUT, DELETE for a single project.
 func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id string) {
 	switch r.Method {

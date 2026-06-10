@@ -140,10 +140,37 @@ type TaskMessage struct {
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
 	ModelName        string    `json:"model_name,omitempty"`
+	ProviderName     string    `json:"provider_name,omitempty"`
 	PromptTokens     int       `json:"prompt_tokens,omitempty"`
 	PredictedTokens  int       `json:"predicted_tokens,omitempty"`
+	CacheTokens      int       `json:"cache_tokens,omitempty"`
 	PromptMs         int       `json:"prompt_ms,omitempty"`
 	PredictedMs      int       `json:"predicted_ms,omitempty"`
 	Duration         int64     `json:"duration,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+// ProjectStats holds aggregated token usage for a project.
+type ProjectStats struct {
+	TotalTasks         int        `json:"total_tasks"`
+	TotalPromptTokens  int        `json:"total_prompt_tokens"`
+	TotalCacheTokens   int        `json:"total_cache_tokens"`
+	TotalProcessedTokens int      `json:"total_processed_tokens"`
+	TotalGeneratedTokens int      `json:"total_generated_tokens"`
+	AvgPromptTps       float64    `json:"avg_prompt_tps"`
+	AvgGenerationTps   float64    `json:"avg_generation_tps"`
+	ByModel            []ModelStats `json:"by_model"`
+}
+
+// ModelStats holds token usage aggregated by provider/model.
+type ModelStats struct {
+	ModelName        string  `json:"model_name"`
+	ProviderName     string  `json:"provider_name,omitempty"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CacheTokens      int     `json:"cache_tokens"`
+	ProcessedTokens  int     `json:"processed_tokens"`
+	GeneratedTokens  int     `json:"generated_tokens"`
+	AvgPromptTps     float64 `json:"avg_prompt_tps"`
+	AvgGenerationTps float64 `json:"avg_generation_tps"`
+	TaskCount        int     `json:"task_count"`
 }

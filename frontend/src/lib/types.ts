@@ -150,6 +150,29 @@ export interface ProjectCounts {
     review: number;
 }
 
+export interface ModelStats {
+    model_name: string;
+    provider_name: string;
+    prompt_tokens: number;
+    cache_tokens: number;
+    processed_tokens: number;
+    generated_tokens: number;
+    avg_prompt_tps: number;
+    avg_generation_tps: number;
+    task_count: number;
+}
+
+export interface ProjectStats {
+    total_tasks: number;
+    total_prompt_tokens: number;
+    total_cache_tokens: number;
+    total_processed_tokens: number;
+    total_generated_tokens: number;
+    avg_prompt_tps: number;
+    avg_generation_tps: number;
+    by_model: ModelStats[];
+}
+
 // Stream events
 export type StreamEventType =
     | 'token'

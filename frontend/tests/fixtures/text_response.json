@@ -1,11 +1,108 @@
 [
-  {"choices": [{"delta": {"content": "Hello!"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " How"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " can"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " I"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " help"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " you"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " today"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": "?"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": ""}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 45, "completion_tokens": 8, "total_tokens": 53, "prompt_ms": 320, "predicted_ms": 180}}
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "Hello!"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " How"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " can"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " I"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " help"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " you"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " today"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "?"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": ""
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 8,
+      "total_tokens": 53,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 320,
+      "predicted_ms": 180,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
 ]
