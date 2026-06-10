@@ -392,10 +392,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         <div bind:this={columnsRef} class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp} role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
-                <div class="column-header">
-                    <span class="column-title">Board</span>
-                    <span class="column-count">{allTasks.length}</span>
-                </div>
                 <div class="task-list">
                     {#each overviewSections as section}
                         {@const sectionTasks = allTasks.filter(t => t.status === section.id).sort((a, b) => a.column_order - b.column_order)}
@@ -470,12 +466,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
             <!-- Column 2: Chat / Agent Interface -->
             <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={chatWidth}>
-                <div class="column-header">
-                    <div class="column-header-left">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                        <span class="column-title">Agent</span>
-                    </div>
-                </div>
                 <div style="flex:1;min-height:0">
                     <TaskChat
                         projectId={task.project_id}
@@ -498,15 +488,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
-                <div class="column-header">
-                    <div class="column-header-left">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        <span class="column-title">Changes</span>
-                    </div>
-                    <button class="btn-icon-sm" onclick={loadDiff} disabled={loadingDiff} aria-label="Refresh diff">
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8a5 5 0 019.5-2M13 8a5 5 0 01-9.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    </button>
-                </div>
                 <div class="diff-content">
                     <DiffViewer files={diffFiles} loading={loadingDiff} />
                 </div>
@@ -617,35 +598,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         flex-shrink: 0;
         border-right: 1px solid var(--color-border);
         background: var(--color-surface-0);
-    }
-    .column-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 12px;
-        border-bottom: 1px solid;
-        flex-shrink: 0;
-        background: var(--color-surface-1);
-        height: 34px;
-    }
-    .column-header-left {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: var(--color-text-secondary);
-    }
-    .column-title {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .column-count {
-        background: var(--color-surface-3);
-        border-radius: 8px;
-        padding: 1px 6px;
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
     }
     .task-list {
         flex: 1;
