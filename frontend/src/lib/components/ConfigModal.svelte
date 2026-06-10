@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Config, Provider } from '$lib/types';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, reloadPrompts as reloadPromptsApi } from '$lib/api';
+    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
@@ -28,10 +28,6 @@
     let defaultMaxFailedTurns = $state(config?.default_max_failed_turns ?? 3);
     let loading = $state(false);
     let error = $state('');
-
-    // -- Prompt reload --
-    let promptReloadStatus = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
-    let promptReloadMessage = $state('');
 
     // -- Provider management --
     interface ModelEntry {
@@ -362,24 +358,6 @@
         }
     });
 
-    async function handleReloadPrompts() {
-        promptReloadStatus = 'loading';
-        promptReloadMessage = '';
-        try {
-            const result = await reloadPromptsApi();
-            promptReloadStatus = 'success';
-            promptReloadMessage = result.message || 'Templates validated successfully';
-            // Auto-clear success after 4s
-            setTimeout(() => {
-                promptReloadStatus = 'idle';
-                promptReloadMessage = '';
-            }, 4000);
-        } catch (e) {
-            promptReloadStatus = 'error';
-            promptReloadMessage = String(e);
-        }
-    }
-
     function handleClose() {
         focusTrap?.destroy();
         focusTrap = null;
@@ -667,33 +645,6 @@
                         </span>
                     </div>
                     <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
-                </div>
-            </fieldset>
-
-            <!-- Prompts Section -->
-            <fieldset class="section">
-                <h3 class="section-label">Prompts</h3>
-                <p class="section-description">System prompt templates are loaded from <code class="inline-code">prompts/</code> at runtime</p>
-                <div class="prompt-reload-row">
-                    <button type="button" class="btn-small" onclick={handleReloadPrompts} disabled={promptReloadStatus === 'loading'}>
-                        {#if promptReloadStatus === 'loading'}
-                            <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
-                            </svg>
-                            Validating...
-                        {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                <path d="M2 8a6 6 0 0111.48-2.4M14 8a6 6 0 01-11.48 2.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                <path d="M14 2v4h-4M2 14v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            Validate Templates
-                        {/if}
-                    </button>
-                    {#if promptReloadStatus === 'success'}
-                        <span class="prompt-status success">✓ {promptReloadMessage}</span>
-                    {:else if promptReloadStatus === 'error'}
-                        <span class="prompt-status error">✕ {promptReloadMessage}</span>
-                    {/if}
                 </div>
             </fieldset>
 
@@ -1655,31 +1606,6 @@
         }
     }
 
-    /* Prompt reload row */
-    .prompt-reload-row {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 8px 0;
-        border-top: 1px solid var(--color-border);
-    }
-    .inline-code {
-        font-family: var(--font-mono, monospace);
-        background: var(--color-surface-3);
-        padding: 1px 6px;
-        border-radius: 4px;
-        font-size: 0.8em;
-    }
-    .prompt-status {
-        font-size: 0.8125rem;
-        font-weight: 500;
-    }
-    .prompt-status.success {
-        color: var(--color-status-green);
-    }
-    .prompt-status.error {
-        color: var(--color-status-red);
-    }
     .spin-icon {
         animation: spin 0.8s linear infinite;
         display: inline-block;
