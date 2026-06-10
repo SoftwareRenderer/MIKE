@@ -36,9 +36,8 @@
         return null;
     });
 
-    // Model badge: configurable via card_model_badge setting
-    // "auto" = model only (1 provider) or provider+model (2+), "always" = provider+model, "model" = model only, "none" = hidden
-    // Shows even when no model is set (displays default model as placeholder)
+    // Model badge: always "auto" behavior
+    // Model only (1 provider) or provider+model (2+)
     const MODEL_COLORS = [
         '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
         '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
@@ -53,8 +52,6 @@
     }
     let modelBadge = $derived.by(() => {
         const cfg = get(configStore);
-        const style = (cfg?.card_model_badge || '').trim() || 'auto';
-        if (style === 'none') return { text: null, color: '' };
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, color: '' };
         // Use task model if set, otherwise fall back to default model
@@ -63,7 +60,8 @@
         if (!activeModel) return { text: null, color: '' };
         // Find matching provider by URL
         const provider = providers.find(p => p.url === task.llama_server_url);
-        const showProvider = style === 'always' || (style === 'auto' && providers.length > 1);
+        // Auto: show provider name only when 2+ providers
+        const showProvider = providers.length > 1;
         const text = showProvider && provider ? `${provider.display_name} · ${activeModel}` : activeModel;
         return { text, color: getModelColor(activeModel) };
     });

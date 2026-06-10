@@ -26,7 +26,6 @@
     let defaultAutoCommit = $state(config?.default_auto_commit ?? false);
     let defaultPlanMode = $state(config?.default_plan_mode ?? false);
     let defaultMaxFailedTurns = $state(config?.default_max_failed_turns ?? 3);
-    let cardModelBadge = $state(config?.card_model_badge || 'auto');
     let loading = $state(false);
     let error = $state('');
 
@@ -337,7 +336,6 @@
                 default_auto_commit: defaultAutoCommit,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
-                card_model_badge: cardModelBadge,
             });
             configStore.set(cfg);
             loading = false;
@@ -669,46 +667,6 @@
                         </span>
                     </div>
                     <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
-                </div>
-            </fieldset>
-
-            <!-- Display Section -->
-            <fieldset class="section">
-                <h3 class="section-label">Display</h3>
-                <p class="section-description">Control what information appears on task cards</p>
-
-                <div class="radio-group" role="radiogroup" aria-label="Model badge style">
-                    <span class="radio-group-label">Model badge on cards</span>
-                    <div class="radio-options">
-                        <label class="radio-option">
-                            <input type="radio" name="cardModelBadge" value="auto" checked={cardModelBadge === 'auto'} oninput={() => cardModelBadge = 'auto'} />
-                            <span class="radio-text">
-                                <span class="radio-title">Auto</span>
-                                <span class="radio-desc">Model only (1 provider) or provider + model (2+)</span>
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="cardModelBadge" value="always" checked={cardModelBadge === 'always'} oninput={() => cardModelBadge = 'always'} />
-                            <span class="radio-text">
-                                <span class="radio-title">Always</span>
-                                <span class="radio-desc">Always show provider + model</span>
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="cardModelBadge" value="model" checked={cardModelBadge === 'model'} oninput={() => cardModelBadge = 'model'} />
-                            <span class="radio-text">
-                                <span class="radio-title">Model only</span>
-                                <span class="radio-desc">Always show model name only</span>
-                            </span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="cardModelBadge" value="none" checked={cardModelBadge === 'none'} oninput={() => cardModelBadge = 'none'} />
-                            <span class="radio-text">
-                                <span class="radio-title">Hidden</span>
-                                <span class="radio-desc">Don't show model badge</span>
-                            </span>
-                        </label>
-                    </div>
                 </div>
             </fieldset>
 
