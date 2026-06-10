@@ -209,6 +209,7 @@
     }
     input[type="text"]:focus-visible, textarea:focus-visible {
         border-color: var(--color-accent);
+        outline: none;
     }
     textarea {
         resize: vertical;

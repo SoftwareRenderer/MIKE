@@ -558,6 +558,7 @@
     .edit-form textarea:focus-visible {
         border-color: var(--color-accent);
         box-shadow: 0 0 0 2px var(--color-accent)22;
+        outline: none;
     }
     .edit-actions {
         display: flex;

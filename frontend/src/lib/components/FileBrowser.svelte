@@ -229,6 +229,7 @@
     }
     .path-input:focus-visible {
         border-color: var(--color-accent);
+        outline: none;
     }
     .error {
         color: var(--color-status-red);

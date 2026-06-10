@@ -158,6 +158,7 @@
         padding: 4px 0;
         font-family: inherit;
         overflow-y: auto;
+        outline: none;
     }
     textarea::placeholder { color: var(--color-text-tertiary); }
     textarea:disabled { opacity: 0.5; cursor: not-allowed; }

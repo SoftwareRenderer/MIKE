@@ -910,6 +910,7 @@
     }
     input:focus-visible, select:focus-visible {
         border-color: var(--color-accent);
+        outline: none;
     }
     select {
         cursor: pointer;
@@ -1041,6 +1042,7 @@
         background: var(--color-surface-0);
         border-color: var(--color-accent);
         color: var(--color-text-primary);
+        outline: none;
     }
     .url-input::placeholder {
         color: var(--color-text-tertiary);
