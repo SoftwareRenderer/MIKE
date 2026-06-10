@@ -46,8 +46,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
-    let loadingDiff = $state(false);
-
     // Terminal
     let worktreeExists = $state(true);
 
@@ -300,12 +298,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     async function loadDiff() {
-        if (!task || loadingDiff) return;
-        loadingDiff = true;
+        if (!task) return;
         try {
             const result = await getTaskDiff(task.project_id, task.id);
-            diffFiles = parseUnifiedDiff(result.diff);
-            untrackedFiles = (result.untracked || []).map(u => ({
+            const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
+            diffFiles = parseUnifiedDiff(result.diff).filter(f => ignoreSwp(f.path));
+            untrackedFiles = (result.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
                 path: u.path,
                 fileSize: u.file_size,
                 file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
@@ -314,7 +312,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             diffFiles = [];
             untrackedFiles = [];
         }
-        loadingDiff = false;
     }
 
     function getStatusBadge(t: Task): { text: string; color: string } {
@@ -498,7 +495,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
-                    <DiffViewer files={diffFiles} untracked={untrackedFiles} loading={loadingDiff} />
+                    <DiffViewer files={diffFiles} untracked={untrackedFiles} />
                 </div>
             </div>
         </div>

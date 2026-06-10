@@ -2,11 +2,11 @@
     import type { DiffFile } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
+    import { fade } from 'svelte/transition';
 
     let props = $props();
     let files = $derived(props.files || []);
     let untracked = $derived(props.untracked || []);
-    let isLoading = $derived(props.loading || false);
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Track which collapsed blocks are expanded
@@ -34,9 +34,7 @@
     }
 </script>
 
-{#if isLoading}
-    <div class="diff-loading">Loading diff...</div>
-{:else if !hasContent}
+{#if !hasContent}
     <div class="diff-empty">
         <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
             <path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
@@ -49,7 +47,7 @@
             {@const ufile = entry.file}
             {@const isUntrackedExpanded = expandedFiles[entry.path] ?? true}
             {@const isLarge = entry.fileSize !== undefined}
-            <section class="diff-file-section diff-file-section-untracked">
+            <section class="diff-file-section diff-file-section-untracked" transition:fade={{ duration: 150 }}>
                 <button
                     type="button"
                     class="diff-file-header diff-file-header-untracked"
@@ -152,7 +150,7 @@
         {/each}
         {#each files as file (file.path)}
             {@const isFileExpanded = expandedFiles[file.path] ?? true}
-            <section class="diff-file-section">
+            <section class="diff-file-section" transition:fade={{ duration: 150 }}>
                 <button
                     type="button"
                     class="diff-file-header"
@@ -253,15 +251,6 @@
         overflow-y: auto;
         min-height: 0;
         padding: 12px 8px 12px 8px;
-    }
-
-    .diff-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        color: var(--color-text-tertiary);
-        font-size: 0.875rem;
     }
 
     .diff-empty {
@@ -434,9 +423,6 @@
     }
 
     /* Untracked file entries */
-    .diff-file-section-untracked {
-        border-left: 2px solid rgba(250,204,21,0.5);
-    }
     .diff-file-header-untracked {
         background: rgba(250,204,21,0.08);
     }
