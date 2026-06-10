@@ -21,14 +21,31 @@ type ToolInfo struct {
 }
 
 // promptDir returns the absolute path to the prompts directory.
-// Resolved relative to the running executable.
+// Tries the executable directory first (compiled binary), then falls back
+// to the current working directory (go run).
 func promptDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		// Fallback: assume prompts/ is a sibling of backend/
-		return filepath.Join("prompts")
+	candidates := []string{}
+
+	// 1. Relative to the running executable (works for compiled binary)
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "prompts"))
 	}
-	return filepath.Join(filepath.Dir(exe), "prompts")
+
+	// 2. Current working directory (works for `go run .`)
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "prompts"))
+	}
+
+	// Return the first candidate that actually contains .tmpl files
+	for _, dir := range candidates {
+		matches, err := filepath.Glob(filepath.Join(dir, "*.tmpl"))
+		if err == nil && len(matches) > 0 {
+			return dir
+		}
+	}
+
+	// Last resort: relative path
+	return "prompts"
 }
 
 // RenderSystemPrompt renders the system prompt from templates loaded from disk.
