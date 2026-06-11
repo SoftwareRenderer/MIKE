@@ -44,6 +44,9 @@ var (
 	reProjectTerminal      = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 	reTaskTerminal         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
 	reTaskWorktreeExists   = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/worktree-exists$`)
+	reTaskThreads          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads$`)
+	reTaskThreadSwitch     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/switch$`)
+	reTaskThreadFork       = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/fork$`)
 )
 
 func (s *Server) setupRoutes() {
@@ -169,6 +172,19 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := reTaskMessages.FindStringSubmatch(path); m != nil {
 		s.handleTaskMessages(w, r, m[1], m[2])
+		return
+	}
+
+	if m := reTaskThreadFork.FindStringSubmatch(path); m != nil {
+		s.handleThreadFork(w, r, m[1], m[2])
+		return
+	}
+	if m := reTaskThreadSwitch.FindStringSubmatch(path); m != nil {
+		s.handleThreadSwitch(w, r, m[1], m[2])
+		return
+	}
+	if m := reTaskThreads.FindStringSubmatch(path); m != nil {
+		s.handleThreads(w, r, m[1], m[2])
 		return
 	}
 

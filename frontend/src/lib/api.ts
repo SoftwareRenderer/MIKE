@@ -355,6 +355,33 @@ export async function getHomeAgentMessages(projectId: string): Promise<HomeAgent
     return res.json();
 }
 
+// -- Thread endpoints --
+export async function getTaskThreads(projectId: string, taskId: string): Promise<Thread[]> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch threads');
+    return res.json();
+}
+
+export async function switchTaskThread(projectId: string, taskId: string, threadId: string): Promise<Thread> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_id: threadId }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to switch thread');
+    return res.json();
+}
+
+export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string): Promise<Thread> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_thread_id: fromThreadId, from_message_id: fromMessageId }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to fork thread');
+    return res.json();
+}
+
 // -- Worktree --
 export async function checkWorktreeExists(projectId: string, taskId: string): Promise<{ exists: boolean }> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/worktree-exists`);

@@ -27,8 +27,19 @@ export interface Task {
     plan_mode: boolean;
     parent_task_id?: string;
     title_generating: boolean;
+    current_thread_id?: string;
     created_at: string;
     updated_at: string;
+}
+
+export interface Thread {
+    id: string;
+    task_id: string;
+    parent_thread_id?: string;
+    name: string;
+    is_active: boolean;
+    git_branch?: string;
+    created_at: string;
 }
 
 export interface Board {
@@ -97,6 +108,7 @@ export interface HomeAgentMessage {
 export interface TaskMessage {
     id: string;
     task_id: string;
+    thread_id?: string;
     role: string;
     content: string;
     reasoning_content?: string;
@@ -185,7 +197,8 @@ export type StreamEventType =
     | 'complete'
     | 'error'
     | 'user_message'
-    | 'stats';
+    | 'stats'
+    | 'thread_switch';
 
 export interface StreamEvent {
     type: StreamEventType;

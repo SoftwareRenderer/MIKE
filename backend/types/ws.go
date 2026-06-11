@@ -17,7 +17,8 @@ const (
 	WSTypeError       WSMessageType = "error"
 	WSTypeUserMessage WSMessageType = "user_message"
 	WSTypeStats       WSMessageType = "stats"
-	WSTypeDiffChanged WSMessageType = "diff_changed"
+	WSTypeDiffChanged  WSMessageType = "diff_changed"
+	WSTypeThreadSwitch WSMessageType = "thread_switch"
 )
 
 // StreamEvent carries a typed payload to broadcast.

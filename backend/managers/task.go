@@ -3,6 +3,7 @@ package managers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -96,6 +97,24 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		}
 		task.TitleGenerating = true
 		if err := h.store.CreateTask(&task); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Create default thread for the task
+		defaultThreadID := generateTaskID()
+		if err := h.store.CreateThread(&types.TaskThread{
+			ID:        defaultThreadID,
+			TaskID:    task.ID,
+			Name:      "Main",
+			IsActive:  true,
+			GitBranch: task.Branch,
+			CreatedAt: now,
+		}); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create default thread: %v", err))
+			return
+		}
+		task.CurrentThreadID = defaultThreadID
+		if err := h.store.UpdateTask(&task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -276,6 +295,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			if err := h.store.CreateTaskMessage(&types.TaskMessage{
 				ID:              uuid.New().String(),
 				TaskID:          taskID,
+				ThreadID:        task.CurrentThreadID,
 				Role:            "title",
 				Content:         title,
 				ModelName:       task.ModelName,

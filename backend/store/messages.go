@@ -12,20 +12,30 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
 
-// GetTaskMessages retrieves all messages for a task.
-func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
+// GetTaskMessages retrieves all messages for a task, optionally filtered by thread.
+func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
-		taskID,
-	)
+	var rows *sql.Rows
+	var err error
+	if threadID != "" {
+		rows, err = s.db.Query(
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+			taskID, threadID,
+		)
+	} else {
+		// For backward compatibility: get messages with no thread_id (legacy) or all messages
+		rows, err = s.db.Query(
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			taskID,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -34,9 +44,12 @@ func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
 	for rows.Next() {
 		var m types.TaskMessage
 		var createdAt string
-		var modelName, providerName, toolCalls, toolResult, reasoningContent sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
+		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
 			return nil, err
+		}
+		if threadID.Valid {
+			m.ThreadID = threadID.String
 		}
 		if reasoningContent.Valid {
 			m.ReasoningContent = reasoningContent.String
@@ -59,8 +72,8 @@ func (s *Store) GetTaskMessages(taskID string) ([]types.TaskMessage, error) {
 	return messages, rows.Err()
 }
 
-// DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it.
-func (s *Store) DeleteTaskMessagesAfter(taskID, messageID string) error {
+// DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it, optionally scoped to a thread.
+func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Get the created_at of the message to delete
@@ -69,8 +82,12 @@ func (s *Store) DeleteTaskMessagesAfter(taskID, messageID string) error {
 	if err != nil {
 		return err
 	}
-	// Delete this message and all messages created after it
-	_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND created_at >= ?`, taskID, createdAt)
+	// Delete this message and all messages created after it (scoped to thread if provided)
+	if threadID != "" {
+		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND thread_id = ? AND created_at >= ?`, taskID, threadID, createdAt)
+	} else {
+		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND created_at >= ?`, taskID, createdAt)
+	}
 	return err
 }
 

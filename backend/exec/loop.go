@@ -41,7 +41,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		systemPrompt = llama.BuildSystemPrompt(worktreePath)
 	}
 
-	taskMsgs, _ := te.store.GetTaskMessages(task.ID)
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
 	for _, m := range taskMsgs {
 		switch m.Role {
@@ -222,6 +222,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				_ = te.store.CreateTaskMessage(&types.TaskMessage{
 					ID:         uuid.New().String(),
 					TaskID:     task.ID,
+					ThreadID:   task.CurrentThreadID,
 					Role:       "tool_call",
 					Content:    "",
 					ToolCalls:  string(tcJSON),
@@ -275,7 +276,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
 			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, Role: "assistant",
+				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
 				Content: assistantText, ReasoningContent: reasoningContent.String(),
 				ModelName: activeModel, ProviderName: providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
@@ -290,7 +291,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)
 			duration := time.Since(startTime).Milliseconds()
 			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, Role: "assistant",
+				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
 				Content: assistantText, ReasoningContent: reasoningContent.String(),
 				ModelName: activeModel, ProviderName: providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
@@ -324,10 +325,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 // sendAndPersistError sends an error event via WebSocket and persists it to the database.
 func (te *TaskExecutor) sendAndPersistError(b *stream.Broadcaster, taskID, message, code string) {
-	errMsg := &types.TaskMessage{
-		ID: uuid.New().String(), TaskID: taskID, Role: "error",
-		Content: fmt.Sprintf("[%s] %s", code, message), CreatedAt: time.Now(),
-	}
+	// Get the task to find its current thread
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		errMsg := &types.TaskMessage{
+			ID: uuid.New().String(), TaskID: taskID, Role: "error",
+			Content: fmt.Sprintf("[%s] %s", code, message), CreatedAt: time.Now(),
+		}
+		if task != nil {
+			errMsg.ThreadID = task.CurrentThreadID
+		}
 	if err := te.store.CreateTaskMessage(errMsg); err != nil {
 		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
 	}

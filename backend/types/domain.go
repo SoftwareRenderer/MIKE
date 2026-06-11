@@ -22,6 +22,7 @@ type Task struct {
 	PlanMode                bool      `json:"plan_mode"`
 	ParentTaskID            string    `json:"parent_task_id,omitempty"`
 	TitleGenerating         bool      `json:"title_generating"`
+	CurrentThreadID         string    `json:"current_thread_id,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }
@@ -29,6 +30,17 @@ type Task struct {
 // Board represents the collection of tasks for a project.
 type Board struct {
 	Tasks []Task `json:"tasks"`
+}
+
+// TaskThread represents a conversation branch within a task.
+type TaskThread struct {
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id"`
+	ParentThreadID string    `json:"parent_thread_id,omitempty"`
+	Name           string    `json:"name"`
+	IsActive       bool      `json:"is_active"`
+	GitBranch      string    `json:"git_branch,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Config represents global server configuration.
@@ -134,6 +146,7 @@ type GitStatus struct {
 type TaskMessage struct {
 	ID               string    `json:"id"`
 	TaskID           string    `json:"task_id"`
+	ThreadID         string    `json:"thread_id,omitempty"`
 	Role             string    `json:"role"`
 	Content          string    `json:"content"`
 	ReasoningContent string    `json:"reasoning_content,omitempty"`

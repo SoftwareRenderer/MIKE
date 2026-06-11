@@ -124,9 +124,22 @@ CREATE TABLE IF NOT EXISTS home_agent_messages (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS task_threads (
+    id              TEXT PRIMARY KEY,
+    task_id         TEXT NOT NULL,
+    parent_thread_id TEXT NULL,
+    name            TEXT NOT NULL DEFAULT 'Main',
+    is_active       INTEGER NOT NULL DEFAULT 0,
+    git_branch      TEXT DEFAULT NULL,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_thread_id) REFERENCES task_threads(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS task_messages (
     id                 TEXT PRIMARY KEY,
     task_id            TEXT NOT NULL,
+    thread_id          TEXT NULL,
     role               TEXT NOT NULL,
     content            TEXT NOT NULL,
     reasoning_content  TEXT DEFAULT NULL,
@@ -149,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_child ON task_dependencies(chil
 CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_home_agent_messages_project ON home_agent_messages(project_id);
 CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 `
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,6 +186,12 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN title_generating INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN cache_tokens INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN provider_name TEXT DEFAULT NULL`)
+	// Thread support migrations
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN current_thread_id TEXT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN thread_id TEXT NULL`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`) // best-effort for existing tables
 	return nil
 }
 
@@ -323,11 +343,11 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoPR, planMode, titleGenerating int
 	var createdAt, updatedAt string
-	var parentTaskID sql.NullString
+	var parentTaskID, currentThreadID sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &createdAt, &updatedAt)
+		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
@@ -336,8 +356,23 @@ func scanTask(s scanner, t *types.Task) error {
 	t.PlanMode = i2b(planMode)
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)
+	t.CurrentThreadID = currentThreadID.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
+	return nil
+}
+
+// scanTaskThread scans a row into a TaskThread.
+func scanTaskThread(s scanner, th *types.TaskThread) error {
+	var parentThreadID, gitBranch sql.NullString
+	var createdAt string
+	err := s.Scan(&th.ID, &th.TaskID, &parentThreadID, &th.Name, &th.IsActive, &gitBranch, &createdAt)
+	if err != nil {
+		return err
+	}
+	th.ParentThreadID = parentThreadID.String
+	th.GitBranch = gitBranch.String
+	th.CreatedAt = scanTime(createdAt)
 	return nil
 }
 

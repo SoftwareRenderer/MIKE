@@ -143,6 +143,11 @@ func (te *TaskExecutor) RemoveStream(taskID string) {
 	te.streamMgr.Remove(taskID)
 }
 
+// GetOrCreateStream returns the broadcaster for a task, creating it if needed.
+func (te *TaskExecutor) GetOrCreateStream(taskID string) *stream.Broadcaster {
+	return te.streamMgr.GetOrCreate(taskID)
+}
+
 // WorktreeMgr returns the WorktreeManager. Used by server wiring.
 func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 	return te.worktreeMgr
@@ -195,17 +200,27 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	}
 
 	task.Branch = branchName
+	// If the task has a current thread with a specific git branch, checkout that branch
+	if task.CurrentThreadID != "" {
+		thread, terr := te.store.GetThread(task.CurrentThreadID)
+		if terr == nil && thread.GitBranch != "" && thread.GitBranch != branchName {
+			// Checkout the thread's branch (create it from HEAD if it doesn't exist locally)
+			_ = te.worktreeMgr.GitRunInWorktree(taskID, "checkout", "-B", thread.GitBranch)
+			task.Branch = thread.GitBranch
+		}
+	}
 	task.StatusState = "running"
 	task.Status = "in_progress"
 	if err := te.store.UpdateTask(task); err != nil {
 		return err
 	}
 
-	existingMsgs, _ := te.store.GetTaskMessages(taskID)
+	existingMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	if len(existingMsgs) == 0 {
 		_ = te.store.CreateTaskMessage(&types.TaskMessage{
 			ID:        uuid.New().String(),
 			TaskID:    taskID,
+			ThreadID:  task.CurrentThreadID,
 			Role:      "user",
 			Content:   task.Prompt,
 			CreatedAt: time.Now().UTC(),

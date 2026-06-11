@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kanban/backend/prompts"
 	"kanban/backend/types"
-
-	"github.com/google/uuid"
 )
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
@@ -26,7 +26,13 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			JSONError(w, http.StatusBadRequest, "message_id required")
 			return
 		}
-		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID); err != nil {
+		// Get the task to find its current thread
+		task, _ := s.store.GetTask(projectID, taskID)
+		threadID := ""
+		if task != nil {
+			threadID = task.CurrentThreadID
+		}
+		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, threadID); err != nil {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -46,6 +52,13 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		msg.TaskID = taskID
 		msg.ID = uuid.New().String()
 		msg.CreatedAt = time.Now()
+		// Set thread_id from task's current thread if not provided
+		if msg.ThreadID == "" {
+			task, _ := s.store.GetTask(projectID, taskID)
+			if task != nil {
+				msg.ThreadID = task.CurrentThreadID
+			}
+		}
 		if err := s.store.CreateTaskMessage(&msg); err != nil {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -57,7 +70,13 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	messages, err := s.store.GetTaskMessages(taskID)
+	// Get the task to find its current thread
+		task, taskErr := s.store.GetTask(projectID, taskID)
+		threadID := ""
+		if taskErr == nil && task != nil {
+			threadID = task.CurrentThreadID
+		}
+		messages, err := s.store.GetTaskMessages(taskID, threadID)
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -240,4 +259,150 @@ func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, pr
 	exists := err == nil
 
 	JSONResponse(w, http.StatusOK, map[string]bool{"exists": exists})
+}
+
+// handleThreads lists all threads for a task.
+func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	threads, err := s.store.GetThreadsByTask(taskID)
+	if err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	JSONResponse(w, http.StatusOK, threads)
+}
+
+// handleThreadSwitch switches the active thread for a task.
+func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ThreadID string `json:"thread_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ThreadID == "" {
+		JSONError(w, http.StatusBadRequest, "thread_id required")
+		return
+	}
+	// Validate task exists
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	// Validate thread exists and belongs to this task
+	thread, err := s.store.GetThread(req.ThreadID)
+	if err != nil || thread.TaskID != taskID {
+		JSONError(w, http.StatusBadRequest, "thread not found")
+		return
+	}
+	// Stop executor if running
+	if task.StatusState == "running" {
+		_ = s.executor.StopTask(taskID)
+	}
+	// Commit current worktree state to old thread's branch, checkout new thread's branch
+	if task.Branch != "" {
+		oldThreadID := task.CurrentThreadID
+		if oldThreadID != "" && oldThreadID != req.ThreadID {
+			// Commit current state to old thread's branch
+			if thread.GitBranch != "" {
+				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
+				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Thread switch snapshot", "--allow-empty")
+				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-B", thread.GitBranch)
+			}
+		}
+	}
+	// Set new active thread
+	if err := s.store.SetActiveThread(req.ThreadID); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Update task's current_thread_id
+	task.CurrentThreadID = req.ThreadID
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateTask(task); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.boardStreamMgr.Broadcast(projectID)
+	// Broadcast thread_switch event to WebSocket clients
+	b := s.executor.GetOrCreateStream(taskID)
+	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
+	JSONResponse(w, http.StatusOK, thread)
+}
+
+// handleThreadFork creates a new thread by forking from a checkpoint.
+func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		FromThreadID  string `json:"from_thread_id"`
+		FromMessageID string `json:"from_message_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FromThreadID == "" || req.FromMessageID == "" {
+		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
+		return
+	}
+	// Validate task exists
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	// Validate source thread exists
+	sourceThread, err := s.store.GetThread(req.FromThreadID)
+	if err != nil || sourceThread.TaskID != taskID {
+		JSONError(w, http.StatusBadRequest, "source thread not found")
+		return
+	}
+	// Generate new thread ID and branch name
+	newThreadID := uuid.New().String()
+	newBranchName := fmt.Sprintf("thread/%s", newThreadID[:8])
+	// Create new git branch from current HEAD (current worktree state)
+	if task.Branch != "" {
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName)
+	}
+	// Create new thread
+	now := time.Now().UTC()
+	newThread := &types.TaskThread{
+		ID:             newThreadID,
+		TaskID:         taskID,
+		ParentThreadID: req.FromThreadID,
+		Name:           fmt.Sprintf("Fork #%d", len(sourceThread.ParentThreadID)+2),
+		IsActive:       true,
+		GitBranch:      newBranchName,
+		CreatedAt:      now,
+	}
+	// Count existing threads for better naming
+	threads, _ := s.store.GetThreadsByTask(taskID)
+	newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
+	if err := s.store.CreateThread(newThread); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Copy messages from source thread up to the checkpoint
+	_ = s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID)
+	// Set new thread as active
+	if err := s.store.SetActiveThread(newThreadID); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Update task's current_thread_id
+	task.CurrentThreadID = newThreadID
+	task.UpdatedAt = now
+	if err := s.store.UpdateTask(task); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.boardStreamMgr.Broadcast(projectID)
+	// Broadcast thread_switch event
+	b := s.executor.GetOrCreateStream(taskID)
+	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
+	JSONResponse(w, http.StatusCreated, newThread)
 }

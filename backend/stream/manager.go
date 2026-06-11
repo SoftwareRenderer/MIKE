@@ -212,17 +212,28 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 			}
 			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
 				log.Printf("[stream] task=%s user_message received (model=%s, url=%s)", taskID, payload.ModelName, payload.LlamaServerURL)
+				// Get the task to find its current thread
+				task, _ := sm.store.GetTaskByTaskID(taskID)
+				threadID := ""
+				if task != nil {
+					threadID = task.CurrentThreadID
+				}
 				// Always persist the user message
 				msgID := uuid.New().String()
 				sm.store.CreateTaskMessage(&types.TaskMessage{
 					ID:        msgID,
 					TaskID:    taskID,
+					ThreadID:  threadID,
 					Role:      "user",
 					Content:   payload.Content,
 					CreatedAt: time.Now().UTC(),
 				})
-				// Always broadcast back to all clients (include backend-generated id)
-				b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}})
+				// Broadcast back to all clients (include backend-generated id + thread_id)
+				echoData := map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}
+				if threadID != "" {
+					echoData["thread_id"] = threadID
+				}
+				b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
 				// If executor is running, forward to it (with model info)
 				handler := b.getUserMessageHandler()
 				if handler != nil {

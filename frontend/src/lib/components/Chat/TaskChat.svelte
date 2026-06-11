@@ -1,12 +1,13 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
-    import type { StreamEvent, Provider } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig } from '$lib/api';
+    import type { StreamEvent, Provider, Thread } from '$lib/types';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
+    import CheckpointDivider from './CheckpointDivider.svelte';
 
     interface ChatEntry {
         id: string;
@@ -61,6 +62,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
     let firstConnectDone = $state(false); // track if initial onopen has fired
+
+    // Thread state
+    let threads: Thread[] = $state([]);
+    let activeThreadId = $state('');
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -292,6 +297,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 onRefreshDiff?.(data);
                 break;
             }
+            case 'thread_switch': {
+                // Thread was switched (possibly from another tab or API call)
+                reloadThreadData();
+                break;
+            }
         }
         scroll();
     }
@@ -372,6 +382,58 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 };
             });
         } catch { /* No history yet */ }
+    }
+
+    async function loadThreads() {
+        try {
+            threads = await getTaskThreads(projectId, taskId);
+            const active = threads.find(t => t.is_active);
+            if (active) {
+                activeThreadId = active.id;
+            }
+        } catch {
+            threads = [];
+        }
+    }
+
+    /** Reload threads and messages for the current active thread. */
+    async function reloadThreadData() {
+        await loadThreads();
+        await loadHistory();
+    }
+
+    async function handleThreadSwitch(threadId: string) {
+        if (threadId === activeThreadId) return;
+        try {
+            await switchTaskThread(projectId, taskId, threadId);
+            await reloadThreadData();
+            // Reconnect WebSocket to pick up the new thread context
+            if (ws) {
+                ws.close();
+                ws = null;
+                connected = false;
+            }
+            connect();
+        } catch (e) {
+            showToast(String(e));
+        }
+    }
+
+    async function handleThreadFork(messageId: string, fromThreadId: string) {
+        if (isLoading || disabled) return;
+        try {
+            await forkTaskThread(projectId, taskId, fromThreadId, messageId);
+            await reloadThreadData();
+            // Reconnect WebSocket to pick up the new thread context
+            if (ws) {
+                ws.close();
+                ws = null;
+                connected = false;
+            }
+            connect();
+        } catch (e) {
+            showToast(String(e));
+        }
     }
 
     function scroll() {
@@ -590,6 +652,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     onMount(async () => {
         await loadProviders();
+        await loadThreads();
         await loadHistory();
         // Override model selection with task-specific values if set
         try {
@@ -686,6 +749,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     </div>
                 {:else}
                     <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => handleEdit(entry.id, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
+                {/if}
+                {#if entry.role === 'user' && threads.length > 0}
+                    <CheckpointDivider
+                        timestamp={entry.createdAt}
+                        messageId={entry.id}
+                        threadId={activeThreadId}
+                        threads={threads}
+                        activeThreadId={activeThreadId}
+                        onFork={handleThreadFork}
+                        onSwitch={handleThreadSwitch}
+                    />
                 {/if}
             {/each}
         {/if}

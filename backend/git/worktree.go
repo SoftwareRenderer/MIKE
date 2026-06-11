@@ -548,3 +548,15 @@ func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, err
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
 	return wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
 }
+
+// GitRunInWorktree runs a git command in the task's worktree directory.
+func (wm *WorktreeManager) GitRunInWorktree(taskID string, args ...string) error {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return fmt.Errorf("worktree not found")
+	}
+	return wm.gitRun(worktreePath, args...)
+}
