@@ -118,6 +118,17 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Store the task prompt as the first user message in the conversation
+		if task.Prompt != "" {
+			_ = h.store.CreateTaskMessage(&types.TaskMessage{
+				ID:        uuid.New().String(),
+				TaskID:    task.ID,
+				ThreadID:  defaultThreadID,
+				Role:      "user",
+				Content:   task.Prompt,
+				CreatedAt: now,
+			})
+		}
 		// Spawn async goroutine to generate a better title via LLM
 		h.startTitleGeneration(projectID, task.ID, task.Prompt)
 		h.boardStreamMgr.Broadcast(projectID)

@@ -41,7 +41,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    let { projectId, taskId, taskPrompt = '', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -71,12 +71,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Shows stop button only during token generation, not during tool execution.
     let isLoading = $derived($streamingTaskIds.has(taskId));
 
-    // A task is "new" (show "Start Task" button) only when:
-    // - There are no entries yet (no messages loaded from backend)
-    // - The task prompt is set
-    // - Not currently loading
-    // Once entries are loaded (even just user messages), show the chat.
-    let isNewTask = $derived(entries.length === 0 && taskPrompt && !isLoading);
+    // Show "Start Task" button when task is in backlog (not yet started).
+    let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
@@ -519,8 +515,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
         }
         isStarting = true;
-        // Add the prompt as the first user message
-        entries.push({ id: genId(), role: 'user', content: taskPrompt, isStreaming: false, createdAt: new Date().toISOString() });
+        // Prompt is already in entries (loaded from DB at task creation)
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = taskPrompt;
@@ -577,6 +572,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function handleEdit(entryId: string, newContent: string) {
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
+        // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
+        if (taskStatus === 'backlog') {
+            entries[idx].content = newContent;
+            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
+            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
+            return;
+        }
         // Find the first PERSISTED message after this one (backend IDs are UUIDs).
         // Frontend-optimistic entries (streaming assistant) use random IDs not in the DB.
         const isBackendId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -683,10 +685,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
     <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll}>
-        {#if isNewTask && taskPrompt}
-            <!-- New task: show prompt as first message -->
-            <ChatMessage role="user" content={taskPrompt} isStreaming={false} timestamp={entries[0]?.createdAt} onEdit={async (newContent) => { await updateTask(projectId, taskId, { prompt: newContent }); }} />
-        {:else if entries.length === 0}
+        {#if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
                     <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
@@ -777,7 +776,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </div>
         </div>
     {/if}
-    {#if isNewTask && !isLoading}
+    {#if showStartButton}
         <div class="chat-start">
             {#if providers.length > 0}
                 <div class="start-model-row">
