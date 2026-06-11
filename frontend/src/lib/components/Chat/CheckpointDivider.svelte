@@ -3,15 +3,13 @@
 
     interface Props {
         timestamp?: string;
-        messageId: string;
         threadId: string;
         threads: Thread[];
         activeThreadId: string;
-        onFork?: (messageId: string, threadId: string) => void;
         onSwitch?: (threadId: string) => void;
     }
 
-    let { timestamp, messageId, threadId, threads, activeThreadId, onFork, onSwitch }: Props = $props();
+    let { timestamp, threadId, threads, activeThreadId, onSwitch }: Props = $props();
 
     let showMenu = $state(false);
     let menuRef: HTMLElement | null = null;
@@ -21,10 +19,6 @@
         const date = new Date(isoStr);
         if (isNaN(date.getTime())) return '';
         return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    }
-
-    function handleFork() {
-        onFork?.(messageId, threadId);
     }
 
     function handleSwitch(threadId: string) {
@@ -76,17 +70,6 @@
                     <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="6 9 12 15 18 9"/>
                     </svg>
-                </button>
-            {/if}
-            {#if onFork}
-                <button class="fork-btn" onclick={handleFork} aria-label="Fork conversation here">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="18" cy="18" r="3"/>
-                        <circle cx="6" cy="6" r="3"/>
-                        <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
-                        <line x1="6" y1="9" x2="6" y2="21"/>
-                    </svg>
-                    Fork
                 </button>
             {/if}
         </div>
@@ -169,25 +152,6 @@
     }
     .chevron {
         transition: transform 0.15s ease;
-    }
-    .fork-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 0.6875rem;
-        font-weight: 500;
-        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-        color: var(--color-accent);
-        border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-    }
-    .fork-btn:hover {
-        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-        border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
     }
     .thread-menu {
         position: absolute;

@@ -631,14 +631,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             updateActiveThread(forked.id);
             await loadHistory();
-            // Find the copied message in the new fork (last user message matching original content)
-            // and update it to the edited content.
-            const forkedEntry = [...entries].reverse().find(e => e.role === 'user' && e.content === _originalContent);
-            if (forkedEntry) {
-                await updateTaskMessage(projectId, taskId, forkedEntry.id, newContent);
-                const forkedIdx = entries.findIndex(e => e.id === forkedEntry.id);
-                if (forkedIdx !== -1) entries[forkedIdx].content = newContent;
-            }
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
             // Reconnect WebSocket to pick up the new thread context
@@ -648,6 +640,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 connected = false;
             }
             connect();
+            // Send the edited message to the LLM in the new fork
+            await new Promise(r => setTimeout(r, 500)); // wait for WS to connect
+            if (ws && ws.sendWithModel) {
+                ws.sendWithModel(newContent, selectedModel, selectedUrl);
+            } else if (ws) {
+                ws.send(newContent);
+            }
         } catch (e) {
             showToast(String(e));
         }
@@ -807,6 +806,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </div>
         {:else}
             {#each entries as entry (entry.id)}
+                {#if entry.role === 'user' && threads.length > 0}
+                    <CheckpointDivider
+                        timestamp={entry.createdAt}
+                        threadId={entry.threadId || activeThreadId}
+                        threads={threads}
+                        activeThreadId={activeThreadId}
+                        onSwitch={handleThreadSwitch}
+                    />
+                {/if}
                 {#if entry.toolCall}
                     <div class="tool-call-entry">
                         <div class="tool-call-card">
@@ -860,17 +868,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     </div>
                 {:else}
                     <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
-                {/if}
-                {#if entry.role === 'user' && threads.length > 0}
-                    <CheckpointDivider
-                        timestamp={entry.createdAt}
-                        messageId={entry.id}
-                        threadId={entry.threadId || activeThreadId}
-                        threads={threads}
-                        activeThreadId={activeThreadId}
-                        onFork={handleThreadFork}
-                        onSwitch={handleThreadSwitch}
-                    />
                 {/if}
             {/each}
         {/if}

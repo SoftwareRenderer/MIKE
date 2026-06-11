@@ -58,8 +58,15 @@ test.describe.serial('Thread URL Navigation', () => {
     threadIds = beforeThreads.map((t: any) => t.id);
     expect(threadIds.length).toBeGreaterThanOrEqual(1);
 
-    // Click the fork button
-    await page.locator('.fork-btn').first().click();
+    // Reload to pick up updated task status (prop from parent)
+    await page.reload();
+    await page.waitForSelector('.task-chat', { timeout: 10000 });
+
+    // Fork via the message's fork button (edit form)
+    const userMsg = page.locator('.chat-message.user').last();
+    await userMsg.locator('.action-btn[aria-label*="Fork"]').click();
+    await page.locator('.edit-form textarea').fill(`Fork ${Date.now()}`);
+    await page.locator('.btn-edit-submit').click();
     await page.waitForTimeout(2000);
 
     // Verify fork created a new thread
