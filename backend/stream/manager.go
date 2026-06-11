@@ -162,6 +162,24 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	b.add(conn)
 	defer b.remove(conn)
 
+	// Ping/pong keepalive to prevent proxy timeouts
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.Ping(context.Background()); err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	// Send buffered events on reconnect
 	if msg := r.URL.Query().Get("sync"); msg != "" {
 		buf := b.getBuffer(0)

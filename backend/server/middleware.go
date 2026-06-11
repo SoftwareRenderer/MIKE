@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"kanban/backend/httputil"
 )
@@ -28,6 +29,13 @@ func GetEnv(key, defaultValue string) string {
 // CORS middleware.
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip CORS headers for WebSocket upgrades.
+		// WebSockets don't use CORS, and extra headers on the 101 upgrade
+		// response can delay nginx's protocol switch detection.
+		if strings.Contains(r.Header.Get("Upgrade"), "websocket") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

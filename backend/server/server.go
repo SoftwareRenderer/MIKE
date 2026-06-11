@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"kanban/backend/config"
 	"kanban/backend/exec"
@@ -85,8 +86,10 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 // Serve starts the HTTP server.
 func (s *Server) Serve() error {
 	srv := &http.Server{
-		Addr:    s.addr,
-		Handler: PanicRecoveryMiddleware(CORSMiddleware(CompressMiddleware(s.mux))),
+		Addr:              s.addr,
+		Handler:           PanicRecoveryMiddleware(CORSMiddleware(CompressMiddleware(s.mux))),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	log.Printf("Server starting on %s", s.addr)
 	return srv.ListenAndServe()

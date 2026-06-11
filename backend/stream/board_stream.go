@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"kanban/backend/store"
 
@@ -114,6 +115,24 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 	defer func() {
 		bsm.remove(projectID, conn)
 		conn.Close(websocket.StatusNormalClosure, "closed")
+	}()
+
+	// Ping/pong keepalive to prevent proxy timeouts
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.Ping(context.Background()); err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
 	}()
 
 	for {
