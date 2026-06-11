@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -380,14 +382,18 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		ID:             newThreadID,
 		TaskID:         taskID,
 		ParentThreadID: req.FromThreadID,
-		Name:           fmt.Sprintf("Fork #%d", len(sourceThread.ParentThreadID)+2),
+		Name:           "",
 		IsActive:       true,
 		GitBranch:      newBranchName,
 		CreatedAt:      now,
 	}
-	// Count existing threads for better naming
+	// Generate thread name from new_content if provided, otherwise use "Fork #N"
 	threads, _ := s.store.GetThreadsByTask(taskID)
-	newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
+	if req.NewContent != "" {
+		newThread.Name = s.generateThreadName(task, req.NewContent)
+	} else {
+		newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
+	}
 	if err := s.store.CreateThread(newThread); err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -424,4 +430,42 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	b := s.executor.GetOrCreateStream(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	JSONResponse(w, http.StatusCreated, newThread)
+}
+
+// generateThreadName uses the LLM to generate a short thread label from a message.
+// Falls back to truncating the text if the LLM is unavailable or errors.
+func (s *Server) generateThreadName(task *types.Task, content string) string {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) == 0 {
+		return "Fork"
+	}
+
+	// Try LLM generation if config is available
+	if task.LlamaServerURL != "" && task.ModelName != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
+		messages := []types.ChatMessage{
+			{Role: "system", Content: "You are a thread name generator. Given a user message, generate a very short, descriptive thread label (max 30 characters, no quotes). Return only the label, nothing else."},
+			{Role: "user", Content: trimmed},
+		}
+
+		_, name, err := client.ChatCompletion(ctx, messages)
+		if err == nil && strings.TrimSpace(name) != "" {
+			name = strings.TrimSpace(name)
+			if len(name) > 35 {
+				name = name[:35]
+			}
+			log.Printf("[thread-name] task=%s generated: %q", task.ID, name)
+			return name
+		}
+		log.Printf("[thread-name] task=%s LLM call failed, using fallback: %v", task.ID, err)
+	}
+
+	// Fallback: truncate the text
+	if len(trimmed) > 35 {
+		return trimmed[:35]
+	}
+	return trimmed
 }

@@ -56,7 +56,7 @@
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="4"/>
             </svg>
-            Checkpoint{#if timestamp} · {formatTime(timestamp)}{/if}
+            Checkpoint
         </span>
         <div class="divider-actions">
             {#if threads.length > 1}
@@ -105,8 +105,8 @@
     .divider-line {
         flex: 1;
         height: 1px;
-        background: var(--color-border);
-        opacity: 0.5;
+        background: var(--color-accent);
+        opacity: 0.6;
     }
     .divider-content {
         display: flex;
@@ -119,8 +119,8 @@
         align-items: center;
         gap: 4px;
         font-size: 0.6875rem;
-        color: var(--color-text-tertiary);
-        opacity: 0.7;
+        color: var(--color-accent);
+        opacity: 1;
         white-space: nowrap;
     }
     .checkpoint-label svg {
