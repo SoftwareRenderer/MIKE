@@ -171,8 +171,9 @@ export function createBoardStream(projectId: string, onRefresh: () => void, onPr
     return { ws, close: () => ws.close() };
 }
 
-export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void): { ws: WebSocket; send: (msg: string) => void; sendWithModel: (msg: string, modelName: string, serverUrl: string) => void; close: () => void } {
-    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream?sync=1`);
+export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void, syncBuffer = true): { ws: WebSocket; send: (msg: string) => void; sendWithModel: (msg: string, modelName: string, serverUrl: string) => void; close: () => void } {
+    const syncParam = syncBuffer ? '?sync=1' : '';
+    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream${syncParam}`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         // msg.data may already be an object (json.RawMessage) or a string

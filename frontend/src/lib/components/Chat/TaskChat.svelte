@@ -230,6 +230,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     }
                     break;
                 }
+                // Dedup: if this message has a backend ID that already exists in entries
+                // (e.g., from sync buffer replaying a message already loaded via loadHistory), skip
+                if (data.id && entries.some(e => e.id === data.id)) {
+                    break;
+                }
                 closeCurrentAssistant();
                 entries.push({ id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() });
                 break;
@@ -316,7 +321,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'thread_switch': {
                 // Thread was switched (possibly from another tab or API call)
-                reloadThreadData();
+                const data = event.data as { thread_id: string; task_id: string };
+                updateActiveThread(data.thread_id);
+                loadHistory();
                 break;
             }
         }
@@ -414,17 +421,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    /** Reload threads and messages for the current active thread. */
-    async function reloadThreadData() {
-        await loadThreads();
-        await loadHistory();
+    /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
+    function updateActiveThread(threadId: string) {
+        activeThreadId = threadId;
+        threads = threads.map(t => ({ ...t, is_active: t.id === threadId }));
     }
 
     async function handleThreadSwitch(threadId: string) {
         if (threadId === activeThreadId) return;
         try {
-            await switchTaskThread(projectId, taskId, threadId);
-            await reloadThreadData();
+            const switched = await switchTaskThread(projectId, taskId, threadId);
+            updateActiveThread(switched.id);
+            await loadHistory();
             // Update URL with new thread param
             updateThreadUrl(threadId);
             // Reconnect WebSocket to pick up the new thread context
@@ -442,12 +450,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function handleThreadFork(messageId: string, fromThreadId: string) {
         if (isLoading || disabled) return;
         try {
-            await forkTaskThread(projectId, taskId, fromThreadId, messageId);
-            await reloadThreadData();
-            // Update URL with the new fork's thread ID
-            if (activeThreadId) {
-                updateThreadUrl(activeThreadId);
+            const forked = await forkTaskThread(projectId, taskId, fromThreadId, messageId);
+            // Add new fork to threads list and set as active
+            if (!threads.some(t => t.id === forked.id)) {
+                threads = [...threads, forked];
             }
+            updateActiveThread(forked.id);
+            await loadHistory();
+            // Update URL with the new fork's thread ID
+            updateThreadUrl(forked.id);
             // Reconnect WebSocket to pick up the new thread context
             if (ws) {
                 ws.close();
@@ -626,7 +637,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     function connect() {
         if (ws) return;
         connecting = true;
-        ws = createTaskStream(projectId, taskId, (event) => handleEvent(event));
+        // Skip sync buffer on first connect (history already loaded from DB via loadHistory).
+        // Enable sync on reconnects to catch events missed during the disconnect window.
+        const syncBuffer = firstConnectDone;
+        ws = createTaskStream(projectId, taskId, (event) => handleEvent(event), syncBuffer);
         ws.ws.onopen = () => {
             connecting = false;
             connected = true;
@@ -687,8 +701,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // If URL specifies a thread and it differs from current active thread, switch to it
         if (urlThread !== activeThreadId && threads.some(t => t.id === urlThread)) {
             try {
-                await switchTaskThread(projectId, taskId, urlThread);
-                await reloadThreadData();
+                const switched = await switchTaskThread(projectId, taskId, urlThread);
+                updateActiveThread(switched.id);
+                await loadHistory();
                 // Reconnect WebSocket
                 if (ws) {
                     ws.close();
@@ -709,8 +724,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const urlThread = readThreadFromUrl();
         if (urlThread && threads.some(t => t.id === urlThread)) {
             try {
-                await switchTaskThread(projectId, taskId, urlThread);
-                await loadThreads();
+                const switched = await switchTaskThread(projectId, taskId, urlThread);
+                updateActiveThread(switched.id);
             } catch (e) {
                 showToast(String(e));
             }
@@ -719,8 +734,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const mainThread = threads.find(t => t.name === 'Main');
             if (mainThread && mainThread.id !== activeThreadId) {
                 try {
-                    await switchTaskThread(projectId, taskId, mainThread.id);
-                    await loadThreads();
+                    const switched = await switchTaskThread(projectId, taskId, mainThread.id);
+                    updateActiveThread(switched.id);
                 } catch (e) {
                     showToast(String(e));
                 }
