@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { getProjectId, getLastTaskId } from './helpers';
 
 test.describe('Diff Auto-Refresh', () => {
   test.beforeEach(async ({ page }) => {
@@ -40,8 +41,20 @@ test.describe('Diff Auto-Refresh', () => {
       });
     });
 
-    // Open task detail — loadDiff() is called on mount
-    await page.click('.card');
+    // Move a task to in_progress so loadDiff() is called on mount
+    // (backlog tasks skip diff loading because they have no worktree)
+    const projectId = await getProjectId(page);
+    const taskId = await getLastTaskId(page, projectId);
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'in_progress' }),
+      });
+    }, { pid: projectId, tid: taskId });
+
+    // Open the specific task via URL (the one moved to in_progress)
+    await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
 
     // Wait for WebSocket to connect

@@ -311,7 +311,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     async function loadDiff() {
-        if (!task) return;
+        if (!task || task.status === 'backlog') return;
         try {
             const result = await getTaskDiff(task.project_id, task.id);
             updateDiff(result);

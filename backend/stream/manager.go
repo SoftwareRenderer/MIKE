@@ -139,6 +139,11 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	if sm.worktreeMgr != nil {
 		b.SetLifecycleCallback(func(hasClients bool) {
 			if hasClients {
+				// Don't poll for tasks that haven't started (no worktree exists)
+				task, _ := sm.store.GetTaskByTaskID(taskID)
+				if task != nil && task.Status == "backlog" {
+					return
+				}
 				sm.pollersMu.Lock()
 				if _, exists := sm.pollers[taskID]; !exists {
 					ctx, cancel := context.WithCancel(context.Background())
