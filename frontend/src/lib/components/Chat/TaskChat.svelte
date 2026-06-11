@@ -75,6 +75,24 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
+    // Set of user message IDs that have no assistant/tool_call entry after them.
+    // Used to determine whether to show "Send" or "Fork" in the edit form.
+    let lastUserMessageIds = $derived(new Set((() => {
+        const ids = new Set<string>();
+        let lastUserId: string | null = null;
+        for (const e of entries) {
+            if (e.role === 'user') {
+                lastUserId = e.id;
+            } else if (lastUserId && (e.toolCall || e.role === 'assistant')) {
+                // An assistant/tool_call entry exists — the user message has a response (or one is in progress)
+                lastUserId = null;
+            }
+        }
+        // If there's a trailing user message with no assistant after it, add it
+        if (lastUserId) ids.add(lastUserId);
+        return ids;
+    })()));
+
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
     }
@@ -125,7 +143,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const id = genId();
         currentAssistantId = id;
         const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString() };
-        entries.push(entry);
+        entries = [...entries, entry];
         return entry;
     }
 
@@ -182,7 +200,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString(),
                     toolCall: { toolName: data.tool_name, args: data.args, raw_args: data.raw_args, isPending: true }
                 };
-                entries.push(entry);
+                entries = [...entries, entry];
                 activeToolCalls.set(data.tool_id, entry);
                 break;
             }
@@ -236,7 +254,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     break;
                 }
                 closeCurrentAssistant();
-                entries.push({ id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() });
+                entries = [...entries, { id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
                 break;
             }
             case 'complete': {
@@ -271,7 +289,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     error: { code, message },
                     createdAt: new Date().toISOString(),
                 };
-                entries.push(entry);
+                entries = [...entries, entry];
                 // Persist to backend (except ws_disconnected which is ephemeral)
                 if (code !== 'ws_disconnected') {
                     createTaskMessage(projectId, taskId, 'error', `[${code}] ${message}`).catch(() => {});
@@ -488,7 +506,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Remove all error entries (cleared by next user action)
         entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
-        entries.push({ id: genId(), role: 'user', content: msg, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() });
+        entries = [...entries, { id: genId(), role: 'user', content: msg, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() }];
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = msg;
@@ -668,6 +686,48 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
+    async function handleEditSend(entryId: string, _originalContent: string, newContent: string) {
+        const idx = entries.findIndex(e => e.id === entryId);
+        if (idx === -1) return;
+
+        // Backlog: persist edit only (soft edit, no LLM trigger)
+        if (taskStatus === 'backlog') {
+            entries = entries.map((e, i) => i === idx ? { ...e, content: newContent } : e);
+            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
+            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
+            return;
+        }
+
+        // Idle/started: delete the old message and create a new one with edited content,
+        // then send via WebSocket to trigger a fresh LLM response.
+        // This avoids the backend's duplicate detection which would reuse the existing ID.
+        if (isLoading || disabled) return;
+        // Remove the old entry and any trailing assistant entries from UI
+        entries = entries.slice(0, idx);
+        closeCurrentAssistant();
+        // Delete old message from DB (and any messages after it)
+        try {
+            await deleteTaskMessagesAfter(projectId, taskId, entryId);
+        } catch (e) {
+            showToast(String(e));
+            return;
+        }
+        // Create new message in DB
+        const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
+        // Add to UI
+        entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
+        // Create assistant entry for the upcoming response
+        ensureAssistantEntry();
+        // Send via WebSocket to trigger lazy-start executor
+        lastSentMessage = newContent;
+        if (ws && ws.sendWithModel) {
+            ws.sendWithModel(newContent, selectedModel, selectedUrl);
+        } else if (ws) {
+            ws.send(newContent);
+        }
+        scroll();
+    }
+
     function connect() {
         if (ws) return;
         connecting = true;
@@ -707,7 +767,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     error: { code: 'ws_disconnected', message: 'Connection lost. Reconnecting...' },
                     createdAt: new Date().toISOString(),
                 };
-                entries.push(entry);
+                entries = [...entries, entry];
             }
             // Auto-retry after 3 seconds
             setTimeout(() => { if (!ws && !destroyed) connect(); }, 3000);
@@ -764,14 +824,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 showToast(String(e));
             }
         } else if (!urlThread) {
-            // No thread param — default to the "Main" thread
-            const mainThread = threads.find(t => t.name === 'Main');
-            if (mainThread && mainThread.id !== activeThreadId) {
-                try {
-                    const switched = await switchTaskThread(projectId, taskId, mainThread.id);
-                    updateActiveThread(switched.id);
-                } catch (e) {
-                    showToast(String(e));
+            // No thread param — use the last active thread (is_active flag).
+            // Only default to "Main" if no thread is marked active (first open).
+            if (!activeThreadId) {
+                const mainThread = threads.find(t => t.name === 'Main');
+                if (mainThread) {
+                    try {
+                        const switched = await switchTaskThread(projectId, taskId, mainThread.id);
+                        updateActiveThread(switched.id);
+                    } catch (e) {
+                        showToast(String(e));
+                    }
                 }
             }
         }
@@ -821,7 +884,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 <span class="hint">Send a message to start the conversation</span>
             </div>
         {:else}
-            {#each entries as entry (entry.id)}
+            {#each entries as entry, entryIdx (entry.id)}
                 {#if entry.role === 'user' && threads.length > 0}
                     <CheckpointDivider
                         timestamp={entry.createdAt}
@@ -883,7 +946,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}

@@ -12,10 +12,12 @@
         onCopy?: () => void;
         onDelete?: () => void;
         onFork?: (messageId: string, originalContent: string, newContent: string) => void;
+        onSend?: (messageId: string, originalContent: string, newContent: string) => void;
         onRegenerate?: () => void;
+        isLastUserMessage?: boolean;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onRegenerate }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false }: Props = $props();
 
     let reasoningExpanded = $state(false);
 
@@ -100,7 +102,11 @@
 
     function submitEdit() {
         if (editContent.trim() && messageId) {
-            onFork?.(messageId, content, editContent.trim());
+            if (isLastUserMessage && onSend) {
+                onSend(messageId, content, editContent.trim());
+            } else {
+                onFork?.(messageId, content, editContent.trim());
+            }
             isEditing = false;
         }
     }
@@ -136,13 +142,21 @@
                     <div class="edit-actions">
                         <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
                         <button class="btn-edit-submit" onclick={submitEdit}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <circle cx="18" cy="18" r="3"/>
-                                <circle cx="6" cy="6" r="3"/>
-                                <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
-                                <line x1="6" y1="9" x2="6" y2="21"/>
-                            </svg>
-                            Fork
+                            {#if isLastUserMessage}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <line x1="22" y1="2" x2="11" y2="13"/>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                                </svg>
+                                Send
+                            {:else}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="18" cy="18" r="3"/>
+                                    <circle cx="6" cy="6" r="3"/>
+                                    <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+                                    <line x1="6" y1="9" x2="6" y2="21"/>
+                                </svg>
+                                Fork
+                            {/if}
                         </button>
                     </div>
                 </div>
