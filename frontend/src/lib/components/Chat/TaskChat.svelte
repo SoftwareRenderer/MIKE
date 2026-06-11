@@ -886,13 +886,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {:else}
             {#each entries as entry, entryIdx (entry.id)}
                 {#if entry.role === 'user' && threads.length > 0}
-                    <CheckpointDivider
-                        timestamp={entry.createdAt}
-                        threadId={entry.threadId || activeThreadId}
-                        threads={threads}
-                        activeThreadId={activeThreadId}
-                        onSwitch={handleThreadSwitch}
-                    />
+                    {#if threads.filter(t => !t.checkpoint_message_time || t.checkpoint_message_time <= entry.createdAt).length > 0}
+                        <CheckpointDivider
+                            timestamp={entry.createdAt}
+                            threadId={entry.threadId || activeThreadId}
+                            threads={threads.filter(t => !t.checkpoint_message_time || t.checkpoint_message_time <= entry.createdAt)}
+                            activeThreadId={activeThreadId}
+                            onSwitch={handleThreadSwitch}
+                        />
+                    {/if}
                 {/if}
                 {#if entry.toolCall}
                     <div class="tool-call-entry">

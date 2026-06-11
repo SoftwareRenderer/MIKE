@@ -376,16 +376,23 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName)
 	}
+	// Look up the checkpoint message's created_at for frontend filtering
+	var checkpointMsgTime time.Time
+	if ct, err := s.store.GetMessageCreatedAt(req.FromMessageID); err == nil && ct != nil {
+		checkpointMsgTime = *ct
+	}
 	// Create new thread
 	now := time.Now().UTC()
 	newThread := &types.TaskThread{
-		ID:             newThreadID,
-		TaskID:         taskID,
-		ParentThreadID: req.FromThreadID,
-		Name:           "",
-		IsActive:       true,
-		GitBranch:      newBranchName,
-		CreatedAt:      now,
+		ID:                  newThreadID,
+		TaskID:              taskID,
+		ParentThreadID:      req.FromThreadID,
+		Name:                "",
+		IsActive:            true,
+		GitBranch:           newBranchName,
+		CheckpointMessageID: req.FromMessageID,
+		CheckpointMessageTime: checkpointMsgTime,
+		CreatedAt:           now,
 	}
 	// Generate thread name from new_content if provided, otherwise use "Fork #N"
 	threads, _ := s.store.GetThreadsByTask(taskID)

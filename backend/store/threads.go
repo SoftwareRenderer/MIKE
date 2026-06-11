@@ -14,8 +14,8 @@ func (s *Store) CreateThread(th *types.TaskThread) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), th.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(&th.CheckpointMessageTime), th.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -25,7 +25,7 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, created_at FROM task_threads WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at FROM task_threads WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *Store) GetThread(threadID string) (*types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, created_at FROM task_threads WHERE id = ?`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at FROM task_threads WHERE id = ?`,
 		threadID,
 	)
 	var th types.TaskThread

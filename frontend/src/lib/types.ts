@@ -39,6 +39,8 @@ export interface Thread {
     name: string;
     is_active: boolean;
     git_branch?: string;
+    checkpoint_message_id?: string;
+    checkpoint_message_time?: string;
     created_at: string;
 }
 

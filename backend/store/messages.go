@@ -113,6 +113,22 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 	return id, err
 }
 
+// GetMessageCreatedAt returns the created_at time of a message by ID.
+func (s *Store) GetMessageCreatedAt(messageID string) (*time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var createdAt string
+	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt)
+	if err != nil {
+		return nil, err
+	}
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // CreateHomeAgentMessage inserts a home agent message.
 func (s *Store) CreateHomeAgentMessage(m *types.HomeAgentMessage) error {
 	s.mu.Lock()

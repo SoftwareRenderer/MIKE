@@ -192,6 +192,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`) // best-effort for existing tables
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`) // best-effort
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
 	return nil
 }
 
@@ -330,6 +332,15 @@ func ptrStr(s string) *string {
 	return &s
 }
 
+// ptrTime formats a time pointer as RFC3339 string, or nil if zero.
+func ptrTime(t *time.Time) *string {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	s := t.Format(time.RFC3339)
+	return &s
+}
+
 // scanTime scans a TEXT column (RFC3339) into a time.Time.
 func scanTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
@@ -364,14 +375,16 @@ func scanTask(s scanner, t *types.Task) error {
 
 // scanTaskThread scans a row into a TaskThread.
 func scanTaskThread(s scanner, th *types.TaskThread) error {
-	var parentThreadID, gitBranch sql.NullString
+	var parentThreadID, gitBranch, checkpointMsgID, checkpointMsgTime sql.NullString
 	var createdAt string
-	err := s.Scan(&th.ID, &th.TaskID, &parentThreadID, &th.Name, &th.IsActive, &gitBranch, &createdAt)
+	err := s.Scan(&th.ID, &th.TaskID, &parentThreadID, &th.Name, &th.IsActive, &gitBranch, &checkpointMsgID, &checkpointMsgTime, &createdAt)
 	if err != nil {
 		return err
 	}
 	th.ParentThreadID = parentThreadID.String
 	th.GitBranch = gitBranch.String
+	th.CheckpointMessageID = checkpointMsgID.String
+	th.CheckpointMessageTime = scanTime(checkpointMsgTime.String)
 	th.CreatedAt = scanTime(createdAt)
 	return nil
 }
