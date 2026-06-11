@@ -387,7 +387,10 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	// Copy messages from source thread up to the checkpoint
-	_ = s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID)
+	if err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	// Set new thread as active
 	if err := s.store.SetActiveThread(newThreadID); err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())

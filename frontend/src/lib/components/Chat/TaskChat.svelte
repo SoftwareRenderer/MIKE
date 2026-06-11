@@ -15,6 +15,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         content: string;
         reasoningContent?: string;
         isStreaming?: boolean;
+        threadId?: string;
         toolCall?: {
             toolName: string;
             args: Record<string, unknown>;
@@ -76,6 +77,25 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
+    }
+
+    /** Read the `thread` URL param from the current URL. */
+    function readThreadFromUrl(): string | null {
+        return new URLSearchParams(location.search).get('thread');
+    }
+
+    /** Update the URL to include `&thread=<threadId>`, pushing to browser history. */
+    function updateThreadUrl(threadId: string) {
+        const url = new URL(location.href);
+        url.searchParams.set('thread', threadId);
+        history.pushState({ task: taskId, thread: threadId }, '', url.toString());
+    }
+
+    /** Remove the `thread` param from the URL. */
+    function clearThreadUrl() {
+        const url = new URL(location.href);
+        url.searchParams.delete('thread');
+        history.pushState({ task: taskId }, '', url.toString());
     }
 
     function formatToolArgs(toolName: string, args: Record<string, unknown>): string {
@@ -194,7 +214,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'user_message': {
-                const data = event.data as { id?: string; role: string; content: string };
+                const data = event.data as { id?: string; role: string; content: string; thread_id?: string };
                 // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
                 if (lastSentMessage === data.content) {
                     lastSentMessage = null;
@@ -203,6 +223,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         for (let i = entries.length - 1; i >= 0; i--) {
                             if (entries[i].role === 'user' && entries[i].content === data.content) {
                                 entries[i].id = data.id;
+                                if (data.thread_id) entries[i].threadId = data.thread_id;
                                 break;
                             }
                         }
@@ -210,7 +231,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     break;
                 }
                 closeCurrentAssistant();
-                entries.push({ id: data.id || genId(), role: data.role, content: data.content, isStreaming: false, createdAt: new Date().toISOString() });
+                entries.push({ id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() });
                 break;
             }
             case 'complete': {
@@ -337,6 +358,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             const messages = await getTaskMessages(projectId, taskId);
             entries = messages.map(m => {
+                const base = { threadId: m.thread_id || undefined };
                 // Restore error entries from persisted data
                 if (m.role === 'error') {
                     const content = m.content || '';
@@ -344,7 +366,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     const code = match ? match[1] : 'error';
                     const message = match ? match[2] : content;
                     return {
-                        id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
+                        ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
                         error: { code, message },
                     };
                 }
@@ -353,7 +375,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     const tc = JSON.parse(m.tool_calls);
                     const result = m.tool_result ? JSON.parse(m.tool_result) : null;
                     return {
-                        id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
+                        ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
                         toolCall: {
                             toolName: tc.tool_name,
                             args: tc.args ?? {},
@@ -366,7 +388,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     };
                 }
                 return {
-                    id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, isStreaming: false, createdAt: m.created_at,
+                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, isStreaming: false, createdAt: m.created_at,
                     stats: m.model_name ? {
                         model_name: m.model_name,
                         prompt_tokens: m.prompt_tokens ?? 0,
@@ -403,6 +425,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             await switchTaskThread(projectId, taskId, threadId);
             await reloadThreadData();
+            // Update URL with new thread param
+            updateThreadUrl(threadId);
             // Reconnect WebSocket to pick up the new thread context
             if (ws) {
                 ws.close();
@@ -420,6 +444,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             await forkTaskThread(projectId, taskId, fromThreadId, messageId);
             await reloadThreadData();
+            // Update URL with the new fork's thread ID
+            if (activeThreadId) {
+                updateThreadUrl(activeThreadId);
+            }
             // Reconnect WebSocket to pick up the new thread context
             if (ws) {
                 ws.close();
@@ -448,8 +476,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         if (!msg || disabled) return;
         // Remove all error entries (cleared by next user action)
         entries = entries.filter(e => e.role !== 'error');
-        // Add message optimistically
-        entries.push({ id: genId(), role: 'user', content: msg, isStreaming: false, createdAt: new Date().toISOString() });
+        // Add message optimistically with current thread context
+        entries.push({ id: genId(), role: 'user', content: msg, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() });
         // Create assistant entry immediately so streaming UI appears
         ensureAssistantEntry();
         lastSentMessage = msg;
@@ -652,9 +680,52 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     let destroyed = $state(false);
 
+    /** Re-read thread param from URL and switch if needed (for popstate/Back navigation). */
+    async function syncThreadFromUrl() {
+        const urlThread = readThreadFromUrl();
+        if (!urlThread) return;
+        // If URL specifies a thread and it differs from current active thread, switch to it
+        if (urlThread !== activeThreadId && threads.some(t => t.id === urlThread)) {
+            try {
+                await switchTaskThread(projectId, taskId, urlThread);
+                await reloadThreadData();
+                // Reconnect WebSocket
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                    connected = false;
+                }
+                connect();
+            } catch (e) {
+                showToast(String(e));
+            }
+        }
+    }
+
     onMount(async () => {
         await loadProviders();
         await loadThreads();
+        // If URL has a thread param, switch to that thread before loading history
+        const urlThread = readThreadFromUrl();
+        if (urlThread && threads.some(t => t.id === urlThread)) {
+            try {
+                await switchTaskThread(projectId, taskId, urlThread);
+                await loadThreads();
+            } catch (e) {
+                showToast(String(e));
+            }
+        } else if (!urlThread) {
+            // No thread param — default to the "Main" thread
+            const mainThread = threads.find(t => t.name === 'Main');
+            if (mainThread && mainThread.id !== activeThreadId) {
+                try {
+                    await switchTaskThread(projectId, taskId, mainThread.id);
+                    await loadThreads();
+                } catch (e) {
+                    showToast(String(e));
+                }
+            }
+        }
         await loadHistory();
         // Override model selection with task-specific values if set
         try {
@@ -669,8 +740,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Task may not exist yet
         }
         connect();
+        // Listen for URL changes (e.g., browser Back/Forward)
+        const handleUrlChange = () => syncThreadFromUrl();
+        window.addEventListener('urlchanged', handleUrlChange);
         // Subscribe to config store to react to settings changes
-        return configStore.subscribe(() => updateProvidersFromStore());
+        const unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
+        return () => {
+            window.removeEventListener('urlchanged', handleUrlChange);
+            unsubConfig();
+        };
     });
 
     onDestroy(() => {
@@ -753,7 +831,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     <CheckpointDivider
                         timestamp={entry.createdAt}
                         messageId={entry.id}
-                        threadId={activeThreadId}
+                        threadId={entry.threadId || activeThreadId}
                         threads={threads}
                         activeThreadId={activeThreadId}
                         onFork={handleThreadFork}

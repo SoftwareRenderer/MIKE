@@ -79,6 +79,8 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 selectedTask.set(null);
                 showCardDetail.set(false);
             }
+            // Notify child components (e.g., TaskChat) that the URL changed
+            window.dispatchEvent(new CustomEvent('urlchanged'));
         }
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
