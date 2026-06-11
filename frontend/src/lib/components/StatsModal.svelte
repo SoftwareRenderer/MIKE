@@ -54,25 +54,29 @@
         return model.model_name;
     }
 
-    // Sort model rows: regular entries first, title generation at bottom
+    // Sort model rows: regular entries first, title generation at bottom, filter out zeroed entries
     let sortedModels: ModelStats[] = $derived(
-        (stats?.by_model || []).sort((a, b) => {
-            const aTitle = a.provider_name === 'title_generation' ? 1 : 0;
-            const bTitle = b.provider_name === 'title_generation' ? 1 : 0;
-            if (aTitle !== bTitle) return aTitle - bTitle;
-            return b.generated_tokens - a.generated_tokens;
-        })
+        (stats?.by_model || []).filter(m => m.task_count > 0 || m.generated_tokens > 0 || m.processed_tokens > 0 || m.cache_tokens > 0)
+            .toSorted((a, b) => {
+                const aTitle = a.provider_name === 'title_generation' ? 1 : 0;
+                const bTitle = b.provider_name === 'title_generation' ? 1 : 0;
+                if (aTitle !== bTitle) return aTitle - bTitle;
+                return b.generated_tokens - a.generated_tokens;
+            })
     );
 
     async function resetModel(model: ModelStats) {
         if (!confirm(`Reset token stats for ${getTokenLabel(model)}?`)) return;
         try {
             await resetProjectStats(projectId, model.model_name, model.provider_name || undefined);
-            // Refresh stats
+            loading = true;
+            error = '';
             const data = await getProjectStats(projectId);
             stats = data;
         } catch (e) {
             error = String(e);
+        } finally {
+            loading = false;
         }
     }
 </script>
@@ -88,7 +92,7 @@
                 <div class="loading">Loading stats...</div>
             {:else if error}
                 <div class="error">{error}</div>
-            {:else if !stats || stats.by_model.length === 0}
+            {:else if !stats || sortedModels.length === 0}
                 <div class="empty">No token usage data yet. Run a task to see stats here.</div>
             {:else}
                 <!-- Overall summary -->
@@ -99,26 +103,26 @@
                             <span class="summary-label">Tasks</span>
                         </div>
                         <div class="summary-item">
-                            <span class="summary-value">{formatNumber(stats.total_generated_tokens)}</span>
-                            <span class="summary-label">Generated</span>
+                            <span class="summary-value">{formatNumber(stats.total_cache_tokens)}</span>
+                            <span class="summary-label">Cached</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatNumber(stats.total_processed_tokens)}</span>
-                            <span class="summary-label">Processed</span>
+                            <span class="summary-label">Prompt</span>
                         </div>
                         <div class="summary-item">
-                            <span class="summary-value">{formatNumber(stats.total_cache_tokens)}</span>
-                            <span class="summary-label">Cached</span>
+                            <span class="summary-value">{formatNumber(stats.total_generated_tokens)}</span>
+                            <span class="summary-label">Generated</span>
                         </div>
                     </div>
                     <div class="summary-row timings">
                         <div class="summary-item">
                             <span class="summary-value">{formatTps(stats.avg_prompt_tps)}</span>
-                            <span class="summary-label">Prompt t/s</span>
+                            <span class="summary-label">Prompt Speed</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatTps(stats.avg_generation_tps)}</span>
-                            <span class="summary-label">Generation t/s</span>
+                            <span class="summary-label">Gen Speed</span>
                         </div>
                     </div>
                 </div>
@@ -129,11 +133,11 @@
                         <tr>
                             <th class="col-model">Model</th>
                             <th class="col-num">Tasks</th>
-                            <th class="col-num">Generated</th>
-                            <th class="col-num">Processed</th>
                             <th class="col-num">Cached</th>
-                            <th class="col-num">Prompt t/s</th>
-                            <th class="col-num">Gen t/s</th>
+                            <th class="col-num">Prompt</th>
+                            <th class="col-num">Generated</th>
+                            <th class="col-num">Prompt Speed</th>
+                            <th class="col-num">Gen Speed</th>
                             <th class="col-action"></th>
                         </tr>
                     </thead>
@@ -144,19 +148,20 @@
                                     <span class="model-label" class:title-gen-label={model.provider_name === 'title_generation'}>{getTokenLabel(model)}</span>
                                 </td>
                                 <td class="col-num">{model.task_count}</td>
-                                <td class="col-num">{formatNumber(model.generated_tokens)}</td>
-                                <td class="col-num">{formatNumber(model.processed_tokens)}</td>
                                 <td class="col-num">{formatNumber(model.cache_tokens)}</td>
+                                <td class="col-num">{formatNumber(model.processed_tokens)}</td>
+                                <td class="col-num">{formatNumber(model.generated_tokens)}</td>
                                 <td class="col-num">{formatTps(model.avg_prompt_tps)}</td>
                                 <td class="col-num">{formatTps(model.avg_generation_tps)}</td>
                                 <td class="col-action">
                                     <button class="btn-reset" onclick={() => resetModel(model)} title="Reset stats for this model" aria-label={`Reset stats for ${getTokenLabel(model)}`}>
-                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                            <path d="M2 8a6 6 0 0111.47-2.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                                            <path d="M14 2v4h-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                            <path d="M14 8A6 6 0 012.53 5.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                                            <path d="M2 14v-4h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M21 2v6h-6"/>
+                                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                                            <path d="M3 22v-6h6"/>
+                                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
                                         </svg>
+                                        Reset
                                     </button>
                                 </td>
                             </tr>
@@ -309,19 +314,22 @@
     }
     .btn-reset {
         background: none;
-        border: none;
+        border: 1px solid var(--color-border);
         color: var(--color-text-secondary);
         cursor: pointer;
-        padding: 4px;
+        padding: 3px 8px;
         border-radius: var(--radius-sm);
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        justify-content: center;
-        transition: color 0.15s ease, background 0.15s ease;
+        gap: 4px;
+        font-size: 0.75rem;
+        font-family: var(--font-sans);
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     }
     .btn-reset:hover {
         color: var(--color-status-red);
         background: rgba(248, 81, 73, 0.1);
+        border-color: rgba(248, 81, 73, 0.3);
     }
     .model-label {
         font-family: var(--font-mono, monospace);
