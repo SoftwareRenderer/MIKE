@@ -29,6 +29,7 @@
     let editContent = $state(content);
     let textareaEl: HTMLTextAreaElement | null = $state(null);
     let statsView = $state<'reading' | 'generation'>('generation');
+    let copied = $state(false);
 
     // Derived stats for generation view
     let genTokens = $derived(stats?.predicted_tokens ?? 0);
@@ -52,9 +53,29 @@
             : ''
     );
 
-    function handleCopy() {
-        navigator.clipboard.writeText(content);
-        onCopy?.();
+    async function handleCopy() {
+        try {
+            await navigator.clipboard.writeText(content);
+            copied = true;
+            setTimeout(() => copied = false, 2000);
+        } catch (err) {
+            // Fallback: create a temporary textarea and copy
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.value = content;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                copied = true;
+                setTimeout(() => copied = false, 2000);
+            } catch (_) {
+                // Both methods failed
+                console.error('Failed to copy to clipboard:', err);
+            }
+        }
     }
 
     function handleDelete() {
@@ -125,11 +146,12 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" onclick={handleCopy} aria-label="Copy message">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message">
+                        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
+                        <span class="check">✓</span>
                     </button>
                     {#if onEdit}
                         <button class="action-btn" onclick={startEdit} aria-label="Edit message">
@@ -225,11 +247,12 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" onclick={handleCopy} aria-label="Copy message">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message">
+                        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
+                        <span class="check">✓</span>
                     </button>
                     {#if onRegenerate && !isStreaming}
                         <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response">
@@ -530,10 +553,35 @@
         align-items: center;
         justify-content: center;
         transition: all 0.15s ease;
+        position: relative;
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
     }
     .action-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    .action-btn .icon {
+        opacity: 1;
+        transition: opacity 0.2s ease;
+    }
+    .action-btn.copied .icon {
+        opacity: 0;
+        pointer-events: none;
+        position: absolute;
+    }
+    .action-btn .check {
+        position: absolute;
+        opacity: 0;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+    }
+    .action-btn.copied .check {
+        opacity: 1;
     }
     .edit-form {
         display: flex;

@@ -160,6 +160,45 @@ test.describe.serial('Task Message Actions', () => {
     await expect(page.locator('.message-bubble').last()).toContainText('Edited content');
   });
 
+  test('should copy assistant message content to clipboard', async ({ page }) => {
+    // Count assistant messages before sending
+    const assistantCountBefore = await page.locator('.chat-message.assistant').count();
+
+    // Send a message to trigger LLM response
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(`Copy assistant test ${Date.now()}`);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+
+    // Wait for a NEW assistant message to appear
+    const newAssistantAppeared = await page.waitForFunction(
+      (count) => document.querySelectorAll('.chat-message.assistant').length > count,
+      assistantCountBefore,
+      { timeout: 10000 }
+    ).catch(() => false);
+    if (!newAssistantAppeared) {
+      test.skip(); // Executor didn't start, skip gracefully
+    }
+
+    // Wait for streaming to stop
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 15000 });
+
+    // Get the assistant message content
+    const lastAssistant = page.locator('.chat-message.assistant').last();
+    const assistantContent = await lastAssistant.locator('.message-text').first().textContent();
+    expect(assistantContent).toBeTruthy();
+
+    // Grant clipboard permission and click copy
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const copyBtn = lastAssistant.locator('.action-btn[aria-label*="Copy"]');
+    await copyBtn.click();
+    await page.waitForTimeout(100);
+
+    // Verify clipboard content matches the assistant message
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toBe(assistantContent?.trim());
+  });
+
   test('should show regenerate button on assistant message after LLM response', async ({ page }) => {
     // Count assistant messages before sending
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
