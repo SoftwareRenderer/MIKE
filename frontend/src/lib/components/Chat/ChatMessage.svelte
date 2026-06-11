@@ -11,11 +11,11 @@
         stats?: { model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         onCopy?: () => void;
         onDelete?: () => void;
-        onEdit?: (newContent: string) => void;
+        onFork?: (messageId: string, originalContent: string, newContent: string) => void;
         onRegenerate?: () => void;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onEdit, onRegenerate }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onRegenerate }: Props = $props();
 
     let reasoningExpanded = $state(false);
 
@@ -99,8 +99,8 @@
     }
 
     function submitEdit() {
-        if (editContent.trim()) {
-            onEdit?.(editContent.trim());
+        if (editContent.trim() && messageId) {
+            onFork?.(messageId, content, editContent.trim());
             isEditing = false;
         }
     }
@@ -135,7 +135,15 @@
                     ></textarea>
                     <div class="edit-actions">
                         <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
-                        <button class="btn-edit-submit" onclick={submitEdit}>Send</button>
+                        <button class="btn-edit-submit" onclick={submitEdit}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="18" cy="18" r="3"/>
+                                <circle cx="6" cy="6" r="3"/>
+                                <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+                                <line x1="6" y1="9" x2="6" y2="21"/>
+                            </svg>
+                            Fork
+                        </button>
                     </div>
                 </div>
             {:else}
@@ -153,8 +161,8 @@
                         </svg>
                         <span class="check">✓</span>
                     </button>
-                    {#if onEdit}
-                        <button class="action-btn" onclick={startEdit} aria-label="Edit message">
+                    {#if onFork}
+                        <button class="action-btn" onclick={startEdit} aria-label="Fork conversation from this message">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>

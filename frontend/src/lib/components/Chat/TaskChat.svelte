@@ -608,36 +608,49 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         deleteConfirm = null;
     }
 
-    async function handleEdit(entryId: string, newContent: string) {
-        const idx = entries.findIndex(e => e.id === entryId);
-        if (idx === -1) return;
+    async function handleEditFork(entryId: string, _originalContent: string, newContent: string) {
+        const entry = entries.find(e => e.id === entryId);
+        if (!entry) return;
         // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
         if (taskStatus === 'backlog') {
-            entries[idx].content = newContent;
+            const idx = entries.findIndex(e => e.id === entryId);
+            if (idx !== -1) entries[idx].content = newContent;
             updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
         }
-        // Optimistic update: update local state immediately
-        lastSentMessage = newContent;
-        entries[idx].content = newContent;
-        entries = entries.slice(0, idx + 1);
-        // Delete the old message and everything after it from the backend,
-        // THEN send the edited content (which creates a replacement message).
-        // This avoids the race where ws.send creates a new DB row that gets
-        // caught by the deletion (backend DeleteTaskMessagesAfter uses created_at >= ?).
-        const isBackendId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-        if (isBackendId(entryId)) {
-            try {
-                await deleteTaskMessagesAfter(projectId, taskId, entryId);
-            } catch (e) {
-                showToast(String(e));
+        if (isLoading || disabled) return;
+        // Fork the conversation from this message, then update the copied message
+        // in the new fork to the edited content.
+        try {
+            const fromThreadId = entry.threadId || activeThreadId;
+            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId);
+            // Add new fork to threads list and set as active
+            if (!threads.some(t => t.id === forked.id)) {
+                threads = [...threads, forked];
             }
+            updateActiveThread(forked.id);
+            await loadHistory();
+            // Find the copied message in the new fork (last user message matching original content)
+            // and update it to the edited content.
+            const forkedEntry = [...entries].reverse().find(e => e.role === 'user' && e.content === _originalContent);
+            if (forkedEntry) {
+                await updateTaskMessage(projectId, taskId, forkedEntry.id, newContent);
+                const forkedIdx = entries.findIndex(e => e.id === forkedEntry.id);
+                if (forkedIdx !== -1) entries[forkedIdx].content = newContent;
+            }
+            // Update URL with the new fork's thread ID
+            updateThreadUrl(forked.id);
+            // Reconnect WebSocket to pick up the new thread context
+            if (ws) {
+                ws.close();
+                ws = null;
+                connected = false;
+            }
+            connect();
+        } catch (e) {
+            showToast(String(e));
         }
-        // Send the edited content to trigger LLM (creates a replacement message)
-        if (ws) ws.send(newContent);
-        // Create assistant entry so streaming UI appears immediately
-        ensureAssistantEntry();
     }
 
     function connect() {
@@ -846,7 +859,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onEdit={(newContent) => handleEdit(entry.id, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
                 {#if entry.role === 'user' && threads.length > 0}
                     <CheckpointDivider

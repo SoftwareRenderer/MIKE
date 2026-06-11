@@ -25,7 +25,6 @@
 
     function handleFork() {
         onFork?.(messageId, threadId);
-        showMenu = false;
     }
 
     function handleSwitch(threadId: string) {

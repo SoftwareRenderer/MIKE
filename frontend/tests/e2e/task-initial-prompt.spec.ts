@@ -26,7 +26,7 @@ test.describe.serial('Task Initial Prompt as Message', () => {
     await expect(firstUserMessage.locator('.message-text')).toContainText(taskPrompt);
   });
 
-  test('should show edit and copy buttons on the prompt message', async ({ page }) => {
+  test('should show fork and copy buttons on the prompt message', async ({ page }) => {
     await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
@@ -35,18 +35,18 @@ test.describe.serial('Task Initial Prompt as Message', () => {
 
     // Action buttons should be visible
     await expect(firstUserMessage.locator('.action-btn[aria-label*="Copy"]')).toBeVisible();
-    await expect(firstUserMessage.locator('.action-btn[aria-label*="Edit"]')).toBeVisible();
+    await expect(firstUserMessage.locator('.action-btn[aria-label*="Fork"]')).toBeVisible();
   });
 
-  test('should update task description when prompt message is edited', async ({ page }) => {
+  test('should update task description when prompt message is fork-edited (backlog soft-edit)', async ({ page }) => {
     await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     const firstUserMessage = page.locator('.chat-message.user').first();
     await expect(firstUserMessage).toBeVisible({ timeout: 10000 });
 
-    // Click edit button
-    await firstUserMessage.locator('.action-btn[aria-label*="Edit"]').click();
+    // Click fork button (for backlog tasks, this does a soft edit)
+    await firstUserMessage.locator('.action-btn[aria-label*="Fork"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
 
     // Edit the content
@@ -54,7 +54,7 @@ test.describe.serial('Task Initial Prompt as Message', () => {
     await page.locator('.edit-form textarea').fill(newPrompt);
     await page.locator('.btn-edit-submit').click();
 
-    // Edit form should close and message should show new content
+    // Form should close and message should show new content
     await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
     await expect(firstUserMessage.locator('.message-text')).toContainText(newPrompt);
 
