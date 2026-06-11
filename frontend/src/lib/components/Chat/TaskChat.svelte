@@ -453,8 +453,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await loadHistory();
             // Update URL with new thread param
             updateThreadUrl(threadId);
-            // Reconnect WebSocket to pick up the new thread context
+            // Reconnect WebSocket — clear onclose to prevent stale handler
+            // from nulling out the new ws reference after it's created.
             if (ws) {
+                ws.ws.onclose = null;
                 ws.close();
                 ws = null;
                 connected = false;
@@ -477,8 +479,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
-            // Reconnect WebSocket to pick up the new thread context
+            // Reconnect WebSocket — clear onclose to prevent stale handler
+            // from nulling out the new ws reference after it's created.
             if (ws) {
+                ws.ws.onclose = null;
                 ws.close();
                 ws = null;
                 connected = false;
@@ -651,8 +655,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
-            // Reconnect WebSocket to pick up the new thread context
+            // Reconnect WebSocket — clear onclose to prevent stale handler
+            // from nulling out the new ws reference after it's created.
             if (ws) {
+                ws.ws.onclose = null;
                 ws.close();
                 ws = null;
                 connected = false;
@@ -778,6 +784,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     /** Force immediate WebSocket reconnect. */
     function handleRetryConnect() {
         if (ws) {
+            ws.ws.onclose = null;
             ws.close();
             ws = null;
         }
@@ -798,8 +805,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const switched = await switchTaskThread(projectId, taskId, urlThread);
                 updateActiveThread(switched.id);
                 await loadHistory();
-                // Reconnect WebSocket
+                // Reconnect WebSocket — clear onclose to prevent stale handler
                 if (ws) {
+                    ws.ws.onclose = null;
                     ws.close();
                     ws = null;
                     connected = false;
