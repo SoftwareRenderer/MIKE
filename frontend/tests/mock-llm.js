@@ -40,6 +40,57 @@ const toolCallComplete = loadFixture('tool_call_complete');
 let requestCount = 0;
 
 /**
+ * Build a non-streaming JSON response (matching real LLM behavior for stream: false).
+ * Uses the selected fixture chunks to derive content + usage.
+ */
+function buildNonStreamingResponse(parsed, chunks) {
+    const isTitleGen = (parsed.messages || []).some(
+        m => m.role === 'system' && /title.generator/i.test(m.content)
+    );
+
+    // Extract content from text chunks
+    let content = '';
+    for (const chunk of chunks) {
+        for (const choice of chunk.choices || []) {
+            if (choice.delta?.content) {
+                content += choice.delta.content;
+            }
+        }
+    }
+
+    // For title generation, produce a short title from the user prompt
+    if (isTitleGen && !content) {
+        const userMsg = (parsed.messages || []).filter(m => m.role === 'user').pop();
+        content = userMsg?.content?.slice(0, 40) || 'Generated Title';
+    }
+
+    const lastChunk = chunks[chunks.length - 1];
+    const usage = lastChunk?.usage || {
+        prompt_tokens: 30,
+        completion_tokens: isTitleGen ? 5 : 8,
+        total_tokens: isTitleGen ? 35 : 38,
+        prompt_tokens_details: { cached_tokens: 0 }
+    };
+    const timings = lastChunk?.timings || {
+        prompt_ms: 150,
+        predicted_ms: isTitleGen ? 50 : 180,
+        prompt_per_token_ms: 0,
+        predicted_per_token_ms: 0,
+        prompt_per_second: 0,
+        predicted_per_second: 0
+    };
+
+    return JSON.stringify({
+        choices: [{
+            message: { content: content },
+            finish_reason: 'stop'
+        }],
+        usage: usage,
+        timings: timings
+    });
+}
+
+/**
  * Select fixture based on request body content.
  * Returns { chunks, chunkDelay } where chunkDelay is ms between SSE frames.
  */
@@ -116,7 +167,15 @@ const server = http.createServer((req, res) => {
                                     chunks === textResponseLong ? 'text_long' : 'text';
                 const msgs = parsed.messages || [];
                 const lastUser = msgs.filter(m => m.role === 'user').pop();
-                console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
+                console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) stream=${parsed.stream} last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
+
+                // Non-streaming response (stream: false) — return JSON, not SSE
+                if (parsed.stream === false) {
+                    const responseBody = buildNonStreamingResponse(parsed, chunks);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(responseBody);
+                    return;
+                }
 
                 // SSE headers
                 res.writeHead(200, {

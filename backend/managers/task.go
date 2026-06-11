@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
@@ -255,7 +257,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			{Role: "user", Content: prompt},
 		}
 
-		title, err := client.ChatCompletion(ctx, messages)
+		usage, title, err := client.ChatCompletion(ctx, messages)
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)
@@ -266,6 +268,27 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			log.Printf("[title-gen] task=%s empty title from LLM", taskID)
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
+		}
+
+		// Store title generation usage as an invisible message (role='title')
+		// so it appears in project stats but not in the chat UI.
+		if usage != nil {
+			if err := h.store.CreateTaskMessage(&types.TaskMessage{
+				ID:              uuid.New().String(),
+				TaskID:          taskID,
+				Role:            "title",
+				Content:         title,
+				ModelName:       task.ModelName,
+				ProviderName:    "title_generation",
+				PromptTokens:    usage.PromptTokens,
+				PredictedTokens: usage.CompletionTokens,
+				CacheTokens:     usage.PromptTokensDetails.CachedTokens,
+				PromptMs:        int(usage.PromptMs),
+				PredictedMs:     int(usage.PredictedMs),
+				CreatedAt:       time.Now().UTC(),
+			}); err != nil {
+				log.Printf("[title-gen] task=%s failed to store usage message: %v", taskID, err)
+			}
 		}
 
 		// Update the task with the generated title

@@ -168,11 +168,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	return usage, scanner.Err()
 }
 
-// ChatCompletion sends a non-streaming chat completion request and returns the full text response.
+// ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
 // Used for simple queries like title generation where streaming is not needed.
-func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage) (string, error) {
+func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
-		return "", fmt.Errorf("llama server URL not configured")
+		return nil, "", fmt.Errorf("llama server URL not configured")
 	}
 
 	url := c.baseURL + "/chat/completions"
@@ -203,41 +203,68 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return nil, "", fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("post to llama: %w", err)
+		return nil, "", fmt.Errorf("post to llama: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result types.ChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return nil, "", fmt.Errorf("decode response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
+		return nil, "", fmt.Errorf("no choices in response")
 	}
 
 	content := result.Choices[0].Message.Content
 	if content == nil {
-		return "", fmt.Errorf("empty content in response")
+		return nil, "", fmt.Errorf("empty content in response")
 	}
 
-	return strings.TrimSpace(*content), nil
+	// Extract usage data
+	var usage *types.ChatUsage
+	if result.Usage != nil {
+		usage = result.Usage
+		if result.Timings != nil {
+			usage.PromptMs = int64(result.Timings.PromptMs)
+			usage.PredictedMs = int64(result.Timings.PredictedMs)
+			if usage.PromptTokensDetails.CachedTokens == 0 && result.Timings.CacheN > 0 {
+				usage.PromptTokensDetails.CachedTokens = result.Timings.CacheN
+			}
+		}
+	} else if result.Timings != nil {
+		usage = &types.ChatUsage{
+			PromptTokens:     result.Timings.PromptN + result.Timings.CacheN,
+			CompletionTokens: result.Timings.PredictedN,
+			TotalTokens:      result.Timings.PromptN + result.Timings.CacheN + result.Timings.PredictedN,
+			PromptMs:         int64(result.Timings.PromptMs),
+			PredictedMs:      int64(result.Timings.PredictedMs),
+		}
+		usage.PromptTokensDetails.CachedTokens = result.Timings.CacheN
+	}
+
+	if usage != nil {
+		log.Printf("[llama] non-streaming usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
+			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
+	}
+
+	return usage, strings.TrimSpace(*content), nil
 }
 
 // HealthCheck pings the llama server.

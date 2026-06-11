@@ -36,7 +36,7 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 			SUM(predicted_tokens) as total_predicted_tokens,
 			SUM(predicted_ms) as total_predicted_ms
 		FROM task_messages
-		WHERE role = 'assistant'
+		WHERE role IN ('assistant', 'title')
 			AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)
 		GROUP BY model_name, provider_name
 		ORDER BY total_generated_tokens DESC
@@ -96,7 +96,7 @@ func (s *Store) DeleteProjectStats(projectID, modelName, providerName string) er
 	if providerName != "" {
 		_, err := s.db.Exec(`
 			DELETE FROM task_messages
-			WHERE role = 'assistant'
+			WHERE role IN ('assistant', 'title')
 				AND task_id IN (`+taskSubquery+`)
 				AND model_name = ?
 				AND provider_name = ?`,
@@ -106,7 +106,7 @@ func (s *Store) DeleteProjectStats(projectID, modelName, providerName string) er
 
 	_, err := s.db.Exec(`
 		DELETE FROM task_messages
-		WHERE role = 'assistant'
+		WHERE role IN ('assistant', 'title')
 			AND task_id IN (`+taskSubquery+`)
 			AND model_name = ?`,
 		projectID, modelName)

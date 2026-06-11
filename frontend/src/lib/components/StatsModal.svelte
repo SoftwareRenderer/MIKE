@@ -45,11 +45,24 @@
     }
 
     function getTokenLabel(model: ModelStats): string {
+        if (model.provider_name === 'title_generation') {
+            return `${model.model_name} (Title Generation)`;
+        }
         if (model.provider_name) {
             return `${model.provider_name} / ${model.model_name}`;
         }
         return model.model_name;
     }
+
+    // Sort model rows: regular entries first, title generation at bottom
+    let sortedModels: ModelStats[] = $derived(
+        (stats?.by_model || []).sort((a, b) => {
+            const aTitle = a.provider_name === 'title_generation' ? 1 : 0;
+            const bTitle = b.provider_name === 'title_generation' ? 1 : 0;
+            if (aTitle !== bTitle) return aTitle - bTitle;
+            return b.generated_tokens - a.generated_tokens;
+        })
+    );
 
     async function resetModel(model: ModelStats) {
         if (!confirm(`Reset token stats for ${getTokenLabel(model)}?`)) return;
@@ -125,10 +138,10 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {#each stats.by_model as model}
-                            <tr>
+                        {#each sortedModels as model}
+                            <tr class:title-gen-row={model.provider_name === 'title_generation'}>
                                 <td class="col-model">
-                                    <span class="model-label">{getTokenLabel(model)}</span>
+                                    <span class="model-label" class:title-gen-label={model.provider_name === 'title_generation'}>{getTokenLabel(model)}</span>
                                 </td>
                                 <td class="col-num">{model.task_count}</td>
                                 <td class="col-num">{formatNumber(model.generated_tokens)}</td>
@@ -313,6 +326,19 @@
     .model-label {
         font-family: var(--font-mono, monospace);
         font-size: 0.8125rem;
+    }
+    .title-gen-label {
+        color: var(--color-text-secondary);
+        font-style: italic;
+    }
+    .title-gen-row {
+        background: var(--color-surface-2);
+    }
+    .title-gen-row:hover {
+        background: var(--color-surface-3);
+    }
+    .title-gen-row td {
+        border-top: 1px dashed var(--color-border);
     }
 
     @media (max-width: 768px) {
