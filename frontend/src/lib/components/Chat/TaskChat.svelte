@@ -439,6 +439,35 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
+    /** Get the thread whose label should be shown at a given checkpoint.
+     * Finds the most specific (deepest) ancestor of the active thread whose
+     * fork point is at or before the message time. */
+    function getCheckpointThreads(entry: ChatEntry): Thread | null {
+        if (threads.length <= 1) return threads[0] || null;
+        const entryTime = entry.createdAt;
+        if (!entryTime) return threads.find(t => t.is_active) || threads[0] || null;
+
+        const activeThread = threads.find(t => t.is_active);
+        if (!activeThread) return threads[0] || null;
+
+        // Walk from active thread up to root. Return first (most specific) ancestor
+        // whose checkpoint is at or before the entry time.
+        const threadMap = new Map(threads.map(t => [t.id, t]));
+        let current: Thread = activeThread;
+
+        while (true) {
+            const ct = current.checkpoint_message_time;
+            // No checkpoint (root/Main), zero/epoch, or checkpoint <= entry → qualifies
+            if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
+                return current;
+            }
+            // This thread's fork point is after the entry; try parent
+            const parent = threadMap.get(current.parent_thread_id || '');
+            if (!parent) return threads[0] || null; // fallback to root
+            current = parent;
+        }
+    }
+
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
     function updateActiveThread(threadId: string) {
         activeThreadId = threadId;
@@ -449,7 +478,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         if (threadId === activeThreadId) return;
         try {
             const switched = await switchTaskThread(projectId, taskId, threadId);
-            updateActiveThread(switched.id);
+            // Refresh threads list from server to pick up any changes (deletions, etc.)
+            threads = await getTaskThreads(projectId, taskId);
+            activeThreadId = switched.id;
             await loadHistory();
             // Update URL with new thread param
             updateThreadUrl(threadId);
@@ -461,7 +492,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 ws = null;
                 connected = false;
             }
-            connect();
+            connect(true); // skip sync buffer after thread switch
         } catch (e) {
             showToast(String(e));
         }
@@ -471,11 +502,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         if (isLoading || disabled) return;
         try {
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, messageId);
-            // Add new fork to threads list and set as active
-            if (!threads.some(t => t.id === forked.id)) {
-                threads = [...threads, forked];
-            }
-            updateActiveThread(forked.id);
+            // Refresh threads list from server to ensure consistency
+            threads = await getTaskThreads(projectId, taskId);
+            activeThreadId = forked.id;
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
@@ -487,7 +516,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 ws = null;
                 connected = false;
             }
-            connect();
+            connect(true); // skip sync buffer after fork
         } catch (e) {
             showToast(String(e));
         }
@@ -624,6 +653,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
             entries = entries.filter((_, i) => i < idx);
+            // Refresh threads list and sync active thread after deletion
+            threads = await getTaskThreads(projectId, taskId);
+            const active = threads.find(t => t.is_active);
+            if (active) {
+                activeThreadId = active.id;
+                // Update URL to reflect the new active thread
+                updateThreadUrl(active.id);
+            }
         } catch (e) {
             showToast(String(e));
         }
@@ -647,11 +684,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             const fromThreadId = entry.threadId || activeThreadId;
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
-            // Add new fork to threads list and set as active
-            if (!threads.some(t => t.id === forked.id)) {
-                threads = [...threads, forked];
-            }
-            updateActiveThread(forked.id);
+            // Refresh threads list from server to ensure consistency
+            threads = await getTaskThreads(projectId, taskId);
+            activeThreadId = forked.id;
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
@@ -663,7 +698,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 ws = null;
                 connected = false;
             }
-            connect();
+            connect(true); // skip sync buffer after fork
             // Wait for WebSocket to be OPEN before sending the edited message.
             // sendWithModel silently drops messages when readyState !== OPEN.
             const wsReady = new Promise<void>((resolve, reject) => {
@@ -714,6 +749,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Delete old message from DB (and any messages after it)
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
+            // Sync active thread after deletion
+            threads = await getTaskThreads(projectId, taskId);
+            const active = threads.find(t => t.is_active);
+            if (active) {
+                activeThreadId = active.id;
+                updateThreadUrl(active.id);
+            }
         } catch (e) {
             showToast(String(e));
             return;
@@ -734,12 +776,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         scroll();
     }
 
-    function connect() {
+    function connect(skipSync = false) {
         if (ws) return;
         connecting = true;
         // Skip sync buffer on first connect (history already loaded from DB via loadHistory).
         // Enable sync on reconnects to catch events missed during the disconnect window.
-        const syncBuffer = firstConnectDone;
+        // After intentional reconnects (fork/thread-switch), skip sync because loadHistory
+        // already loaded the correct messages and the sync buffer may contain stale events
+        // from the old thread.
+        const syncBuffer = firstConnectDone && !skipSync;
         ws = createTaskStream(projectId, taskId, (event) => handleEvent(event), syncBuffer);
         ws.ws.onopen = () => {
             connecting = false;
@@ -812,7 +857,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     ws = null;
                     connected = false;
                 }
-                connect();
+                connect(true); // skip sync buffer after thread switch
             } catch (e) {
                 showToast(String(e));
             }
@@ -894,12 +939,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {:else}
             {#each entries as entry, entryIdx (entry.id)}
                 {#if entry.role === 'user' && threads.length > 0}
-                    {#if threads.filter(t => !t.checkpoint_message_time || t.checkpoint_message_time <= entry.createdAt).length > 0}
+                    {#if getCheckpointThreads(entry)}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
                             threadId={entry.threadId || activeThreadId}
-                            threads={threads.filter(t => !t.checkpoint_message_time || t.checkpoint_message_time <= entry.createdAt)}
-                            activeThreadId={activeThreadId}
+                            threads={threads}
+                            activeThreadId={getCheckpointThreads(entry)!.id}
                             onSwitch={handleThreadSwitch}
                         />
                     {/if}

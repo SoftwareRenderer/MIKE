@@ -34,15 +34,15 @@ type Board struct {
 
 // TaskThread represents a conversation branch within a task.
 type TaskThread struct {
-	ID                   string    `json:"id"`
-	TaskID               string    `json:"task_id"`
-	ParentThreadID       string    `json:"parent_thread_id,omitempty"`
-	Name                 string    `json:"name"`
-	IsActive             bool      `json:"is_active"`
-	GitBranch            string    `json:"git_branch,omitempty"`
-	CheckpointMessageID  string    `json:"checkpoint_message_id,omitempty"`
-	CheckpointMessageTime time.Time `json:"checkpoint_message_time,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                    string     `json:"id"`
+	TaskID                string     `json:"task_id"`
+	ParentThreadID        string     `json:"parent_thread_id,omitempty"`
+	Name                  string     `json:"name"`
+	IsActive              bool       `json:"is_active"`
+	GitBranch             string     `json:"git_branch,omitempty"`
+	CheckpointMessageID   string     `json:"checkpoint_message_id,omitempty"`
+	CheckpointMessageTime *time.Time `json:"checkpoint_message_time,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 // Config represents global server configuration.

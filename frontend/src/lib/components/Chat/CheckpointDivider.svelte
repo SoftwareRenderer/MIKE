@@ -11,6 +11,14 @@
 
     let { timestamp, threadId, threads, activeThreadId, onSwitch }: Props = $props();
 
+    // Filter threads to only show those relevant at this checkpoint
+    let relevantThreads = $derived(threads.filter(t => {
+        const ct = t.checkpoint_message_time;
+        if (!ct) return true; // root thread (Main)
+        if (ct.startsWith('0001-') || ct.startsWith('1970-')) return true; // zero/epoch
+        return !timestamp || ct <= timestamp;
+    }));
+
     let showMenu = $state(false);
     let menuRef: HTMLElement | null = null;
 
@@ -59,14 +67,14 @@
             Checkpoint
         </span>
         <div class="divider-actions">
-            {#if threads.length > 1}
+            {#if relevantThreads.length > 1}
                 <button class="thread-btn" onclick={toggleMenu} aria-label="Switch thread" aria-expanded={showMenu}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="10"/>
                         <path d="M2 12h20"/>
                         <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                     </svg>
-                    {threads.find(t => t.is_active)?.name || 'Main'}
+                    {relevantThreads.find(t => t.id === activeThreadId)?.name || 'Main'}
                     <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="6 9 12 15 18 9"/>
                     </svg>
@@ -75,9 +83,9 @@
         </div>
     </div>
 
-    {#if showMenu && threads.length > 1}
+    {#if showMenu && relevantThreads.length > 1}
         <div class="thread-menu" role="menu">
-            {#each threads as thread (thread.id)}
+            {#each relevantThreads as thread (thread.id)}
                 <button
                     class="thread-menu-item"
                     class:active={thread.is_active}

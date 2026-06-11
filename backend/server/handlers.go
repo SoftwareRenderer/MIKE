@@ -265,16 +265,68 @@ func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, pr
 
 // handleThreads lists all threads for a task.
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		threads, err := s.store.GetThreadsByTask(taskID)
+		if err != nil {
+			JSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		JSONResponse(w, http.StatusOK, threads)
+	case http.MethodDelete:
+		s.handleThreadDelete(w, r, projectID, taskID)
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleThreadDelete removes a thread and its messages.
+func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	var req struct {
+		ThreadID string `json:"thread_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ThreadID == "" {
+		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
-	threads, err := s.store.GetThreadsByTask(taskID)
+	// Validate task exists
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	// Can't delete the only thread (Main)
+	if task.CurrentThreadID == req.ThreadID {
+		threads, _ := s.store.GetThreadsByTask(taskID)
+		if len(threads) <= 1 {
+			JSONError(w, http.StatusBadRequest, "cannot delete the last thread")
+			return
+		}
+	}
+	// Delete messages for this thread
+	_, err = s.store.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, req.ThreadID)
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	JSONResponse(w, http.StatusOK, threads)
+	// Delete the thread
+	_, err = s.store.Exec(`DELETE FROM task_threads WHERE id = ?`, req.ThreadID)
+	if err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// If the deleted thread was the active one, switch to another
+	if task.CurrentThreadID == req.ThreadID {
+		remaining, _ := s.store.GetThreadsByTask(taskID)
+		if len(remaining) > 0 {
+			_ = s.store.SetActiveThread(remaining[0].ID)
+			task.CurrentThreadID = remaining[0].ID
+			task.UpdatedAt = time.Now().UTC()
+			_ = s.store.UpdateTask(task)
+		}
+	}
+	s.boardStreamMgr.Broadcast(projectID)
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // handleThreadSwitch switches the active thread for a task.
@@ -377,9 +429,9 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName)
 	}
 	// Look up the checkpoint message's created_at for frontend filtering
-	var checkpointMsgTime time.Time
+	var checkpointMsgTime *time.Time
 	if ct, err := s.store.GetMessageCreatedAt(req.FromMessageID); err == nil && ct != nil {
-		checkpointMsgTime = *ct
+		checkpointMsgTime = ct
 	}
 	// Create new thread
 	now := time.Now().UTC()

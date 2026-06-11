@@ -53,6 +53,13 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Exec runs a raw SQL statement with arguments.
+func (s *Store) Exec(query string, args ...interface{}) (sql.Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.db.Exec(query, args...)
+}
+
 func (s *Store) initSchema() error {
 	schema := `
 CREATE TABLE IF NOT EXISTS projects (
@@ -384,7 +391,10 @@ func scanTaskThread(s scanner, th *types.TaskThread) error {
 	th.ParentThreadID = parentThreadID.String
 	th.GitBranch = gitBranch.String
 	th.CheckpointMessageID = checkpointMsgID.String
-	th.CheckpointMessageTime = scanTime(checkpointMsgTime.String)
+	if checkpointMsgTime.Valid {
+		t := scanTime(checkpointMsgTime.String)
+		th.CheckpointMessageTime = &t
+	}
 	th.CreatedAt = scanTime(createdAt)
 	return nil
 }

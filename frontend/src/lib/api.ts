@@ -385,6 +385,16 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
     return res.json();
 }
 
+export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_id: threadId }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to delete thread');
+    return res.json();
+}
+
 // -- Worktree --
 export async function checkWorktreeExists(projectId: string, taskId: string): Promise<{ exists: boolean }> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/worktree-exists`);

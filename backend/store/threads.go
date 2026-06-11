@@ -15,7 +15,7 @@ func (s *Store) CreateThread(th *types.TaskThread) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(&th.CheckpointMessageTime), th.CreatedAt.Format(time.RFC3339),
+		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(th.CheckpointMessageTime), th.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
