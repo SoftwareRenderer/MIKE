@@ -618,20 +618,26 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
         }
-        // Find the first PERSISTED message after this one (backend IDs are UUIDs).
-        // Frontend-optimistic entries (streaming assistant) use random IDs not in the DB.
-        const isBackendId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-        const firstPersistedAfter = entries.slice(idx + 1).find(e => isBackendId(e.id));
         // Optimistic update: update local state immediately
         lastSentMessage = newContent;
         entries[idx].content = newContent;
         entries = entries.slice(0, idx + 1);
-        if (ws) ws.send(newContent);
-        // Fire-and-forget API calls with error handling
-        if (firstPersistedAfter) {
-            deleteTaskMessagesAfter(projectId, taskId, firstPersistedAfter.id).catch(e => showToast(String(e)));
+        // Delete the old message and everything after it from the backend,
+        // THEN send the edited content (which creates a replacement message).
+        // This avoids the race where ws.send creates a new DB row that gets
+        // caught by the deletion (backend DeleteTaskMessagesAfter uses created_at >= ?).
+        const isBackendId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        if (isBackendId(entryId)) {
+            try {
+                await deleteTaskMessagesAfter(projectId, taskId, entryId);
+            } catch (e) {
+                showToast(String(e));
+            }
         }
-        updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
+        // Send the edited content to trigger LLM (creates a replacement message)
+        if (ws) ws.send(newContent);
+        // Create assistant entry so streaming UI appears immediately
+        ensureAssistantEntry();
     }
 
     function connect() {

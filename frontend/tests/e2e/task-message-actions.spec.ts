@@ -227,4 +227,53 @@ test.describe.serial('Task Message Actions', () => {
     const regenerateBtn = lastAssistant.locator('.action-btn[aria-label*="Regenerate"]');
     await expect(regenerateBtn).toBeVisible();
   });
+
+  test('should keep edited follow-up message visible after re-send', async ({ page }) => {
+    // Task is already open from beforeEach, ensure chat form is ready (starts task if backlog)
+    await ensureChatForm(page);
+
+    // Send a follow-up message
+    const followUpMsg = `Follow up edit test ${Date.now()}`;
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    await textarea.fill(followUpMsg);
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('', { timeout: 5000 });
+
+    // Wait for the user message to appear in the chat
+    await expect(page.locator('.chat-message.user').filter({ hasText: followUpMsg })).toBeVisible({ timeout: 10000 });
+
+    // Wait for LLM response (executor may not start for follow-ups in test env)
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 15000 }).catch(() => {});
+
+    // Count user messages before edit
+    const userMessages = page.locator('.chat-message.user');
+    const userCountBefore = await userMessages.count();
+
+    // Find the follow-up message by content (most recent matching)
+    const followUpEl = userMessages.filter({ hasText: followUpMsg }).last();
+    await expect(followUpEl).toBeVisible();
+
+    // Edit the follow-up message
+    const editedMsg = `Edited follow up ${Date.now()}`;
+    await followUpEl.locator('.action-btn[aria-label*="Edit"]').click();
+    await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
+    await page.locator('.edit-form textarea').fill(editedMsg);
+    await page.locator('.btn-edit-submit').click();
+
+    // Edit form should close
+    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
+
+    // The edited message should be visible immediately (optimistic update)
+    await expect(page.locator('.message-bubble').filter({ hasText: editedMsg })).toBeVisible({ timeout: 5000 });
+
+    // Wait a bit for any async operations (echo, API calls) to settle
+    await page.waitForTimeout(2000);
+
+    // The edited message should STILL be visible after async operations complete
+    await expect(page.locator('.chat-message.user').filter({ hasText: editedMsg })).toBeVisible({ timeout: 5000 });
+
+    // User message count should be the same (edited in place, not duplicated)
+    const userCountAfter = await userMessages.count();
+    expect(userCountAfter).toBe(userCountBefore);
+  });
 });
