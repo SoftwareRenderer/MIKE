@@ -620,11 +620,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             return;
         }
         if (isLoading || disabled) return;
-        // Fork the conversation from this message, then update the copied message
-        // in the new fork to the edited content.
+        // Fork the conversation from this message. The edited content is sent
+        // via WebSocket after the fork — it becomes the first new message in the fork.
         try {
             const fromThreadId = entry.threadId || activeThreadId;
-            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId);
+            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
             // Add new fork to threads list and set as active
             if (!threads.some(t => t.id === forked.id)) {
                 threads = [...threads, forked];
@@ -640,8 +640,24 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 connected = false;
             }
             connect();
-            // Send the edited message to the LLM in the new fork
-            await new Promise(r => setTimeout(r, 500)); // wait for WS to connect
+            // Wait for WebSocket to be OPEN before sending the edited message.
+            // sendWithModel silently drops messages when readyState !== OPEN.
+            const wsReady = new Promise<void>((resolve, reject) => {
+                const maxWait = 5000;
+                const start = Date.now();
+                const poll = () => {
+                    if (ws && ws.ws.readyState === WebSocket.OPEN) {
+                        resolve();
+                    } else if (Date.now() - start > maxWait) {
+                        reject(new Error('WebSocket connection timeout'));
+                    } else {
+                        setTimeout(poll, 50);
+                    }
+                };
+                poll();
+            });
+            await wsReady;
+            lastSentMessage = newContent;
             if (ws && ws.sendWithModel) {
                 ws.sendWithModel(newContent, selectedModel, selectedUrl);
             } else if (ws) {

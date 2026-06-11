@@ -344,10 +344,16 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	var req struct {
 		FromThreadID  string `json:"from_thread_id"`
 		FromMessageID string `json:"from_message_id"`
+		NewContent    string `json:"new_content"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FromThreadID == "" || req.FromMessageID == "" {
 		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
 		return
+	}
+	// If new_content is provided, stop the current executor so the next run
+	// loads the forked context instead of the stale original thread.
+	if req.NewContent != "" {
+		_ = s.executor.StopTask(taskID)
 	}
 	// Validate task exists
 	task, err := s.store.GetTask(projectID, taskID)
@@ -386,10 +392,20 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Copy messages from source thread up to the checkpoint
+	// Copy messages from source thread up to and including the checkpoint.
 	if err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID); err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// If new_content is provided, update the checkpoint message in the fork
+	// to the edited content. Find the last user message in the new thread
+	// (the copied checkpoint) and update its content.
+	if req.NewContent != "" {
+		if copiedMsgID, err := s.store.GetLastUserMessageInThread(newThreadID); err == nil && copiedMsgID != "" {
+			_ = s.store.UpdateTaskMessage(copiedMsgID, req.NewContent)
+		}
+		// Stop the current executor so the next run loads the forked context.
+		_ = s.executor.StopTask(taskID)
 	}
 	// Set new thread as active
 	if err := s.store.SetActiveThread(newThreadID); err != nil {

@@ -373,11 +373,13 @@ export async function switchTaskThread(projectId: string, taskId: string, thread
     return res.json();
 }
 
-export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string): Promise<Thread> {
+export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
+    const body: Record<string, string> = { from_thread_id: fromThreadId, from_message_id: fromMessageId };
+    if (newContent) body.new_content = newContent;
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from_thread_id: fromThreadId, from_message_id: fromMessageId }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) throw await apiError(res, 'Failed to fork thread');
     return res.json();

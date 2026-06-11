@@ -99,6 +99,20 @@ func (s *Store) UpdateTaskMessage(messageID, content string) error {
 	return err
 }
 
+// GetLastUserMessageInThread returns the ID of the last user message in a thread.
+func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var id string
+	err := s.db.QueryRow(`
+		SELECT id FROM task_messages
+		WHERE thread_id = ? AND role = 'user'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, threadID).Scan(&id)
+	return id, err
+}
+
 // CreateHomeAgentMessage inserts a home agent message.
 func (s *Store) CreateHomeAgentMessage(m *types.HomeAgentMessage) error {
 	s.mu.Lock()

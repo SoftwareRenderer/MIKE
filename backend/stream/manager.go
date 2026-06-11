@@ -223,16 +223,34 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 				if task != nil {
 					threadID = task.CurrentThreadID
 				}
-				// Always persist the user message
+				// Check if the last user message in this thread already has the same content.
+				// This avoids duplicating the message when forking (the checkpoint was already
+				// updated to the new content by the fork handler).
 				msgID := uuid.New().String()
-				sm.store.CreateTaskMessage(&types.TaskMessage{
-					ID:        msgID,
-					TaskID:    taskID,
-					ThreadID:  threadID,
-					Role:      "user",
-					Content:   payload.Content,
-					CreatedAt: time.Now().UTC(),
-				})
+				existingID, lookupErr := sm.store.GetLastUserMessageInThread(threadID)
+				isDuplicate := false
+				if lookupErr == nil && existingID != "" {
+					existingMsgs, _ := sm.store.GetTaskMessages(taskID, threadID)
+					for i := len(existingMsgs) - 1; i >= 0; i-- {
+						if existingMsgs[i].ID == existingID {
+							if existingMsgs[i].Content == payload.Content {
+								isDuplicate = true
+								msgID = existingID
+							}
+							break
+						}
+					}
+				}
+				if !isDuplicate {
+					sm.store.CreateTaskMessage(&types.TaskMessage{
+						ID:        msgID,
+						TaskID:    taskID,
+						ThreadID:  threadID,
+						Role:      "user",
+						Content:   payload.Content,
+						CreatedAt: time.Now().UTC(),
+					})
+				}
 				// Broadcast back to all clients (include backend-generated id + thread_id)
 				echoData := map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}
 				if threadID != "" {

@@ -105,6 +105,73 @@ test.describe.serial('Task Threading (Checkpoints + Forks)', () => {
     expect(activeThread.git_branch).toContain('thread/');
   });
 
+  test('should show edited message in fork and trigger LLM response', async ({ page }) => {
+    // Create a fresh task for this test to avoid dependencies on prior test state
+    const forkUniqueId = Date.now();
+    const result = await page.evaluate(async (uid: number) => {
+      const projects = await (await fetch('/api/projects')).json();
+      const pid = projects[0].id;
+      const res = await fetch(`/api/projects/${pid}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: `Fork test task ${uid}` }),
+      });
+      const task = await res.json();
+      return { projectId: pid, taskId: task.id };
+    }, forkUniqueId);
+
+    const forkPid = result.projectId;
+    const forkTid = result.taskId;
+
+    // Navigate to the task
+    await page.goto(`/?task=${forkTid}`);
+    await page.waitForSelector('.task-chat', { timeout: 10000 });
+
+    // Click Start Task if visible
+    const startBtn = page.locator('button:has-text("Start Task")');
+    if (await startBtn.isVisible().catch(() => false)) {
+      await startBtn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Wait for the task prompt (first user message) and LLM response to appear
+    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.assistant').first()).toBeVisible({ timeout: 10000 });
+
+    // Get threads before fork
+    const threadsBefore = await page.evaluate(async (params: { pid: string; tid: string }) => {
+      const res = await fetch(`/api/projects/${params.pid}/tasks/${params.tid}/threads`);
+      return res.json();
+    }, { pid: forkPid, tid: forkTid });
+    const threadCountBefore = threadsBefore.length;
+
+    // Fork the task prompt message with edited content
+    const forkContent = `Edited fork content ${forkUniqueId}`;
+    const firstUserMsg = page.locator('.chat-message.user').first();
+    await firstUserMsg.locator('.action-btn[aria-label*="Fork"]').click();
+    await page.locator('.edit-form textarea').fill(forkContent);
+    await page.locator('.btn-edit-submit').click();
+
+    // Wait for fork to complete, history to reload, and LLM to respond
+    await page.waitForTimeout(5000);
+
+    // Verify the edited message appears in the chat
+    await expect(page.locator('.chat-message.user').filter({ hasText: 'Edited fork content' })).toBeVisible({ timeout: 10000 });
+
+    // Verify a new fork thread was created
+    const threadsAfter = await page.evaluate(async (params: { pid: string; tid: string }) => {
+      const res = await fetch(`/api/projects/${params.pid}/tasks/${params.tid}/threads`);
+      return res.json();
+    }, { pid: forkPid, tid: forkTid });
+    expect(threadsAfter.length).toBeGreaterThanOrEqual(threadCountBefore + 1);
+    const activeThread = threadsAfter.find((t: any) => t.is_active);
+    expect(activeThread).toBeDefined();
+    expect(activeThread.name).toContain('Fork');
+
+    // Verify the LLM responded (assistant message visible)
+    await expect(page.locator('.chat-message.assistant').first()).toBeVisible({ timeout: 10000 });
+  });
+
   test('should switch between threads via API', async ({ page }) => {
     if (!taskId || !projectId) {
       test.skip();
