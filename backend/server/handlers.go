@@ -34,9 +34,68 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		if task != nil {
 			threadID = task.CurrentThreadID
 		}
+		// Get the message's created_at BEFORE deletion (needed for checkpoint matching below).
+		msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(req.MessageID)
 		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, threadID); err != nil {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		// Check if the deleted message was a checkpoint for any fork threads.
+		// If so, delete those orphaned fork threads and switch to parent if needed.
+		// Match by message ID first (direct match), then by created_at time (for copied messages
+		// in fork threads that have new IDs but preserved timestamps).
+		checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(req.MessageID)
+		if len(checkpointThreads) == 0 && msgTimeErr == nil && msgCreatedAt != nil {
+			checkpointThreads, _ = s.store.GetThreadsByCheckpointMessageTime(msgCreatedAt.Format(time.RFC3339))
+		}
+		if len(checkpointThreads) > 0 {
+			activeWasDeleted := false
+			for _, th := range checkpointThreads {
+				if th.IsActive {
+					activeWasDeleted = true
+				}
+				_ = s.store.DeleteThread(th.ID)
+			}
+			if activeWasDeleted {
+				// Switch to the parent thread of the deleted active thread.
+				// Walk up the parent chain in case parents were also deleted.
+				allThreads, _ := s.store.GetThreadsByTask(taskID)
+				threadMap := make(map[string]types.TaskThread)
+				for _, t := range allThreads {
+					threadMap[t.ID] = t
+				}
+				candidate := checkpointThreads[0].ParentThreadID
+				for candidate != "" {
+					parent, ok := threadMap[candidate]
+					if !ok {
+						// Parent was also deleted; walk up further
+						candidate = parent.ParentThreadID
+						continue
+					}
+					// Found a surviving parent
+					_ = s.store.SetActiveThread(parent.ID)
+					task.CurrentThreadID = parent.ID
+					task.UpdatedAt = time.Now().UTC()
+					_ = s.store.UpdateTask(task)
+					candidate = "" // break
+				}
+				if candidate != "" {
+					// No surviving parent found; fall back to root/Main thread
+					for _, t := range allThreads {
+						if t.Name == "Main" || t.ParentThreadID == "" {
+							_ = s.store.SetActiveThread(t.ID)
+							task.CurrentThreadID = t.ID
+							task.UpdatedAt = time.Now().UTC()
+							_ = s.store.UpdateTask(task)
+							break
+						}
+					}
+				}
+			}
+			// Broadcast thread_switch event so frontend refreshes
+			s.boardStreamMgr.Broadcast(projectID)
+			b := s.executor.GetOrCreateStream(taskID)
+			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return

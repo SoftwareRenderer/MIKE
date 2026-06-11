@@ -79,6 +79,61 @@ func (s *Store) SetActiveThread(threadID string) error {
 	return err
 }
 
+// GetThreadsByCheckpointMessageID returns all threads whose checkpoint message matches the given ID.
+func (s *Store) GetThreadsByCheckpointMessageID(messageID string) ([]types.TaskThread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at FROM task_threads WHERE checkpoint_message_id = ?`,
+		messageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	threads := []types.TaskThread{}
+	for rows.Next() {
+		var th types.TaskThread
+		if err := scanTaskThread(rows, &th); err != nil {
+			return nil, err
+		}
+		threads = append(threads, th)
+	}
+	return threads, rows.Err()
+}
+
+// DeleteThread removes a thread from the database.
+func (s *Store) DeleteThread(threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM task_threads WHERE id = ?`, threadID)
+	return err
+}
+
+// GetThreadsByCheckpointMessageTime returns all threads whose checkpoint message time matches the given time.
+// This is used for cleanup when a copied checkpoint message (with a new ID but same created_at) is deleted.
+func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.TaskThread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, created_at FROM task_threads WHERE checkpoint_message_time = ?`,
+		messageTime,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	threads := []types.TaskThread{}
+	for rows.Next() {
+		var th types.TaskThread
+		if err := scanTaskThread(rows, &th); err != nil {
+			return nil, err
+		}
+		threads = append(threads, th)
+	}
+	return threads, rows.Err()
+}
+
 // copyMsg holds the fields needed to copy a message.
 type copyMsg struct {
 	role, content, createdAt       string
