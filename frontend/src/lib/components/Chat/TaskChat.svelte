@@ -1034,9 +1034,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             </div>
                             <pre class="tool-args">{formatToolArgs(entry.toolCall.toolName, entry.toolCall.args)}</pre>
                             {#if entry.toolCall.result !== undefined}
-                                <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>
-                                    {entry.toolCall.result}
-                                </pre>
+                                <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>{entry.toolCall.result}</pre>
                             {/if}
                         </div>
                     </div>
