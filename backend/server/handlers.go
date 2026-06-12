@@ -24,10 +24,20 @@ import (
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method == http.MethodDelete {
 		var req struct {
-			MessageID string `json:"message_id"`
+			MessageID   string `json:"message_id"`
+			DeleteSingle bool   `json:"delete_single"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
 			JSONError(w, http.StatusBadRequest, "message_id required")
+			return
+		}
+		// If delete_single is true, only remove that one message (e.g., dismissing an error).
+		if req.DeleteSingle {
+			if err := s.store.DeleteTaskMessageByID(req.MessageID); err != nil {
+				JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}
 		// Get the task to find its current thread

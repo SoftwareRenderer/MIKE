@@ -237,6 +237,16 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
     if (!res.ok) throw await apiError(res, 'Failed to delete messages');
 }
 
+/** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. */
+export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId, delete_single: true }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to delete message');
+}
+
 /** Regenerate from a message: deletes it and all messages after it. Alias for deleteTaskMessagesAfter. */
 export const regenerateTaskMessages = deleteTaskMessagesAfter;
 

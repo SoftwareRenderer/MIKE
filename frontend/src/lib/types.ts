@@ -1,5 +1,19 @@
 // TypeScript interfaces matching backend Go types
 
+/** Maps raw tool names to their UI display names (fallback for old persisted messages). */
+export const TOOL_DISPLAY_NAMES: Record<string, string> = {
+    read_file: 'Read',
+    write_file: 'Write',
+    execute_command: 'Execute',
+    task_complete: 'Done',
+};
+
+/** Returns the display name for a tool, falling back to the raw name. */
+export function getToolDisplayName(displayName: string | undefined, toolName: string): string {
+    if (displayName) return displayName;
+    return TOOL_DISPLAY_NAMES[toolName] || toolName;
+}
+
 export interface Project {
     id: string;
     name: string;
@@ -228,6 +242,7 @@ export interface StreamReasoningEndEvent {
 export interface StreamToolCallEvent {
     tool_id: string;
     tool_name: string;
+    tool_display_name?: string;
     args: Record<string, unknown>;
 }
 
@@ -274,6 +289,7 @@ export interface StreamSection {
     toolCall?: {
         toolId: string;
         toolName: string;
+        displayName?: string;
         args: Record<string, unknown>;
         result?: string;
         success?: boolean;

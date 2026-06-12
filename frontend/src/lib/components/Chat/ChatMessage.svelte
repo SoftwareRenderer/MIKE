@@ -1,9 +1,11 @@
 <script lang="ts">
     import { marked } from 'marked';
+import { getToolDisplayName } from '$lib/types';
 
     interface ToolCallInfo {
         toolId: string;
         toolName: string;
+        displayName?: string;
         args: Record<string, unknown>;
         raw_args?: string;
         result?: string;
@@ -300,7 +302,7 @@
                         <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
                             <div class="tool-call-header">
                                 <span class="tool-icon">{#if tc.toolName === 'execute_command'}⚡{:else if tc.toolName === 'read_file'}📄{:else if tc.toolName === 'write_file'}✏️{:else if tc.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
-                                <span class="tool-name">{tc.toolName}</span>
+                                <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
                                 {#if tc.isPending}
                                     <span class="tool-status pending"><span class="spinner"></span> Running...</span>
                                 {:else if tc.success}

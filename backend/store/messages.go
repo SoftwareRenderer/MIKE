@@ -72,6 +72,14 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	return messages, rows.Err()
 }
 
+// DeleteTaskMessageByID deletes a single message by its ID.
+func (s *Store) DeleteTaskMessageByID(messageID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM task_messages WHERE id = ?`, messageID)
+	return err
+}
+
 // DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it, optionally scoped to a thread.
 func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) error {
 	s.mu.Lock()

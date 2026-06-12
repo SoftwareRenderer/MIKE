@@ -260,15 +260,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				toolStart := time.Now()
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task)
 				toolDuration := time.Since(toolStart).Milliseconds()
-				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "args": args, "raw_args": tc.Function.Arguments}})
+				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments}})
 				b.Send(types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
 				tcJSON, _ := json.Marshal(map[string]interface{}{
-					"tool_id":   tc.ID,
-					"tool_name": tc.Function.Name,
-					"args":      args,
-					"raw_args":  tc.Function.Arguments,
+					"tool_id":           tc.ID,
+					"tool_name":         tc.Function.Name,
+					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
+					"args":              args,
+					"raw_args":          tc.Function.Arguments,
 				})
 				resultJSON, _ := json.Marshal(map[string]interface{}{
 					"output":   result,

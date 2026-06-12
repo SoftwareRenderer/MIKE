@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -19,6 +19,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         toolCalls?: Array<{
             toolId: string;
             toolName: string;
+            displayName?: string;
             args: Record<string, unknown>;
             raw_args?: string;
             result?: string;
@@ -28,6 +29,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }>;
         toolCall?: {
             toolName: string;
+            displayName?: string;
             args: Record<string, unknown>;
             raw_args?: string;
             result?: string;
@@ -231,6 +233,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 entry.toolCalls.push({
                     toolId: data.tool_id,
                     toolName: data.tool_name,
+                    displayName: data.tool_display_name,
                     args: data.args,
                     raw_args: data.raw_args,
                     isPending: true
@@ -450,6 +453,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         toolCalls: [{
                             toolId: tc.tool_id || m.id,
                             toolName: tc.tool_name,
+                            displayName: tc.tool_display_name,
                             args: tc.args ?? {},
                             raw_args: tc.raw_args,
                             result: result?.output,
@@ -958,6 +962,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         ws.ws.onerror = () => { connecting = false; };
     }
 
+    /** Dismiss a single error message without affecting other messages. */
+    async function handleDismissError(messageId: string) {
+        try {
+            await deleteTaskMessage(projectId, taskId, messageId);
+            entries = entries.filter(e => e.id !== messageId);
+        } catch (e) {
+            console.error('Failed to dismiss error:', e);
+        }
+    }
+
     /** Force immediate WebSocket reconnect. */
     function handleRetryConnect() {
         if (ws) {
@@ -1094,6 +1108,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                                 {#if entry.error?.code === 'ws_disconnected'}
                                     <span class="error-reconnecting"><span class="spinner"></span> Reconnecting...</span>
                                 {/if}
+                                <button class="btn-dismiss" onclick={() => handleDismissError(entry.id)} title="Dismiss error" aria-label="Dismiss error">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <line x1="18" y1="6" x2="6" y2="18"/>
+                                        <line x1="6" y1="6" x2="18" y2="18"/>
+                                    </svg>
+                                </button>
                             </div>
                             <div class="error-message">{entry.content}</div>
                             {#if entry.error?.code === 'ws_disconnected'}
@@ -1310,6 +1330,25 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         color: var(--color-status-red);
     }
     .error-header svg { flex-shrink: 0; }
+    .btn-dismiss {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+    }
+    .btn-dismiss:hover {
+        background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
+        color: var(--color-status-red);
+    }
     .error-code {
         font-size: 0.75rem;
         font-weight: 600;

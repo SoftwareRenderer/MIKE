@@ -50,9 +50,10 @@ type StreamReasoningEndEvent struct {
 
 // StreamToolCallEvent is an AI tool invocation request.
 type StreamToolCallEvent struct {
-	ToolID   string                 `json:"tool_id"`
-	ToolName string                 `json:"tool_name"`
-	Args     map[string]interface{} `json:"args"`
+	ToolID          string                 `json:"tool_id"`
+	ToolName        string                 `json:"tool_name"`
+	ToolDisplayName string                 `json:"tool_display_name"`
+	Args            map[string]interface{} `json:"args"`
 }
 
 // StreamToolResultEvent is the result of a tool invocation.

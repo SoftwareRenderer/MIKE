@@ -2,6 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamSection } from '$lib/types';
+    import { getToolDisplayName } from '$lib/types';
     import { createTaskStream } from '$lib/api';
     import StreamSectionComp from './StreamSection.svelte';
     import StreamActions from './StreamActions.svelte';
@@ -100,7 +101,7 @@
                     type: 'tool_call',
                     content: '',
                     isStreaming: true,
-                    toolCall: { toolId: data.tool_id, toolName: data.tool_name, args: data.args }
+                    toolCall: { toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args }
                 };
                 sections.push(sec);
                 activeToolCalls.set(data.tool_id, sec);
@@ -218,7 +219,7 @@
                     {:else if sec.type === 'tool_call' && sec.toolCall}
                         <div class="tool-call-card" style="border-left-color: {sec.isStreaming ? 'var(--color-accent)' : (sec.toolCall.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
                             <div class="tool-call-header">
-                                <span class="tool-name">{sec.toolCall.toolName}</span>
+                                <span class="tool-name" title={sec.toolCall.toolName}>{getToolDisplayName(sec.toolCall.displayName, sec.toolCall.toolName)}</span>
                                 {#if sec.isStreaming}
                                     <span class="spinner">⏳</span>
                                 {:else if sec.toolCall.success}

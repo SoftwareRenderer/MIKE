@@ -17,6 +17,7 @@ type ChatTool struct {
 // ToolDef defines a tool's schema.
 type ToolDef struct {
 	Name        string                 `json:"name"`
+	DisplayName string                 `json:"display_name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 }
