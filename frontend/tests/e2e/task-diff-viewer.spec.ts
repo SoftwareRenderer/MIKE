@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { getProjectId, createTaskViaApi } from './helpers';
 
+test.describe.configure({ mode: 'parallel' });
 test.describe('Structured Diff Viewer', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -7,9 +9,10 @@ test.describe('Structured Diff Viewer', () => {
   });
 
   test('should show empty state when no diff', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-empty-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // The diff column should exist
     await expect(page.locator('.column-diff')).toBeVisible();
@@ -19,9 +22,10 @@ test.describe('Structured Diff Viewer', () => {
   });
 
   test('should have diff column with content area', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-column-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Diff content area should be visible
     await expect(page.locator('.diff-content')).toBeVisible();
@@ -43,9 +47,10 @@ index abc1234..def5678 100644
       await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-headers-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // The diff column should have content
     const diffContent = page.locator('.diff-content');
@@ -60,9 +65,10 @@ index abc1234..def5678 100644
   });
 
   test('should have color-coded diff rows', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-colors-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Verify the diff column exists and is styled
     const diffColumn = page.locator('.column-diff');
@@ -92,9 +98,10 @@ index abc1234..def5678 100644
       await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-counts-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Diff content area should be visible (may show empty state if no worktree)
     const diffContent = page.locator('.diff-content');
@@ -121,9 +128,10 @@ index abc1234..def5678 100644
       await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-lines-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Diff content area should be visible
     const diffContent = page.locator('.diff-content');
@@ -171,9 +179,10 @@ index abc1234..def5678 100644
       await route.fulfill({ body: JSON.stringify({ diff: mockDiff, untracked: [] }), status: 200, headers: { 'Content-Type': 'application/json' } });
     });
 
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `diff-collapse-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Diff content area should be visible
     const diffContent = page.locator('.diff-content');
@@ -191,7 +200,7 @@ index abc1234..def5678 100644
 
       // Click to collapse
       await fileHeader.click();
-      await page.waitForTimeout(200);
+      // Wait for file content to be hidden (replaces waitForTimeout(200))
 
       // File content should be hidden
       const fileContent = page.locator('.diff-file-content');

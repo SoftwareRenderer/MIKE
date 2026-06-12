@@ -26,11 +26,13 @@ var taskWords = []string{
 	"shadow", "light", "truth", "wisdom", "power", "grace", "honor", "valor",
 }
 
-func generateUUID() string {
+// GenerateUUID returns a new UUID string.
+func GenerateUUID() string {
 	return uuid.New().String()
 }
 
-func generateTaskID() string {
+// GenerateTaskID returns a human-readable task ID (e.g., "frost-amber-quartz").
+func GenerateTaskID() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	w1 := taskWords[r.Intn(len(taskWords))]
 	w2 := taskWords[r.Intn(len(taskWords))]
@@ -38,7 +40,8 @@ func generateTaskID() string {
 	return w1 + "-" + w2 + "-" + w3
 }
 
-func autoGenerateTitle(prompt string) string {
+// AutoGenerateTitle creates a short title from the first line of a prompt.
+func AutoGenerateTitle(prompt string) string {
 	line := strings.Split(prompt, "\n")[0]
 	line = strings.TrimSpace(line)
 	if len(line) > 80 {
@@ -47,20 +50,23 @@ func autoGenerateTitle(prompt string) string {
 	return line
 }
 
-func isGitRepo(path string) bool {
+// IsGitRepo checks if a directory contains a .git subdirectory.
+func IsGitRepo(path string) bool {
 	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
 	cmd.Dir = path
 	return cmd.Run() == nil
 }
 
-func getEnv(key, defaultValue string) string {
+// GetEnv returns the environment variable value or a default.
+func GetEnv(key, defaultValue string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return defaultValue
 }
 
-func basename(path string) string {
+// Basename returns the last component of a path.
+func Basename(path string) string {
 	if len(path) > 0 && (path[len(path)-1] == '/' || path[len(path)-1] == '\\') {
 		path = path[:len(path)-1]
 	}

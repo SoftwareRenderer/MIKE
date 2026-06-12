@@ -467,7 +467,7 @@ func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string)
 			// Replace hunk(s) for this file if large/binary
 			if isLarge {
 				fileSize := info.Size()
-				result.WriteString(fmt.Sprintf("# binary or large file: %s bytes\n", fileSize))
+				result.WriteString(fmt.Sprintf("# binary or large file: %d bytes\n", fileSize))
 				// Skip all hunk lines for this file
 				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
 					i++

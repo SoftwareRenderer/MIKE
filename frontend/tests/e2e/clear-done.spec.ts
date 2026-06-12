@@ -26,9 +26,6 @@ test.describe.serial('Clear All Done Tasks', () => {
     }, { pid: projectId, tid: taskId });
     expect(moveStatus).toBe(200);
 
-    // Wait for the board to update
-    await page.waitForTimeout(500);
-
     // Navigate to the board view
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
@@ -95,7 +92,6 @@ test.describe.serial('Clear All Done Tasks', () => {
     await page.click('.clear-btn');
 
     // Done tasks should still exist
-    await page.waitForTimeout(500);
     const doneCountAfter = await page.evaluate(async ({ pid }) => {
       const res = await fetch(`/api/projects/${pid}/board`);
       const board = await res.json();
@@ -141,10 +137,7 @@ test.describe.serial('Clear All Done Tasks', () => {
     // Click clear button
     await page.click('.clear-btn');
 
-    // Wait for board to update
-    await page.waitForTimeout(1000);
-
-    // Navigate to refresh the view
+    // Wait for done tasks to be deleted (replaces waitForTimeout(1000) + navigate)
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 

@@ -1,7 +1,23 @@
 import { test, expect } from '@playwright/test';
+import { apiPutConfig, waitForConfig } from './helpers';
 
 test.describe.serial('Reasoning effort setting', () => {
     test.beforeEach(async ({ page }) => {
+        // Ensure a provider exists (parallel tests may have cleared config)
+        await apiPutConfig(page, {
+            providers: [{
+                name: 'test-localhost-9999',
+                display_name: 'Test Server',
+                url: 'http://localhost:9999/v1',
+                models: ['model-a', 'model-b'],
+                concurrency: 2,
+                default_model: 'model-a',
+            }],
+            default_provider: 'test-localhost-9999',
+        });
+        await waitForConfig(page, c =>
+            c.providers && c.providers.length >= 1
+        );
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
     });
@@ -14,7 +30,8 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand a provider card
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        await page.waitForTimeout(300);
+        // Wait for reasoning selects to appear (replaces waitForTimeout(300))
+        await expect(page.locator('.reasoning-effort-select').first()).toBeVisible({ timeout: 5000 });
 
         // Check that reasoning effort selects exist
         const reasoningSelects = page.locator('.reasoning-effort-select');
@@ -47,18 +64,21 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        await page.waitForTimeout(200);
+        // Wait for details to appear (replaces waitForTimeout(200))
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
         // Add a new model
         await page.click('.btn-add-model');
-        await page.waitForTimeout(200);
+        // Wait for new model input to appear (replaces waitForTimeout(200))
+        const modelInputs = page.locator('.model-input');
+        const inputCount = await modelInputs.count();
 
         // Fill in model name
-        const modelInput = page.locator('.model-input').filter({ hasText: 'Model name' }).first();
+        const modelInput = modelInputs.filter({ hasText: 'Model name' }).first();
         if (await modelInput.count() > 0) {
             await modelInput.fill(`test-model-${Date.now()}`);
         } else {
-            await page.locator('.model-input').last().fill(`test-model-${Date.now()}`);
+            await modelInputs.last().fill(`test-model-${Date.now()}`);
         }
 
         // Check that the reasoning effort select for the new row defaults to 'medium'
@@ -69,7 +89,8 @@ test.describe.serial('Reasoning effort setting', () => {
 
         // Cancel without saving
         await page.click('button:has-text("Cancel")');
-        await page.waitForTimeout(300);
+        // Wait for modal to close (replaces waitForTimeout(300))
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
     });
 
     test('should persist reasoning effort after save', async ({ page }) => {
@@ -80,7 +101,8 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        await page.waitForTimeout(200);
+        // Wait for details to appear (replaces waitForTimeout(200))
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
         const reasoningSelects = page.locator('.reasoning-effort-select');
         const count = await reasoningSelects.count();
@@ -91,14 +113,8 @@ test.describe.serial('Reasoning effort setting', () => {
 
             // Save
             await page.click('button:has-text("Save")');
-            await page.waitForTimeout(1000);
-
-            // Close modal if still open
-            const closeBtn = page.locator('button:has-text("Cancel"), .close-btn').first();
-            if (await closeBtn.isVisible()) {
-                await closeBtn.click();
-                await page.waitForTimeout(300);
-            }
+            // Wait for modal to close (replaces waitForTimeout(1000))
+            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings
             await page.click('[aria-label="Settings"]');
@@ -106,7 +122,8 @@ test.describe.serial('Reasoning effort setting', () => {
 
             // Expand first provider again
             await providerHeader.click();
-            await page.waitForTimeout(300);
+            // Wait for details to appear (replaces waitForTimeout(300))
+            await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
             // Check that the value persisted
             const savedSelect = page.locator('.reasoning-effort-select').first();
@@ -116,13 +133,8 @@ test.describe.serial('Reasoning effort setting', () => {
             // Change back to medium and save to restore
             await savedSelect.selectOption({ value: 'medium' });
             await page.click('button:has-text("Save")');
-            await page.waitForTimeout(500);
-
-            // Close settings
-            const closeBtn2 = page.locator('button:has-text("Cancel"), .close-btn').first();
-            if (await closeBtn2.isVisible()) {
-                await closeBtn2.click();
-            }
+            // Wait for modal to close (replaces waitForTimeout(500))
+            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
         }
     });
 });

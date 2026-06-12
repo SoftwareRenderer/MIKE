@@ -70,14 +70,14 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isGitRepo(req.Path) {
+	if !IsGitRepo(req.Path) {
 		httputil.JSONError(w, http.StatusBadRequest, "path is not a git repository")
 		return
 	}
 
 	name := req.Name
 	if name == "" {
-		name = basename(req.Path)
+		name = Basename(req.Path)
 	}
 
 	now := time.Now().UTC()

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { getProjectId, getLastTaskId } from './helpers';
 
+test.describe.configure({ mode: 'parallel' });
 test.describe('Diff Auto-Refresh', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');

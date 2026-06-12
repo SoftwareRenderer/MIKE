@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"kanban/backend/llama"
+	"kanban/backend/managers"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -306,7 +307,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		IsGitRepo bool   `json:"isGitRepo"`
 	}
 
-	isGit := IsGitRepo(path)
+	isGit := managers.IsGitRepo(path)
 
 	result := struct {
 		Path      string    `json:"path"`
@@ -320,7 +321,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 
 	if path != string(os.PathSeparator) {
 		if parent := filepath.Dir(path); parent != path {
-			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: IsGitRepo(parent)})
+			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: managers.IsGitRepo(parent)})
 		}
 	}
 
@@ -333,7 +334,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			Name:      e.Name(),
 			IsDir:     e.IsDir(),
 			Path:      fullPath,
-			IsGitRepo: IsGitRepo(fullPath),
+			IsGitRepo: managers.IsGitRepo(fullPath),
 		})
 	}
 

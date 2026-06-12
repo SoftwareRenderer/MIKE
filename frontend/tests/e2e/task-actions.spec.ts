@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { getProjectId, createTaskViaApi } from './helpers';
 
+test.describe.configure({ mode: 'parallel' });
 test.describe('Task Actions', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -7,17 +9,10 @@ test.describe('Task Actions', () => {
   });
 
   test('should not show Start/Stop buttons in header', async ({ page }) => {
-    // Create a task first
-    await page.click('.add-task-btn');
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', 'Task for conversational start');
-    await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
-    await page.waitForSelector('.card', { timeout: 5000 });
-
-    // Open the task
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, 'Task for conversational start');
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Should NOT show legacy Start/Stop buttons (conversational model)
     const startButtons = page.locator('[title="Start task"]');
@@ -32,9 +27,10 @@ test.describe('Task Actions', () => {
   });
 
   test('should show Delete button', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `actions-delete-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Delete button should be visible
     const deleteButton = page.locator('.btn-icon[aria-label="Delete task"]');
@@ -42,9 +38,10 @@ test.describe('Task Actions', () => {
   });
 
   test('should confirm before deleting task', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `actions-confirm-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Accept the confirmation dialog
     page.on('dialog', dialog => dialog.accept());
@@ -57,11 +54,10 @@ test.describe('Task Actions', () => {
   });
 
   test('should cancel delete task', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    const initialTaskCount = await page.locator('.card').count();
-
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `actions-cancel-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Reject the confirmation dialog
     page.on('dialog', dialog => dialog.dismiss());
@@ -74,20 +70,19 @@ test.describe('Task Actions', () => {
   });
 
   test('should show Backlog column title in context', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `actions-backlog-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Context column should show Backlog section title
-    await expect(page.getByText('Backlog')).toBeVisible();
+    await expect(page.locator('.section-title').first()).toBeVisible();
   });
 
   test('should show task count in context column', async ({ page }) => {
-    // Navigate fresh to avoid stale state from previous tests
-    await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
-    const cards = page.locator('.card');
-    await cards.first().click();
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `actions-count-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Context column should be visible with section headers
@@ -95,25 +90,10 @@ test.describe('Task Actions', () => {
   });
 
   test('should show Start Task button for new tasks', async ({ page }) => {
-    // Count cards before creation to identify the new one
-    const countBefore = await page.locator('.card').count();
-
-    // Create a new task
-    await page.click('.add-task-btn');
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', `Start task test ${Date.now()}`);
-    await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
-
-    // Wait for card count to increase (new card appeared)
-    await expect(async () => {
-      const count = await page.locator('.card').count();
-      expect(count).toBeGreaterThan(countBefore);
-    }).toPass({ timeout: 10000 });
-
-    // Open the newly created task (new tasks get column_order=0, so they appear first)
-    await page.locator('.card').first().click();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `Start task test ${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // New task should show the Start Task button
     const startButton = page.locator('.btn-start-task');

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"runtime/debug"
 	"strings"
 
 	"kanban/backend/httputil"
+	"kanban/backend/managers"
 )
 
 // Re-export JSON helpers from httputil.
@@ -18,13 +18,8 @@ var (
 	JSONErrorf   = httputil.JSONErrorf
 )
 
-// GetEnv returns the environment variable value or a default.
-func GetEnv(key, defaultValue string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultValue
-}
+// Re-export GetEnv from managers.
+var GetEnv = managers.GetEnv
 
 // CORS middleware.
 func CORSMiddleware(next http.Handler) http.Handler {

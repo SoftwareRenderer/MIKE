@@ -26,15 +26,19 @@ import { execSync } from 'node:child_process';
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TEST_DB = '/tmp/kanban-test.db';
+const TEST_DB_ISOLATED = '/tmp/kanban-test-isolated.db';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
 const KANBAN_PORT = 3000;
+const KANBAN_PORT_ISOLATED = 3001;
 const MOCK_PORT = 9999;
 const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
+const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
 const KANBAN_BIN = '/home/mwren/projects/kanban/kanban';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
+let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 
 async function setup(): Promise<void> {
     // 1. Ensure test git repo exists
@@ -44,7 +48,7 @@ async function setup(): Promise<void> {
     cleanupStaleState();
 
     // 3. Kill any existing kanban server on port 3000
-    killKanbanServer();
+    await killKanbanServer();
 
     // 4. Start fresh kanban server with test database
     console.log('[global-setup] Starting test kanban server...');
@@ -126,7 +130,62 @@ async function setup(): Promise<void> {
         console.log('[global-setup] Using real LLM endpoint (USE_MOCK_LLM=0)');
     }
 
-    // 10. Create lock file to signal setup complete
+    // 10. Start isolated kanban server (for config-modifying test suites)
+    console.log('[global-setup] Starting isolated kanban server...');
+    kanbanServerIsolated = spawn('node', ['-e', `
+        const { spawn } = require('child_process');
+        const child = spawn('${KANBAN_BIN}', ['-db-path', '${TEST_DB_ISOLATED}'], {
+            cwd: '/home/mwren/projects/kanban',
+            env: { ...process.env, WORKTREES_DIR: '${TEST_WORKTREES}', PORT: '${KANBAN_PORT_ISOLATED}' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
+        });
+        child.stdout.on('data', d => process.stderr.write('[kanban-isolated] ' + d));
+        child.stderr.on('data', d => process.stderr.write('[kanban-isolated] ' + d));
+        process.on('SIGTERM', () => child.kill('SIGTERM'));
+        process.on('SIGINT', () => child.kill('SIGINT'));
+        // Keep alive
+        setInterval(() => {}, 1000);
+    `], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+    });
+
+    kanbanServerIsolated.stderr.on('data', data => process.stderr.write(data.toString()));
+    await waitForServer(KANBAN_PORT_ISOLATED, 15000);
+    console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
+
+    // 11. Configure mock provider on isolated server
+    if (useMock) {
+        const configIso = await getJson(`${KANBAN_BASE_ISOLATED}/api/config`);
+        await putJson(`${KANBAN_BASE_ISOLATED}/api/config`, {
+            ...configIso,
+            providers: [{
+                name: 'mock',
+                display_name: 'Mock LLM',
+                url: mockUrl,
+                models: [{ name: 'mock-model', reasoning_effort: 'off' }],
+                concurrency: 1,
+                default_model: 'mock-model',
+            }],
+            default_provider: 'mock',
+        });
+        console.log(`[global-setup] Mock provider configured on isolated server`);
+    }
+
+    // 12. Create test project on isolated server
+    const projectIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects`, {
+        name: 'test-project',
+        path: TEST_REPO,
+    });
+    console.log(`[global-setup] Test project created on isolated server: ${projectIso.id}`);
+
+    // 13. Create test tasks on isolated server
+    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload);
+    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2);
+    console.log(`[global-setup] Test tasks created on isolated server: ${taskIso.id}, ${taskIso2.id}`);
+
+    // 14. Create lock file to signal setup complete
     try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
 }
 
@@ -135,6 +194,12 @@ async function teardown(): Promise<void> {
     if (mockServer) {
         mockServer.kill('SIGTERM');
         console.log('[global-teardown] Mock LLM server stopped');
+    }
+
+    // 2. Stop isolated kanban server
+    if (kanbanServerIsolated) {
+        kanbanServerIsolated.kill('SIGTERM');
+        console.log('[global-teardown] Isolated kanban server stopped');
     }
 
     // 3. Stop test kanban server
@@ -151,7 +216,15 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test database already gone');
     }
 
-    // 5. Delete test worktrees directory
+    // 5. Delete isolated test database
+    try {
+        fs.unlinkSync(TEST_DB_ISOLATED);
+        console.log('[global-teardown] Isolated test database deleted');
+    } catch {
+        console.log('[global-teardown] Isolated test database already gone');
+    }
+
+    // 6. Delete test worktrees directory
     try {
         fs.rmSync(TEST_WORKTREES, { recursive: true, force: true });
         console.log('[global-teardown] Test worktrees directory deleted');
@@ -159,7 +232,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test worktrees already gone');
     }
 
-    // 6. Remove lock file
+    // 7. Remove lock file
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
 }
 
@@ -188,39 +261,53 @@ function cleanupStaleState(): void {
     try { execSync('pkill -f "mock-llm" 2>/dev/null || true'); } catch { /* ignore */ }
     // Kill stale kanban on port 3000 (will be restarted)
     try { execSync('lsof -ti:3000 | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
+    // Kill stale kanban on port 3001 (isolated server)
+    try { execSync('lsof -ti:3001 | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
     // Clean up stale test DB/worktrees
     try { fs.unlinkSync(TEST_DB); } catch { /* ignore */ }
+    try { fs.unlinkSync(TEST_DB_ISOLATED); } catch { /* ignore */ }
     try { fs.rmSync(TEST_WORKTREES, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 
-function killKanbanServer(): void {
+async function killKanbanServer(): Promise<void> {
+    let killed = false;
     try {
         const pids = execSync('lsof -ti:3000 2>/dev/null || true').toString().trim();
         if (pids) {
             execSync(`kill ${pids} 2>/dev/null || true`);
             console.log('[global-setup] Killed existing server on port 3000');
+            killed = true;
         }
     } catch { /* no server running */ }
-    // Wait for port to be free
-    let attempts = 0;
-    while (attempts < 10) {
-        try {
-            const req = http.get(`http://localhost:${KANBAN_PORT}/`, () => {
-                // Still responding, try again
-            });
-            req.on('error', () => {
-                // Port is free
-                return;
-            });
-            req.end();
-        } catch { /* port is free */ }
-        attempts++;
-        if (attempts < 10) {
-            // Small delay
-            const start = Date.now();
-            while (Date.now() - start < 500) { /* busy wait */ }
-        }
+
+    if (!killed) return; // No server was running, nothing to wait for
+
+    // Wait for port to be free (up to 5s)
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const isFree = await isPortFree(KANBAN_PORT);
+        if (isFree) return;
+        await new Promise(r => setTimeout(r, 500));
     }
+}
+
+/** Return true if the port is not accepting connections. */
+async function isPortFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const req = http.get(`http://localhost:${port}/`, () => {
+            // Got a response — port is still in use
+            req.destroy();
+            resolve(false);
+        });
+        req.on('error', () => {
+            // Connection refused — port is free
+            resolve(true);
+        });
+        req.setTimeout(500, () => {
+            req.destroy();
+            resolve(false);
+        });
+        req.end();
+    });
 }
 
 function waitForServer(port: number, timeout = 5000): Promise<void> {

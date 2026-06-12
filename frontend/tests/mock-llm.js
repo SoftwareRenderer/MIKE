@@ -199,7 +199,7 @@ const server = http.createServer((req, res) => {
                         setTimeout(sendNext, chunkDelay);
                     };
                     sendNext();
-                }, 200);
+                }, 50);
             } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid request body' }));

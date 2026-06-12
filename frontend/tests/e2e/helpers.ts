@@ -1,4 +1,5 @@
-import { test as base, expect, Page } from '@playwright/test';
+import { test as base, expect, Page, Locator } from '@playwright/test';
+import http from 'node:http';
 
 // Custom fixture that provides helper methods
 export const test = base.extend<{
@@ -35,6 +36,101 @@ export const test = base.extend<{
 });
 
 export { expect } from '@playwright/test';
+
+// --- Shared API helpers (replaces duplicate code in individual test files) ---
+
+/** Get the server origin from the page, navigating first if needed. */
+async function getOrigin(page: Page): Promise<string> {
+  const url = page.url();
+  // If page hasn't been navigated yet (about:blank), navigate to get the origin
+  if (!url || url === 'about:blank') {
+    await page.goto('/');
+  }
+  return await page.evaluate(() => window.location.origin);
+}
+
+/** PUT /api/config with the given body and wait for it to propagate. */
+export async function apiPutConfig(page: Page, body: Record<string, any>): Promise<any> {
+  const origin = await getOrigin(page);
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request(`${origin}/api/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, (res) => {
+      let responseBody = '';
+      res.on('data', chunk => responseBody += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(responseBody)); } catch { resolve(null); }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+/** GET /api/config and return parsed JSON. */
+export async function apiGetConfig(page: Page): Promise<any> {
+  const origin = await getOrigin(page);
+  return new Promise((resolve, reject) => {
+    http.get(`${origin}/api/config`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(null); }
+      });
+    }).on('error', reject);
+  });
+}
+
+/** Wait for config to match expected state (replaces blind waitForSettle after PUT). */
+export async function waitForConfig(page: Page, predicate: (config: any) => boolean, timeout = 2000): Promise<void> {
+  await expect(async () => {
+    const config = await apiGetConfig(page);
+    expect(predicate(config)).toBe(true);
+  }).toPass({ timeout });
+}
+
+// --- Condition-based wait helpers (replaces arbitrary sleeps) ---
+
+/** Wait for a locator's attribute to change from its current value. */
+export async function waitForAttributeChange(locator: Locator, attr: string, timeout = 5000): Promise<void> {
+  const initialValue = await locator.getAttribute(attr);
+  await expect(async () => {
+    const currentValue = await locator.getAttribute(attr);
+    expect(currentValue).not.toBe(initialValue);
+  }).toPass({ timeout });
+}
+
+/** Wait for a locator's text content to change from its current value. */
+export async function waitForTextChange(locator: Locator, timeout = 5000): Promise<void> {
+  const initialText = await locator.textContent();
+  await expect(async () => {
+    const currentText = await locator.textContent();
+    expect(currentText).not.toBe(initialText);
+  }).toPass({ timeout });
+}
+
+/** Wait for a locator to have a specific count (replaces sleep after add/remove). */
+export async function waitForCount(locator: Locator, expectedCount: number, timeout = 5000): Promise<void> {
+  await expect(locator).toHaveCount(expectedCount, { timeout });
+}
+
+/** Wait for an element to disappear from the DOM. */
+export async function waitForHidden(locator: Locator, timeout = 5000): Promise<void> {
+  await expect(locator).toBeHidden({ timeout });
+}
+
+/** Wait for bounding box width to change (for resize tests). */
+export async function waitForWidthChange(locator: Locator, timeout = 5000): Promise<void> {
+  const initialBox = await locator.boundingBox();
+  const initialWidth = initialBox?.width || 0;
+  await expect(async () => {
+    const box = await locator.boundingBox();
+    expect(box?.width).not.toBe(initialWidth);
+  }).toPass({ timeout });
+}
 
 // Helper: get the first project ID from the API
 export async function getProjectId(page: Page): Promise<string> {
@@ -145,14 +241,27 @@ export async function sendMessageAndWait(page: Page, message: string, timeout = 
 
 // Helper: create a task via API and return its ID
 // This avoids the UI race conditions and is faster for tests that don't need UI interaction.
+// Automatically includes the default provider's llama_server_url and model_name
+// so the executor can start (tasks without LLM config won't have a running executor).
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
   return await page.evaluate(async ({ pid, prompt }) => {
-    const res = await fetch(`/api/projects/${pid}/tasks`, {
+    // Fetch default provider config to include in task creation
+    const [configRes] = await Promise.all([
+      fetch('/api/config'),
+    ]);
+    const config = await configRes.json();
+    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
+
+    const taskRes = await fetch(`/api/projects/${pid}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt,
+        llama_server_url: defaultProvider?.url || '',
+        model_name: defaultProvider?.default_model || '',
+      }),
     });
-    const task = await res.json();
+    const task = await taskRes.json();
     return task.id;
   }, { pid: projectId, prompt });
 }

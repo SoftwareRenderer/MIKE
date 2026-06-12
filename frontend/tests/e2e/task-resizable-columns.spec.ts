@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { getProjectId, createTaskViaApi } from './helpers';
 
+test.describe.configure({ mode: 'parallel' });
 test.describe('Resizable Columns', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -7,9 +9,10 @@ test.describe('Resizable Columns', () => {
   });
 
   test('should show resize handles between columns', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `resize-handles-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Two resize handles should be present (Board↔Chat, Chat↔Diff)
     const handles = page.locator('[role="separator"]');
@@ -17,9 +20,10 @@ test.describe('Resizable Columns', () => {
   });
 
   test('should resize board column via drag', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `resize-drag-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     const handle = page.locator('[role="separator"]').first();
     await expect(handle).toBeVisible();
@@ -34,9 +38,6 @@ test.describe('Resizable Columns', () => {
       force: true,
     });
 
-    // Wait for resize to settle
-    await page.waitForTimeout(200);
-
     // Board column should be wider
     const newWidth = await page.locator('.column-context').boundingBox();
     expect(newWidth).not.toBeNull();
@@ -44,9 +45,10 @@ test.describe('Resizable Columns', () => {
   });
 
   test('should persist column sizes to localStorage', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `resize-persist-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     const handle = page.locator('[role="separator"]').first();
 
@@ -55,7 +57,6 @@ test.describe('Resizable Columns', () => {
       targetPosition: { x: 80, y: 100 },
       force: true,
     });
-    await page.waitForTimeout(200);
 
     // Check that localStorage has the ratio
     const boardRatio = await page.evaluate(() => {
@@ -73,10 +74,11 @@ test.describe('Resizable Columns', () => {
       localStorage.setItem('kanban:detail:boardRatio', '0.30');
     });
 
-    // Open task detail
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    // Create own task and open it
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `resize-restore-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Check that the board column uses the persisted ratio
     const boardWidth = await page.locator('.column-context').evaluate(el => {
@@ -86,9 +88,10 @@ test.describe('Resizable Columns', () => {
   });
 
   test('should clamp board column within min/max bounds', async ({ page }) => {
-    await page.waitForSelector('.card', { timeout: 10000 });
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `resize-clamp-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     const handle = page.locator('[role="separator"]').first();
 
@@ -97,7 +100,6 @@ test.describe('Resizable Columns', () => {
       targetPosition: { x: 5, y: 5 },
       force: true,
     });
-    await page.waitForTimeout(200);
 
     // Board should not be smaller than min (12%)
     const minWidth = await page.locator('.column-context').boundingBox();

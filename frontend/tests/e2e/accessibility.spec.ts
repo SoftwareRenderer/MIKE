@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 
+test.describe.configure({ mode: 'parallel' });
 test.describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -81,15 +82,13 @@ test.describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
 
     // Click to toggle
     await toggle.click();
-    await page.waitForTimeout(100); // Wait for Svelte reactivity
-    const afterClick = await toggle.getAttribute('aria-checked');
-    expect(afterClick).not.toBe(initialChecked);
+    // Wait for aria-checked to change (replaces waitForTimeout(100))
+    await expect(toggle).toHaveAttribute('aria-checked', initialChecked === 'true' ? 'false' : 'true', { timeout: 2000 });
 
     // Click again to toggle back
     await toggle.click();
-    await page.waitForTimeout(100);
-    const afterSecondClick = await toggle.getAttribute('aria-checked');
-    expect(afterSecondClick).toBe(initialChecked);
+    // Wait for aria-checked to revert (replaces waitForTimeout(100))
+    await expect(toggle).toHaveAttribute('aria-checked', initialChecked, { timeout: 2000 });
 
     await page.keyboard.press('Escape');
   });

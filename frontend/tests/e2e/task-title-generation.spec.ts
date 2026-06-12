@@ -1,6 +1,7 @@
 import { test, expect } from './helpers';
 
-test.describe.serial('Task Title Generation', () => {
+test.describe.configure({ mode: 'parallel' });
+test.describe('Task Title Generation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
@@ -43,10 +44,8 @@ test.describe.serial('Task Title Generation', () => {
     expect(title).not.toBeNull();
     expect(title!.trim()).not.toBe('');
 
-    // Wait for LLM generation to complete (mock is fast, ~200ms)
-    await page.waitForTimeout(1000);
-
-    // No spinner should be visible (generation complete)
+    // Wait for spinner to disappear (replaces waitForTimeout(1000))
+    await expect(newCard.locator('.title-spinner')).not.toBeVisible({ timeout: 5000 });
     await expect(newCard.locator('.title-spinner')).not.toBeVisible();
   });
 
@@ -54,9 +53,6 @@ test.describe.serial('Task Title Generation', () => {
     // Navigate fresh to avoid stale state from previous tests
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
-
-    // Wait briefly for any in-flight title generation to complete
-    await page.waitForTimeout(2000);
 
     // Cards should exist and have titles
     const cards = page.locator('.card');

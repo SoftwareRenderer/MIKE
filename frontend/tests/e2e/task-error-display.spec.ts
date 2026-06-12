@@ -34,7 +34,6 @@ test.describe.serial('Task Error Display', () => {
     // Reload to pick up the new message from the backend
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Error entry should be visible with distinct styling
     const errorEntry = page.locator('.error-entry');
@@ -74,7 +73,6 @@ test.describe.serial('Task Error Display', () => {
     // Reload to pick up the error message
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Verify error is visible
     await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });
@@ -113,7 +111,6 @@ test.describe.serial('Task Error Display', () => {
     // Reload to pick up the error message
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Verify error is visible after first reload
     await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });
@@ -122,7 +119,6 @@ test.describe.serial('Task Error Display', () => {
     // Reload again — error should still be there
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Error should still be visible
     await expect(page.locator('.error-entry')).toBeVisible();
@@ -140,11 +136,10 @@ test.describe.serial('Task Error Display', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
     await waitForChatForm(page);
 
-    // Create multiple error messages via the API (with small delay for ordering)
+    // Create multiple error messages via the API (sequential for ordering)
     await request.post(`/api/projects/${projectId}/tasks/${taskId}/messages`, {
       data: { role: 'error', content: '[connection_failed] First error' },
     });
-    await new Promise(r => setTimeout(r, 100));
     await request.post(`/api/projects/${projectId}/tasks/${taskId}/messages`, {
       data: { role: 'error', content: '[max_failures] Second error' },
     });
@@ -152,7 +147,6 @@ test.describe.serial('Task Error Display', () => {
     // Reload to pick up the error messages
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Both error entries should be visible
     const errorEntries = page.locator('.error-entry');
@@ -183,7 +177,6 @@ test.describe.serial('Task Error Display', () => {
 
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(500);
 
     // Verify error entry renders with correct structure
     await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });

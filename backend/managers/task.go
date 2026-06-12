@@ -54,7 +54,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 			httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		task.ID = generateTaskID()
+		task.ID = GenerateTaskID()
 		task.ProjectID = projectID
 		if task.Status == "" {
 			task.Status = "backlog"
@@ -63,7 +63,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		task.CreatedAt = now
 		task.UpdatedAt = now
 		if task.Title == "" && task.Prompt != "" {
-			task.Title = autoGenerateTitle(task.Prompt)
+			task.Title = AutoGenerateTitle(task.Prompt)
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
@@ -101,7 +101,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 		// Create default thread for the task
-		defaultThreadID := generateTaskID()
+		defaultThreadID := GenerateTaskID()
 		if err := h.store.CreateThread(&types.TaskThread{
 			ID:        defaultThreadID,
 			TaskID:    task.ID,

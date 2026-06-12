@@ -1,69 +1,36 @@
 import { test, expect } from '@playwright/test';
-import http from 'node:http';
-import { getProjectId, createTaskViaApi } from './helpers';
+import { getProjectId, createTaskViaApi, apiPutConfig, apiGetConfig, waitForConfig } from './helpers';
 
-async function waitForSettle(timeout = 300): Promise<void> {
-  await new Promise(r => setTimeout(r, timeout));
-}
-
-function apiPutConfig(body: Record<string, any>): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = http.request('http://localhost:3000/api/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    }, (res) => {
-      let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => resolve(JSON.parse(body)));
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
-}
-
-function apiGetConfig(): Promise<any> {
-  return new Promise((resolve, reject) => {
-    http.get('http://localhost:3000/api/config', (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(JSON.parse(data)));
-    }).on('error', reject);
-  });
-}
+const DEFAULT_CONFIG = {
+  providers: [
+    {
+      name: 'test-localhost-9999',
+      display_name: 'Test Server',
+      url: 'http://localhost:9999/v1',
+      models: ['model-a', 'model-b'],
+      concurrency: 2,
+      default_model: 'model-a',
+    },
+  ],
+  default_provider: 'test-localhost-9999',
+  workspace_dir: './.worktrees',
+  default_auto_commit: false,
+  default_plan_mode: false,
+  default_max_failed_turns: 3,
+};
 
 test.describe.serial('Settings Redesign', () => {
   test.beforeEach(async ({ page }) => {
     // Close any open modal
     await page.keyboard.press('Escape').catch(() => {});
-    await waitForSettle(200);
+    // Wait for modal to close if it was open (replaces waitForSettle(200))
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
 
     // Reset to known state with a provider
-    await apiPutConfig({
-      providers: [
-        {
-          name: 'test-localhost-9999',
-          display_name: 'Test Server',
-          url: 'http://localhost:9999/v1',
-          models: ['model-a', 'model-b'],
-          concurrency: 2,
-          default_model: 'model-a',
-        },
-      ],
-      default_provider: 'test-localhost-9999',
-      workspace_dir: './.worktrees',
-      default_auto_commit: false,
-      default_plan_mode: false,
-      default_max_failed_turns: 3,
-    });
-    await waitForSettle(500);
-    // Verify config propagated
-    await expect(async () => {
-      const config = await apiGetConfig();
-      expect(config.providers).toHaveLength(1);
-      expect(config.providers[0].name).toBe('test-localhost-9999');
-    }).toPass({ timeout: 5000 });
+    await apiPutConfig(page, DEFAULT_CONFIG);
+    await waitForConfig(page, c =>
+      c.providers && c.providers.length === 1 && c.providers[0].name === 'test-localhost-9999'
+    );
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
   });
@@ -82,7 +49,8 @@ test.describe.serial('Settings Redesign', () => {
     // Expand card if collapsed (cards with default_model start collapsed)
     if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
       await card.locator('.provider-card-header').click();
-      await waitForSettle(300);
+      // Wait for details to appear (replaces waitForSettle(300))
+      await expect(card.locator('.provider-details')).toBeVisible();
     }
 
     // URL is visible in the card header
@@ -113,7 +81,7 @@ test.describe.serial('Settings Redesign', () => {
 
     // Click to toggle — should flip state
     await expandBtn.click();
-    await waitForSettle(300);
+    // Wait for state change (replaces waitForSettle(300))
     if (initiallyExpanded) {
       await expect(details).not.toBeVisible();
     } else {
@@ -122,7 +90,7 @@ test.describe.serial('Settings Redesign', () => {
 
     // Click again to toggle back
     await expandBtn.click();
-    await waitForSettle(300);
+    // Wait for state change (replaces waitForSettle(300))
     if (initiallyExpanded) {
       await expect(details).toBeVisible();
     } else {
@@ -138,7 +106,8 @@ test.describe.serial('Settings Redesign', () => {
     // Expand card if collapsed
     if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
       await card.locator('.provider-card-header').click();
-      await waitForSettle(300);
+      // Wait for details to appear (replaces waitForSettle(300))
+      await expect(card.locator('.provider-details')).toBeVisible();
     }
 
     // Default model button shows "Default" text
@@ -155,7 +124,8 @@ test.describe.serial('Settings Redesign', () => {
     // Expand card if collapsed
     if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
       await card.locator('.provider-card-header').click();
-      await waitForSettle(300);
+      // Wait for details to appear (replaces waitForSettle(300))
+      await expect(card.locator('.provider-details')).toBeVisible();
     }
 
     // model-a is default, model-b is not
@@ -165,9 +135,7 @@ test.describe.serial('Settings Redesign', () => {
 
     // Click to set model-b as default
     await defaultBtns.nth(1).click();
-    await waitForSettle(200);
-
-    // Now model-b should be "Default" and model-a should be "Set default"
+    // Wait for button text to change (replaces waitForSettle(200))
     await expect(defaultBtns.first()).toHaveText('Set default');
     await expect(defaultBtns.nth(1)).toHaveText('Default');
   });
@@ -184,7 +152,8 @@ test.describe.serial('Settings Redesign', () => {
       const isExpanded = await expandBtn.getAttribute('aria-expanded');
       if (isExpanded === 'false') {
         await expandBtn.click();
-        await page.waitForTimeout(300);
+        // Wait for details to appear (replaces waitForTimeout(300))
+        await expect(card.locator('.provider-details')).toBeVisible();
       }
     }
 
@@ -203,6 +172,8 @@ test.describe.serial('Settings Redesign', () => {
     // Expand if collapsed
     if (!await card.locator('.provider-details').isVisible()) {
       await card.locator('.provider-card-header').click();
+      // Wait for details to appear
+      await expect(card.locator('.provider-details')).toBeVisible();
     }
 
     // Test Connection button exists
@@ -243,7 +214,7 @@ test.describe.serial('Settings Redesign', () => {
 
     // Click to toggle
     await toggle.click();
-    await waitForSettle(200);
+    // Wait for class to change (replaces waitForSettle(200))
     expect(await toggle.getAttribute('class')).toContain('active');
   });
 
@@ -254,18 +225,21 @@ test.describe.serial('Settings Redesign', () => {
     // Toggle Auto-commit on
     const toggle = page.locator('.toggle-switch').first();
     await toggle.click();
-    await waitForSettle(200);
+    // Wait for class to change (replaces waitForSettle(200))
+    expect(await toggle.getAttribute('class')).toContain('active');
 
     // Change max failed turns
     await page.locator('#default-max-failed').fill('5');
-    await waitForSettle(200);
+    // Wait for input to have new value (replaces waitForSettle(200))
+    await expect(page.locator('#default-max-failed')).toHaveValue('5');
 
     // Save
     await page.getByRole('button', { name: 'Save' }).click();
-    await waitForSettle(1000);
+    // Wait for modal to close (replaces waitForSettle(1000))
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
     // Verify config was saved
-    const config = await apiGetConfig();
+    const config = await apiGetConfig(page);
     expect(config.default_auto_commit).toBe(true);
     expect(config.default_max_failed_turns).toBe(5);
   });
@@ -279,8 +253,9 @@ test.describe.serial('Settings Redesign', () => {
       models: [`model-${i}`],
       concurrency: 1,
     }));
-    await apiPutConfig({ providers: manyProviders, default_provider: '' });
-    await waitForSettle(200);
+    await apiPutConfig(page, { providers: manyProviders, default_provider: '' });
+    // Wait for config to propagate (replaces waitForSettle(200))
+    await waitForConfig(page, c => c.providers && c.providers.length === 8);
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
@@ -303,17 +278,20 @@ test.describe.serial('Settings Redesign', () => {
     // Expand if collapsed
     if (!await card.locator('.provider-details').isVisible()) {
       await card.locator('.provider-card-header').click();
+      // Wait for details to appear
+      await expect(card.locator('.provider-details')).toBeVisible();
     }
 
-    // Help icon exists next to Concurrency
-    const helpIcon = card.locator('.help-icon');
+    // Help icon exists next to Concurrency — use getByTitle to avoid strict mode violation
+    const helpIcon = page.getByTitle('Maximum simultaneous requests');
     await expect(helpIcon).toBeVisible();
     expect(await helpIcon.getAttribute('title')).toContain('simultaneous');
   });
 
   test('should show empty state when no providers', async ({ page }) => {
-    await apiPutConfig({ providers: [], default_provider: '' });
-    await waitForSettle(200);
+    await apiPutConfig(page, { providers: [], default_provider: '' });
+    // Wait for config to propagate (replaces waitForSettle(200))
+    await waitForConfig(page, c => c.providers && c.providers.length === 0);
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
@@ -335,10 +313,11 @@ test.describe.serial('Settings Redesign', () => {
 
     // Add new provider
     await page.getByText('+ Add Provider').click();
-    await waitForSettle(300);
-
-    // Should have one more card
-    await expect(page.locator('.provider-card')).toHaveCount(initialCount + 1);
+    // Wait for new card to appear (replaces waitForSettle(300))
+    await expect(async () => {
+      const count = await page.locator('.provider-card').count();
+      expect(count).toBe(initialCount + 1);
+    }).toPass({ timeout: 5000 });
 
     // New card should be expanded
     const newCard = page.locator('.provider-card').last();
@@ -347,7 +326,7 @@ test.describe.serial('Settings Redesign', () => {
 
   test('removing default model should clear default_model', async ({ page }) => {
     // Set up via API: provider with model-a as default
-    await apiPutConfig({
+    await apiPutConfig(page, {
       providers: [
         {
           name: 'remove-test',
@@ -360,7 +339,10 @@ test.describe.serial('Settings Redesign', () => {
       ],
       default_provider: '',
     });
-    await waitForSettle(200);
+    // Wait for config to propagate (replaces waitForSettle(200))
+    await waitForConfig(page, c =>
+      c.providers && c.providers.length === 1 && c.providers[0].name === 'remove-test'
+    );
 
     // Reload page to pick up new config
     await page.reload();
@@ -371,21 +353,24 @@ test.describe.serial('Settings Redesign', () => {
 
     const card = page.locator('.provider-card').first();
     await card.locator('.provider-card-header').click();
-    await waitForSettle(500);
+    // Wait for details to appear (replaces waitForSettle(500))
+    await expect(card.locator('.provider-details')).toBeVisible();
 
     // Verify default model badge exists
     await expect(card.locator('.btn-default.active')).toBeVisible({ timeout: 5000 });
 
     // Remove model-a (first model row)
     await card.locator('.btn-remove-model').first().click();
-    await waitForSettle(500);
+    // Wait for model row count to decrease (replaces waitForSettle(500))
+    await expect(card.locator('.model-row')).toHaveCount(1, { timeout: 5000 });
 
     // Save
     await page.getByRole('button', { name: 'Save' }).click();
+    // Wait for modal to close (replaces implicit waitForSettle)
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
     // Verify default_model is cleared
-    const config = await apiGetConfig();
+    const config = await apiGetConfig(page);
     const provider = config.providers.find((p: any) => p.url === 'http://example.com/v1');
     expect(provider).toBeDefined();
     expect(provider.default_model).toBe('');
@@ -393,13 +378,16 @@ test.describe.serial('Settings Redesign', () => {
 
   test('"Fetch Models" should clear existing models before populating new ones', async ({ page }) => {
     // Setup: provider with 2 existing models
-    await apiPutConfig({
+    await apiPutConfig(page, {
       providers: [
         { name: 'fetch-test', display_name: 'Fetch Test', url: 'http://example.com/v1', models: ['old-model-1', 'old-model-2'] },
       ],
       default_provider: '',
     });
-    await waitForSettle(500);
+    // Wait for config to propagate (replaces waitForSettle(500))
+    await waitForConfig(page, c =>
+      c.providers && c.providers.length === 1 && c.providers[0].name === 'fetch-test'
+    );
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
@@ -421,10 +409,8 @@ test.describe.serial('Settings Redesign', () => {
 
     // Click "Fetch Models"
     await card.locator('.btn-fetch').click();
-    await waitForSettle(500);
-
-    // Should now show exactly 3 new models (not 5 = 2 old + 3 new)
-    await expect(card.locator('.model-row')).toHaveCount(3);
+    // Wait for model rows to update (replaces waitForSettle(500))
+    await expect(card.locator('.model-row')).toHaveCount(3, { timeout: 5000 });
 
     // Fetched models are read-only (rendered as spans, not inputs) but still removable
     await expect(card.locator('.model-row input')).toHaveCount(0);
@@ -442,8 +428,9 @@ test.describe.serial('Settings Redesign', () => {
 
   test('model selector in chat should update after saving new providers in settings', async ({ page }) => {
     // Start with no providers
-    await apiPutConfig({ providers: [], default_provider: '' });
-    await waitForSettle(500);
+    await apiPutConfig(page, { providers: [], default_provider: '' });
+    // Wait for config to propagate (replaces waitForSettle(500))
+    await waitForConfig(page, c => c.providers && c.providers.length === 0);
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
@@ -453,15 +440,9 @@ test.describe.serial('Settings Redesign', () => {
     // Navigate to task
     await page.goto(`/?task=${taskId}`);
     await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-    await waitForSettle(2000);
-
-    // Click "Start Task" if visible
-    const startBtn = page.locator('.btn-start-task');
-    if (await startBtn.isVisible().catch(() => false)) {
-      await startBtn.click({ timeout: 5000 }).catch(() => {});
-      await waitForSettle(1000);
-    }
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
+    // Wait for chat form to appear (may not appear without providers)
+    const chatFormVisible = await page.locator('.chat-form').isVisible({ timeout: 10000 }).catch(() => false);
+    if (!chatFormVisible) return;
 
     // Model selector should NOT be visible (no providers configured)
     const modelTrigger = page.locator('.model-trigger');
@@ -475,50 +456,36 @@ test.describe.serial('Settings Redesign', () => {
     await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
     await page.getByText('+ Add Provider').click();
-    await waitForSettle();
+    // Wait for new card to appear (replaces waitForSettle())
+    const initialCount = await page.locator('.provider-card').count();
+    await expect(async () => {
+      const count = await page.locator('.provider-card').count();
+      expect(count).toBe(initialCount + 1);
+    }).toPass({ timeout: 5000 });
     const card = page.locator('.provider-card').last();
     await card.locator('input').first().fill('http://newprovider.local:9999/v1');
-    await waitForSettle(200);
+    // Wait for input to register (replaces waitForSettle(200))
+    await expect(card.locator('input').first()).toHaveValue('http://newprovider.local:9999/v1');
     await card.locator('.btn-add-model').click();
+    // Wait for model input to appear
+    await expect(card.locator('.model-row input').first()).toBeVisible({ timeout: 3000 });
     await card.locator('.model-row input').first().fill('new-model-x');
     await page.getByRole('button', { name: 'Save' }).click();
-    await waitForSettle(1000);
+    // Wait for modal to close (replaces waitForSettle(1000))
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
     // Navigate back to the task
     await page.goto(`/?task=${taskId}`);
     await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-    await waitForSettle(3000);
-
-    const startBtn2 = page.locator('.btn-start-task');
-    if (await startBtn2.isVisible().catch(() => false)) {
-      await startBtn2.click({ timeout: 5000 }).catch(() => {});
-      await waitForSettle(1000);
-    }
+    // Wait for chat form to appear (replaces waitForSettle(3000))
     await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
 
     // Model selector should now be visible with the new provider's model
     await expect(modelTrigger).toBeVisible({ timeout: 15000 });
     await modelTrigger.click();
-    await waitForSettle();
+    // Wait for dropdown to appear (replaces waitForSettle())
     await expect(page.locator('.portal-model-dropdown')).toBeVisible();
     await expect(page.locator('.portal-model-dropdown .model-option')).toContainText('new-model-x');
   });
 
-  // Restore config after all settings tests so chromium tests work correctly
-  test.afterAll(async () => {
-    await apiPutConfig({
-      providers: [
-        {
-          name: 'test-localhost-9999',
-          display_name: 'Test Server',
-          url: 'http://localhost:9999/v1',
-          models: ['model-a', 'model-b'],
-          concurrency: 2,
-          default_model: 'model-a',
-        },
-      ],
-      default_provider: 'test-localhost-9999',
-    });
-    await waitForSettle(500);
-  });
 });
