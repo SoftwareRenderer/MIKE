@@ -1,6 +1,17 @@
 <script lang="ts">
     import { marked } from 'marked';
 
+    interface ToolCallInfo {
+        toolId: string;
+        toolName: string;
+        args: Record<string, unknown>;
+        raw_args?: string;
+        result?: string;
+        success?: boolean;
+        duration?: number;
+        isPending?: boolean;
+    }
+
     interface Props {
         role: string;
         content: string;
@@ -9,6 +20,8 @@
         timestamp?: string;
         messageId?: string;
         stats?: { model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
+        toolCalls?: ToolCallInfo[];
+        formatToolArgs?: (toolName: string, args: Record<string, unknown>) => string;
         onCopy?: () => void;
         onDelete?: () => void;
         onFork?: (messageId: string, originalContent: string, newContent: string) => void;
@@ -18,9 +31,31 @@
         isFirstUserMessage?: boolean;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false }: Props = $props();
 
-    let reasoningExpanded = $state(false);
+    let reasoningExpanded = $state(!reasoningContent || reasoningContent.length <= 200);
+
+    function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
+        switch (toolName) {
+            case 'execute_command':
+                return `$ ${args.command as string}`;
+            case 'read_file': {
+                const p = args.path as string;
+                return p.startsWith('./') ? p : `./${p}`;
+            }
+            case 'write_file': {
+                const p = args.path as string;
+                const c = args.content as string;
+                const lines = c ? c.split('\n').length : 0;
+                const prefixed = p.startsWith('./') ? p : `./${p}`;
+                return `${prefixed} (${lines} lines)`;
+            }
+            case 'task_complete':
+                return args.summary as string || '(task complete)';
+            default:
+                return JSON.stringify(args, null, 2);
+        }
+    }
 
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
         const date = new Date(isoStr);
@@ -249,14 +284,42 @@
                     {/if}
                 </div>
             {/if}
-            <div class="message-bubble assistant-bubble">
-                <div class="message-text" class:streaming={isStreaming}>
-                    {@html renderedHtml}
-                    {#if isStreaming}
-                        <span class="cursor-blink"></span>
-                    {/if}
+            {#if content}
+                <div class="message-bubble assistant-bubble">
+                    <div class="message-text" class:streaming={isStreaming}>
+                        {@html renderedHtml}
+                        {#if isStreaming}
+                            <span class="cursor-blink"></span>
+                        {/if}
+                    </div>
                 </div>
-            </div>
+            {/if}
+            {#if toolCalls && toolCalls.length > 0}
+                {#each toolCalls as tc (tc.toolId)}
+                    <div class="tool-call-entry">
+                        <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
+                            <div class="tool-call-header">
+                                <span class="tool-icon">{#if tc.toolName === 'execute_command'}⚡{:else if tc.toolName === 'read_file'}📄{:else if tc.toolName === 'write_file'}✏️{:else if tc.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
+                                <span class="tool-name">{tc.toolName}</span>
+                                {#if tc.isPending}
+                                    <span class="tool-status pending"><span class="spinner"></span> Running...</span>
+                                {:else if tc.success}
+                                    <span class="tool-status success">Done</span>
+                                {:else}
+                                    <span class="tool-status error">Failed</span>
+                                {/if}
+                                {#if tc.duration !== undefined}
+                                    <span class="tool-duration">{tc.duration}ms</span>
+                                {/if}
+                            </div>
+                            <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                            {#if tc.result !== undefined}
+                                <pre class="tool-result">{tc.result}</pre>
+                            {/if}
+                        </div>
+                    </div>
+                {/each}
+            {/if}
             {#if stats}
                 <div class="message-stats">
                     <div class="stats-row">
@@ -310,7 +373,8 @@
                     </div>
                 </div>
             {/if}
-            <div class="message-actions assistant-actions">
+            {#if content || reasoningContent}
+                <div class="message-actions assistant-actions">
                     {#if timestampInfo.display}
                         <span class="message-timestamp" title={timestampInfo.tooltip || undefined}>{timestampInfo.display}</span>
                     {/if}
@@ -340,6 +404,7 @@
                         </button>
                     {/if}
                 </div>
+            {/if}
         </div>
     {:else}
         <div class="message-wrapper system-wrapper">
@@ -729,5 +794,54 @@
     @keyframes blink {
         0%, 100% { opacity: 1; }
         50% { opacity: 0; }
+    }
+
+    /* Tool call entries */
+    .tool-call-entry { padding: 4px 0; }
+    .tool-call-card {
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+        border-left: 3px solid;
+        padding: 8px 12px;
+    }
+    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-accent); }
+    .tool-status { font-size: 0.75rem; font-weight: 500; }
+    .tool-status.pending { color: var(--color-status-yellow); }
+    .tool-status.success { color: var(--color-status-green); }
+    .tool-status.error { color: var(--color-status-red); }
+    .tool-spinner {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border: 1.5px solid var(--color-status-yellow);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: tool-spin 0.6s linear infinite;
+    }
+    @keyframes tool-spin { to { transform: rotate(360deg); } }
+    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); margin-left: auto; }
+    .tool-args {
+        background: var(--color-surface-0);
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+        overflow-x: auto;
+        margin: 0;
+        color: var(--color-text-secondary);
+    }
+    .tool-result {
+        background: var(--color-surface-0);
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+        overflow-x: auto;
+        margin: 4px 0 0;
+        max-height: 120px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
 </style>

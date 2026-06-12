@@ -16,6 +16,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         reasoningContent?: string;
         isStreaming?: boolean;
         threadId?: string;
+        toolCalls?: Array<{
+            toolId: string;
+            toolName: string;
+            args: Record<string, unknown>;
+            raw_args?: string;
+            result?: string;
+            success?: boolean;
+            duration?: number;
+            isPending?: boolean;
+        }>;
         toolCall?: {
             toolName: string;
             args: Record<string, unknown>;
@@ -58,7 +68,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let selectedUrl = $state('');
 
     let currentAssistantId: string | null = $state(null);
-    let activeToolCalls = $state<Map<string, ChatEntry>>(new Map());
+    let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
     let deleteConfirm = $state<{ entryId: string; count: number; willDeleteBranch: boolean; branchName: string } | null>(null);
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
@@ -91,7 +101,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         for (const e of entries) {
             if (e.role === 'user') {
                 lastUserId = e.id;
-            } else if (lastUserId && (e.toolCall || e.role === 'assistant')) {
+            } else if (lastUserId && (e.toolCalls || e.role === 'assistant')) {
                 // An assistant/tool_call entry exists — the user message has a response (or one is in progress)
                 lastUserId = null;
             }
@@ -128,13 +138,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         switch (toolName) {
             case 'execute_command':
                 return `$ ${args.command as string}`;
-            case 'read_file':
-                return `📄 ${args.path as string}`;
+            case 'read_file': {
+                const path = args.path as string;
+                return path.startsWith('./') ? path : `./${path}`;
+            }
             case 'write_file': {
                 const path = args.path as string;
                 const content = args.content as string;
                 const lines = content ? content.split('\n').length : 0;
-                return `✏️ ${path} (${lines} lines)`;
+                const prefixed = path.startsWith('./') ? path : `./${path}`;
+                return `${prefixed} (${lines} lines)`;
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
@@ -207,44 +220,41 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         entries = entries.filter(e => e.id !== currentAssistantId);
                     }
                 }
-                closeCurrentAssistant();
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
                 if (!data.tool_id || data.tool_id === '') {
                     break;
                 }
-                const id = genId();
-                const entry: ChatEntry = {
-                    id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString(),
-                    toolCall: { toolName: data.tool_name, args: data.args, raw_args: data.raw_args, isPending: true }
-                };
-                entries = [...entries, entry];
-                activeToolCalls.set(data.tool_id, entry);
+                // Attach tool call to the current assistant entry (below its text content)
+                const entry = ensureAssistantEntry();
+                if (!entry.toolCalls) entry.toolCalls = [];
+                entry.toolCalls.push({
+                    toolId: data.tool_id,
+                    toolName: data.tool_name,
+                    args: data.args,
+                    raw_args: data.raw_args,
+                    isPending: true
+                });
+                entry.isStreaming = true;
+                activeToolCalls.set(data.tool_id, { entryId: entry.id });
                 break;
             }
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
-                const entry = activeToolCalls.get(data.tool_id);
+                const ref = activeToolCalls.get(data.tool_id);
                 activeToolCalls.delete(data.tool_id);
-                if (entry && entry.toolCall) {
-                    // Create a completely new entry object to force Svelte 5 reactivity
-                    // (keyed {#each} may skip re-render if object reference is the same)
-                    const updatedEntry: ChatEntry = {
-                        ...entry,
-                        isStreaming: false,
-                        toolCall: {
-                            ...entry.toolCall,
-                            result: data.output,
-                            success: data.success,
-                            duration: data.duration,
-                            isPending: false
+                if (ref) {
+                    const entry = entries.find(e => e.id === ref.entryId);
+                    if (entry && entry.toolCalls) {
+                        const tc = entry.toolCalls.find(t => t.toolId === data.tool_id);
+                        if (tc) {
+                            tc.result = data.output;
+                            tc.success = data.success;
+                            tc.duration = data.duration;
+                            tc.isPending = false;
                         }
-                    };
-                    const idx = entries.findIndex(e => e.id === entry.id);
-                    if (idx !== -1) {
-                        entries = entries.map((e, i) => i === idx ? updatedEntry : e);
+                        // Force reactivity
+                        entries = entries.map(e => e.id === entry.id ? { ...e, toolCalls: [...(e.toolCalls || [])] } : e);
                     }
-                } else {
-                    entries = [...entries];
                 }
                 break;
             }
@@ -279,7 +289,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
                 closeCurrentAssistant();
                 // Attach stats to the last assistant entry
-                const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && !e.toolCall);
+                const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
                 if (lastAssistant && data.predicted_tokens !== undefined) {
                     lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
                 }
@@ -328,8 +338,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         }
                     }
                     activeToolCalls.clear();
-                    // Remove pending tool call entries (assistant entries with toolCall and isStreaming)
-                    entries = entries.filter(e => !(e.toolCall && e.toolCall.isPending));
+                    // Remove assistant entries with only pending tool calls (no text content)
+                    entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
@@ -430,13 +440,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         error: { code, message },
                     };
                 }
-                // Restore tool call entries from persisted data
+                // Restore tool call entries from persisted data — merged into preceding assistant entry
                 if (m.role === 'tool_call' && m.tool_calls) {
                     const tc = JSON.parse(m.tool_calls);
                     const result = m.tool_result ? JSON.parse(m.tool_result) : null;
                     return {
                         ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
-                        toolCall: {
+                        toolCalls: [{
+                            toolId: tc.tool_id || m.id,
                             toolName: tc.tool_name,
                             args: tc.args ?? {},
                             raw_args: tc.raw_args,
@@ -444,7 +455,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             success: result?.success ?? true,
                             duration: result?.duration,
                             isPending: false,
-                        },
+                        }],
                     };
                 }
                 return {
@@ -459,7 +470,32 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     } : undefined,
                 };
             });
+            // Merge toolCalls entries into the preceding assistant entry
+            entries = mergeToolCallsIntoAssistant(entries);
         } catch { /* No history yet */ }
+    }
+
+    function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[] {
+        // DB ordering: assistant(text+reasoning) → tool_call → assistant(response to tool) → tool_call...
+        // Merge each tool-call-only entry into the preceding assistant entry
+        // so tool calls appear below the assistant's reasoning/text in the UI.
+        const merged: ChatEntry[] = [];
+        for (const entry of allEntries) {
+            if (entry.toolCalls && entry.toolCalls.length > 0 && !entry.content) {
+                // This is a tool-call-only entry — merge into preceding assistant
+                const prev = merged[merged.length - 1];
+                if (prev && prev.role === 'assistant') {
+                    if (!prev.toolCalls) prev.toolCalls = [];
+                    prev.toolCalls.push(...entry.toolCalls);
+                } else {
+                    // No preceding assistant entry, keep as-is
+                    merged.push(entry);
+                }
+            } else {
+                merged.push(entry);
+            }
+        }
+        return merged;
     }
 
     async function loadThreads() {
@@ -1015,30 +1051,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         />
                     {/if}
                 {/if}
-                {#if entry.toolCall}
-                    <div class="tool-call-entry">
-                        <div class="tool-call-card">
-                            <div class="tool-call-header">
-                                <span class="tool-icon">{#if entry.toolCall.toolName === 'execute_command'}⚡{:else if entry.toolCall.toolName === 'read_file'}📄{:else if entry.toolCall.toolName === 'write_file'}✏️{:else if entry.toolCall.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
-                                <span class="tool-name">{entry.toolCall.toolName}</span>
-                                {#if entry.toolCall.isPending}
-                                    <span class="tool-status pending"><span class="spinner"></span> Running...</span>
-                                {:else if entry.toolCall.success}
-                                    <span class="tool-status success">Done</span>
-                                {:else}
-                                    <span class="tool-status error">Failed</span>
-                                {/if}
-                                {#if entry.toolCall.duration !== undefined}
-                                    <span class="tool-duration">{entry.toolCall.duration}ms</span>
-                                {/if}
-                            </div>
-                            <pre class="tool-args">{formatToolArgs(entry.toolCall.toolName, entry.toolCall.args)}</pre>
-                            {#if entry.toolCall.result !== undefined}
-                                <pre class="tool-result" class:success={entry.toolCall.success} class:failure={!entry.toolCall.success}>{entry.toolCall.result}</pre>
-                            {/if}
-                        </div>
-                    </div>
-                {:else if entry.role === 'error'}
+                {#if entry.role === 'error'}
                     <div class="error-entry">
                         <div class="error-card">
                             <div class="error-header">
@@ -1065,7 +1078,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}
@@ -1186,7 +1199,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .tool-call-card {
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
-        border-left: 3px solid var(--color-accent);
+        border-left: 3px solid;
         padding: 8px 12px;
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
@@ -1237,8 +1250,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         white-space: pre-wrap;
         word-break: break-word;
     }
-    .tool-result.success { border-left: 3px solid var(--color-status-green); }
-    .tool-result.failure { border-left: 3px solid var(--color-status-red); }
 
     /* Error entry styles */
     .error-entry { padding: 6px 0; }

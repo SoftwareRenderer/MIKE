@@ -216,7 +216,7 @@
                     {:else if sec.type === 'reasoning'}
                         <div class="stream-reasoning">{sec.content}</div>
                     {:else if sec.type === 'tool_call' && sec.toolCall}
-                        <div class="tool-call-card">
+                        <div class="tool-call-card" style="border-left-color: {sec.isStreaming ? 'var(--color-accent)' : (sec.toolCall.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
                             <div class="tool-call-header">
                                 <span class="tool-name">{sec.toolCall.toolName}</span>
                                 {#if sec.isStreaming}
@@ -308,7 +308,7 @@
     .tool-call-card {
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
-        border-left: 3px solid var(--color-accent);
+        border-left: 3px solid;
         padding: 8px 12px;
     }
     .tool-call-header {
@@ -350,8 +350,6 @@
         max-height: 150px;
         overflow-y: auto;
     }
-    .tool-result.success { border-left: 3px solid var(--color-status-green); }
-    .tool-result.failure { border-left: 3px solid var(--color-status-red); }
     .raw {
         background: var(--color-surface-0);
         padding: 12px;

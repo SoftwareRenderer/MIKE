@@ -238,6 +238,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		var toolResults []toolResult
 
 		if len(pendingToolCalls) > 0 {
+			// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
+			msgCountBefore := len(messages)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
+			assistantCreatedAt := time.Now().UTC()
+			te.store.CreateTaskMessage(&types.TaskMessage{
+				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
+				Content: assistantText, ReasoningContent: reasoningContent.String(),
+				ModelName: activeModel, ProviderName: providerName,
+				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
+				PromptMs: promptMs, PredictedMs: predictedMs,
+				Duration: time.Since(startTime).Milliseconds(), CreatedAt: assistantCreatedAt,
+			})
+
 			for _, tc := range pendingToolCalls {
 				if tc.ID == "" || tc.Function.Name == "" {
 					log.Printf("[tool] skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
@@ -300,7 +313,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 					task.Output = summary
 					te.store.UpdateTask(task)
-					promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages, assistantText, reasoningContent.String(), startTime)
 					b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 						"state": task.StatusState, "summary": summary,
 						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
@@ -312,20 +324,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 			}
-			msgCountBefore := len(messages)
 			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
 			for _, tr := range toolResults {
 				messages = append(messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
-			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
-				Content: assistantText, ReasoningContent: reasoningContent.String(),
-				ModelName: activeModel, ProviderName: providerName,
-				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
-				PromptMs: promptMs, PredictedMs: predictedMs,
-				Duration: time.Since(startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
-			})
 			pendingToolCalls = nil
 			assistantContent.Reset()
 			reasoningContent.Reset()
