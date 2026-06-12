@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/config"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -16,12 +17,13 @@ import (
 
 // ProjectHandler handles project CRUD operations.
 type ProjectHandler struct {
-	store *store.Store
+	store       *store.Store
+	configStore *config.ConfigStore
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store *store.Store) *ProjectHandler {
-	return &ProjectHandler{store: store}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore}
 }
 
 // HandleList returns all projects.
@@ -103,6 +105,8 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request, id 
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get project stats")
 			return
 		}
+		// Compute costs using provider pricing from config
+		h.applyPricing(stats)
 		httputil.JSONResponse(w, http.StatusOK, stats)
 
 	case http.MethodDelete:
@@ -121,6 +125,47 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request, id 
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// applyPricing computes cost for each model in stats using provider pricing from config.
+// Cost formula (USD):
+//   input_rate = cache_write_price if > 0, else input_price
+//   cost = (processed_tokens * input_rate + cache_tokens * cache_read_price + generated_tokens * output_rate) / 1,000,000
+func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
+	cfg, err := h.configStore.GetConfig()
+	if err != nil {
+		return // no config, skip pricing
+	}
+
+	// Build provider name -> provider map (match by both Name and DisplayName)
+	providerMap := make(map[string]types.Provider)
+	for _, p := range cfg.Providers {
+		providerMap[p.Name] = p
+		if p.DisplayName != "" && p.DisplayName != p.Name {
+			providerMap[p.DisplayName] = p
+		}
+	}
+
+	for i := range stats.ByModel {
+		m := &stats.ByModel[i]
+		p, ok := providerMap[m.ProviderName]
+		if !ok {
+			continue // no pricing configured for this provider
+		}
+
+		// Use cache_write_price for non-cached input if set, else input_price
+		inputRate := p.InputPrice
+		if p.CacheWritePrice > 0 {
+			inputRate = p.CacheWritePrice
+		}
+
+		cost := (float64(m.ProcessedTokens)*inputRate +
+			float64(m.CacheTokens)*p.CacheReadPrice +
+			float64(m.GeneratedTokens)*p.OutputPrice) / 1_000_000
+
+		m.Cost = cost
+		stats.TotalCost += cost
 	}
 }
 

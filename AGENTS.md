@@ -75,6 +75,13 @@ npx playwright test --ui
 USE_MOCK_LLM=0 npx playwright test
 ```
 
+**Before running**: If tests previously failed or were interrupted, clean up stale state:
+```bash
+pkill -f "node -e.*kanban" 2>/dev/null; pkill -f "mock-llm" 2>/dev/null
+rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db
+```
+Stale `node -e` wrapper processes from prior test runs accumulate and hold port 3000 open, causing `ERR_CONNECTION_REFUSED` on the next run. The lock file from an interrupted run also causes global-setup to execute teardown instead of setup.
+
 ### Test Server Lifecycle
 Tests run against a **dedicated test server** with an isolated database, fully managed by `global-setup.ts`:
 
@@ -252,10 +259,10 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 5. Browser cache cleared? Hard refresh
 6. Check logs: server stdout or `/tmp/kanban.log`
 7. Tests passing? `cd frontend && npx playwright test`
-8. Stale test state? `rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db`
+8. Stale test state? `pkill -f "node -e.*kanban" && rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db`
 
 ### Test Failures
-- **`ERR_CONNECTION_REFUSED`**: Test server didn't start — check `lsof -i :3000` for port conflicts
+- **`ERR_CONNECTION_REFUSED`**: Most commonly caused by stale `node -e` wrapper processes from prior test runs holding port 3000. Run the cleanup commands above. Otherwise check `lsof -i :3000` for conflicts.
 - **`waiting for locator('.project-item')`**: Test project not created — check global-setup logs
 - **`waiting for locator('.card')`**: No tasks exist — test expects existing tasks
 - **Mock LLM routing wrong**: Check `mock-llm.js` keyword matching and fixture files

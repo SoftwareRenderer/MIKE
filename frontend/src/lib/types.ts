@@ -78,6 +78,10 @@ export interface Provider {
     models: ProviderModel[];
     concurrency: number;
     default_model?: string;
+    input_price?: number;      // USD per 1M input (non-cached) tokens
+    output_price?: number;     // USD per 1M output tokens
+    cache_read_price?: number; // USD per 1M cache-read tokens
+    cache_write_price?: number; // USD per 1M cache-write tokens (overrides input_price when set)
 }
 
 export interface TaskDependency {
@@ -174,6 +178,7 @@ export interface ModelStats {
     avg_prompt_tps: number;
     avg_generation_tps: number;
     task_count: number;
+    cost: number; // USD cost for this model's usage
 }
 
 export interface ProjectStats {
@@ -185,6 +190,7 @@ export interface ProjectStats {
     avg_prompt_tps: number;
     avg_generation_tps: number;
     by_model: ModelStats[];
+    total_cost: number; // USD total cost across all models
 }
 
 // Stream events

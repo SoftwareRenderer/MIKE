@@ -59,7 +59,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		addr:        addr,
 	}
 
-	s.projectHandler = managers.NewProjectHandler(store)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore)

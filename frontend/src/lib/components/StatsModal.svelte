@@ -44,6 +44,26 @@
         return `${Math.round(tps)} t/s`;
     }
 
+    function formatCost(cost: number): string {
+        if (cost === 0) return '-';
+        // Get locale currency symbol and number format
+        const parts = new Intl.NumberFormat(undefined, {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).formatToParts(1);
+        const symbol = parts.find(p => p.type === 'currency')?.value || '$';
+        const literal = parts.find(p => p.type === 'literal' && p.value.includes(','))?.value || '';
+        // Format number with locale-aware grouping, fixed decimals
+        const numFmt = cost < 1 ? cost.toFixed(4) : cost.toFixed(2);
+        const formatted = Number(numFmt).toLocaleString(undefined, {
+            minimumFractionDigits: cost < 1 ? 4 : 2,
+            maximumFractionDigits: cost < 1 ? 4 : 2,
+        });
+        return `${symbol}${literal}${formatted}`;
+    }
+
     function getTokenLabel(model: ModelStats): string {
         if (model.provider_name === 'title_generation') {
             return `${model.model_name} (Title Generation)`;
@@ -124,6 +144,10 @@
                             <span class="summary-value">{formatTps(stats.avg_generation_tps)}</span>
                             <span class="summary-label">Gen Speed</span>
                         </div>
+                        <div class="summary-item">
+                            <span class="summary-value">{formatCost(stats.total_cost)}</span>
+                            <span class="summary-label">Total Cost</span>
+                        </div>
                     </div>
                 </div>
 
@@ -138,6 +162,7 @@
                             <th class="col-num">Generated</th>
                             <th class="col-num">Prompt Speed</th>
                             <th class="col-num">Gen Speed</th>
+                            <th class="col-num">Cost</th>
                             <th class="col-action"></th>
                         </tr>
                     </thead>
@@ -153,6 +178,7 @@
                                 <td class="col-num">{formatNumber(model.generated_tokens)}</td>
                                 <td class="col-num">{formatTps(model.avg_prompt_tps)}</td>
                                 <td class="col-num">{formatTps(model.avg_generation_tps)}</td>
+                                <td class="col-num">{formatCost(model.cost)}</td>
                                 <td class="col-action">
                                     <button class="btn-reset" onclick={() => resetModel(model)} title="Reset stats for this model" aria-label={`Reset stats for ${getTokenLabel(model)}`}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

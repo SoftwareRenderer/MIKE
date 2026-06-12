@@ -29,6 +29,29 @@
     let loading = $state(false);
     let error = $state('');
 
+    // Locale-aware currency formatting for pricing inputs
+    const currencySymbol = (() => {
+        const parts = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).formatToParts(0);
+        const currencyPart = parts.find(p => p.type === 'currency');
+        return currencyPart ? currencyPart.value : '$';
+    })();
+
+    /** Format a price number as a locale-aware string with 2 decimal places. */
+    function formatPrice(value: number): string {
+        if (!value && value !== 0) return '';
+        return Number(value).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 4,
+        });
+    }
+
+    /** Parse a formatted price string back to a number. */
+    function parsePrice(str: string): number {
+        const cleaned = str.replace(/[^0-9.]/g, '');
+        const n = parseFloat(cleaned);
+        return isNaN(n) ? 0 : n;
+    }
+
     // -- Provider management --
     interface ModelEntry {
         name: string;
@@ -43,6 +66,11 @@
         models: ModelEntry[];
         concurrency: number;
         default_model: string; // per-provider default model
+        // Pricing (USD per 1M tokens)
+        input_price: number;
+        output_price: number;
+        cache_read_price: number;
+        cache_write_price: number;
         fetchingModels: boolean;
         fetchError: string;
         expanded: boolean; // card expansion state
@@ -94,6 +122,10 @@
                 ...p,
                 concurrency: p.concurrency || 1,
                 default_model: p.default_model || '',
+                input_price: p.input_price || 0,
+                output_price: p.output_price || 0,
+                cache_read_price: p.cache_read_price || 0,
+                cache_write_price: p.cache_write_price || 0,
                 fetchingModels: false,
                 fetchError: '',
                 expanded: !p.default_model, // collapse if already configured
@@ -152,6 +184,10 @@
             models: [],
             concurrency: 1,
             default_model: '',
+            input_price: 0,
+            output_price: 0,
+            cache_read_price: 0,
+            cache_write_price: 0,
             fetchingModels: false,
             fetchError: '',
             expanded: true,
@@ -323,6 +359,10 @@
                         })),
                         concurrency: p.concurrency || 1,
                         default_model: p.default_model || '',
+                        input_price: p.input_price,
+                        output_price: p.output_price,
+                        cache_read_price: p.cache_read_price,
+                        cache_write_price: p.cache_write_price,
                     };
                 });
             const cfg = await updateConfig({
@@ -549,6 +589,48 @@
                                         {#if p.models.length === 0}
                                             <div class="models-empty">No models added. Use "Fetch Models" or add manually.</div>
                                         {/if}
+                                    </div>
+                                    <!-- Pricing Section -->
+                                    <div class="pricing-section">
+                                        <div class="pricing-header">
+                                            <span class="pricing-label">Pricing (USD per 1M tokens)</span>
+                                            <span class="help-icon" title="Set token pricing to track costs in project stats. If Cache Write is set, it replaces Input for non-cached tokens.">
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                                </svg>
+                                            </span>
+                                        </div>
+                                        <div class="pricing-grid">
+                                            <div class="pricing-field">
+                                                <label for={`input-price-${i}`}>Input</label>
+                                                <div class="pricing-input-wrap">
+                                                    <span class="pricing-prefix">{currencySymbol}</span>
+                                                    <input id={`input-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.input_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.input_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                </div>
+                                            </div>
+                                            <div class="pricing-field">
+                                                <label for={`output-price-${i}`}>Output</label>
+                                                <div class="pricing-input-wrap">
+                                                    <span class="pricing-prefix">{currencySymbol}</span>
+                                                    <input id={`output-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.output_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.output_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                </div>
+                                            </div>
+                                            <div class="pricing-field">
+                                                <label for={`cache-read-price-${i}`}>Cache Read</label>
+                                                <div class="pricing-input-wrap">
+                                                    <span class="pricing-prefix">{currencySymbol}</span>
+                                                    <input id={`cache-read-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_read_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.cache_read_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                </div>
+                                            </div>
+                                            <div class="pricing-field">
+                                                <label for={`cache-write-price-${i}`}>Cache Write</label>
+                                                <div class="pricing-input-wrap">
+                                                    <span class="pricing-prefix">{currencySymbol}</span>
+                                                    <input id={`cache-write-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_write_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.cache_write_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             {/if}
@@ -1318,6 +1400,88 @@
     }
     .help-icon:hover {
         color: var(--color-text-secondary);
+    }
+
+    /* Pricing section */
+    .pricing-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+    .pricing-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .pricing-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .pricing-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+    }
+    .pricing-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .pricing-field label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+    }
+    .pricing-input-wrap {
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        transition: border-color 0.15s ease;
+        width: fit-content;
+        max-width: 100%;
+    }
+    .pricing-input-wrap:focus-within {
+        border-color: var(--color-accent);
+    }
+    .pricing-prefix {
+        padding: 0 2px 0 6px;
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+    }
+    .pricing-input {
+        width: 68px;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        padding: 4px 6px;
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        font-family: var(--font-mono, monospace);
+    }
+    .pricing-input:focus,
+    .pricing-input:focus-visible {
+        outline: none;
+        border: none;
+    }
+    .pricing-input::placeholder {
+        color: var(--color-text-tertiary);
+    }
+    /* Remove number input spinners */
+    .pricing-input::-webkit-outer-spin-button,
+    .pricing-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .pricing-input[type=number] {
+        -moz-appearance: textfield;
     }
 
     /* Models section */
