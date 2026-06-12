@@ -22,10 +22,42 @@
 
     let reasoningExpanded = $state(false);
 
-    function formatTime(isoStr: string): string {
+    function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
         const date = new Date(isoStr);
-        if (isNaN(date.getTime())) return '';
-        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (isNaN(date.getTime())) return { display: '', tooltip: '' };
+
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const msgStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const diffMs = todayStart.getTime() - msgStart.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+        const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        const fullDate = date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+
+        if (diffDays === 0) {
+            // Today — time only
+            return { display: timeStr, tooltip: '' };
+        } else if (diffDays === 1) {
+            // Yesterday
+            return { display: `Yesterday at ${timeStr}`, tooltip: fullDate };
+        } else if (diffDays >= 2 && diffDays <= 7) {
+            // Last [weekday]
+            const weekday = date.toLocaleDateString([], { weekday: 'long' });
+            return { display: `Last ${weekday} at ${timeStr}`, tooltip: fullDate };
+        } else {
+            // Older — full short date + time
+            const shortDate = date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+            return { display: `${shortDate} at ${timeStr}`, tooltip: fullDate };
+        }
+    }
+
+    let timestampInfo = $derived(
+        timestamp ? formatTimestamp(timestamp) : { display: '', tooltip: '' }
+    );
+
+    function formatTime(isoStr: string): string {
+        return formatTimestamp(isoStr).display;
     }
 
     let isEditing = $state(false);
@@ -173,8 +205,8 @@
                     <div class="message-text">{@html userHtml}</div>
                 </div>
                 <div class="message-actions user-actions">
-                    {#if timestamp}
-                        <span class="message-timestamp">{formatTime(timestamp)}</span>
+                    {#if timestampInfo.display}
+                        <span class="message-timestamp" title={timestampInfo.tooltip || undefined}>{timestampInfo.display}</span>
                     {/if}
                     <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
                         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -279,8 +311,8 @@
                 </div>
             {/if}
             <div class="message-actions assistant-actions">
-                    {#if timestamp}
-                        <span class="message-timestamp">{formatTime(timestamp)}</span>
+                    {#if timestampInfo.display}
+                        <span class="message-timestamp" title={timestampInfo.tooltip || undefined}>{timestampInfo.display}</span>
                     {/if}
                     <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
                         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
