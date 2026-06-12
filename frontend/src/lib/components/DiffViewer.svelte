@@ -118,6 +118,7 @@
                                         class="diff-collapse-btn"
                                         aria-expanded={expandedBlocks[item.block.id]}
                                         onclick={() => toggleBlock(item.block.id)}
+                                        title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
                                     >
                                         {#if expandedBlocks[item.block.id]}
                                             <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
@@ -212,6 +213,7 @@
                                         class="diff-collapse-btn"
                                         aria-expanded={expandedBlocks[item.block.id]}
                                         onclick={() => toggleBlock(item.block.id)}
+                                        title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
                                     >
                                         {#if expandedBlocks[item.block.id]}
                                             <svg width="10" height="10" viewBox="0 0 16 16" fill="none">

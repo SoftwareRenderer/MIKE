@@ -113,7 +113,7 @@
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="create-task-title" tabindex="-1">
         <div class="modal-header">
             <h2 id="create-task-title">{parentId ? 'Create Subtask' : 'Create Task'}</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
             {#if parentId}
@@ -155,8 +155,8 @@
                 <div id="task-error" class="error" role="alert">{error}</div>
             {/if}
             <div class="modal-footer">
-                <button type="button" onclick={handleClose}>Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)}>
+                <button type="button" onclick={handleClose} title="Cancel">Cancel</button>
+                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)} title="Create the task">
                     {loading ? 'Creating...' : 'Create Task'}
                 </button>
             </div>

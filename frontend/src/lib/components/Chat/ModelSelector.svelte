@@ -221,6 +221,7 @@
             aria-label="Select provider"
             aria-haspopup="listbox"
             aria-expanded={providerDropdownOpen}
+            title="Select provider"
         >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
@@ -246,6 +247,7 @@
         aria-label="Select model"
         aria-haspopup="listbox"
         aria-expanded={modelDropdownOpen}
+        title="Select model"
     >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2 4l6 5 6-5M2 4v8l6 5 6-5V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

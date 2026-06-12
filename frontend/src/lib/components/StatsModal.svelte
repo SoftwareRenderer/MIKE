@@ -105,7 +105,7 @@
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="stats-modal-title" tabindex="-1">
         <div class="modal-header">
             <h2 id="stats-modal-title">Token Usage</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close stats">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label="Close stats" title="Close stats">✕</button>
         </div>
         <div class="modal-body">
             {#if loading}

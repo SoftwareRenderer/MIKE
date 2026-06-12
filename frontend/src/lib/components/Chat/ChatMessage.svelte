@@ -143,8 +143,8 @@
                         rows="3"
                     ></textarea>
                     <div class="edit-actions">
-                        <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
-                        <button class="btn-edit-submit" onclick={submitEdit}>
+                        <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
+                        <button class="btn-edit-submit" onclick={submitEdit} title="Save changes">
                             {#if isFirstUserMessage}
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="20 6 9 17 4 12"/>
@@ -176,7 +176,7 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message">
+                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
                         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -184,7 +184,7 @@
                         <span class="check">✓</span>
                     </button>
                     {#if onFork}
-                        <button class="action-btn" onclick={startEdit} aria-label="Fork conversation from this message">
+                        <button class="action-btn" onclick={startEdit} aria-label="Fork conversation from this message" title="Edit / fork conversation">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -192,7 +192,7 @@
                         </button>
                     {/if}
                     {#if onDelete}
-                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages">
+                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
                             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -206,7 +206,7 @@
         <div class="message-wrapper assistant-wrapper">
             {#if reasoningContent}
                 <div class="reasoning-block" class:expanded={reasoningExpanded}>
-                    <button class="reasoning-toggle" onclick={() => reasoningExpanded = !reasoningExpanded} aria-expanded={reasoningExpanded}>
+                    <button class="reasoning-toggle" onclick={() => reasoningExpanded = !reasoningExpanded} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
                         </svg>
@@ -238,6 +238,7 @@
                                 onclick={() => statsView = 'reading'}
                                 aria-label="Reading stats (prompt processing)"
                                 aria-pressed={statsView === 'reading'}
+                                title="Reading stats (prompt processing)"
                             >
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
@@ -250,6 +251,7 @@
                                 onclick={() => statsView = 'generation'}
                                 aria-label="Generation stats (token output)"
                                 aria-pressed={statsView === 'generation'}
+                                title="Generation stats (token output)"
                             >
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
@@ -280,7 +282,7 @@
                     {#if timestamp}
                         <span class="message-timestamp">{formatTime(timestamp)}</span>
                     {/if}
-                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message">
+                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
                         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -288,7 +290,7 @@
                         <span class="check">✓</span>
                     </button>
                     {#if onRegenerate && !isStreaming}
-                        <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response">
+                        <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response" title="Regenerate response">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M21 2v6h-6"/>
                                 <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
@@ -298,7 +300,7 @@
                         </button>
                     {/if}
                     {#if onDelete}
-                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages">
+                        <button class="action-btn" onclick={handleDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
                             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

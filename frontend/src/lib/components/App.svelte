@@ -231,7 +231,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 
     <!-- Mobile sidebar backdrop -->
     {#if isMobile && mobileMenuOpen}
-        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu"></button>
+        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu"></button>
     {/if}
 
     <!-- Sidebar -->
@@ -239,9 +239,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         <div class="sidebar-header">
             <h2 class:collapsed>Kanban</h2>
             {#if isMobile}
-                <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu">✕</button>
+                <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
             {:else}
-                <button class="toggle-btn" onclick={toggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+                <button class="toggle-btn" onclick={toggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
                     {collapsed ? '▸' : '◂'}
                 </button>
             {/if}
@@ -252,6 +252,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     <button
                         class="project-item"
                         onclick={() => { selectProject(p); if (isMobile) mobileMenuOpen = false; }}
+                        title={`Open project: ${p.name}`}
                     >
                         <span class="project-name">{p.name}</span>
                         {#if !collapsed && projectCounts[p.id]}
@@ -275,6 +276,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         class="project-remove-btn"
                         onclick={(e) => { e.stopPropagation(); removeProject(p); }}
                         aria-label={`Remove project ${p.name}`}
+                        title={`Remove project ${p.name}`}
                     >
                         ✕
                     </button>
@@ -282,7 +284,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             {/each}
         </nav>
         <div class="sidebar-footer">
-            <button class="add-project-btn" onclick={openAddProject} aria-label="Add Project">+ Project</button>
+            <button class="add-project-btn" onclick={openAddProject} aria-label="Add Project" title="Add Project">+ Project</button>
         </div>
     </aside>
 
@@ -292,7 +294,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             {#if !(showCardDetailVal && selectedTaskVal)}
             <header class="top-bar">
                 {#if isMobile}
-                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu">
+                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu" title="Open menu">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="3" y1="6" x2="21" y2="6"/>
                             <line x1="3" y1="12" x2="21" y2="12"/>
@@ -302,20 +304,20 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 {/if}
                 <span class="project-title">{getHomeRelativePath(currentProject.path)}</span>
                 <div class="actions">
-                    <button class="icon-btn" onclick={() => showTerminal.set(true)} aria-label="Open terminal">
+                    <button class="icon-btn" onclick={() => showTerminal.set(true)} aria-label="Open terminal" title="Open terminal">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                             <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
-                    <button class="icon-btn" onclick={() => showStats.set(true)} aria-label="Token usage stats">
+                    <button class="icon-btn" onclick={() => showStats.set(true)} aria-label="Token usage stats" title="Token usage stats">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
                             <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
                             <rect x="12" y="1" width="3" height="13" rx="0.5" fill="currentColor"/>
                         </svg>
                     </button>
-                    <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
+                    <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings" title="Settings">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="3"/>
                             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -342,7 +344,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             </section>
         {:else}
             <div class="empty-state">
-                <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings">
+                <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings" title="Settings">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -351,11 +353,11 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 {#if !hasProviders}
                     <h2>Welcome to Kanban</h2>
                     <p>Configure an LLM provider to get started. Supports any OpenAI-compatible API.</p>
-                    <button class="btn-primary" onclick={() => showConfig.set(true)}>Configure Provider</button>
+                    <button class="btn-primary" onclick={() => showConfig.set(true)} title="Configure an LLM provider">Configure Provider</button>
                 {:else}
                     <h2>No Projects</h2>
                     <p>Add a project to get started. Projects must be git repositories.</p>
-                    <button class="btn-primary" onclick={openAddProject}>Add Project</button>
+                    <button class="btn-primary" onclick={openAddProject} title="Add a project">Add Project</button>
                 {/if}
             </div>
         {/if}

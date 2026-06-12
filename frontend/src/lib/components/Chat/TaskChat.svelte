@@ -1008,7 +1008,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             </div>
                             <div class="error-message">{entry.content}</div>
                             {#if entry.error?.code === 'ws_disconnected'}
-                                <button class="btn-retry" onclick={handleRetryConnect}>
+                                <button class="btn-retry" onclick={handleRetryConnect} title="Retry connection">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <polyline points="23 4 23 10 17 10"/>
                                         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
@@ -1041,8 +1041,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     </div>
                 {/if}
                 <div class="delete-actions">
-                    <button class="btn-cancel" onclick={() => deleteConfirm = null}>Cancel</button>
-                    <button class="btn-delete" onclick={handleDelete}>Delete</button>
+                    <button class="btn-cancel" onclick={() => deleteConfirm = null} title="Cancel deletion">Cancel</button>
+                    <button class="btn-delete" onclick={handleDelete} title="Delete message(s)">Delete</button>
                 </div>
             </div>
         </div>
@@ -1059,7 +1059,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     />
                 </div>
             {/if}
-            <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)}>
+            <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Start the AI task">
                 {#if isStarting}
                     <span class="spinner-inline"></span> Starting...
                 {:else}

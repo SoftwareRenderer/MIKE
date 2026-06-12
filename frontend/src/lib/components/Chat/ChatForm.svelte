@@ -101,13 +101,13 @@
             oninput={autoResize}
         ></textarea>
         {#if isLoading}
-            <button type="button" class="btn-stop" onclick={handleStop} aria-label="Stop generation">
+            <button type="button" class="btn-stop" onclick={handleStop} aria-label="Stop generation" title="Stop generation">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
                 </svg>
             </button>
         {:else}
-            <button type="submit" class="btn-send" disabled={!canSend} aria-label="Send message">
+            <button type="submit" class="btn-send" disabled={!canSend} aria-label="Send message" title="Send message">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 2l12 6-12 6V9l6-1-6-1V2z" fill="currentColor"/>
                 </svg>

@@ -337,7 +337,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         <!-- Header -->
         <div class="header">
             <div class="header-left">
-                <button class="btn-back" onclick={onClose} aria-label="Back to board (Esc)">
+                <button class="btn-back" onclick={onClose} aria-label="Back to board (Esc)" title="Back to board (Esc)">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
@@ -351,20 +351,20 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             </div>
             <div class="header-actions">
                 {#if task.status === 'review'}
-                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} aria-label="Approve and move to Done">
+                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} aria-label="Approve and move to Done" title="Approve and move to Done">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
-                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} aria-label="Reject and return to In Progress">
+                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} aria-label="Reject and return to In Progress" title="Reject and return to In Progress">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
-                <button class="btn-icon" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal">
+                <button class="btn-icon" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                         <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
-                <button class="btn-icon" onclick={handleDelete} aria-label="Delete task">
+                <button class="btn-icon" onclick={handleDelete} aria-label="Delete task" title="Delete task">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -379,6 +379,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 <button
                     class="tab-btn {activeTab === 'context' ? 'active' : ''}"
                     onclick={() => activeTab = 'context'}
+                    title="Board overview"
                 >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2"/></svg>
                     Board
@@ -386,6 +387,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 <button
                     class="tab-btn {activeTab === 'chat' ? 'active' : ''}"
                     onclick={() => activeTab = 'chat'}
+                    title="Agent chat"
                 >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
                     Agent
@@ -393,6 +395,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 <button
                     class="tab-btn {activeTab === 'diff' ? 'active' : ''}"
                     onclick={() => activeTab = 'diff'}
+                    title="Working changes"
                 >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Changes
@@ -409,7 +412,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         {@const sectionTasks = allTasks.filter(t => t.status === section.id).sort((a, b) => a.column_order - b.column_order)}
                         {#if sectionTasks.length > 0}
                             <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
-                                <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)}>
+                                <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
                                     <span class="section-title">
                                         {#if section.id === 'backlog'}
                                             <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -445,6 +448,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                             onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
                                             aria-label={`Select task: ${t.title || '(untitled)'}`}
                                             aria-current={t.id === task.id ? 'task' : undefined}
+                                            title={`Select task: ${t.title || '(untitled)'}`}
                                         >
                                             <span class="task-item-title">{t.title || '(untitled)'}</span>
                                             <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} role="button" aria-label="Edit title" title="Edit title" tabindex="0">

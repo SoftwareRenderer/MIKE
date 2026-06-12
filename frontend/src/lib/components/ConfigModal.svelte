@@ -411,14 +411,14 @@
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="config-modal-title" tabindex="-1">
         <div class="modal-header">
             <h2 id="config-modal-title">Settings</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close settings">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label="Close settings" title="Close settings">✕</button>
         </div>
         <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
             <!-- Providers Section -->
             <fieldset class="section">
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
-                    <button type="button" class="btn-small" onclick={addProvider}>+ Add Provider</button>
+                    <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
                 </div>
                 <div class="providers-list">
                     {#each providers as p, i}
@@ -461,7 +461,7 @@
                                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-expanded={p.expanded} aria-label={p.expanded ? 'Collapse provider details' : 'Expand provider details'}>
+                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-expanded={p.expanded} aria-label={p.expanded ? 'Collapse provider details' : 'Expand provider details'} title={p.expanded ? 'Collapse' : 'Expand'}>
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={p.expanded}>
                                             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
@@ -473,7 +473,7 @@
                             {#if p.expanded}
                                 <div class="provider-details">
                                     <div class="details-actions">
-                                        <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()}>
+                                        <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}
                                                 <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -486,7 +486,7 @@
                                                 Fetch Models
                                             {/if}
                                         </button>
-                                        <button type="button" class="btn-test" onclick={() => testProviderConnection(i)} disabled={p.testingConnection || !p.url.trim()}>
+                                        <button type="button" class="btn-test" onclick={() => testProviderConnection(i)} disabled={p.testingConnection || !p.url.trim()} title="Test connection to this provider">
                                             {#if p.testingConnection}
                                                 <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -499,7 +499,7 @@
                                                 Test Connection
                                             {/if}
                                         </button>
-                                        <button type="button" class="btn-default-provider" class:active={defaultProvider === p.name} onclick={() => toggleDefaultProvider(p.name)}>
+                                        <button type="button" class="btn-default-provider" class:active={defaultProvider === p.name} onclick={() => toggleDefaultProvider(p.name)} title="Set as default provider">
                                             {defaultProvider === p.name ? '✓ Default' : 'Set default'}
                                         </button>
                                     </div>
@@ -545,7 +545,7 @@
                                     <div class="models-section">
                                         <div class="models-header">
                                             <span class="models-label">Default Model</span>
-                                            <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)}>
+                                            <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)} title="Add a model manually">
                                                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                                                     <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                                 </svg>
@@ -580,7 +580,7 @@
                                                             <option value={option.value}>{option.label}</option>
                                                         {/each}
                                                     </select>
-                                                    <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`}>
+                                                    <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`} title={`Remove ${model.name || 'model'}`}>
                                                         ✕
                                                     </button>
                                                 </div>
@@ -685,6 +685,7 @@
                         aria-checked={defaultAutoCommit}
                         aria-labelledby="toggle-autocommit"
                         onclick={() => defaultAutoCommit = !defaultAutoCommit}
+                        title="Automatically commit changes when the task completes"
                     >
                         <span class="toggle-knob"></span>
                     </button>
@@ -708,6 +709,7 @@
                         aria-checked={defaultPlanMode}
                         aria-labelledby="toggle-planmode"
                         onclick={() => defaultPlanMode = !defaultPlanMode}
+                        title="Task describes its plan before making changes"
                     >
                         <span class="toggle-knob"></span>
                     </button>
@@ -732,8 +734,8 @@
             {/if}
 
             <div class="modal-footer">
-                <button type="button" onclick={handleClose}>Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading}>
+                <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+                <button type="submit" class="btn-primary" disabled={loading} title="Save settings">
                     {loading ? 'Saving...' : 'Save'}
                 </button>
             </div>

@@ -95,13 +95,13 @@
     <div class="browser" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={browserEl} role="dialog" aria-modal="true" aria-labelledby="file-browser-title" tabindex="-1">
         <div class="browser-header">
             <h2 id="file-browser-title">Select Project Directory</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
         </div>
 
         <div class="browser-body">
             <!-- Path bar -->
             <div class="path-bar">
-                <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory">🏠</button>
+                <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">🏠</button>
                 <input
                     type="text"
                     class="path-input"
@@ -133,6 +133,7 @@
                             class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
                             onclick={() => handleClick(entry)}
                             aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
+                            title={`${entry.isDir ? 'Open folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ' (git repository)' : ''}`}
                         >
                             <span class="icon" aria-hidden="true">{entry.isDir ? '📁' : '📄'}</span>
                             <span class="name">{entry.name}</span>
@@ -148,11 +149,12 @@
         <div class="browser-footer">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
-                <button class="btn-cancel" onclick={handleClose}>Cancel</button>
+                <button class="btn-cancel" onclick={handleClose} title="Cancel">Cancel</button>
                 <button
                     class="btn-select"
                     onclick={handleSelect}
                     disabled={!isGitRepo}
+                    title="Select this directory as project"
                 >
                     Select
                 </button>

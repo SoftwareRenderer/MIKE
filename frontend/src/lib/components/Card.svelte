@@ -432,6 +432,7 @@
                         aria-label="Change model"
                         aria-haspopup="listbox"
                         aria-expanded={modelPickerOpen}
+                        title="Change model"
                     >
                         {modelBadge.text}
                         <svg class="badge-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
