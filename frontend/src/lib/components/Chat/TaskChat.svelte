@@ -72,6 +72,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Shows stop button only during token generation, not during tool execution.
     let isLoading = $derived($streamingTaskIds.has(taskId));
 
+    // awaitingResponse: true between sending a message and receiving the first token/tool_call.
+    // Shows a spinner so the user knows the LLM is being contacted.
+    let awaitingResponse = $state(false);
+
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
@@ -165,9 +169,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         streamingTaskIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
     }
 
+    /** Clear the "awaiting LLM" spinner — first response from provider has arrived. */
+    function clearAwaiting() {
+        if (awaitingResponse) awaitingResponse = false;
+    }
+
     function handleEvent(event: StreamEvent) {
         switch (event.type) {
             case 'token': {
+                clearAwaiting();
                 markStreaming();
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
@@ -181,6 +191,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_call': {
+                clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // If the LLM sent the tool name as text content before the tool call,
                 // remove that entry to avoid a blank bubble above the tool call card
@@ -270,6 +281,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'error': {
+                clearAwaiting();
                 markNotStreaming();
                 closeCurrentAssistant();
                 connected = false;
@@ -563,6 +575,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         lastSentMessage = msg;
         // Send with model info for lazy-start
+        awaitingResponse = true;
         if (ws && ws.sendWithModel) {
             ws.sendWithModel(msg, selectedModel, selectedUrl);
         } else if (ws) {
@@ -605,6 +618,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         // Re-send the user message to trigger a new LLM response
         lastSentMessage = lastUser.content;
+        awaitingResponse = true;
         if (ws) ws.send(lastUser.content);
         scroll();
     }
@@ -626,6 +640,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Prompt is already in entries (loaded from DB at task creation)
         // Don't pre-create assistant entry — let the first token/tool_call event create it
         lastSentMessage = taskPrompt;
+        awaitingResponse = true;
         scroll();
         try {
             const updated = await startTask(projectId, taskId);
@@ -643,6 +658,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     async function handleStop() {
         markNotStreaming();
+        awaitingResponse = false;
         if (ws) {
             ws.close();
             ws = null;
@@ -749,6 +765,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             });
             await wsReady;
             lastSentMessage = newContent;
+            awaitingResponse = true;
             if (ws && ws.sendWithModel) {
                 ws.sendWithModel(newContent, selectedModel, selectedUrl);
             } else if (ws) {
@@ -799,6 +816,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         // Send via WebSocket to trigger lazy-start executor
         lastSentMessage = newContent;
+        awaitingResponse = true;
         if (ws && ws.sendWithModel) {
             ws.sendWithModel(newContent, selectedModel, selectedUrl);
         } else if (ws) {
@@ -834,6 +852,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         ws.ws.onclose = (event: CloseEvent) => {
             const wasConnected = connected;
             markNotStreaming();
+            awaitingResponse = false;
             connected = false;
             closeCurrentAssistant();
             isStarting = false;
@@ -1036,6 +1055,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 {/if}
             {/each}
         {/if}
+        {#if awaitingResponse}
+            <div class="awaiting-llm">
+                <span class="spinner"></span>
+                <span>Awaiting LLM provider...</span>
+            </div>
+        {/if}
     </div>
 
     {#if deleteConfirm}
@@ -1162,6 +1187,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         animation: spin 0.6s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .awaiting-llm {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        font-size: 0.8125rem;
+        color: var(--color-text-tertiary);
+    }
     .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); margin-left: auto; }
     .tool-args {
         background: var(--color-surface-0);
