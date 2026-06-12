@@ -183,11 +183,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'tool_call': {
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // If the LLM sent the tool name as text content before the tool call,
-                // clear it to avoid duplicating the tool name in the UI
+                // remove that entry to avoid a blank bubble above the tool call card
                 if (currentAssistantId) {
                     const entry = entries.find(e => e.id === currentAssistantId);
-                    if (entry && entry.content.trim() === data.tool_name) {
-                        entry.content = '';
+                    if (entry && entry.content.trim() === data.tool_name && !entry.reasoningContent) {
+                        entries = entries.filter(e => e.id !== currentAssistantId);
                     }
                 }
                 closeCurrentAssistant();
@@ -302,7 +302,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     // A new executor is starting (e.g., lazy-start after user follow-up).
                     // Clear pending tool calls and streaming state from any previous executor
                     // to avoid mixing tool call deltas from concurrent executors.
-                    closeCurrentAssistant();
+                    // Only close current assistant if it's empty (stale entry), not if it has content (active streaming).
+                    if (currentAssistantId) {
+                        const entry = entries.find(e => e.id === currentAssistantId);
+                        if (!entry || (!entry.content && !entry.reasoningContent)) {
+                            closeCurrentAssistant();
+                        }
+                    }
                     activeToolCalls.clear();
                     // Remove pending tool call entries (assistant entries with toolCall and isStreaming)
                     entries = entries.filter(e => !(e.toolCall && e.toolCall.isPending));
@@ -382,7 +388,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function loadHistory() {
         try {
             const messages = await getTaskMessages(projectId, taskId);
-            entries = messages.map(m => {
+            // Filter out title generation messages (invisible, used for stats only)
+            entries = messages.filter(m => m.role !== 'title').map(m => {
                 const base = { threadId: m.thread_id || undefined };
                 // Restore error entries from persisted data
                 if (m.role === 'error') {
@@ -540,8 +547,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
         entries = [...entries, { id: genId(), role: 'user', content: msg, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() }];
-        // Create assistant entry immediately so streaming UI appears
-        ensureAssistantEntry();
+        // Don't pre-create — let the first token/tool_call event create the assistant entry
         lastSentMessage = msg;
         // Send with model info for lazy-start
         if (ws && ws.sendWithModel) {
@@ -583,8 +589,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Trim local entries: keep everything up to and including the last user message
         const userIdx = entries.findIndex(e => e.id === lastUser.id);
         entries = entries.slice(0, userIdx + 1);
-        // Create assistant entry immediately so streaming UI appears
-        ensureAssistantEntry();
+        // Don't pre-create — let the first token/tool_call event create the assistant entry
         // Re-send the user message to trigger a new LLM response
         lastSentMessage = lastUser.content;
         if (ws) ws.send(lastUser.content);
@@ -606,8 +611,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
         isStarting = true;
         // Prompt is already in entries (loaded from DB at task creation)
-        // Create assistant entry immediately so streaming UI appears
-        ensureAssistantEntry();
+        // Don't pre-create assistant entry — let the first token/tool_call event create it
         lastSentMessage = taskPrompt;
         scroll();
         try {
@@ -779,8 +783,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
         // Add to UI
         entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        // Create assistant entry for the upcoming response
-        ensureAssistantEntry();
+        // Don't pre-create — let the first token/tool_call event create the assistant entry
         // Send via WebSocket to trigger lazy-start executor
         lastSentMessage = newContent;
         if (ws && ws.sendWithModel) {
