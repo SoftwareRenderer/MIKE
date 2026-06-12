@@ -16,6 +16,9 @@ export const showCardDetail = writable(false);
 // Task IDs that are actively streaming tokens (frontend-only, real-time)
 export const streamingTaskIds = writable<Set<string>>(new Set());
 
+// Diff stats per task ID (pushed via WebSocket)
+export const taskDiffStats = writable<Record<string, string>>({});
+
 // Toast notification — empty string means no toast visible
 export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);
 

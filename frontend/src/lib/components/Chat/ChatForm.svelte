@@ -199,5 +199,8 @@
             width: 44px;
             height: 44px;
         }
+        textarea {
+            padding: 8px 0;
+        }
     }
 </style>

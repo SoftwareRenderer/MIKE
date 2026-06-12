@@ -88,6 +88,25 @@ func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 	}
 }
 
+// BroadcastDiffStats sends a task_diff_stats event to all clients of a project.
+func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat string, untrackedN int) {
+	bsm.mu.RLock()
+	clients := bsm.clients[projectID]
+	bsm.mu.RUnlock()
+
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":        "task_diff_stats",
+		"task_id":     taskID,
+		"short_stat":  shortStat,
+		"untracked_n": untrackedN,
+	})
+	for conn := range clients {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected
+		}
+	}
+}
+
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
 func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 	if bsm.store == nil {

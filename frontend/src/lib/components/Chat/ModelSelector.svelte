@@ -250,7 +250,10 @@
         title="Select model"
     >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M2 4l6 5 6-5M2 4v8l6 5 6-5V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
         </svg>
         <span class="selector-label model-name" class:current={!!currentModel}>
             {currentModel || 'Select model'}

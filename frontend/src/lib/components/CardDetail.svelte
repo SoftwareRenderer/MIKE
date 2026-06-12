@@ -121,8 +121,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Mobile tab
     let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
     let isMobile = $derived(false);
-    let touchStartX = $state(0);
-    let touchEndX = $state(0);
+
 
     // Column resize
     let columnsRef: HTMLDivElement | null = $state(null);
@@ -211,40 +210,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         window.addEventListener('resize', check);
         return () => window.removeEventListener('resize', check);
     });
-
-    function handleTouchStart(e: TouchEvent) {
-        touchStartX = e.touches[0].clientX;
-    }
-
-    function handleTouchEnd(e: TouchEvent) {
-        touchEndX = e.changedTouches[0].clientX;
-        processSwipe();
-    }
-
-    function handlePointerDown(e: PointerEvent) {
-        touchStartX = e.clientX;
-    }
-
-    function handlePointerUp(e: PointerEvent) {
-        touchEndX = e.clientX;
-        processSwipe();
-    }
-
-    function processSwipe() {
-        const diff = touchStartX - touchEndX;
-        const threshold = 50;
-        if (Math.abs(diff) > threshold) {
-            if (diff > 0 && activeTab !== 'diff') {
-                // Swiped left — go next
-                if (activeTab === 'context') activeTab = 'chat';
-                else if (activeTab === 'chat') activeTab = 'diff';
-            } else if (diff < 0 && activeTab !== 'context') {
-                // Swiped right — go prev
-                if (activeTab === 'diff') activeTab = 'chat';
-                else if (activeTab === 'chat') activeTab = 'context';
-            }
-        }
-    }
 
     onMount(() => {
         const unsubBoard = boardStore.subscribe(b => {
@@ -404,7 +369,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         {/if}
 
         <!-- 3-Column Layout -->
-        <div bind:this={columnsRef} class="columns" class:mobile-swipe={isMobile} ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onpointerdown={handlePointerDown} onpointerup={handlePointerUp} role="region" aria-label="Task detail panels">
+        <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <div class="task-list">
@@ -829,23 +794,16 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         .tab-btn:hover:not(.active) {
             color: var(--color-text-primary);
         }
-        .columns.mobile-swipe {
-            overflow-x: auto;
-            overflow-y: hidden;
-            scroll-snap-type: x mandatory;
-            -webkit-overflow-scrolling: touch;
-        }
-        .columns.mobile-swipe .column {
-            flex: 0 0 100% !important;
-            min-width: 100% !important;
-            width: 100% !important;
-            scroll-snap-align: start;
-        }
         .column-context {
             border-right: none;
         }
         .column-chat {
             border-right: none;
+        }
+        .column:not(.hidden) {
+            flex: 0 0 100% !important;
+            min-width: 100% !important;
+            width: 100% !important;
         }
         .task-list {
             padding: 0 8px 8px 8px;

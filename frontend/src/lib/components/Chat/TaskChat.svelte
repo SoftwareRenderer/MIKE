@@ -76,7 +76,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
     // Set of user message IDs that have no assistant/tool_call entry after them.
-    // Used to determine whether to show "Send" or "Fork" in the edit form.
+    // Used to determine whether to show "Send" or "New Thread" in the edit form.
     let lastUserMessageIds = $derived(new Set((() => {
         const ids = new Set<string>();
         let lastUserId: string | null = null;

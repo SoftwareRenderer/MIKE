@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import { get } from 'svelte/store';
-    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore } from '$lib/store';
+    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, getBoard } from '$lib/api';
 
     let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
@@ -79,6 +79,9 @@
     let pickerRect = $state<{ top: number; left: number } | null>(null);
     let providers = $derived(get(configStore)?.providers || []);
     let isConfigurable = $derived(columnId === 'backlog');
+
+    // Diff stats: pushed via WebSocket from the backend
+    let diffStats = $derived(get(taskDiffStatsStore)[task.id] || null);
 
     function togglePicker(e: MouseEvent) {
         e.stopPropagation(); // Prevent card from opening when clicking the model badge
@@ -412,7 +415,6 @@
             </div>
         </div>
     {/if}
-    <div class="card-preview">{truncate(task.prompt, 80)}</div>
     {#if statusBadge || modelBadge.text}
         <div class="badges-row">
             {#if statusBadge}
@@ -442,6 +444,9 @@
                         {modelBadge.text}
                     </div>
                 {/if}
+            {/if}
+            {#if diffStats}
+                <span class="diff-stats">{diffStats}</span>
             {/if}
         </div>
     {/if}
@@ -604,15 +609,6 @@
         font-family: inherit;
         outline: none;
     }
-    .card-preview {
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        line-height: 1.4;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
     .badges-row {
         display: flex;
         flex-wrap: wrap;
@@ -647,6 +643,13 @@
         flex-shrink: 0;
         opacity: 0.5;
         transition: transform 0.15s ease;
+    }
+    .diff-stats {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+        padding: 2px 0;
     }
     .badge.open .badge-chevron {
         transform: rotate(180deg);

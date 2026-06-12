@@ -286,6 +286,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			pendingToolCalls = nil
 			assistantContent.Reset()
 			reasoningContent.Reset()
+
+			// Broadcast updated diff stats to board viewers
+			if shortStat, untrackedN, err := te.worktreeMgr.GetDiffStats(task.ID); err == nil && shortStat != "" {
+				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN)
+			}
 		} else if assistantText != "" {
 			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)

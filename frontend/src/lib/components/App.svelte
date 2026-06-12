@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import type { Project, Task, Config } from '$lib/types';
@@ -21,6 +21,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     let collapsed = $state(false);
     let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
+    let taskDiffStats: Record<string, string> = $state({});
     let showCreateTaskVal = $state(false);
     let showConfigVal = $state(false);
     let showTerminalVal = $state(false);
@@ -60,6 +61,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     }
                 }
             }),
+            taskDiffStatsStore.subscribe(v => taskDiffStats = v),
         ].map(unsub => unsub);
         return () => unsub.forEach(u => u());
     });
@@ -162,6 +164,25 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             // Connect board stream for real-time updates
             boardStream = createBoardStream(p.id, () => refreshBoard(), (counts) => {
                 projectCounts = counts;
+            }, (task_id, short_stat, untracked_n) => {
+                const stat = short_stat || '';
+                const fileMatch = stat.match(/(\d+) file\w* changed/);
+                const insMatch = stat.match(/(\d+) insertion\w*/);
+                const delMatch = stat.match(/(\d+) deletion\w*/);
+                let statsStr = '';
+                if (fileMatch) {
+                    const files = fileMatch[1];
+                    const insertions = insMatch ? insMatch[1] : '0';
+                    const deletions = delMatch ? delMatch[1] : '0';
+                    statsStr = `${files} files +${insertions} -${deletions}`;
+                } else if (untracked_n > 0) {
+                    statsStr = `${untracked_n} untracked`;
+                }
+                taskDiffStatsStore.update(map => {
+                    if (statsStr) map[task_id] = statsStr;
+                    else delete map[task_id];
+                    return map;
+                });
             });
         } catch (e) {
             console.error('Failed to load board:', e);
@@ -255,6 +276,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         title={`Open project: ${p.name}`}
                     >
                         <span class="project-name">{p.name}</span>
+                        <span class="project-abbr" title={p.name}>{p.name.slice(0, 2)}</span>
                         {#if !collapsed && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)">
@@ -272,6 +294,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                             </span>
                         {/if}
                     </button>
+                    {#if !collapsed}
                     <button
                         class="project-remove-btn"
                         onclick={(e) => { e.stopPropagation(); removeProject(p); }}
@@ -280,12 +303,15 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     >
                         ✕
                     </button>
+                    {/if}
                 </div>
             {/each}
         </nav>
+        {#if !collapsed}
         <div class="sidebar-footer">
             <button class="add-project-btn" onclick={openAddProject} aria-label="Add Project" title="Add Project">+ Project</button>
         </div>
+        {/if}
     </aside>
 
     <!-- Main Content -->
@@ -519,6 +545,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         color: var(--color-text-primary);
         background: transparent;
     }
+    .collapsed .project-item {
+        padding: 8px 4px;
+    }
     .project-name {
         flex: 1 1 0;
         min-width: 0;
@@ -563,8 +592,20 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    .project-abbr {
+        display: none;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-align: center;
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     .collapsed .project-name {
         display: none;
+    }
+    .collapsed .project-abbr {
+        display: block;
     }
     .project-stats {
         display: flex;
@@ -718,10 +759,16 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         .top-bar {
             padding: 8px 12px;
             gap: 8px;
+            justify-content: flex-start;
+        }
+        .sidebar-header {
+            padding: 10px 12px;
+        }
+        .project-list {
+            padding: 4px;
         }
         .project-title {
             flex: 1;
-            text-align: center;
         }
     }
 </style>

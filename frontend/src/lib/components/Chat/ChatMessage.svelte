@@ -195,7 +195,7 @@
                                     <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
                                     <line x1="6" y1="9" x2="6" y2="21"/>
                                 </svg>
-                                Fork
+                                New Thread
                             {/if}
                         </button>
                     </div>
@@ -216,7 +216,7 @@
                         <span class="check">✓</span>
                     </button>
                     {#if onFork}
-                        <button class="action-btn" onclick={startEdit} aria-label="Fork conversation from this message" title="Edit / fork conversation">
+                        <button class="action-btn" onclick={startEdit} aria-label="Start new thread from this message" title="Edit / new thread">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -532,16 +532,13 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 2px 0 4px;
+        padding: 2px 4px 4px;
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
     .stats-model-name {
         font-size: 0.75rem;
-        font-weight: 600;
         color: var(--color-text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
         opacity: 0.7;
     }
     .stats-row {
@@ -586,7 +583,11 @@
         gap: 4px;
     }
     .stat-separator {
+        font-size: 0.75rem;
         opacity: 0.5;
+    }
+    .stat-item {
+        font-size: 0.75rem;
     }
     .message-actions {
         display: flex;
@@ -615,7 +616,7 @@
         margin-left: 0;
     }
     .assistant-actions .message-timestamp {
-        margin-right: 0;
+        margin: 0;
     }
     .action-btn {
         background: none;

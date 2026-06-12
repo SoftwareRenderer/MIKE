@@ -38,7 +38,8 @@
 {#if !hasContent}
     <div class="diff-empty">
         <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-            <path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
+            <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+            <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
         </svg>
         <p>No changes yet</p>
     </div>

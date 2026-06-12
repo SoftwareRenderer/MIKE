@@ -360,6 +360,7 @@ type UntrackedFile struct {
 type TaskDiff struct {
 	Diff      string          `json:"diff"`
 	Untracked []UntrackedFile `json:"untracked"`
+	ShortStat string          `json:"short_stat"`
 }
 
 // GetDiff returns the git diff for a task's worktree.
@@ -398,6 +399,9 @@ func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
 	}
 	diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
+	// Get shortstat summary
+	shortStat, _ := wm.gitRunOutput(worktreePath, "diff", "--shortstat", "HEAD")
+
 	// Get untracked files from git status --porcelain (lines starting with "?? ")
 	statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
 	if err != nil {
@@ -430,7 +434,29 @@ func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
 		}
 	}
 
-	return &TaskDiff{Diff: diffOut, Untracked: untracked}, nil
+	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat}, nil
+}
+
+// GetDiffStats returns the git diff shortstat and untracked file count for a task.
+func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrackedN int, err error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", 0, err
+	}
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return "", 0, fmt.Errorf("worktree not found")
+	}
+	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", "HEAD")
+	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+	for _, line := range strings.Split(statusOut, "\n") {
+		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
+			path := strings.TrimSpace(line[3:])
+			if path != "" {
+				untrackedN++
+			}
+		}
+	}
+	return shortStat, untrackedN, nil
 }
 
 // -- Helper functions --

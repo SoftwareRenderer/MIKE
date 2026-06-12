@@ -151,7 +151,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 }
 
 // Board stream - WebSocket for real-time board updates
-export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void): { ws: WebSocket; close: () => void } {
+export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void, onDiffStats?: (task_id: string, short_stat: string, untracked_n: number) => void): { ws: WebSocket; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -160,6 +160,9 @@ export function createBoardStream(projectId: string, onRefresh: () => void, onPr
         }
         if (msg.type === 'project_counts' && onProjectCounts) {
             onProjectCounts(msg.data);
+        }
+        if (msg.type === 'task_diff_stats' && onDiffStats) {
+            onDiffStats(msg.task_id, msg.short_stat, msg.untracked_n);
         }
     };
     ws.onclose = () => {
@@ -245,7 +248,7 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
     if (!res.ok) throw await apiError(res, 'Failed to update message');
 }
 
-export async function getTaskDiff(projectId: string, taskId: string): Promise<{ diff: string; untracked: Array<{ path: string; diff: string }> }> {
+export async function getTaskDiff(projectId: string, taskId: string): Promise<{ diff: string; untracked: Array<{ path: string; diff: string }>; short_stat: string }> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
     return res.json();
