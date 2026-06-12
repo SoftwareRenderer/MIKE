@@ -15,9 +15,10 @@
         onSend?: (messageId: string, originalContent: string, newContent: string) => void;
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
+        isFirstUserMessage?: boolean;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false }: Props = $props();
 
     let reasoningExpanded = $state(false);
 
@@ -102,7 +103,9 @@
 
     function submitEdit() {
         if (editContent.trim() && messageId) {
-            if (isLastUserMessage && onSend) {
+            if (isFirstUserMessage) {
+                onFork?.(messageId, content, editContent.trim());
+            } else if (isLastUserMessage && onSend) {
                 onSend(messageId, content, editContent.trim());
             } else {
                 onFork?.(messageId, content, editContent.trim());
@@ -142,7 +145,12 @@
                     <div class="edit-actions">
                         <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
                         <button class="btn-edit-submit" onclick={submitEdit}>
-                            {#if isLastUserMessage}
+                            {#if isFirstUserMessage}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                                Save
+                            {:else if isLastUserMessage}
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <line x1="22" y1="2" x2="11" y2="13"/>
                                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -647,6 +655,9 @@
         justify-content: flex-end;
     }
     .btn-edit-cancel {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
         font-size: 0.8125rem;
@@ -658,6 +669,9 @@
         background: var(--color-surface-4);
     }
     .btn-edit-submit {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
         font-size: 0.8125rem;

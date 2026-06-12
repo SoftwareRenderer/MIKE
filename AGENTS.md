@@ -174,6 +174,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 2. Build: `cd frontend && npm run build`
 3. Server serves from `frontend/dist/` — no dev server needed
 4. Browser hard refresh to pick up changes
+5. **No server restart needed** — frontend-only changes are picked up immediately after build
 
 ### Backend
 1. Edit Go files in `backend/`

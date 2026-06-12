@@ -168,3 +168,13 @@ func (s *Store) ReorderTasks(projectID string, reorders []types.ReorderRequest) 
 	}
 	return tx.Commit()
 }
+
+// ClearStaleTitleGenerating sets title_generating to false for all tasks.
+// Called on server startup to clear flags left by crashed/restarted title generation goroutines.
+func (s *Store) ClearStaleTitleGenerating() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE tasks SET title_generating = 0, updated_at = ? WHERE title_generating = 1`,
+		time.Now().UTC().Format(time.RFC3339))
+	return err
+}

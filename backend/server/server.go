@@ -78,6 +78,11 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		log.Printf("[gc] startup: %d orphaned worktrees cleaned", removed)
 	}
 
+	// Clear stale title_generating flags from previous server sessions
+	if err := store.ClearStaleTitleGenerating(); err != nil {
+		log.Printf("[title-gen] startup: failed to clear stale flags: %v", err)
+	}
+
 	s.setupRoutes()
 
 	return s, nil

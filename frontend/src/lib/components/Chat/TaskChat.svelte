@@ -688,7 +688,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
         if (taskStatus === 'backlog') {
             const idx = entries.findIndex(e => e.id === entryId);
-            if (idx !== -1) entries[idx].content = newContent;
+            if (idx !== -1) { entries[idx].content = newContent; entries[idx].createdAt = new Date().toISOString(); }
             updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
@@ -748,7 +748,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {
-            entries = entries.map((e, i) => i === idx ? { ...e, content: newContent } : e);
+            entries = entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
             updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
@@ -953,7 +953,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </div>
         {:else}
             {#each entries as entry, entryIdx (entry.id)}
-                {#if entry.role === 'user' && threads.length > 0}
+                {#if entry.role === 'user' && threads.length > 0 && entryIdx > 0}
                     {#if getCheckpointThreads(entry)}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
@@ -1016,7 +1016,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}
