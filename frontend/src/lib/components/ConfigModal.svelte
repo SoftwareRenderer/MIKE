@@ -576,9 +576,11 @@
                                                         aria-label="Reasoning effort for {model.name || 'this model'}"
                                                         title="Reasoning effort (thinking budget)"
                                                     >
-                                                        {#each REASONING_EFFORT_OPTIONS as option}
-                                                            <option value={option.value}>{option.label}</option>
-                                                        {/each}
+                                                        <optgroup label="Reasoning effort">
+                                                            {#each REASONING_EFFORT_OPTIONS as option}
+                                                                <option value={option.value}>{option.label}</option>
+                                                            {/each}
+                                                        </optgroup>
                                                     </select>
                                                     <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`} title={`Remove ${model.name || 'model'}`}>
                                                         ✕
@@ -983,7 +985,7 @@
     /* Inputs */
     input[type="text"], input[type="number"], select {
         background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-md);
         padding: 8px 12px;
         color: var(--color-text-primary);
@@ -1390,6 +1392,13 @@
         flex-shrink: 0;
         padding: 4px 8px;
     }
+    .option-input::-webkit-inner-spin-button,
+    .option-input::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+    }
+    .option-input[type="number"] {
+        -moz-appearance: textfield;
+    }
 
     /* Help icon tooltip */
     .help-icon {
@@ -1583,7 +1592,7 @@
     /* Reasoning effort select */
     .reasoning-effort-select {
         background: var(--color-surface-0);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-sm);
         padding: 4px 6px;
         font-size: 0.75rem;
@@ -1601,6 +1610,9 @@
     .reasoning-effort-select:focus-visible {
         border-color: var(--color-accent);
         outline: none;
+    }
+    .reasoning-effort-select optgroup {
+        font-style: normal;
     }
 
     /* Default model button */
