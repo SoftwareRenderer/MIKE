@@ -146,7 +146,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 		return "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
 
-	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-b", branchName); err != nil {
+	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-B", branchName); err != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
 		return "", fmt.Errorf("create branch: %s: %w", out, err)
 	}

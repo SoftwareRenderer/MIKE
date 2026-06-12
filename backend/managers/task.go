@@ -224,15 +224,18 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 	task.Status = req.Status
 	task.UpdatedAt = time.Now()
 
+	if req.Status == "done" {
+		task.StatusState = "completed"
+	} else if task.StatusState == "completed" {
+		// Task moved away from Done — reset status so it can run again
+		task.StatusState = "idle"
+	}
 	if req.Status == "in_progress" && task.StatusState != "running" {
 		if err := h.executor.StartTask(projectID, taskID); err != nil {
 			log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
 			task.StatusState = "failed"
 			task.Output = err.Error()
 		}
-	}
-	if req.Status == "done" {
-		task.StatusState = "completed"
 	}
 	if err := h.store.UpdateTask(task); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())

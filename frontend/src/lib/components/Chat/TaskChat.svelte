@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -541,8 +541,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    function handleSend(msg: string) {
+    async function handleSend(msg: string) {
         if (!msg || disabled) return;
+        // If task is in Done, move it back to In Progress before sending
+        if (taskStatus === 'done') {
+            try {
+                const updated = await moveTask(projectId, taskId, 'in_progress');
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                });
+            } catch (e) {
+                showToast(String(e));
+                return;
+            }
+        }
         // Remove all error entries (cleared by next user action)
         entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context

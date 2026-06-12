@@ -135,8 +135,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 28px;
-        height: 28px;
+        width: 22px;
+        height: 22px;
         border: none;
         border-radius: var(--radius-sm);
         background: transparent;
@@ -144,6 +144,7 @@
         cursor: pointer;
         transition: background 0.15s ease, color 0.15s ease;
         padding: 0;
+        flex-shrink: 0;
     }
     .clear-btn:hover {
         background: var(--color-status-red)22;

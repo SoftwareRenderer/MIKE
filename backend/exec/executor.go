@@ -287,8 +287,15 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
 		return
 	}
-	if task.StatusState == "completed" {
-		return
+	// Reset stale running state (executor crashed/server restarted)
+	if task.StatusState == "running" {
+		te.taskMu.Lock()
+		_, activelyRunning := te.tasks[taskID]
+		te.taskMu.Unlock()
+		if !activelyRunning {
+			log.Printf("[lazy-start] task=%s stale running state detected, resetting", taskID)
+			task.StatusState = "idle"
+		}
 	}
 
 	task.StatusState = "running"

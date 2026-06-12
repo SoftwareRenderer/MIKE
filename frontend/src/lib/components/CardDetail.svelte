@@ -488,7 +488,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         taskId={task.id}
                         taskPrompt={task.prompt}
                         taskStatus={task.status}
-                        disabled={task.status_state === 'completed'}
                         onRefreshDiff={updateDiff}
                     />
                 </div>
