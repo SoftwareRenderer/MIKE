@@ -214,7 +214,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
         width: 90vw;
-        max-width: 720px;
+        max-width: 860px;
         max-height: 80dvh;
         display: flex;
         flex-direction: column;
