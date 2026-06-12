@@ -105,6 +105,7 @@ func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Request, projectID string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		log.Printf("board stream accept error: %v", err)

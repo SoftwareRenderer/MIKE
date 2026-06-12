@@ -205,6 +205,7 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Request, session *taskTerminal) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		log.Printf("terminal accept error: %v", err)

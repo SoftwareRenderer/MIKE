@@ -127,6 +127,7 @@ func (sm *StreamManager) ResetForTest() {
 func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, taskID string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		return

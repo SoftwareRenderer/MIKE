@@ -58,7 +58,10 @@ func (h *HomeAgentHandler) HandleMessages(w http.ResponseWriter, r *http.Request
 
 // HandleStream handles WebSocket stream for home agent.
 func (h *HomeAgentHandler) HandleStream(w http.ResponseWriter, r *http.Request, projectID string) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return
 	}
