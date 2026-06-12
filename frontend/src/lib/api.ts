@@ -422,6 +422,24 @@ export function createProjectTerminal(projectId: string, term: import('@xterm/xt
     return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term);
 }
 
+// Filter xterm.js init queries that the PTY echoes back as visible garbage.
+// These are terminal capability probes sent automatically on terminal creation.
+function isTerminalQuery(data: string): boolean {
+    if (!data.startsWith('\x1b')) return false;
+    const second = data[1];
+    // DCS sequence (e.g. charset detection)
+    if (second === 'P') return true;
+    // OSC queries: title (]0;?), background color (]10;?), foreground (]11;?), cursor (]12;?)
+    if (second === ']') {
+        return /^\x1b\](0|10|11|12);\?\x07?$/.test(data);
+    }
+    // DSR queries: device attributes (c), secondary device attributes ($y)
+    if (second === '[') {
+        return data === '\x1b[c' || data.startsWith('\x1b[$y');
+    }
+    return false;
+}
+
 // Shared WebSocket setup for terminal connections
 function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): WebSocket {
     const ws = new WebSocket(url);
@@ -435,6 +453,9 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): W
         console.log('Terminal WebSocket closed:', e.code, e.reason);
     };
     term.onData((data) => {
+        // Filter out xterm.js init queries that the PTY echoes back as garbage text.
+        // These are terminal capability queries (DA1, OSC color/title, DCS) sent on mount.
+        if (isTerminalQuery(data)) return;
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'input', data }));
         }
