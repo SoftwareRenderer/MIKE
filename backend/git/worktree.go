@@ -33,12 +33,17 @@ func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
 }
 
 // WorktreePath returns the filesystem path for a task's worktree.
+// Respects WORKTREES_DIR env var override (same as CreateWorktree).
 func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 	cfg, err := wm.configStore.GetConfig()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cfg.WorkspaceDir, taskID), nil
+	worktreesDir := cfg.WorkspaceDir
+	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
+		worktreesDir = wtDir
+	}
+	return filepath.Join(worktreesDir, taskID), nil
 }
 
 // CreateWorktree creates a git worktree for a task, capturing the current working tree state.

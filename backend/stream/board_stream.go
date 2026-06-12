@@ -14,12 +14,22 @@ import (
 	"github.com/coder/websocket"
 )
 
+// diffSnapshot holds the last-known diff stats for a task, used to detect changes.
+type diffSnapshot struct {
+	shortStat      string
+	untrackedN     int
+	untrackedLines int
+}
+
 // BoardStreamManager manages per-project WebSocket connections for board updates.
 type BoardStreamManager struct {
-	mu           sync.RWMutex
-	clients      map[string]map[*websocket.Conn]bool // projectID -> set of connections
-	store        *store.Store
-	worktreeMgr  *git.WorktreeManager
+	mu      sync.RWMutex
+	clients map[string]map[*websocket.Conn]bool // projectID -> set of connections
+	store   *store.Store
+	worktreeMgr *git.WorktreeManager
+	// pollers tracks the git diff stats poller context per project (one poller per project, not per client)
+	pollersMu sync.Mutex
+	pollers   map[string]context.CancelFunc
 }
 
 // NewBoardStreamManager creates a new BoardStreamManager.
@@ -28,6 +38,7 @@ func NewBoardStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager)
 		clients:     make(map[string]map[*websocket.Conn]bool),
 		store:       store,
 		worktreeMgr: worktreeMgr,
+		pollers:     make(map[string]context.CancelFunc),
 	}
 }
 
@@ -124,6 +135,82 @@ func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 	bsm.BroadcastAll(msg)
 }
 
+// pollProjectDiffStats periodically checks git diff stats for tasks in in_progress/review
+// and broadcasts updates when file/line counts change.
+func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, projectID string) {
+	if bsm.store == nil || bsm.worktreeMgr == nil {
+		return
+	}
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+
+	// Track last-known stats per task to detect changes
+	snapshots := make(map[string]diffSnapshot)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			tasks, err := bsm.store.GetTasksByProject(projectID)
+			if err != nil {
+				continue
+			}
+			for _, task := range tasks {
+				if task.Status != "in_progress" && task.Status != "review" {
+					continue
+				}
+				shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID)
+				if err != nil {
+					continue
+				}
+				current := diffSnapshot{shortStat: shortStat, untrackedN: untrackedN, untrackedLines: untrackedLines}
+				prev, exists := snapshots[task.ID]
+				if !exists || prev != current {
+					snapshots[task.ID] = current
+					if shortStat != "" || untrackedN > 0 {
+						log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files, %d lines)",
+							projectID, task.ID, shortStat, untrackedN, untrackedLines)
+						bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+					} else {
+						// No changes — clear the stats for this task
+						bsm.BroadcastDiffStats(projectID, task.ID, "", 0, 0)
+					}
+				}
+			}
+		}
+	}
+}
+
+// startPoller starts the diff stats poller for a project if not already running.
+func (bsm *BoardStreamManager) startPoller(projectID string) {
+	bsm.pollersMu.Lock()
+	defer bsm.pollersMu.Unlock()
+	if _, exists := bsm.pollers[projectID]; exists {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	bsm.pollers[projectID] = cancel
+	go bsm.pollProjectDiffStats(ctx, projectID)
+}
+
+// stopPoller stops the diff stats poller for a project.
+func (bsm *BoardStreamManager) stopPoller(projectID string) {
+	bsm.pollersMu.Lock()
+	defer bsm.pollersMu.Unlock()
+	if cancel, exists := bsm.pollers[projectID]; exists {
+		cancel()
+		delete(bsm.pollers, projectID)
+	}
+}
+
+// clientCount returns the number of connected clients for a project.
+func (bsm *BoardStreamManager) clientCount(projectID string) int {
+	bsm.mu.RLock()
+	defer bsm.mu.RUnlock()
+	return len(bsm.clients[projectID])
+}
+
 // HandleStream upgrades a WebSocket connection and subscribes to board updates.
 func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Request, projectID string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -135,11 +222,22 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Track if this was the first client (to start the poller)
+	wasEmpty := bsm.clientCount(projectID) == 0
 	bsm.add(projectID, conn)
 	defer func() {
 		bsm.remove(projectID, conn)
 		conn.Close(websocket.StatusNormalClosure, "closed")
+		// Stop poller if this was the last client
+		if bsm.clientCount(projectID) == 0 {
+			bsm.stopPoller(projectID)
+		}
 	}()
+
+	// Start poller when first client connects
+	if wasEmpty {
+		bsm.startPoller(projectID)
+	}
 
 	// Send initial diff stats for all tasks in this project
 	if bsm.store != nil && bsm.worktreeMgr != nil {
