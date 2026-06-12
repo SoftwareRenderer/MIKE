@@ -383,7 +383,6 @@
                         onclick={handleDelete}
                         aria-label="Delete task"
                         title="Delete task"
-                        style="color: var(--color-status-red)"
                     >
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -573,6 +572,10 @@
     .action-icon.action-move:hover {
         background: var(--color-surface-3);
         /* keep column color from inline style */
+    }
+    .action-icon.action-delete:hover {
+        background: var(--color-status-red)22;
+        color: var(--color-status-red) !important;
     }
     .action-idle {
         display: flex;
