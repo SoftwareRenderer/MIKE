@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -59,7 +59,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, ChatEntry>>(new Map());
-    let deleteConfirm = $state<{ entryId: string; count: number } | null>(null);
+    let deleteConfirm = $state<{ entryId: string; count: number; willDeleteBranch: boolean; branchName: string } | null>(null);
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
     let firstConnectDone = $state(false); // track if initial onopen has fired
@@ -667,6 +667,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         deleteConfirm = null;
     }
 
+    /** Called when the user clicks the delete button on a message.
+     * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
+    async function handleDeleteRequest(entryId: string, count: number) {
+        let willDeleteBranch = false;
+        let branchName = '';
+        try {
+            const info = await checkMessageDelete(projectId, taskId, entryId);
+            willDeleteBranch = info.will_delete_branch;
+            branchName = info.branch_name || '';
+        } catch {
+            // If check fails, proceed without branch warning
+        }
+        deleteConfirm = { entryId, count, willDeleteBranch, branchName };
+    }
+
     async function handleEditFork(entryId: string, _originalContent: string, newContent: string) {
         const entry = entries.find(e => e.id === entryId);
         if (!entry) return;
@@ -1001,7 +1016,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); deleteConfirm = { entryId: entry.id, count: entries.length - idx }; }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} onDelete={() => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} onRegenerate={() => handleRegenerate(entry.id)} />
                 {/if}
             {/each}
         {/if}
@@ -1012,6 +1027,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             <div class="delete-dialog">
                 <h3 id="delete-dialog-title">Delete Message</h3>
                 <p>This will delete {deleteConfirm.count} message{deleteConfirm.count > 1 ? 's' : ''}. This action cannot be undone.</p>
+                {#if deleteConfirm.willDeleteBranch}
+                    <div class="delete-branch-warning">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <span>This will also delete the git branch <code>{deleteConfirm.branchName}</code>.</span>
+                    </div>
+                {/if}
                 <div class="delete-actions">
                     <button class="btn-cancel" onclick={() => deleteConfirm = null}>Cancel</button>
                     <button class="btn-delete" onclick={handleDelete}>Delete</button>
@@ -1229,8 +1254,32 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .delete-dialog p {
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
-        margin: 0 0 16px;
+        margin: 0 0 12px;
         line-height: 1.5;
+    }
+    .delete-branch-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.25);
+        border-radius: var(--radius-sm);
+        color: var(--color-status-red);
+        font-size: 0.75rem;
+        line-height: 1.4;
+    }
+    .delete-branch-warning svg {
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+    .delete-branch-warning code {
+        font-family: var(--font-mono);
+        background: rgba(248, 81, 73, 0.15);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 0.75rem;
     }
     .delete-actions {
         display: flex;

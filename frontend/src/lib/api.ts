@@ -229,6 +229,13 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
 /** Regenerate from a message: deletes it and all messages after it. Alias for deleteTaskMessagesAfter. */
 export const regenerateTaskMessages = deleteTaskMessagesAfter;
 
+/** Check if deleting a message would also delete a fork branch. */
+export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);
+    if (!res.ok) throw await apiError(res, 'Failed to check message delete');
+    return res.json();
+}
+
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
         method: 'PATCH',

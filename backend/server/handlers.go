@@ -50,9 +50,14 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		}
 		if len(checkpointThreads) > 0 {
 			activeWasDeleted := false
+			// Collect branches to delete before removing threads
+			var branchesToDelete []string
 			for _, th := range checkpointThreads {
 				if th.IsActive {
 					activeWasDeleted = true
+				}
+				if th.GitBranch != "" {
+					branchesToDelete = append(branchesToDelete, th.GitBranch)
 				}
 				_ = s.store.DeleteThread(th.ID)
 			}
@@ -64,6 +69,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 				for _, t := range allThreads {
 					threadMap[t.ID] = t
 				}
+				var targetThread *types.TaskThread
 				candidate := checkpointThreads[0].ParentThreadID
 				for candidate != "" {
 					parent, ok := threadMap[candidate]
@@ -77,6 +83,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 					task.CurrentThreadID = parent.ID
 					task.UpdatedAt = time.Now().UTC()
 					_ = s.store.UpdateTask(task)
+					targetThread = &parent
 					candidate = "" // break
 				}
 				if candidate != "" {
@@ -87,9 +94,20 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 							task.CurrentThreadID = t.ID
 							task.UpdatedAt = time.Now().UTC()
 							_ = s.store.UpdateTask(task)
+							targetThread = &t
 							break
 						}
 					}
+				}
+				// Checkout the new active thread's branch and delete orphaned branches
+				s.checkoutThreadBranch(taskID, targetThread)
+				for _, branch := range branchesToDelete {
+					s.deleteThreadBranch(taskID, branch)
+				}
+			} else {
+				// Non-active fork deleted; just clean up its branch
+				for _, branch := range branchesToDelete {
+					s.deleteThreadBranch(taskID, branch)
 				}
 			}
 			// Broadcast thread_switch event so frontend refreshes
@@ -146,6 +164,29 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 }
 
 func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request, projectID, taskID, messageID string) {
+	if r.Method == http.MethodGet {
+		// Check if deleting this message would delete a fork branch.
+		// Used by the frontend to show a warning in the delete dialog.
+		checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(messageID)
+		if len(checkpointThreads) == 0 {
+			if msgTime, err := s.store.GetMessageCreatedAt(messageID); err == nil && msgTime != nil {
+				checkpointThreads, _ = s.store.GetThreadsByCheckpointMessageTime(msgTime.Format(time.RFC3339))
+			}
+		}
+		willDeleteBranch := false
+		var branchName string
+		if len(checkpointThreads) > 0 {
+			willDeleteBranch = true
+			if checkpointThreads[0].GitBranch != "" {
+				branchName = checkpointThreads[0].GitBranch
+			}
+		}
+		JSONResponse(w, http.StatusOK, map[string]interface{}{
+			"will_delete_branch": willDeleteBranch,
+			"branch_name":        branchName,
+		})
+		return
+	}
 	if r.Method == http.MethodPatch {
 		var req struct {
 			Content string `json:"content"`
@@ -368,6 +409,12 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Get the thread's git branch before deleting (needed for branch cleanup)
+	deletedThread, _ := s.store.GetThread(req.ThreadID)
+	deletedBranch := ""
+	if deletedThread != nil {
+		deletedBranch = deletedThread.GitBranch
+	}
 	// Delete the thread
 	_, err = s.store.Exec(`DELETE FROM task_threads WHERE id = ?`, req.ThreadID)
 	if err != nil {
@@ -382,7 +429,14 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 			task.CurrentThreadID = remaining[0].ID
 			task.UpdatedAt = time.Now().UTC()
 			_ = s.store.UpdateTask(task)
+			// Checkout the new active thread's branch and delete orphaned branch
+			targetThread, _ := s.store.GetThread(remaining[0].ID)
+			s.checkoutThreadBranch(taskID, targetThread)
+			s.deleteThreadBranch(taskID, deletedBranch)
 		}
+	} else if deletedBranch != "" {
+		// Not active but still has a branch — clean it up
+		s.deleteThreadBranch(taskID, deletedBranch)
 	}
 	s.boardStreamMgr.Broadcast(projectID)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -586,4 +640,21 @@ func (s *Server) generateThreadName(task *types.Task, content string) string {
 		return trimmed[:35]
 	}
 	return trimmed
+}
+
+// checkoutThreadBranch switches the worktree to the target thread's git branch.
+// Discards any uncommitted changes (does not commit first).
+func (s *Server) checkoutThreadBranch(taskID string, targetThread *types.TaskThread) {
+	if targetThread == nil || targetThread.GitBranch == "" {
+		return
+	}
+	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-B", targetThread.GitBranch)
+}
+
+// deleteThreadBranch removes a thread's git branch from the repo.
+func (s *Server) deleteThreadBranch(taskID string, branchName string) {
+	if branchName == "" {
+		return
+	}
+	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", "-D", branchName)
 }
