@@ -135,6 +135,8 @@ test.describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
 
   test('focus is restored after modal close', async ({ page }) => {
     const settingsBtn = page.locator('[aria-label="Settings"]');
+    // Wait for button to be visible before focusing (high parallelism may have slow render)
+    await expect(settingsBtn).toBeVisible({ timeout: 10000 });
     await settingsBtn.focus();
     await settingsBtn.click();
 
@@ -143,11 +145,13 @@ test.describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
 
     // Close with Escape
     await page.keyboard.press('Escape');
-    await expect(modal).not.toBeVisible();
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-    // Focus should return to the settings button
-    const activeElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
-    expect(activeElement).toBe('Settings');
+    // Focus should return to the settings button (poll for focus restoration)
+    await expect(async () => {
+      const activeElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+      expect(activeElement).toBe('Settings');
+    }).toPass({ timeout: 5000 });
   });
 
   test('decorative SVGs have aria-hidden="true"', async ({ page }) => {

@@ -83,7 +83,13 @@ test.describe.serial('Thread URL Navigation', () => {
 
     // Fork via the message's fork button (edit form)
     const userMsg = page.locator('.chat-message.user').last();
-    await userMsg.locator('.action-btn[aria-label*="Fork"]').click();
+    // Wait for user message to be visible (messages may load slowly under load)
+    await expect(userMsg).toBeVisible({ timeout: 10000 });
+    const forkBtn = userMsg.locator('.action-btn[aria-label*="Fork"]');
+    await expect(forkBtn).toBeVisible({ timeout: 10000 });
+    await forkBtn.click();
+    // Wait for edit form to appear before filling
+    await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
     await page.locator('.edit-form textarea').fill(`Fork ${Date.now()}`);
     await page.locator('.btn-edit-submit').click();
 

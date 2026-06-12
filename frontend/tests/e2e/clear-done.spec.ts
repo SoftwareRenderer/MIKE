@@ -30,9 +30,19 @@ test.describe.serial('Clear All Done Tasks', () => {
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
+    // Wait for the moved task to appear on the board (server may be slow under load)
+    await expect(async () => {
+      const board = await page.evaluate(async ({ pid }) => {
+        const res = await fetch(`/api/projects/${pid}/board`);
+        return res.json();
+      }, { pid: projectId });
+      const doneTasks = board.tasks.filter((t: any) => t.status === 'done');
+      expect(doneTasks.length).toBeGreaterThanOrEqual(1);
+    }).toPass({ timeout: 10000 });
+
     // Clear all button should be visible in the Done column header
     const clearBtn = page.locator('.clear-btn');
-    await expect(clearBtn).toBeVisible();
+    await expect(clearBtn).toBeVisible({ timeout: 10000 });
   });
 
   test('should not show Clear all button when no done tasks exist', async ({ page }) => {

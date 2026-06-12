@@ -97,25 +97,7 @@ async function setup(): Promise<void> {
         console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
 
-    // 7. Create test project
-    const project = await postJson(`${KANBAN_BASE}/api/projects`, {
-        name: 'test-project',
-        path: TEST_REPO,
-    });
-    console.log(`[global-setup] Test project created: ${project.id}`);
-
-    // 8. Create test tasks with provider URL
-    const taskPayload = useMock
-        ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
-        : { prompt: 'Test task for e2e tests' };
-    const taskPayload2 = useMock
-        ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
-        : { prompt: 'Second test task' };
-    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload);
-    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2);
-    console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
-
-    // 9. Start mock LLM server (if enabled)
+    // 7. Start mock LLM server BEFORE creating tasks (title-gen goroutine calls LLM immediately)
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
         mockServer = spawn('node', ['tests/mock-llm.js', MOCK_PORT.toString()], {
@@ -129,6 +111,24 @@ async function setup(): Promise<void> {
     } else {
         console.log('[global-setup] Using real LLM endpoint (USE_MOCK_LLM=0)');
     }
+
+    // 8. Create test project (after mock LLM is ready, so title-gen works)
+    const project = await postJson(`${KANBAN_BASE}/api/projects`, {
+        name: 'test-project',
+        path: TEST_REPO,
+    });
+    console.log(`[global-setup] Test project created: ${project.id}`);
+
+    // 9. Create test tasks with provider URL
+    const taskPayload = useMock
+        ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Test task for e2e tests' };
+    const taskPayload2 = useMock
+        ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Second test task' };
+    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload);
+    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2);
+    console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');

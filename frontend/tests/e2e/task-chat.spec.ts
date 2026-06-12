@@ -8,9 +8,19 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  // Create task via API and open it — faster than UI-based createAndOpenTask
-  // Use only for tests that don't need the chat form (no LLM config on API-created tasks)
+  // Create task via API (includes default provider config) and open it.
+  // Waits for chat form to be ready (executor started).
   async function openTask(page: any, title?: string): Promise<void> {
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, title || `chat-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await ensureChatForm(page);
+  }
+
+  // Create task via API and open it without waiting for chat form.
+  // Use for tests that don't need the chat form (diff, task list, etc.).
+  async function openTaskNoChat(page: any, title?: string): Promise<void> {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, title || `chat-${Date.now()}`);
     await page.goto(`/?task=${taskId}`);
@@ -18,8 +28,7 @@ test.describe('Task Chat', () => {
   }
 
   test('should show send button when typing', async ({ page }) => {
-    await createAndOpenTask(page);
-    await ensureChatForm(page);
+    await openTask(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Test message');
@@ -31,8 +40,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should disable send button when empty', async ({ page }) => {
-    await createAndOpenTask(page);
-    await ensureChatForm(page);
+    await openTask(page);
 
     // Send button should be disabled when textarea is empty
     const sendButton = page.locator('.btn-send');
@@ -41,8 +49,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should send message with Enter key', async ({ page }) => {
-    await createAndOpenTask(page);
-    await ensureChatForm(page);
+    await openTask(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Enter key test');
@@ -53,8 +60,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should not send on Shift+Enter', async ({ page }) => {
-    await createAndOpenTask(page);
-    await ensureChatForm(page);
+    await openTask(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill('Line 1');
@@ -66,7 +72,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should have diff column with empty state', async ({ page }) => {
-    await openTask(page);
+    await openTaskNoChat(page);
 
     // Diff column should show empty state
     await expect(page.locator('.diff-empty')).toBeVisible();
@@ -74,7 +80,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show task list in context column', async ({ page }) => {
-    await openTask(page);
+    await openTaskNoChat(page);
 
     // Task list should be visible
     await expect(page.locator('.task-list')).toBeVisible();
@@ -84,7 +90,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show task actions in header', async ({ page }) => {
-    await openTask(page);
+    await openTaskNoChat(page);
 
     // Delete button should always be visible
     const deleteButton = page.locator('.header-actions .btn-icon').last();
@@ -92,8 +98,7 @@ test.describe('Task Chat', () => {
   });
 
   test('should show assistant streaming indicator immediately after sending a message', async ({ page }) => {
-    await createAndOpenTask(page);
-    await ensureChatForm(page);
+    await openTask(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
 
@@ -112,15 +117,14 @@ test.describe('Task Chat', () => {
   });
 
   test('should show status badge', async ({ page }) => {
-    await openTask(page);
+    await openTaskNoChat(page);
 
     // Badge should be visible
     await expect(page.locator('.badge')).toBeVisible();
   });
 
   test('should not duplicate user message after sending', async ({ page }) => {
-    await createAndOpenTask(page, `No dup test task ${Date.now()}`);
-    await ensureChatForm(page);
+    await openTask(page, `No dup test task ${Date.now()}`);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     const testMsg = `No dup test ${Date.now()}`;
