@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -241,6 +242,48 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.boardStreamMgr.Broadcast(projectID)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// HandleCommitAndDone commits the worktree changes and moves the task to Done.
+func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
+	}
+
+	// Try to commit worktree changes (skip if worktree doesn't exist)
+	diffStat, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
+	if wtErr == nil {
+		// Worktree exists — stage and commit
+		_ = h.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
+		commitMsg := task.Title
+		if strings.TrimSpace(diffStat) != "" {
+			commitMsg += "\n\n" + strings.TrimSpace(diffStat)
+		}
+		_ = h.worktreeMgr.GitRunInWorktree(taskID, "commit", "-m", commitMsg, "--allow-empty")
+	}
+	// If worktree doesn't exist, skip git operations and just move to done
+
+	// Move task to Done
+	task.Status = "done"
+	task.StatusState = "completed"
+	task.UpdatedAt = time.Now()
+	if err := h.store.UpdateTask(task); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }

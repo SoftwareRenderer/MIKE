@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -73,6 +73,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
     let firstConnectDone = $state(false); // track if initial onopen has fired
+    let isCommitting = $state(false);
 
     // Thread state
     let threads: Thread[] = $state([]);
@@ -727,6 +728,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         await loadHistory();
     }
 
+    async function handleCommitAndDone() {
+        if (isCommitting || disabled) return;
+        isCommitting = true;
+        try {
+            const updated = await commitAndDone(projectId, taskId);
+            boardStore.update(b => {
+                if (!b) return b;
+                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+            });
+        } catch (e) {
+            showToast(String(e));
+        }
+        isCommitting = false;
+    }
+
     async function handleDelete() {
         if (!deleteConfirm) return;
         const entryId = deleteConfirm.entryId;
@@ -1140,6 +1156,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </button>
         </div>
     {:else}
+        {#if taskStatus === 'review'}
+            <div class="chat-review-bar">
+                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and mark task as done">
+                    {#if isCommitting}
+                        <span class="spinner-inline"></span> Committing...
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Commit and Mark as Done
+                    {/if}
+                </button>
+            </div>
+        {/if}
         <ChatForm
             bind:value={inputValue}
             disabled={disabled}
@@ -1430,5 +1458,38 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         border-top-color: transparent;
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
+    }
+
+    /* Review bar — Commit and Mark as Done */
+    .chat-review-bar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 8px 12px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-0);
+        flex-shrink: 0;
+    }
+    .btn-commit-done {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 16px;
+        border-radius: var(--radius-md);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        background: var(--color-status-green);
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .btn-commit-done:hover:not(:disabled) {
+        opacity: 0.85;
+        transform: translateY(-1px);
+    }
+    .btn-commit-done:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 </style>

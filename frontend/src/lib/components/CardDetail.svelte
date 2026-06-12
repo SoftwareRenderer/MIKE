@@ -315,14 +315,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 </div>
             </div>
             <div class="header-actions">
-                {#if task.status === 'review'}
-                    <button class="btn-icon btn-success-icon" onclick={() => handleMove('done')} aria-label="Approve and move to Done" title="Approve and move to Done">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
-                    <button class="btn-icon btn-secondary-icon" onclick={() => handleMove('in_progress')} aria-label="Reject and return to In Progress" title="Reject and return to In Progress">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    </button>
-                {/if}
                 <button class="btn-icon" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
@@ -563,7 +555,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .btn-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
     .btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
     .btn-icon:disabled:hover { background: none; color: var(--color-text-secondary); }
-    .btn-success-icon:hover { background: var(--color-status-green)22; color: var(--color-status-green); }
     .columns {
         display: flex;
         flex: 1;
