@@ -672,6 +672,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         font-size: 0.875rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }
     .icon-btn:hover {
         background: var(--color-accent);

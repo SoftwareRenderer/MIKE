@@ -9,8 +9,10 @@
     let isGitRepo = $state(false);
     let loading = $state(false);
     let error = $state('');
-    let inputPath = $state('');
-    let showInput = $state(false);
+    let initGitLoading = $state(false);
+    let showNewFolder = $state(false);
+    let newFolderName = $state('');
+    let mkdirLoading = $state(false);
 
     async function loadDir(path: string) {
         loading = true;
@@ -48,18 +50,67 @@
     }
 
     function handleInputChange() {
-        const p = inputPath.trim();
+        const p = currentPath.trim();
         if (p) {
             loadDir(p);
-            showInput = false;
         }
     }
 
-    function toggleInput() {
-        if (!showInput) {
-            inputPath = currentPath;
+    async function handleInitGit() {
+        initGitLoading = true;
+        error = '';
+        try {
+            const res = await fetch('/api/fs/init-git', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: currentPath }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Failed to initialize git repository');
+            }
+            // Refresh directory to confirm git init succeeded, then auto-select
+            await loadDir(currentPath);
+            onSelect(currentPath);
+        } catch (e) {
+            error = String(e);
+        } finally {
+            initGitLoading = false;
         }
-        showInput = !showInput;
+    }
+
+    function toggleNewFolder() {
+        if (!showNewFolder) {
+            newFolderName = '';
+        }
+        showNewFolder = !showNewFolder;
+    }
+
+    async function handleCreateFolder() {
+        const name = newFolderName.trim();
+        if (!name) return;
+        mkdirLoading = true;
+        error = '';
+        try {
+            const newPath = currentPath.endsWith('/') ? currentPath + name : currentPath + '/' + name;
+            const res = await fetch('/api/fs/mkdir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: newPath }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Failed to create folder');
+            }
+            // Navigate into the new folder
+            showNewFolder = false;
+            newFolderName = '';
+            await loadDir(newPath);
+        } catch (e) {
+            error = String(e);
+        } finally {
+            mkdirLoading = false;
+        }
     }
 
     // Load home directory on mount
@@ -101,16 +152,37 @@
         <div class="browser-body">
             <!-- Path bar -->
             <div class="path-bar">
-                <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">🏠</button>
-                <input
-                    type="text"
-                    class="path-input"
-                    value={currentPath}
-                    onfocus={() => { inputPath = currentPath; showInput = true; }}
-                    onblur={() => { if (!inputPath.trim()) showInput = false; }}
-                    onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
-                    placeholder="Enter path or browse..."
-                />
+                <div class="path-bar-row">
+                    <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">🏠</button>
+                    <input
+                        type="text"
+                        class="path-input"
+                        bind:value={currentPath}
+                        onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
+                        placeholder="Enter path or browse..."
+                    />
+                    <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            <line x1="12" y1="10" x2="12" y2="16"/>
+                            <line x1="9" y1="13" x2="15" y2="13"/>
+                        </svg>
+                    </button>
+                </div>
+                {#if showNewFolder}
+                    <div class="new-folder-row">
+                        <input
+                            type="text"
+                            class="folder-name-input"
+                            bind:value={newFolderName}
+                            placeholder="Folder name"
+                            onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
+                            autofocus
+                        />
+                        <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
+                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
+                    </div>
+                {/if}
             </div>
 
             {#if error}
@@ -150,14 +222,24 @@
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
                 <button class="btn-cancel" onclick={handleClose} title="Cancel">Cancel</button>
-                <button
-                    class="btn-select"
-                    onclick={handleSelect}
-                    disabled={!isGitRepo}
-                    title="Select this directory as project"
-                >
-                    Select
-                </button>
+                {#if isGitRepo}
+                    <button
+                        class="btn-select"
+                        onclick={handleSelect}
+                        title="Select this directory as project"
+                    >
+                        Select
+                    </button>
+                {:else}
+                    <button
+                        class="btn-select"
+                        onclick={handleInitGit}
+                        disabled={initGitLoading}
+                        title="Initialize git repository in this directory"
+                    >
+                        {initGitLoading ? 'Initializing...' : 'Initialize Git'}
+                    </button>
+                {/if}
             </div>
         </div>
     </div>
@@ -203,21 +285,31 @@
     .browser-body {
         flex: 1;
         overflow-y: auto;
-        padding: 16px;
+        padding: 0 16px 16px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
     }
     .path-bar {
         display: flex;
+        flex-direction: column;
         gap: 8px;
-        align-items: center;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--color-surface-1);
+        padding-bottom: 8px;
+    }
+    .path-bar-row {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
     }
     .home-btn {
         font-size: 1.125rem;
-        padding: 4px 8px;
+        padding: 8px;
         background: var(--color-surface-3);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
     }
     .path-input {
         flex: 1;
@@ -252,6 +344,63 @@
         background: var(--color-status-green)11;
         border-radius: var(--radius-sm);
         text-align: center;
+    }
+    .new-folder-row {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+    }
+    .folder-name-input {
+        flex: 1;
+        padding: 8px 12px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        font-size: 0.875rem;
+        font-family: var(--font-mono);
+        outline: none;
+    }
+    .btn-mini {
+        padding: 8px 12px;
+        background: var(--color-accent);
+        color: white;
+        border-radius: var(--radius-md);
+        font-size: 0.875rem;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .btn-mini:hover:not(:disabled) {
+        background: var(--color-accent-hover);
+    }
+    .btn-mini:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .btn-mini-cancel {
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+    }
+    .btn-mini-cancel:hover {
+        background: var(--color-surface-4);
+    }
+    .icon-btn-sm {
+        padding: 8px;
+        background: var(--color-surface-3);
+        border-radius: var(--radius-md);
+        color: var(--color-text-secondary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .icon-btn-sm:hover:not(:disabled) {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
+    .icon-btn-sm:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
     }
     .file-list {
         display: flex;

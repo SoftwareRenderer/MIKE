@@ -229,6 +229,12 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		})
 	}
 
+	// If the last message is already from the assistant, just update status without re-triggering the LLM
+	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
+		log.Printf("[start] task=%s last message is from assistant, skipping LLM call", taskID)
+		return nil
+	}
+
 	b := te.streamMgr.GetOrCreate(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 

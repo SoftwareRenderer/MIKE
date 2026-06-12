@@ -689,6 +689,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 console.error('Failed to update task model before start:', e);
             }
         }
+        // If the last message is already from the LLM, just update status without re-triggering
+        const lastEntry = entries[entries.length - 1];
+        if (lastEntry && lastEntry.role === 'assistant') {
+            try {
+                const updated = await startTask(projectId, taskId);
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                });
+            } catch (e) {
+                console.error('Failed to start task:', e);
+            }
+            return;
+        }
         isStarting = true;
         // Prompt is already in entries (loaded from DB at task creation)
         // Don't pre-create assistant entry — let the first token/tool_call event create it

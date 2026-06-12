@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -343,6 +344,101 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	})
 
 	JSONResponse(w, http.StatusOK, result)
+}
+
+// handleFSInitGit initializes a git repository in the given path.
+func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+
+	info, err := os.Stat(req.Path)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, "path does not exist: "+err.Error())
+		return
+	}
+	if !info.IsDir() {
+		JSONError(w, http.StatusBadRequest, "path is not a directory")
+		return
+	}
+	if managers.IsGitRepo(req.Path) {
+		JSONError(w, http.StatusBadRequest, "path is already a git repository")
+		return
+	}
+
+	// git init
+	cmd := exec.Command("git", "-C", req.Path, "init")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git init failed: %s", out))
+		return
+	}
+
+	// Create README.md
+	readmePath := filepath.Join(req.Path, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# "+managers.Basename(req.Path)+"\n"), 0644); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create README.md: %v", err))
+		return
+	}
+
+	// git add + commit
+	cmd = exec.Command("git", "-C", req.Path, "add", "README.md")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
+		return
+	}
+	cmd = exec.Command("git", "-C", req.Path, "-c", "user.email=kanban@local", "-c", "user.name=Kanban", "commit", "-m", "Initial commit")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", out))
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
+}
+
+// handleFSMkdir creates a new directory.
+func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+
+	// Check parent exists
+	parent := filepath.Dir(req.Path)
+	info, err := os.Stat(parent)
+	if err != nil || !info.IsDir() {
+		JSONError(w, http.StatusBadRequest, "parent directory does not exist")
+		return
+	}
+
+	// Check target doesn't already exist
+	if _, err := os.Stat(req.Path); err == nil {
+		JSONError(w, http.StatusBadRequest, "path already exists")
+		return
+	}
+
+	if err := os.MkdirAll(req.Path, 0755); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 }
 
 func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, projectID, taskID string) {

@@ -62,6 +62,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
+	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
+	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
 	s.mux.HandleFunc("/api/fs", s.handleFS)
 
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
