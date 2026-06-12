@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/store"
 
 	"github.com/coder/websocket"
@@ -15,16 +16,18 @@ import (
 
 // BoardStreamManager manages per-project WebSocket connections for board updates.
 type BoardStreamManager struct {
-	mu       sync.RWMutex
-	clients  map[string]map[*websocket.Conn]bool // projectID -> set of connections
-	store    *store.Store
+	mu           sync.RWMutex
+	clients      map[string]map[*websocket.Conn]bool // projectID -> set of connections
+	store        *store.Store
+	worktreeMgr  *git.WorktreeManager
 }
 
 // NewBoardStreamManager creates a new BoardStreamManager.
-func NewBoardStreamManager(store *store.Store) *BoardStreamManager {
+func NewBoardStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *BoardStreamManager {
 	return &BoardStreamManager{
-		clients: make(map[string]map[*websocket.Conn]bool),
-		store:   store,
+		clients:     make(map[string]map[*websocket.Conn]bool),
+		store:       store,
+		worktreeMgr: worktreeMgr,
 	}
 }
 
@@ -89,16 +92,17 @@ func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 }
 
 // BroadcastDiffStats sends a task_diff_stats event to all clients of a project.
-func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat string, untrackedN int) {
+func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat string, untrackedN, untrackedLines int) {
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
 	bsm.mu.RUnlock()
 
 	msg, _ := json.Marshal(map[string]interface{}{
-		"type":        "task_diff_stats",
-		"task_id":     taskID,
-		"short_stat":  shortStat,
-		"untracked_n": untrackedN,
+		"type":            "task_diff_stats",
+		"task_id":         taskID,
+		"short_stat":      shortStat,
+		"untracked_n":     untrackedN,
+		"untracked_lines": untrackedLines,
 	})
 	for conn := range clients {
 		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
@@ -136,6 +140,18 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		bsm.remove(projectID, conn)
 		conn.Close(websocket.StatusNormalClosure, "closed")
 	}()
+
+	// Send initial diff stats for all tasks in this project
+	if bsm.store != nil && bsm.worktreeMgr != nil {
+		tasks, err := bsm.store.GetTasksByProject(projectID)
+		if err == nil {
+			for _, task := range tasks {
+				if shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID); err == nil && (shortStat != "" || untrackedN > 0) {
+					bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+				}
+			}
+		}
+	}
 
 	// Ping/pong keepalive to prevent proxy timeouts
 	done := make(chan struct{})

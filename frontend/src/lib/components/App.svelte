@@ -164,25 +164,27 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             // Connect board stream for real-time updates
             boardStream = createBoardStream(p.id, () => refreshBoard(), (counts) => {
                 projectCounts = counts;
-            }, (task_id, short_stat, untracked_n) => {
+            }, (task_id, short_stat, untracked_n, untracked_lines) => {
                 const stat = short_stat || '';
                 const fileMatch = stat.match(/(\d+) file\w* changed/);
                 const insMatch = stat.match(/(\d+) insertion\w*/);
                 const delMatch = stat.match(/(\d+) deletion\w*/);
-                let statsStr = '';
-                if (fileMatch) {
-                    const files = fileMatch[1];
-                    const insertions = insMatch ? insMatch[1] : '0';
-                    const deletions = delMatch ? delMatch[1] : '0';
-                    statsStr = `${files} files +${insertions} -${deletions}`;
-                } else if (untracked_n > 0) {
-                    statsStr = `${untracked_n} untracked`;
+                const trackedFiles = fileMatch ? parseInt(fileMatch[1]) : 0;
+                const untracked = untracked_n || 0;
+                const totalFiles = trackedFiles + untracked;
+                const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
+                const deletions = delMatch ? parseInt(delMatch[1]) : 0;
+                if (totalFiles > 0) {
+                    taskDiffStatsStore.update(map => {
+                        map[task_id] = { files: totalFiles, additions, deletions };
+                        return map;
+                    });
+                } else {
+                    taskDiffStatsStore.update(map => {
+                        delete map[task_id];
+                        return map;
+                    });
                 }
-                taskDiffStatsStore.update(map => {
-                    if (statsStr) map[task_id] = statsStr;
-                    else delete map[task_id];
-                    return map;
-                });
             });
         } catch (e) {
             console.error('Failed to load board:', e);

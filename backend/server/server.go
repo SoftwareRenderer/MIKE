@@ -10,6 +10,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/exec"
+	"kanban/backend/git"
 	"kanban/backend/managers"
 	"kanban/backend/stream"
 	"kanban/backend/store"
@@ -60,11 +61,12 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	}
 
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore)
-	s.boardStreamMgr = stream.NewBoardStreamManager(store)
+	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
+	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore)
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr)
-	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, s.executor.WorktreeMgr())
+	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr)
+	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr)
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())

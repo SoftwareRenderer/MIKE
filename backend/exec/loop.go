@@ -331,8 +331,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			reasoningContent.Reset()
 
 			// Broadcast updated diff stats to board viewers
-			if shortStat, untrackedN, err := te.worktreeMgr.GetDiffStats(task.ID); err == nil && shortStat != "" {
-				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN)
+			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID); err == nil && (shortStat != "" || untrackedN > 0) {
+				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 			}
 		} else if assistantText != "" {
 			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})

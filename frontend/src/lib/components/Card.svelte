@@ -1,6 +1,5 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
-    import { get } from 'svelte/store';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, getBoard } from '$lib/api';
 
@@ -35,7 +34,7 @@
     });
 
     let statusBadge = $derived.by(() => {
-        const streaming = get(streamingTaskIds).has(task.id);
+        const streaming = $streamingTaskIds.has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
@@ -58,7 +57,7 @@
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
     let modelBadge = $derived.by(() => {
-        const cfg = get(configStore);
+        const cfg = $configStore;
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, color: '' };
         // Use task model if set, otherwise fall back to default model
@@ -77,11 +76,11 @@
     let modelPickerOpen = $state(false);
     let modelBadgeRef: HTMLButtonElement | null = $state(null);
     let pickerRect = $state<{ top: number; left: number } | null>(null);
-    let providers = $derived(get(configStore)?.providers || []);
+    let providers = $derived($configStore?.providers || []);
     let isConfigurable = $derived(columnId === 'backlog');
 
     // Diff stats: pushed via WebSocket from the backend
-    let diffStats = $derived(get(taskDiffStatsStore)[task.id] || null);
+    let diffStats = $derived($taskDiffStatsStore[task.id] || null);
 
     function togglePicker(e: MouseEvent) {
         e.stopPropagation(); // Prevent card from opening when clicking the model badge
@@ -446,7 +445,12 @@
                 {/if}
             {/if}
             {#if diffStats}
-                <span class="diff-stats">{diffStats}</span>
+                <span class="diff-stats">
+                    {#if diffStats.files > 0}<span class="diff-files">{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>{/if}
+                    {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
+                    {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
+                    {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
+                </span>
             {/if}
         </div>
     {/if}
@@ -647,9 +651,27 @@
     .diff-stats {
         display: inline-flex;
         align-items: center;
+        gap: 3px;
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         padding: 2px 0;
+        font-variant-numeric: tabular-nums;
+    }
+    .diff-files {
+        color: var(--color-text-secondary);
+    }
+    .diff-add {
+        color: var(--color-status-green, #3FB950);
+        margin-left: -1px;
+    }
+    .diff-del {
+        color: var(--color-status-red, #F85149);
+        margin-left: -1px;
+    }
+    .diff-sep {
+        color: var(--color-text-tertiary);
+        opacity: 0.5;
+        margin: 0 2px;
     }
     .badge.open .badge-chevron {
         transform: rotate(180deg);

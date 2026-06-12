@@ -60,15 +60,15 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardStreamMgr *stream.BoardStreamManager) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardStreamMgr *stream.BoardStreamManager, worktreeMgr *git.WorktreeManager) *TaskExecutor {
 	te := &TaskExecutor{
 		store:          store,
 		configStore:    configStore,
 		boardStreamMgr: boardStreamMgr,
+		worktreeMgr:    worktreeMgr,
 		gate:           NewConcurrencyGate(),
 		tasks:          make(map[string]*executionState),
 	}
-	te.worktreeMgr = git.NewWorktreeManager(store, configStore)
 	te.streamMgr = stream.NewStreamManager(store, te.worktreeMgr)
 	te.streamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te

@@ -437,14 +437,14 @@ func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
 	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat}, nil
 }
 
-// GetDiffStats returns the git diff shortstat and untracked file count for a task.
-func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrackedN int, err error) {
+// GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
+func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrackedN int, untrackedLines int, err error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", 0, fmt.Errorf("worktree not found")
+		return "", 0, 0, fmt.Errorf("worktree not found")
 	}
 	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", "HEAD")
 	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
@@ -453,10 +453,15 @@ func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrac
 			path := strings.TrimSpace(line[3:])
 			if path != "" {
 				untrackedN++
+				// Count lines in new (untracked) files
+				fullPath := filepath.Join(worktreePath, path)
+				if data, err := os.ReadFile(fullPath); err == nil {
+					untrackedLines += strings.Count(string(data), "\n")
+				}
 			}
 		}
 	}
-	return shortStat, untrackedN, nil
+	return shortStat, untrackedN, untrackedLines, nil
 }
 
 // -- Helper functions --
