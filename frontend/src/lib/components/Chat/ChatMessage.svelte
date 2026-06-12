@@ -33,7 +33,7 @@
 
     let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false }: Props = $props();
 
-    let reasoningExpanded = $state(!reasoningContent || reasoningContent.length <= 200);
+    let reasoningExpanded = $state(!reasoningContent || (reasoningContent.length <= 200 && !content));
 
     function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
         switch (toolName) {
