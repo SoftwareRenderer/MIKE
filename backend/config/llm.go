@@ -222,3 +222,22 @@ func (cs *ConfigStore) GetProviderNameByURL(serverURL string) string {
 	return ""
 }
 
+// GetProviderConcurrency returns the concurrency limit for the provider matching the given server URL.
+// Returns 1 (default minimum) if no matching provider is found or concurrency is not set.
+func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return 1
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") == serverURL {
+			if provider.Concurrency < 1 {
+				return 1
+			}
+			return provider.Concurrency
+		}
+	}
+	return 1
+}
+

@@ -357,7 +357,7 @@
                             name: m.name.trim(),
                             reasoning_effort: m.reasoning_effort || 'medium',
                         })),
-                        concurrency: p.concurrency || 1,
+                        concurrency: Math.max(1, p.concurrency || 1),
                         default_model: p.default_model || '',
                         input_price: p.input_price,
                         output_price: p.output_price,

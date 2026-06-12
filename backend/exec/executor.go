@@ -28,6 +28,7 @@ type TaskExecutor struct {
 	boardStreamMgr *stream.BoardStreamManager
 	worktreeMgr    *git.WorktreeManager
 	streamMgr      *stream.StreamManager
+	gate           *ConcurrencyGate
 	taskMu         sync.Mutex
 	tasks          map[string]*executionState
 }
@@ -64,6 +65,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardS
 		store:          store,
 		configStore:    configStore,
 		boardStreamMgr: boardStreamMgr,
+		gate:           NewConcurrencyGate(),
 		tasks:          make(map[string]*executionState),
 	}
 	te.worktreeMgr = git.NewWorktreeManager(store, configStore)

@@ -76,6 +76,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Shows a spinner so the user knows the LLM is being contacted.
     let awaitingResponse = $state(false);
 
+    // Queue state — set when a task is waiting for a concurrency gate slot.
+    let queuePosition = $state(0);
+    let queueEstimatedWait = $state(0);
+
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
@@ -167,6 +171,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     /** Mark this task as no longer streaming. */
     function markNotStreaming() {
         streamingTaskIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
+        queuePosition = 0;
+        queueEstimatedWait = 0;
     }
 
     /** Clear the "awaiting LLM" spinner — first response from provider has arrived. */
@@ -360,6 +366,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const data = event.data as { thread_id: string; task_id: string };
                 updateActiveThread(data.thread_id);
                 loadHistory();
+                break;
+            }
+            case 'queue': {
+                const data = event.data as { position: number; estimated_wait_seconds: number };
+                queuePosition = data.position || 0;
+                queueEstimatedWait = data.estimated_wait_seconds || 0;
+                // Keep awaitingResponse visible while queued
+                if (queuePosition > 0) {
+                    awaitingResponse = true;
+                }
                 break;
             }
         }
@@ -1058,7 +1074,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {#if awaitingResponse}
             <div class="awaiting-llm">
                 <span class="spinner"></span>
-                <span>Awaiting LLM provider...</span>
+                {#if queuePosition > 0}
+                    <span>Waiting in queue — position {queuePosition}, ~{queueEstimatedWait}s</span>
+                {:else}
+                    <span>Awaiting LLM provider...</span>
+                {/if}
             </div>
         {/if}
     </div>

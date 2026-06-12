@@ -110,9 +110,47 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 		}
 
+		// Acquire concurrency gate slot before LLM call.
+		serverURL, activeModel := mc.get()
+		concurrency := te.configStore.GetProviderConcurrency(serverURL)
+
+		// Queue status polling — runs while waiting for a gate slot.
+		queueDone := make(chan struct{})
+		go func() {
+			tick := time.NewTicker(1 * time.Second)
+			defer tick.Stop()
+			for {
+				select {
+				case <-queueDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					pos := te.gate.Position(serverURL)
+					est := te.gate.EstimateWait(serverURL)
+					b.Send(types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]interface{}{
+						"position":             pos,
+						"estimated_wait_seconds": est,
+					}})
+				}
+			}
+		}()
+
+		_, err := te.gate.Acquire(ctx, serverURL, concurrency)
+		if err != nil {
+			close(queueDone)
+			// Context cancelled while waiting for slot
+			task.StatusState = "stopped"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			te.sendAndPersistError(b, task.ID, "Task stopped while waiting for LLM slot", "stopped")
+			return
+		}
+		close(queueDone)
+
 		var streamTokenCount int
 		streamStart := time.Time{}
-		_, activeModel := mc.get()
 
 		usage, err := client.ChatStream(ctx, messages, tools, func(choice types.ChatChoice) {
 			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
@@ -156,6 +194,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			for i := 0; i < 3; i++ {
 				select {
 				case <-ctx.Done():
+					te.gate.Release(serverURL)
 					task.StatusState = "stopped"
 					task.Output = "Stopped by user"
 					te.store.UpdateTask(task)
@@ -177,6 +216,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 			if err != nil {
+				te.gate.Release(serverURL)
 				task.StatusState = "failed"
 				task.Output = fmt.Sprintf("Connection failed: %v", err)
 				te.store.UpdateTask(task)
@@ -185,6 +225,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				return
 			}
 		}
+
+		// Release gate slot after LLM call (before tool execution)
+		te.gate.Release(serverURL)
 
 		assistantText := assistantContent.String()
 

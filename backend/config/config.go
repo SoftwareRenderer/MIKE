@@ -72,6 +72,12 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
+	// Enforce minimum concurrency of 1 for all providers
+	for i := range c.Providers {
+		if c.Providers[i].Concurrency < 1 {
+			c.Providers[i].Concurrency = 1
+		}
+	}
 	providersJSON, err := json.Marshal(c.Providers)
 	if err != nil {
 		return err
