@@ -209,16 +209,19 @@
                     {/if}
                 </div>
             {/if}
-            <div class="message-text" class:streaming={isStreaming}>
-                {@html renderedHtml}
-                {#if isStreaming}
-                    <span class="cursor-blink"></span>
-                {/if}
+            <div class="message-bubble assistant-bubble">
+                <div class="message-text" class:streaming={isStreaming}>
+                    {@html renderedHtml}
+                    {#if isStreaming}
+                        <span class="cursor-blink"></span>
+                    {/if}
+                </div>
             </div>
             {#if stats}
                 <div class="message-stats">
-                    <span class="stats-model-name">{stats.model_name || 'model'}</span>
                     <div class="stats-row">
+                        <span class="stats-model-name">{stats.model_name || 'model'}</span>
+                        <span class="stat-separator">·</span>
                         <div class="stats-toggle" role="group" aria-label="Statistics view">
                             <button
                                 type="button"
@@ -327,8 +330,14 @@
         border-radius: 1.125rem;
         padding: 8px 14px;
     }
+    .assistant .message-bubble {
+        max-width: 100%;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
+    }
     .message-text {
-        font-size: 0.875rem;
+        font-size: 1rem;
         line-height: 1.875rem;
         word-break: break-word;
         white-space: pre-wrap;
@@ -423,12 +432,12 @@
         line-height: 1.4;
         color: var(--color-text-primary);
     }
-    .assistant .message-text :global(h1) { font-size: 1.25rem; }
-    .assistant .message-text :global(h2) { font-size: 1.125rem; }
-    .assistant .message-text :global(h3) { font-size: 1rem; }
-    .assistant .message-text :global(h4) { font-size: 0.9375rem; }
-    .assistant .message-text :global(h5) { font-size: 0.875rem; }
-    .assistant .message-text :global(h6) { font-size: 0.875rem; color: var(--color-text-secondary); }
+    .assistant .message-text :global(h1) { font-size: 1.43rem; }
+    .assistant .message-text :global(h2) { font-size: 1.29rem; }
+    .assistant .message-text :global(h3) { font-size: 1.14rem; }
+    .assistant .message-text :global(h4) { font-size: 1.07rem; }
+    .assistant .message-text :global(h5) { font-size: 1rem; }
+    .assistant .message-text :global(h6) { font-size: 1rem; color: var(--color-text-secondary); }
     .assistant .message-text :global(h1:first-child),
     .assistant .message-text :global(h2:first-child),
     .assistant .message-text :global(h3:first-child) {
@@ -479,8 +488,8 @@
     }
     .message-stats {
         display: flex;
-        flex-direction: column;
-        gap: 4px;
+        align-items: center;
+        gap: 6px;
         padding: 2px 0 4px;
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
@@ -539,6 +548,7 @@
     }
     .message-actions {
         display: flex;
+        align-items: center;
         gap: 2px;
         padding: 2px 4px;
     }
@@ -557,6 +567,7 @@
         white-space: nowrap;
         margin: 0 4px;
         padding: 4px 0;
+        height: 22px;
     }
     .user-actions .message-timestamp {
         margin-left: 0;

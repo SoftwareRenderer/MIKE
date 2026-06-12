@@ -331,7 +331,7 @@
     .diff-file-stats {
         display: flex;
         gap: 6px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 500;
         flex-shrink: 0;
     }
@@ -369,7 +369,7 @@
         background: var(--color-surface-1);
     }
     .diff-line-num-text {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
     }
     .diff-line-content {
         display: flex;
@@ -416,7 +416,7 @@
         border-top: 1px solid var(--color-border);
         border-bottom: 1px solid var(--color-border);
         cursor: pointer;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         transition: background 0.1s ease;
     }
@@ -454,7 +454,7 @@
         color: rgba(250,204,21,0.8);
     }
     .diff-untracked-badge {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         padding: 1px 6px;
         border-radius: 4px;
         background: rgba(250,204,21,0.15);

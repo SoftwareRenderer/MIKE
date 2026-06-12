@@ -173,6 +173,19 @@
         cursor: ns-resize;
         z-index: 1;
     }
+    .resize-handle::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--color-border);
+        transition: background 0.15s ease;
+    }
+    .resize-handle:hover::after {
+        background: var(--color-accent);
+    }
     .title {
         font-size: 0.875rem;
         font-weight: 600;

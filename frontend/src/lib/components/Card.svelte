@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import { get } from 'svelte/store';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore } from '$lib/store';
-    import { moveTask, updateTask, stopTask, resumeTask } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, getBoard } from '$lib/api';
 
     let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -280,6 +280,18 @@
         }
     }
 
+    async function handleDelete(e: MouseEvent) {
+        e.stopPropagation();
+        if (!projectId || !confirm('Delete this task? This cannot be undone.')) return;
+        try {
+            await deleteTask(projectId, task.id);
+            const board = await getBoard(projectId);
+            boardStore.set(board);
+        } catch (err) {
+            alert('Failed to delete task: ' + String(err));
+        }
+    }
+
     function handleCreateChild(e: MouseEvent) {
         e.stopPropagation();
         if (onCreateChildTask) {
@@ -364,6 +376,20 @@
                     </button>
                 {:else if isIdle}
                     <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                {:else if columnId === 'done'}
+                    <button
+                        type="button"
+                        class="action-icon action-delete"
+                        onclick={handleDelete}
+                        aria-label="Delete task"
+                        title="Delete task"
+                        style="color: var(--color-status-red)"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
                 {:else}
                     <button
                         type="button"
@@ -552,7 +578,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.3px;
@@ -625,7 +651,7 @@
     /* Model picker dropdown styles */
     .picker-provider-header {
         padding: 6px 8px 2px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.4px;

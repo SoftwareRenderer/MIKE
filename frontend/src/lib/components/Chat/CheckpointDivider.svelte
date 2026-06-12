@@ -126,7 +126,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-accent);
         opacity: 1;
         white-space: nowrap;
@@ -145,7 +145,7 @@
         gap: 4px;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -201,7 +201,7 @@
         font-weight: 500;
     }
     .thread-active {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         color: var(--color-accent);
         opacity: 0.7;
     }
