@@ -333,10 +333,16 @@
         text-align: right;
         width: 80px;
     }
+    .model-table th.col-num {
+        text-align: right;
+    }
     .col-action {
         text-align: center;
         width: 40px;
         padding: 8px 4px;
+    }
+    .model-table th.col-action {
+        text-align: center;
     }
     .btn-reset {
         background: none;
