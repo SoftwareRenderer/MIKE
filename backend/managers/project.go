@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
+	"kanban/backend/term"
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
@@ -19,11 +21,13 @@ import (
 type ProjectHandler struct {
 	store       *store.Store
 	configStore *config.ConfigStore
+	worktreeMgr *git.WorktreeManager
+	terminalMgr *term.TerminalManager
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr}
 }
 
 // HandleList returns all projects.
@@ -198,6 +202,20 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 		httputil.JSONResponse(w, http.StatusOK, p)
 
 	case http.MethodDelete:
+		// Clean up worktrees and terminal sessions for all tasks before deleting the project
+		tasks, err := h.store.GetTasksByProject(id)
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")
+			return
+		}
+		for _, task := range tasks {
+			if h.worktreeMgr != nil {
+				_ = h.worktreeMgr.RemoveWorktreeDir(id, task.ID)
+			}
+			if h.terminalMgr != nil {
+				h.terminalMgr.RemoveSession(task.ID)
+			}
+		}
 		if err := h.store.DeleteProject(id); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
 			return

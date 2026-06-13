@@ -60,11 +60,11 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		addr:        addr,
 	}
 
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore)
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr)
 	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr)
 	s.depHandler = managers.NewDependencyHandler(store)

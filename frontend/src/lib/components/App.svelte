@@ -14,6 +14,14 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
 
+    function getProjectAbbr(name: string): string {
+        const words = name.split(/[-_\s]+/).filter(Boolean);
+        if (words.length >= 2) {
+            return (words[0][0] + words[1][0]).toUpperCase();
+        }
+        return name.slice(0, 2).toUpperCase();
+    }
+
     let projects: Project[] = $state([]);
     let currentProject: Project | null = $state(null);
     let tasks: Task[] = $state([]);
@@ -224,7 +232,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     async function removeProject(p: Project) {
-        if (!confirm(`Remove "${p.name}" from the board?\n\nThis will remove the project and all its tasks from the Kanban board. No files will be deleted.`)) {
+        if (!confirm(`Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`)) {
             return;
         }
         try {
@@ -278,7 +286,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         title={`Open project: ${p.name}`}
                     >
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" title={p.name}>{p.name.slice(0, 2)}</span>
+                        <span class="project-abbr" title={p.name}>{getProjectAbbr(p.name)}</span>
                         {#if !collapsed && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)">
