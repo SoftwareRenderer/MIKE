@@ -58,8 +58,9 @@ type Config struct {
 
 // ModelConfig represents a model with its per-model settings.
 type ModelConfig struct {
-	Name            string `json:"name"`
+	Name           string `json:"name"`
 	ReasoningEffort string `json:"reasoning_effort"`
+	ContextWindow  *int   `json:"context_window,omitempty"` // nil if not reported by LLM
 }
 
 // Provider is a named LLM server preset with a list of available models.

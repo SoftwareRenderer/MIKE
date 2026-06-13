@@ -403,7 +403,11 @@ test.describe.serial('Settings Redesign', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ models: ['new-model-a', 'new-model-b', 'new-model-c'] }),
+        body: JSON.stringify({ models: [
+          { name: 'new-model-a', context_window: 32768 },
+          { name: 'new-model-b' },
+          { name: 'new-model-c', context_window: 131072 },
+        ] }),
       });
     });
 

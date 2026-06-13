@@ -76,6 +76,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		maxFailures = 3
 	}
 
+	// Context tracking: load context window from provider config, discover if unknown
+	var contextWindow *int
+	if cw := te.configStore.GetModelContextWindow(modelName, serverURL); cw != nil {
+		contextWindow = cw
+	} else if discovered := te.configStore.DiscoverContextWindow(modelName, serverURL); discovered != nil {
+		contextWindow = discovered
+		te.configStore.SaveModelContextWindow(modelName, serverURL, *discovered)
+		log.Printf("[context] discovered context window for %s: %d", modelName, *discovered)
+	}
+	lastCompressIdx := -1 // index in messages slice up to which content was already compressed
+
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var pendingToolCalls []types.ChatToolCall
@@ -112,7 +123,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort)
 				providerName = te.configStore.GetProviderNameByURL(newURL)
-				log.Printf("[model-switch] task=%s url=%s model=%s", task.ID, newURL, newModel)
+				contextWindow = te.configStore.GetModelContextWindow(newModel, newURL)
+				if contextWindow == nil {
+					if discovered := te.configStore.DiscoverContextWindow(newModel, newURL); discovered != nil {
+						contextWindow = discovered
+						te.configStore.SaveModelContextWindow(newModel, newURL, *discovered)
+					}
+				}
+				log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, contextWindow)
 			}
 		}
 
@@ -368,12 +386,28 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			return
 		}
 
-		if len(messages) > 100 {
-			task.StatusState = "idle"
-			task.Output = "Conversation limit reached"
-			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
-			return
+		// Context compression: check if we're approaching the context window limit
+		if contextWindow != nil && lastCompressIdx < len(messages)-1 {
+			if shouldCompress(messages, *contextWindow) {
+				compressResult, err := compressContext(messages, lastCompressIdx, client, systemPrompt)
+				if err != nil {
+					log.Printf("[compress] task=%s compression failed: %v", task.ID, err)
+				} else {
+					messages = compressResult.newMessages
+					lastCompressIdx = compressResult.newLastCompressIdx
+					// Persist compression checkpoint message
+					_ = te.store.CreateTaskMessage(&types.TaskMessage{
+						ID:       uuid.New().String(),
+						TaskID:   task.ID,
+						ThreadID: task.CurrentThreadID,
+						Role:     "compression",
+						Content:  compressResult.summary,
+						CreatedAt: time.Now().UTC(),
+					})
+					b.Send(types.StreamEvent{Type: "compression", Data: map[string]string{"summary": compressResult.summary}})
+					log.Printf("[compress] task=%s compressed context: %d messages -> %d messages", task.ID, compressResult.oldLen, len(messages))
+				}
+			}
 		}
 	}
 }
@@ -413,4 +447,79 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	promptMs = durationMs * 7 / 10
 	predictedMs = durationMs * 3 / 10
 	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
+}
+
+// compressResult holds the result of a context compression operation.
+type compressResult struct {
+	newMessages       []types.ChatMessage
+	newLastCompressIdx int
+	summary           string
+	oldLen            int
+}
+
+// shouldCompress checks if the current context (estimated from messages) is approaching the context window limit.
+// Uses the same token estimation as estimatePromptTokens for consistency.
+func shouldCompress(messages []types.ChatMessage, contextWindow int) bool {
+	if contextWindow <= 0 {
+		return false
+	}
+	estimatedTokens := estimatePromptTokens(messages)
+	return estimatedTokens >= contextWindow*8/10
+}
+
+// compressContext summarizes the conversation history to reduce context size.
+// It sends a non-streaming chat completion with a summarization prompt,
+// then returns a new messages array: [system, summary] + last N recent messages.
+func compressContext(messages []types.ChatMessage, lastCompressIdx int, client *llama.LlamaClient, systemPrompt string) (compressResult, error) {
+	oldLen := len(messages)
+
+	// Build the summarization request: system prompt + all messages since last compression
+	compressFrom := 0
+	if lastCompressIdx > 0 {
+		compressFrom = lastCompressIdx
+	}
+
+	compressMessages := []types.ChatMessage{
+		{Role: "system", Content: "Summarize the key events, decisions, and lessons learned in this conversation. " +
+			"Preserve technical details, file paths, code decisions, and any important context. " +
+			"This summary will be used to restore context in a truncated conversation. " +
+			"Be concise but thorough. Include: what was done, what files were changed, what commands were run, " +
+			"what errors were encountered, and what the current state of the task is."},
+	}
+	// Include messages from after last compression (skip system prompt at index 0)
+	for i := compressFrom; i < len(messages); i++ {
+		compressMessages = append(compressMessages, messages[i])
+	}
+
+	// Send non-streaming summarization request
+	_, summary, err := client.ChatCompletion(context.Background(), compressMessages)
+	if err != nil {
+		return compressResult{}, fmt.Errorf("summarization call failed: %w", err)
+	}
+
+	// Keep last N messages for continuity (system + last ~10 messages = ~5 turns)
+	keepRecent := 10
+	var recent []types.ChatMessage
+	if len(messages) > keepRecent+1 {
+		recent = messages[len(messages)-keepRecent:]
+	} else {
+		recent = messages[1:] // skip system
+	}
+
+	// Build new messages: system + summary + recent
+	newMessages := []types.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "assistant", Content: "[Context summary: " + summary + "]"},
+	}
+	newMessages = append(newMessages, recent...)
+
+	// New lastCompressIdx: points to the summary message (index 1)
+	newLastCompressIdx := 1
+
+	return compressResult{
+		newMessages:        newMessages,
+		newLastCompressIdx: newLastCompressIdx,
+		summary:            summary,
+		oldLen:             oldLen,
+	}, nil
 }

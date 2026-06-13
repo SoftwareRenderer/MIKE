@@ -296,7 +296,7 @@
                 p.fetchError = result.error;
             } else {
                 // Replace: clear existing models and use fetched list (readonly)
-                p.models = result.models.map(m => ({ name: m, readonly: true, reasoning_effort: 'medium' as const }));
+                p.models = result.models.map(m => ({ name: m.name, readonly: true, reasoning_effort: 'medium' as const, context_window: m.context_window }));
                 p.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
             }
         } catch (e) {
@@ -584,6 +584,11 @@
                                                             <span class="model-name-label">{model.name}</span>
                                                         {:else}
                                                             <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" />
+                                                        {/if}
+                                                        {#if model.context_window}
+                                                            <span class="context-window-badge" title="Context window: {model.context_window} tokens">
+                                                                {(model.context_window >= 1_000_000 ? (model.context_window / 1_000_000).toFixed(1) + 'M' : (model.context_window / 1_000).toFixed(0) + 'K')} context
+                                                            </span>
                                                         {/if}
                                                     </div>
                                                     <select
@@ -1587,6 +1592,16 @@
         padding: 1px 5px;
         border-radius: 3px;
         flex-shrink: 0;
+    }
+    .context-window-badge {
+        font-size: 0.65rem;
+        font-weight: 500;
+        color: var(--color-text-tertiary);
+        background: var(--color-surface-3);
+        padding: 1px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        white-space: nowrap;
     }
 
     /* Model name display */

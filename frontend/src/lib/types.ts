@@ -75,6 +75,7 @@ export interface Config {
 export interface ProviderModel {
     name: string;
     reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+    context_window?: number; // nil if not reported by LLM
 }
 
 /** Reasoning effort options for the settings UI. */
@@ -221,7 +222,8 @@ export type StreamEventType =
     | 'error'
     | 'user_message'
     | 'stats'
-    | 'thread_switch';
+    | 'thread_switch'
+    | 'compression';
 
 export interface StreamEvent {
     type: StreamEventType;

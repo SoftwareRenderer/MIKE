@@ -308,7 +308,7 @@ export async function testConnection(llamaServerUrl: string, modelName: string):
     return res.json();
 }
 
-export async function fetchModels(llamaServerUrl: string): Promise<{ models: string[]; error?: string }> {
+export async function fetchModels(llamaServerUrl: string): Promise<{ models: Array<{ name: string; context_window?: number }>; error?: string }> {
     const res = await fetch(`${API_BASE}/config/fetch-models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

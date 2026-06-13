@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import ModelSelector from './ModelSelector.svelte';
+    import ContextUsage from './ContextUsage.svelte';
 
     interface Props {
         value?: string;
@@ -11,6 +12,8 @@
         selectedModel?: string;
         selectedUrl?: string;
         selectedReasoningEffort?: string;
+        contextUsed?: number;
+        contextLimit?: number;
         onSubmit?: (message: string) => void;
         onStop?: () => void;
         onModelSelect?: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
@@ -25,6 +28,8 @@
         selectedModel = '',
         selectedUrl = '',
         selectedReasoningEffort = '',
+        contextUsed = 0,
+        contextLimit = 0,
         onSubmit,
         onStop,
         onModelSelect,
@@ -33,6 +38,7 @@
     let textareaEl: HTMLTextAreaElement | undefined;
     let canSend = $derived(value.trim().length > 0 && !disabled && !(providers.length > 0 && !selectedModel));
     let showModelSelector = $derived(providers.length > 0);
+    let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
 
     export function focus() {
         textareaEl?.focus();
@@ -91,6 +97,7 @@
                 {disabled}
                 onSelect={onModelSelect}
             />
+            <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} />
         </div>
     {/if}
     <div class="chat-form-inner">
@@ -133,6 +140,7 @@
         padding: 0 0 6px;
         display: flex;
         align-items: center;
+        gap: 8px;
     }
     .chat-form-inner {
         display: flex;

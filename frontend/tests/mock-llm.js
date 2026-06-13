@@ -71,6 +71,10 @@ function buildNonStreamingResponse(parsed, chunks) {
         total_tokens: isTitleGen ? 35 : 38,
         prompt_tokens_details: { cached_tokens: 0 }
     };
+    // Include cache_tokens field for context tracking tests
+    if (!usage.cache_tokens) {
+        usage.cache_tokens = usage.prompt_tokens_details?.cached_tokens || 0;
+    }
     const timings = lastChunk?.timings || {
         prompt_ms: 150,
         predicted_ms: isTitleGen ? 50 : 180,
@@ -150,6 +154,21 @@ function selectResponse(parsed) {
 }
 
 const server = http.createServer((req, res) => {
+    // GET /models or GET /v1/models — return mock model list with context windows
+    if (req.method === 'GET' && (req.url === '/models' || req.url === '/v1/models')) {
+        const modelsResponse = JSON.stringify({
+            object: 'list',
+            data: [
+                { id: 'mock-model', object: 'model', created: 1700000000, owned_by: 'test', max_model_len: 8192 },
+                { id: 'mock-model-large', object: 'model', created: 1700000000, owned_by: 'test', max_model_len: 32768 },
+                { id: 'mock-model-small', object: 'model', created: 1700000000, owned_by: 'test' }, // no context window
+            ]
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(modelsResponse);
+        return;
+    }
+
     if (req.method === 'POST' && (req.url === '/chat/completions' || req.url === '/v1/chat/completions')) {
         requestCount++;
         let body = '';

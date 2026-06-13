@@ -97,6 +97,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let queuePosition = $state(0);
     let queueEstimatedWait = $state(0);
 
+    // Context usage tracking
+    let contextState = $state({ used: 0, limit: 0 });
+
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
@@ -296,6 +299,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 markNotStreaming();
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
                 closeCurrentAssistant();
+                // Track context usage from the last turn's prompt tokens
+                if (data.prompt_tokens !== undefined) {
+                    contextState.used = data.prompt_tokens;
+                }
                 // Attach stats to the last assistant entry
                 const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
                 if (lastAssistant && data.predicted_tokens !== undefined) {
@@ -396,6 +403,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 }
                 break;
             }
+            case 'compression': {
+                const data = event.data as { summary: string };
+                // Add a compression checkpoint entry
+                entries = [...entries, {
+                    id: genId(),
+                    role: 'compression',
+                    content: data.summary || 'Context was summarized to free space',
+                    isStreaming: false,
+                    createdAt: new Date().toISOString(),
+                }];
+                break;
+            }
         }
         scroll();
     }
@@ -417,6 +436,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
+            updateContextLimit();
 
         } catch {
             providers = [];
@@ -428,7 +448,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const cfg = get(configStore);
         if (cfg && cfg.providers) {
             providers = cfg.providers;
+            updateContextLimit();
         }
+    }
+
+    /** Look up the context window for the currently selected model. */
+    function updateContextLimit() {
+        const provider = providers.find(p => p.url === selectedUrl);
+        if (!provider) {
+            contextState.limit = 0;
+            return;
+        }
+        const model = provider.models.find((m: { name: string }) => m.name === selectedModel);
+        contextState.limit = (model as { context_window?: number })?.context_window || 0;
     }
 
     async function loadHistory() {
@@ -481,6 +513,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             });
             // Merge toolCalls entries into the preceding assistant entry
             entries = mergeToolCallsIntoAssistant(entries);
+            // Restore context usage from the last assistant message
+            const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
+            if (lastAssistant?.stats?.prompt_tokens) {
+                contextState.used = lastAssistant.stats.prompt_tokens;
+            }
         } catch { /* No history yet */ }
     }
 
@@ -649,6 +686,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
+        updateContextLimit();
         // Update task with new model/provider
         try {
             await updateTask(projectId, taskId, {
@@ -1140,6 +1178,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             {/if}
                         </div>
                     </div>
+                {:else if entry.role === 'compression'}
+                    <div class="compression-entry">
+                        <div class="compression-divider">
+                            <div class="divider-line"></div>
+                            <div class="divider-content">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                                </svg>
+                                <span class="compression-label">Context compressed</span>
+                            </div>
+                            <div class="divider-line"></div>
+                        </div>
+                        <div class="compression-summary">{entry.content}</div>
+                    </div>
                 {:else}
                     <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
@@ -1224,6 +1276,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}
             selectedReasoningEffort={selectedReasoningEffort}
+            contextUsed={contextState.used}
+            contextLimit={contextState.limit}
             onSubmit={(msg) => handleSend(msg)}
             onStop={handleStop}
             onModelSelect={handleModelSelect}
@@ -1503,5 +1557,43 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .btn-commit-done:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+    .compression-entry {
+        padding: 8px 0;
+    }
+    .compression-divider {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 0;
+    }
+    .compression-divider .divider-line {
+        flex: 1;
+        height: 1px;
+        background: var(--color-accent);
+        opacity: 0.4;
+    }
+    .compression-divider .divider-content {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .compression-label {
+        font-size: 0.75rem;
+        color: var(--color-accent);
+        opacity: 0.8;
+        white-space: nowrap;
+    }
+    .compression-summary {
+        margin-top: 6px;
+        padding: 8px 12px;
+        background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+        border-radius: var(--radius-md);
+        border-left: 3px solid var(--color-accent);
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        white-space: pre-wrap;
     }
 </style>

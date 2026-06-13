@@ -195,3 +195,27 @@ func parseIntPtr(s string) (*int, error) {
 	}
 	return &v, nil
 }
+
+// SaveModelContextWindow persists a discovered context window for a model in the config.
+func (cs *ConfigStore) SaveModelContextWindow(modelName, providerURL string, contextWindow int) {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return
+	}
+
+	for i := range cfg.Providers {
+		if cfg.Providers[i].URL == providerURL {
+			for j := range cfg.Providers[i].Models {
+				if cfg.Providers[i].Models[j].Name == modelName {
+					cfg.Providers[i].Models[j].ContextWindow = &contextWindow
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Persist
+	providersJSON, _ := json.Marshal(cfg.Providers)
+	_ = cs.store.SetConfigValue("providers", string(providersJSON))
+}
