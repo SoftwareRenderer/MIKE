@@ -11,7 +11,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
 
-    let { task, tasks: columnTasks, projectPath, workspaceDir, onClose }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; onClose: () => void } = $props();
+    let { task, tasks: columnTasks, projectPath, workspaceDir, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -409,7 +409,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                         <button
                                             type="button"
                                             class={`task-item${t.id === task.id ? ' selected' : ''}`}
-                                            onclick={() => { window.history.replaceState(null, '', '?task=' + t.id); selectedTask.set(t); activeTab = 'chat'; }}
+                                            onclick={() => { if (onSelectTask) onSelectTask(t); else selectedTask.set(t); activeTab = 'chat'; }}
                                             aria-label={`Select task: ${t.title || '(untitled)'}`}
                                             aria-current={t.id === task.id ? 'task' : undefined}
                                             title={`Select task: ${t.title || '(untitled)'}`}

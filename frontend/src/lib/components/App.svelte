@@ -63,10 +63,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             configStore.subscribe(v => { if (v) cfg = v; }),
             selectedTask.subscribe(t => {
                 selectedTaskVal = t;
-                if (t) {
+                if (t && currentProject) {
                     const url = new URL(location.href);
-                    if (url.searchParams.get('task') !== t.id) {
-                        history.pushState({ task: t.id }, '', '?task=' + t.id);
+                    url.searchParams.set('project', currentProject.id);
+                    url.searchParams.set('task', t.id);
+                    if (url.search !== location.search) {
+                        history.pushState({ task: t.id, project: currentProject.id }, '', url.search);
                     }
                 }
             }),
@@ -79,14 +81,30 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     $effect(() => {
         function handlePopState() {
             const params = new URLSearchParams(location.search);
+            const projectId = params.get('project');
             const taskId = params.get('task');
+
+            // If URL specifies a different project, switch to it
+            if (projectId && currentProject && projectId !== currentProject.id) {
+                const targetProject = projects.find(p => p.id === projectId);
+                if (targetProject) {
+                    selectProject(targetProject);
+                    // After board loads, restoreTaskFromUrl will handle the task
+                    return;
+                }
+            }
+
             if (taskId) {
                 const task = tasks.find(t => t.id === taskId);
                 if (task) {
+                    selectedTaskVal = task;
+                    showCardDetailVal = true;
                     selectedTask.set(task);
                     showCardDetail.set(true);
                 }
             } else {
+                selectedTaskVal = null;
+                showCardDetailVal = false;
                 selectedTask.set(null);
                 showCardDetail.set(false);
             }
@@ -103,7 +121,13 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             projects = projs || [];
             projectsStore.set(projects);
             if (projects.length > 0) {
-                selectProject(projects[0]);
+                // Check URL for project param to restore previous project
+                const urlParams = new URLSearchParams(location.search);
+                const urlProjectId = urlParams.get('project');
+                const targetProject = urlProjectId
+                    ? projects.find(p => p.id === urlProjectId)
+                    : null;
+                selectProject(targetProject || projects[0]);
             }
             const c = await getConfig();
             cfg = c;
@@ -130,6 +154,11 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 selectedTaskVal = task;
                 showCardDetailVal = true;
                 selectedTask.set(task);
+            } else {
+                // Task not found (e.g., deleted) — clear task param, keep project
+                const url = new URL(location.href);
+                url.searchParams.delete('task');
+                history.replaceState(null, '', location.pathname + url.search);
             }
         }
     }
@@ -160,10 +189,38 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         }
     }
 
+    function clearTaskDetail() {
+        selectedTaskVal = null;
+        showCardDetailVal = false;
+        selectedTask.set(null);
+        showCardDetail.set(false);
+        // Clear task param, keep project param for current project
+        if (currentProject) {
+            const url = new URL(location.href);
+            url.searchParams.delete('task');
+            url.searchParams.set('project', currentProject.id);
+            history.replaceState(null, '', location.pathname + url.search);
+        } else {
+            history.replaceState(null, '', location.pathname);
+        }
+    }
+
     async function selectProject(p: Project) {
         disconnectBoardStream();
         currentProject = p;
         selectedProject.set(p);
+        // Update URL with project param
+        // Preserve existing task param from URL (restoreTaskFromUrl will read it)
+        // Only set task param if we have an actively selected task
+        {
+            const url = new URL(location.href);
+            url.searchParams.set('project', p.id);
+            if (selectedTaskVal) {
+                url.searchParams.set('task', selectedTaskVal.id);
+            }
+            // Don't delete task param — restoreTaskFromUrl needs it on initial load
+            history.replaceState(null, '', location.pathname + url.search);
+        }
         try {
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
@@ -221,6 +278,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             const proj = await p.json();
             projects.push(proj);
             projectsStore.set(projects);
+            clearTaskDetail();
             selectProject(proj);
         } catch (e) {
             addProjectError = String(e);
@@ -248,8 +306,10 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             // Auto-select next project (or previous if it was the last)
             if (projects.length > 0) {
                 const nextIndex = Math.min(index, projects.length - 1);
+                clearTaskDetail();
                 selectProject(projects[nextIndex]);
             } else {
+                clearTaskDetail();
                 currentProject = null;
                 selectedProject.set(null);
                 tasks = [];
@@ -287,7 +347,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 <div class="project-item-wrapper" class:active={currentProject?.id === p.id}>
                     <button
                         class="project-item"
-                        onclick={() => { selectProject(p); if (isMobile) mobileMenuOpen = false; }}
+                        onclick={() => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
                         title={`Open project: ${p.name}`}
                     >
                         <span class="project-name">{p.name}</span>
@@ -372,7 +432,16 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
-                        history.pushState({ task: null }, '', location.pathname);
+                        const url = new URL(location.href);
+                        url.searchParams.delete('task');
+                        history.pushState({ project: currentProject?.id }, '', url.search);
+                    }} onSelectTask={(t: Task) => {
+                        selectedTaskVal = t;
+                        selectedTask.set(t);
+                        const url = new URL(location.href);
+                        url.searchParams.set('project', currentProject?.id || '');
+                        url.searchParams.set('task', t.id);
+                        history.replaceState({ task: t.id, project: currentProject?.id }, '', url.search);
                     }} />
                 {:else}
                     <Board 

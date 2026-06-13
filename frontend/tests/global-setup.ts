@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const TEST_REPO = '/tmp/kanban-test-repo';
+const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
 const TEST_DB = '/tmp/kanban-test.db';
 const TEST_DB_ISOLATED = '/tmp/kanban-test-isolated.db';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
@@ -249,6 +250,19 @@ function ensureTestRepo(): void {
             execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: TEST_REPO });
         } catch (e) {
             console.error('[global-setup] Failed to create test repo:', e);
+            throw e;
+        }
+    }
+    if (!fs.existsSync(TEST_REPO_2)) {
+        console.log('[global-setup] Creating second test git repo...');
+        fs.mkdirSync(TEST_REPO_2, { recursive: true });
+        fs.writeFileSync(`${TEST_REPO_2}/README.md`, '# Second Test Repository\n');
+        try {
+            execSync('git init', { cwd: TEST_REPO_2 });
+            execSync('git add README.md', { cwd: TEST_REPO_2 });
+            execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: TEST_REPO_2 });
+        } catch (e) {
+            console.error('[global-setup] Failed to create second test repo:', e);
             throw e;
         }
     }
