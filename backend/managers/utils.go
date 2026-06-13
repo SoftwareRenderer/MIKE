@@ -50,6 +50,16 @@ func AutoGenerateTitle(prompt string) string {
 	return line
 }
 
+// IsShortTitle returns true if the first line of the prompt has 5 or fewer words.
+func IsShortTitle(prompt string) bool {
+	line := strings.Split(prompt, "\n")[0]
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	return len(strings.Fields(line)) <= 5
+}
+
 // IsGitRepo checks if a directory contains a .git subdirectory.
 func IsGitRepo(path string) bool {
 	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")

@@ -96,7 +96,12 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 				return
 			}
 		}
-		task.TitleGenerating = true
+		// If the first line is short (≤5 words), use it as the title directly
+		if IsShortTitle(task.Prompt) {
+			task.TitleGenerating = false
+		} else {
+			task.TitleGenerating = true
+		}
 		if err := h.store.CreateTask(&task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -131,7 +136,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 			})
 		}
 		// Spawn async goroutine to generate a better title via LLM
-		h.startTitleGeneration(projectID, task.ID, task.Prompt)
+		// (skip if first line was already a short, good-enough title)
+		if task.TitleGenerating {
+			h.startTitleGeneration(projectID, task.ID, task.Prompt)
+		}
 		h.boardStreamMgr.Broadcast(projectID)
 		httputil.JSONResponse(w, http.StatusCreated, task)
 	default:
