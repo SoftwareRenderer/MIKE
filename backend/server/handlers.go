@@ -142,7 +142,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		}
 		msg.TaskID = taskID
 		msg.ID = uuid.New().String()
-		msg.CreatedAt = time.Now()
+		msg.CreatedAt = time.Now().UTC()
 		// Set thread_id from task's current thread if not provided
 		if msg.ThreadID == "" {
 			task, _ := s.store.GetTask(projectID, taskID)

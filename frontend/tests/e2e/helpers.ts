@@ -205,26 +205,16 @@ export async function ensureChatForm(page: Page, timeout = 10000): Promise<void>
   await expect(page.locator('.btn-send')).toBeVisible({ timeout });
 }
 
-// Helper: create a fresh task via UI and open it
-// Use this instead of clicking an existing card to avoid shared-state issues across parallel workers.
+// Helper: create a fresh task and open it via URL
+// Uses the API to create the task (avoids race with LLM title generation replacing card text)
+// then navigates directly to the task detail page.
 export async function createAndOpenTask(page: Page, title?: string): Promise<string> {
-  const taskTitle = title || `task-${Date.now()}`;
-  await page.click('.add-task-btn');
-  await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-  await page.fill('textarea', taskTitle);
-  await page.click('button[type="submit"]');
-  // Wait for modal to close (removed from DOM) — use a longer timeout for heavy load
-  await expect(page.locator('.modal')).toBeHidden({ timeout: 10000 });
-  await page.waitForSelector('.card', { timeout: 5000 });
-
-  // Open the newly created task by finding the card with matching title
-  // (using .last() is unreliable when many tasks share the same column_order)
-  const taskCard = page.locator('.card').filter({ hasText: taskTitle });
-  await expect(taskCard).toBeVisible({ timeout: 10000 });
-  await taskCard.click();
+  const taskPrompt = title || `task-${Date.now()}`;
+  const projectId = await getProjectId(page);
+  const taskId = await createTaskViaApi(page, projectId, taskPrompt);
+  await page.goto(`/?task=${taskId}`);
   await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-  return taskTitle;
+  return taskId;
 }
 
 // Helper: send a message and wait for the LLM response to complete

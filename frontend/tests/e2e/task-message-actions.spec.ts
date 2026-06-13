@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm, createAndOpenTask, getProjectId, waitForChatForm } from './helpers';
+import { ensureChatForm, createAndOpenTask, getProjectId, createTaskViaApi } from './helpers';
 
 test.describe.serial('Task Message Actions', () => {
   test.beforeEach(async ({ page }) => {
@@ -24,7 +24,7 @@ test.describe.serial('Task Message Actions', () => {
     // All three action buttons should be visible on the message
     const message = page.locator('.chat-message.user').last();
     await expect(message.locator('.action-btn[aria-label*="Copy"]')).toBeVisible();
-    await expect(message.locator('.action-btn[aria-label*="Fork"]')).toBeVisible();
+    await expect(message.locator('.action-btn[aria-label*="new thread"]')).toBeVisible();
     await expect(message.locator('.action-btn[aria-label*="Delete"]')).toBeVisible();
   });
 
@@ -123,7 +123,7 @@ test.describe.serial('Task Message Actions', () => {
     if (!newAssistantAppeared) return;
 
     // Click fork button
-    const forkBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Fork"]');
+    const forkBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="new thread"]');
     await forkBtn.click();
 
     // Fork form should appear with original content
@@ -156,7 +156,7 @@ test.describe.serial('Task Message Actions', () => {
     if (!newAssistantAppeared) return;
 
     // Enter fork mode
-    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Fork"]').click();
+    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="new thread"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible();
 
     // Cancel fork
@@ -190,7 +190,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Fork the message
     const forkedMsg = `Forked content ${Date.now()}`;
-    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Fork"]').click();
+    await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="new thread"]').click();
     await page.locator('.edit-form textarea').fill(forkedMsg);
     await page.locator('.btn-edit-submit').click();
 
@@ -269,6 +269,43 @@ test.describe.serial('Task Message Actions', () => {
     await expect(regenerateBtn).toBeVisible();
   });
 
+  test('should only show regenerate button on the last assistant message when it is the last entry', async ({ page }) => {
+    // Create messages directly via API to guarantee multiple assistant messages
+    // (follow-up messages may not trigger the executor in test env)
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `regenerate-scope-${Date.now()}`);
+
+    // Create user + assistant message pairs via API
+    // Use sequential API calls (not in a single evaluate) for reliable timestamp ordering
+    const base = `/api/projects/${projectId}/tasks/${taskId}/messages`;
+    const headers = { 'Content-Type': 'application/json' };
+    await page.evaluate((url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'user', content: 'First user message' }) }), base);
+    await page.waitForTimeout(100);
+    await page.evaluate((url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'assistant', content: 'First assistant response' }) }), base);
+    await page.waitForTimeout(100);
+    await page.evaluate((url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'user', content: 'Second user message' }) }), base);
+    await page.waitForTimeout(100);
+    await page.evaluate((url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'assistant', content: 'Second assistant response' }) }), base);
+
+    // Navigate to the task to load messages
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.assistant')).toHaveCount(2, { timeout: 10000 });
+
+    // Get all assistant messages
+    const assistantMessages = page.locator('.chat-message.assistant');
+
+    // Last assistant message (last entry) should have regenerate button
+    const lastAssistant = assistantMessages.last();
+    const lastRegenerateBtn = lastAssistant.locator('.action-btn[aria-label*="Regenerate"]');
+    await expect(lastRegenerateBtn).toBeVisible();
+
+    // Earlier assistant messages should NOT have regenerate button
+    const earlierAssistant = assistantMessages.first();
+    const earlierRegenerateBtn = earlierAssistant.locator('.action-btn[aria-label*="Regenerate"]');
+    await expect(earlierRegenerateBtn).not.toBeVisible();
+  });
+
   test('should close fork form for follow-up message', async ({ page }) => {
     // Send a follow-up message
     const followUpMsg = `Follow up fork test ${Date.now()}`;
@@ -289,7 +326,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Fork the follow-up message
     const forkedMsg = `Forked follow up ${Date.now()}`;
-    await followUpEl.locator('.action-btn[aria-label*="Fork"]').click();
+    await followUpEl.locator('.action-btn[aria-label*="new thread"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
     await page.locator('.edit-form textarea').fill(forkedMsg);
     await page.locator('.btn-edit-submit').click();
@@ -325,7 +362,7 @@ test.describe.serial('Task Message Actions', () => {
     // Note: with fast mock LLM, the assistant entry may already exist.
     // In that case, the button shows "Fork" which is also correct behavior.
     const lastUserMsg = page.locator('.chat-message.user').filter({ hasText: uniqueMsg }).last();
-    await lastUserMsg.locator('.action-btn[aria-label*="Fork"]').click();
+    await lastUserMsg.locator('.action-btn[aria-label*="new thread"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible();
 
     // The button should be either "Send" (no assistant yet) or "Fork" (assistant exists)
@@ -359,7 +396,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Click fork/edit on the user message that has an LLM response after it
     const userMsgWithResponse = page.locator('.chat-message.user').filter({ hasText: msgWithResponse }).last();
-    await userMsgWithResponse.locator('.action-btn[aria-label*="Fork"]').click();
+    await userMsgWithResponse.locator('.action-btn[aria-label*="new thread"]').click();
 
     // Edit form should appear with Fork button (not Send)
     await expect(page.locator('.edit-form textarea')).toBeVisible();
@@ -380,7 +417,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Open edit form on the last user message
     const lastUserMsg = page.locator('.chat-message.user').filter({ hasText: originalMsg }).last();
-    await lastUserMsg.locator('.action-btn[aria-label*="Fork"]').click();
+    await lastUserMsg.locator('.action-btn[aria-label*="new thread"]').click();
     await expect(page.locator('.edit-form textarea')).toBeVisible();
 
     // Edit the message

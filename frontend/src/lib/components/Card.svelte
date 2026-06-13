@@ -313,6 +313,7 @@
     class="card"
     class:selected={isSelected}
     class:indented={depth > 0}
+    data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
     onclick={() => { selectedTask.set(task); showCardDetail.set(true); }}

@@ -85,6 +85,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Shows stop button only during token generation, not during tool execution.
     let isLoading = $derived($streamingTaskIds.has(taskId));
 
+    // Last entry index for regenerate button gating
+    let lastEntryIdx = $derived(entries.length - 1);
+
     // awaitingResponse: true between sending a message and receiving the first token/tool_call.
     // Shows a spinner so the user knows the LLM is being contacted.
     let awaitingResponse = $state(false);
@@ -1132,7 +1135,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={() => handleRegenerate(entry.id)} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
             {/each}
         {/if}
