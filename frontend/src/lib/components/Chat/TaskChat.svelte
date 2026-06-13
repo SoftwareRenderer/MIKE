@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
     import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, streamingTaskIds } from '$lib/store';
+import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
@@ -71,7 +71,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
-    let deleteConfirm = $state<{ entryId: string; count: number; willDeleteBranch: boolean; branchName: string } | null>(null);
+
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
     let firstConnectDone = $state(false); // track if initial onopen has fired
@@ -761,14 +761,34 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         isCommitting = false;
     }
 
-    async function handleDelete() {
-        if (!deleteConfirm) return;
-        const entryId = deleteConfirm.entryId;
-        const idx = entries.findIndex(e => e.id === entryId);
-        if (idx === -1) {
-            deleteConfirm = null;
-            return;
+    /** Called when the user clicks the delete button on a message.
+     * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
+    async function handleDeleteRequest(entryId: string, count: number) {
+        let willDeleteBranch = false;
+        let branchName = '';
+        try {
+            const info = await checkMessageDelete(projectId, taskId, entryId);
+            willDeleteBranch = info.will_delete_branch;
+            branchName = info.branch_name || '';
+        } catch {
+            // If check fails, proceed without branch warning
         }
+
+        let message = `This will delete ${count} message${count > 1 ? 's' : ''}. This action cannot be undone.`;
+        if (willDeleteBranch && branchName) {
+            message += `\n\nThis will also delete the git branch "${branchName}".`;
+        }
+
+        const confirmed = await showConfirm({
+            title: 'Delete Message',
+            message,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
+
+        const idx = entries.findIndex(e => e.id === entryId);
+        if (idx === -1) return;
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
             entries = entries.filter((_, i) => i < idx);
@@ -783,22 +803,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         } catch (e) {
             showToast(String(e));
         }
-        deleteConfirm = null;
-    }
-
-    /** Called when the user clicks the delete button on a message.
-     * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
-    async function handleDeleteRequest(entryId: string, count: number) {
-        let willDeleteBranch = false;
-        let branchName = '';
-        try {
-            const info = await checkMessageDelete(projectId, taskId, entryId);
-            willDeleteBranch = info.will_delete_branch;
-            branchName = info.branch_name || '';
-        } catch {
-            // If check fails, proceed without branch warning
-        }
-        deleteConfirm = { entryId, count, willDeleteBranch, branchName };
     }
 
     async function handleEditFork(entryId: string, _originalContent: string, newContent: string) {
@@ -1144,28 +1148,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {/if}
     </div>
 
-    {#if deleteConfirm}
-        <div class="delete-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-live="assertive">
-            <div class="delete-dialog">
-                <h3 id="delete-dialog-title">Delete Message</h3>
-                <p>This will delete {deleteConfirm.count} message{deleteConfirm.count > 1 ? 's' : ''}. This action cannot be undone.</p>
-                {#if deleteConfirm.willDeleteBranch}
-                    <div class="delete-branch-warning">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/>
-                            <line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                        <span>This will also delete the git branch <code>{deleteConfirm.branchName}</code>.</span>
-                    </div>
-                {/if}
-                <div class="delete-actions">
-                    <button class="btn-cancel" onclick={() => deleteConfirm = null} title="Cancel deletion">Cancel</button>
-                    <button class="btn-delete" onclick={handleDelete} title="Delete message(s)">Delete</button>
-                </div>
-            </div>
-        </div>
-    {/if}
+
     {#if showStartButton}
         <div class="chat-start">
             {#if providers.length > 0}
@@ -1387,86 +1370,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
     .btn-retry:hover { opacity: 0.85; }
 
-    .delete-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-    }
-    .delete-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 20px 24px;
-        max-width: 360px;
-        width: 90%;
-    }
-    .delete-dialog h3 {
-        font-size: 0.875rem;
-        font-weight: 600;
-        margin: 0 0 8px;
-        color: var(--color-text-primary);
-    }
-    .delete-dialog p {
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        margin: 0 0 12px;
-        line-height: 1.5;
-    }
-    .delete-branch-warning {
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-        padding: 8px 10px;
-        margin-bottom: 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.25);
-        border-radius: var(--radius-sm);
-        color: var(--color-status-red);
-        font-size: 0.75rem;
-        line-height: 1.4;
-    }
-    .delete-branch-warning svg {
-        flex-shrink: 0;
-        margin-top: 1px;
-    }
-    .delete-branch-warning code {
-        font-family: var(--font-mono);
-        background: rgba(248, 81, 73, 0.15);
-        padding: 1px 5px;
-        border-radius: 3px;
-        font-size: 0.75rem;
-    }
-    .delete-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-    }
-    .btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        cursor: pointer;
-    }
-    .btn-cancel:hover {
-        background: var(--color-surface-4);
-    }
-    .btn-delete {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
-        background: var(--color-status-red);
-        color: white;
-        cursor: pointer;
-    }
-    .btn-delete:hover {
-        opacity: 0.85;
-    }
+
     .chat-start {
         display: flex;
         flex-direction: column;

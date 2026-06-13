@@ -43,11 +43,12 @@ test.describe('Task Actions', () => {
     await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Accept the confirmation dialog
-    page.on('dialog', dialog => dialog.accept());
-
-    // Click delete button
+    // Click delete button to trigger confirmation dialog
     await page.click('.btn-icon[aria-label="Delete task"]');
+
+    // Wait for confirmation dialog and accept
+    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
+    await page.click('.confirm-dialog .btn-confirm');
 
     // Should navigate back to board
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
@@ -59,11 +60,12 @@ test.describe('Task Actions', () => {
     await page.goto(`/?task=${taskId}`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Reject the confirmation dialog
-    page.on('dialog', dialog => dialog.dismiss());
-
-    // Click delete button
+    // Click delete button to trigger confirmation dialog
     await page.click('.btn-icon[aria-label="Delete task"]');
+
+    // Wait for confirmation dialog and cancel
+    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
+    await page.click('.confirm-dialog .btn-cancel');
 
     // Should still be on task detail page
     await expect(page.locator('.task-detail-page')).toBeVisible();

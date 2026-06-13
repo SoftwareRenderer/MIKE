@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
-    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore } from '$lib/store';
+    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, getBoard } from '$lib/api';
 
     let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
@@ -284,13 +284,20 @@
 
     async function handleDelete(e: MouseEvent) {
         e.stopPropagation();
-        if (!projectId || !confirm('Delete this task? This cannot be undone.')) return;
+        if (!projectId) return;
+        const confirmed = await showConfirm({
+            title: 'Delete Task',
+            message: 'Delete this task? This cannot be undone.',
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
         try {
             await deleteTask(projectId, task.id);
             const board = await getBoard(projectId);
             boardStore.set(board);
         } catch (err) {
-            alert('Failed to delete task: ' + String(err));
+            showToast('Failed to delete task: ' + String(err), 'error');
         }
     }
 

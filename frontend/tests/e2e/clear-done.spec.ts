@@ -91,15 +91,15 @@ test.describe.serial('Clear All Done Tasks', () => {
     }, { pid: projectId });
     expect(doneCountBefore).toBeGreaterThan(0);
 
-    // Reject the confirmation dialog
-    page.on('dialog', async (dialog) => {
-      expect(dialog.message()).toContain('Permanently delete');
-      expect(dialog.message()).toContain('done task');
-      await dialog.dismiss();
-    });
-
-    // Click clear button
+    // Click clear button to trigger confirmation dialog
     await page.click('.clear-btn');
+
+    // Wait for confirmation dialog to appear
+    await expect(page.locator('.confirm-dialog')).toBeVisible();
+    expect(await page.locator('.confirm-dialog p').textContent()).toContain('Permanently delete');
+
+    // Cancel the confirmation
+    await page.click('.confirm-dialog .btn-cancel');
 
     // Done tasks should still exist
     const doneCountAfter = await page.evaluate(async ({ pid }) => {
@@ -139,13 +139,12 @@ test.describe.serial('Clear All Done Tasks', () => {
     }, { pid: projectId });
     expect(doneCountBefore).toBeGreaterThanOrEqual(2);
 
-    // Accept the confirmation dialog
-    page.on('dialog', async (dialog) => {
-      await dialog.accept();
-    });
-
-    // Click clear button
+    // Click clear button to trigger confirmation dialog
     await page.click('.clear-btn');
+
+    // Wait for confirmation dialog and accept
+    await expect(page.locator('.confirm-dialog')).toBeVisible();
+    await page.click('.confirm-dialog .btn-confirm');
 
     // Wait for done tasks to be deleted (replaces waitForTimeout(1000) + navigate)
     await page.goto('/');

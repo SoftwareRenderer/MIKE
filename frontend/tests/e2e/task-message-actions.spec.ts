@@ -63,7 +63,7 @@ test.describe.serial('Task Message Actions', () => {
     await deleteBtn.click();
 
     // Check that delete dialog appears
-    const dialog = page.locator('.delete-dialog');
+    const dialog = page.locator('.confirm-dialog');
     await expect(dialog).toBeVisible({ timeout: 5000 });
     await expect(dialog.locator('h3')).toContainText('Delete Message');
 
@@ -91,10 +91,10 @@ test.describe.serial('Task Message Actions', () => {
     // Click delete and confirm
     const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Delete"]');
     await deleteBtn.click();
-    await page.locator('.delete-dialog .btn-delete').click();
+    await page.locator('.confirm-dialog .btn-confirm').click();
 
     // Dialog should close and user message count should decrease
-    await expect(page.locator('.delete-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 5000 });
     // Wait for the message to actually disappear (async API call must complete)
     await expect(page.locator('.chat-message.user')).toHaveCount(userCountBefore - 1, { timeout: 5000 });
   });

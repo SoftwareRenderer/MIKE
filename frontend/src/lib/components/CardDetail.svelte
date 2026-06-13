@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, selectedTask, streamingTaskIds, showTerminal } from '$lib/store';
+    import { board as boardStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask, checkWorktreeExists } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -244,12 +244,19 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 return { ...b };
             });
         } catch (e) {
-            alert('Failed to move: ' + String(e));
+            showToast('Failed to move: ' + String(e), 'error');
         }
     }
 
     async function handleDelete() {
-        if (!task || !confirm('Delete this task? This cannot be undone.')) return;
+        if (!task) return;
+        const confirmed = await showConfirm({
+            title: 'Delete Task',
+            message: 'Delete this task? This cannot be undone.',
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
         const projectId = task.project_id;
         const taskId = task.id;
         try {
@@ -258,7 +265,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             boardStore.set(board);
             onClose();
         } catch (e) {
-            alert('Failed to delete task: ' + String(e));
+            showToast('Failed to delete task: ' + String(e), 'error');
         }
     }
 

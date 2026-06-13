@@ -27,3 +27,30 @@ export function showToast(message: string, type: 'error' | 'success' = 'error', 
     toast.set({ message, type });
     setTimeout(() => toast.set(null), duration);
 }
+
+// Confirmation dialog state
+export interface ConfirmOptions {
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'default' | 'destructive';
+}
+
+export const confirmation = writable<ConfirmOptions | null>(null);
+
+/**
+ * Show a confirmation dialog and return a Promise that resolves to true (confirmed) or false (cancelled).
+ */
+export function showConfirm(options: ConfirmOptions): Promise<boolean> {
+    return new Promise((resolve) => {
+        confirmation.set({
+            title: options.title,
+            message: options.message,
+            confirmText: options.confirmText ?? 'Confirm',
+            cancelText: options.cancelText ?? 'Cancel',
+            variant: options.variant ?? 'destructive',
+            _resolve: resolve,
+        } as ConfirmOptions & { _resolve?: (value: boolean) => void });
+    });
+}

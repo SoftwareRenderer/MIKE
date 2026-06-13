@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks, getBoard } from '$lib/api';
-    import { board as boardStore } from '$lib/store';
+    import { board as boardStore, showConfirm, showToast } from '$lib/store';
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -85,13 +85,19 @@
     async function handleClearDone() {
         const doneTasks = getTasksForColumn('done');
         if (doneTasks.length === 0) return;
-        if (!confirm(`Permanently delete ${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        const confirmed = await showConfirm({
+            title: 'Clear Done Tasks',
+            message: `Permanently delete ${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''}? This cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
         try {
             await clearDoneTasks(projectId);
             const board = await getBoard(projectId);
             boardStore.set(board);
         } catch (e) {
-            alert('Failed to clear done tasks: ' + String(e));
+            showToast('Failed to clear done tasks: ' + String(e), 'error');
         }
     }
 </script>

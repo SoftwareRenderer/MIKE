@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import type { Project, Task, Config } from '$lib/types';
@@ -13,6 +13,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import Board from './Board.svelte';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
+    import ConfirmationDialog from './ConfirmationDialog.svelte';
 
     function getProjectAbbr(name: string): string {
         const words = name.split(/[-_\s]+/).filter(Boolean);
@@ -232,9 +233,13 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     async function removeProject(p: Project) {
-        if (!confirm(`Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`)) {
-            return;
-        }
+        const confirmed = await showConfirm({
+            title: 'Remove Project',
+            message: `Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`,
+            confirmText: 'Remove',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
         try {
             await deleteProject(p.id);
             const index = projects.indexOf(p);
@@ -434,6 +439,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         <div class="error-toast">{addProjectError}</div>
     {/if}
     <Toast />
+    <ConfirmationDialog />
 </div>
 
 <svelte:head>
