@@ -14,12 +14,14 @@ import (
 
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store *store.Store
+	store    *store.Store
+	dbPath   string
 }
 
 // NewConfigStore creates a new ConfigStore.
-func NewConfigStore(store *store.Store) *ConfigStore {
-	return &ConfigStore{store: store}
+func NewConfigStore(store *store.Store, dbPath string) *ConfigStore {
+	abs, _ := filepath.Abs(dbPath)
+	return &ConfigStore{store: store, dbPath: abs}
 }
 
 // GetConfig retrieves the full server configuration.
@@ -55,6 +57,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
+		DatabasePath:    cs.dbPath,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
 	}

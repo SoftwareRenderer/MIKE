@@ -49,6 +49,7 @@ type TaskThread struct {
 // Config represents global server configuration.
 type Config struct {
 	WorkspaceDir          string     `json:"workspace_dir"`
+	DatabasePath          string     `json:"database_path"`
 	Providers             []Provider `json:"providers"`
 	DefaultProvider       string     `json:"default_provider"`
 	DefaultAutoCommit     *bool      `json:"default_auto_commit,omitempty"`

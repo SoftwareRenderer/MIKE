@@ -42,7 +42,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		return nil, fmt.Errorf("create store: %w", err)
 	}
 
-	cfgStore := config.NewConfigStore(store)
+	cfgStore := config.NewConfigStore(store, dbPath)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)

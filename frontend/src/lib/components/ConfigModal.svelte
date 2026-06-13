@@ -684,6 +684,11 @@
                     <input type="text" bind:value={workspaceDir} placeholder="./workspace" />
                     <span class="field-help">Directory where task worktrees are created</span>
                 </label>
+                <div class="field-label">
+                    <span class="field-label-inline">Database</span>
+                    <div class="readonly-value">{config?.database_path || '—'}</div>
+                    <span class="field-help">Path to the server's SQLite database</span>
+                </div>
             </fieldset>
 
             <!-- Task Defaults Section -->
@@ -883,6 +888,16 @@
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-weight: 400;
+    }
+    .readonly-value {
+        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+        font-size: 0.8125rem;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 8px 12px;
+        color: var(--color-text-secondary);
+        user-select: all;
     }
 
     /* Section description */
