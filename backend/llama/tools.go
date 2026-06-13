@@ -73,13 +73,11 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "task_complete",
 				DisplayName: "Done",
-				Description: "Signal that the task is complete with a summary of work done",
+				Description: "Signal that the task is complete",
 				Parameters: map[string]interface{}{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"summary": map[string]interface{}{"type": "string", "description": "Summary of work completed"},
-					},
-					"required": []string{"summary"},
+					"properties": map[string]interface{}{},
+					"required": []string{},
 				},
 			},
 		},

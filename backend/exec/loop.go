@@ -302,20 +302,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 
 				if tc.Function.Name == "task_complete" {
-					summary := args["summary"].(string)
 					if task.AutoCommit {
 						te.gitRun(worktreePath, "add", "-A")
-						te.gitRun(worktreePath, "commit", "-m", summary)
+						te.gitRun(worktreePath, "commit", "-m", "Task completed")
 						task.StatusState = "completed"
 						task.Status = "done"
 					} else {
 						task.StatusState = "awaiting_review"
 						task.Status = "review"
 					}
-					task.Output = summary
 					te.store.UpdateTask(task)
 					b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
-						"state": task.StatusState, "summary": summary,
+						"state": task.StatusState,
 						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
 						"prompt_ms": promptMs, "predicted_ms": predictedMs,

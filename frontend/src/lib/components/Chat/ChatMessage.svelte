@@ -47,10 +47,7 @@ import { getToolDisplayName } from '$lib/types';
             }
             case 'write_file': {
                 const p = args.path as string;
-                const c = args.content as string;
-                const lines = c ? c.split('\n').length : 0;
-                const prefixed = p.startsWith('./') ? p : `./${p}`;
-                return `${prefixed} (${lines} lines)`;
+                return p.startsWith('./') ? p : `./${p}`;
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
@@ -303,20 +300,18 @@ import { getToolDisplayName } from '$lib/types';
                             <div class="tool-call-header">
                                 <span class="tool-icon">{#if tc.toolName === 'execute_command'}⚡{:else if tc.toolName === 'read_file'}📄{:else if tc.toolName === 'write_file'}✏️{:else if tc.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
                                 <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
+                                <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
                                 {#if tc.isPending}
                                     <span class="tool-status pending"><span class="spinner"></span> Running...</span>
-                                {:else if tc.success}
-                                    <span class="tool-status success">Done</span>
-                                {:else}
+                                {:else if !tc.success}
                                     <span class="tool-status error">Failed</span>
                                 {/if}
-                                {#if tc.duration !== undefined}
-                                    <span class="tool-duration">{tc.duration}ms</span>
-                                {/if}
                             </div>
-                            <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
                             {#if tc.result !== undefined}
                                 <pre class="tool-result">{tc.result}</pre>
+                            {/if}
+                            {#if tc.duration !== undefined}
+                                <span class="tool-duration">{tc.duration}ms</span>
                             {/if}
                         </div>
                     </div>
@@ -380,13 +375,15 @@ import { getToolDisplayName } from '$lib/types';
                     {#if timestampInfo.display}
                         <span class="message-timestamp" title={timestampInfo.tooltip || undefined}>{timestampInfo.display}</span>
                     {/if}
-                    <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
-                        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                        <span class="check">✓</span>
-                    </button>
+                    {#if content}
+                        <button class="action-btn" class:copied={copied} onclick={handleCopy} aria-label="Copy message" title="Copy message">
+                            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                            <span class="check">✓</span>
+                        </button>
+                    {/if}
                     {#if onRegenerate && !isStreaming}
                         <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response" title="Regenerate response">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -805,9 +802,11 @@ import { getToolDisplayName } from '$lib/types';
         border-radius: var(--radius-md);
         border-left: 3px solid;
         padding: 8px 12px;
+        display: flex;
+        flex-direction: column;
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-accent); }
+    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-text-primary); }
     .tool-status { font-size: 0.75rem; font-weight: 500; }
     .tool-status.pending { color: var(--color-status-yellow); }
     .tool-status.success { color: var(--color-status-green); }
@@ -822,16 +821,14 @@ import { getToolDisplayName } from '$lib/types';
         animation: tool-spin 0.6s linear infinite;
     }
     @keyframes tool-spin { to { transform: rotate(360deg); } }
-    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); margin-left: auto; }
+    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); align-self: flex-end; padding-top: 4px; }
     .tool-args {
-        background: var(--color-surface-0);
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
+        display: inline;
         font-size: 0.75rem;
         font-family: var(--font-mono);
-        overflow-x: auto;
-        margin: 0;
+        margin: 0 6px;
         color: var(--color-text-secondary);
+        white-space: pre;
     }
     .tool-result {
         background: var(--color-surface-0);
