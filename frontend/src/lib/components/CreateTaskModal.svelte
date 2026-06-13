@@ -311,8 +311,9 @@
         .modal {
             width: 100vw;
             max-width: none;
-            max-height: 100vh;
-            height: 100vh;
+            max-height: 100dvh;
+            height: 100dvh;
+            top: 0;
             border-radius: 0;
             border: none;
         }

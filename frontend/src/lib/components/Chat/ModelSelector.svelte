@@ -58,18 +58,30 @@
         return { top: r.bottom + 6, left: r.left };
     }
 
-    // After dropdown renders, measure actual height and flip if it would overflow
+    // After dropdown renders, measure actual size and adjust if it would overflow
     function adjustDropdownPosition(portalClass: string, triggerEl: HTMLElement | null, rect: { top: number; left: number } | null, setRect: (r: { top: number; left: number } | null) => void) {
         if (!triggerEl || !rect) return;
         const portal = document.querySelector(portalClass);
         if (!portal) return;
         const triggerTop = triggerEl.getBoundingClientRect().top;
         const dropdownHeight = portal.getBoundingClientRect().height;
-        const spaceBelow = window.innerHeight - (triggerTop + triggerEl.getBoundingClientRect().height);
-        // If dropdown would extend beyond viewport, flip it above
+        const dropdownWidth = portal.getBoundingClientRect().width;
+        const viewportHeight = window.visualViewport?.height || window.innerHeight;
+        const viewportWidth = window.visualViewport?.width || window.innerWidth;
+        let top = rect.top;
+        let left = rect.left;
+        // Flip above if not enough space below
+        const spaceBelow = viewportHeight - (triggerTop + triggerEl.getBoundingClientRect().height);
         if (spaceBelow < dropdownHeight + 12) {
-            setRect({ top: triggerTop - dropdownHeight - 6, left: rect.left });
+            top = triggerTop - dropdownHeight - 6;
         }
+        // Shift left if overflowing right edge
+        if (left + dropdownWidth > viewportWidth - 8) {
+            left = viewportWidth - dropdownWidth - 8;
+        }
+        // Ensure left edge doesn't go negative
+        if (left < 8) left = 8;
+        setRect({ top, left });
     }
 
     function toggleProviderDropdown() {

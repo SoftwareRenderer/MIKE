@@ -146,10 +146,20 @@
             if (!portal) return;
             const triggerTop = modelBadgeRef!.getBoundingClientRect().top;
             const dropdownHeight = portal.getBoundingClientRect().height;
-            const spaceBelow = window.innerHeight - (triggerTop + modelBadgeRef!.getBoundingClientRect().height);
+            const dropdownWidth = portal.getBoundingClientRect().width;
+            const viewportHeight = window.visualViewport?.height || window.innerHeight;
+            const viewportWidth = window.visualViewport?.width || window.innerWidth;
+            let top = pickerRect.top;
+            let left = pickerRect.left;
+            const spaceBelow = viewportHeight - (triggerTop + modelBadgeRef!.getBoundingClientRect().height);
             if (spaceBelow < dropdownHeight + 12) {
-                pickerRect = { top: triggerTop - dropdownHeight - 6, left: pickerRect.left };
+                top = triggerTop - dropdownHeight - 6;
             }
+            if (left + dropdownWidth > viewportWidth - 8) {
+                left = viewportWidth - dropdownWidth - 8;
+            }
+            if (left < 8) left = 8;
+            pickerRect = { top, left };
         });
         return () => cancelAnimationFrame(raf);
     });
