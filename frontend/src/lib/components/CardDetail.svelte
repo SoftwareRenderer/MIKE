@@ -453,6 +453,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         taskPrompt={task.prompt}
                         taskStatus={task.status}
                         onRefreshDiff={updateDiff}
+                        onMoveTask={handleMove}
                     />
                 </div>
             </div>

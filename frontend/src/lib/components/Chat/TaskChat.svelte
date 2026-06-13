@@ -54,7 +54,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff, onMoveTask }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -1176,8 +1176,28 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </button>
         </div>
     {:else}
+        {#if taskStatus === 'done' && onMoveTask}
+            <div class="chat-review-bar">
+                <button class="btn-move" onclick={() => onMoveTask('review')} title="Move task to Review">
+                    → Review
+                </button>
+                <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
+                    → Backlog
+                </button>
+            </div>
+        {/if}
         {#if taskStatus === 'review'}
             <div class="chat-review-bar">
+                {#if onMoveTask}
+                    <div class="move-buttons">
+                        <button class="btn-move" onclick={() => onMoveTask('done')} title="Move task to Done">
+                            → Done
+                        </button>
+                        <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
+                            → Backlog
+                        </button>
+                    </div>
+                {/if}
                 <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and mark task as done">
                     {#if isCommitting}
                         <span class="spinner-inline"></span> Committing...
@@ -1424,11 +1444,35 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .chat-review-bar {
         display: flex;
         align-items: center;
+        gap: 8px;
         justify-content: flex-end;
         padding: 8px 12px;
         border-top: 1px solid var(--color-border);
         background: var(--color-surface-0);
         flex-shrink: 0;
+    }
+    .move-buttons {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: auto;
+    }
+    .btn-move {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: var(--radius-md);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        background: var(--color-surface-2);
+        color: var(--color-text);
+        border: 1px solid var(--color-border);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .btn-move:hover {
+        background: var(--color-surface-1);
+        border-color: var(--color-accent);
     }
     .btn-commit-done {
         display: inline-flex;
