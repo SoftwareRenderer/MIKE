@@ -7,7 +7,7 @@ import (
 	"kanban/backend/types"
 )
 
-// CreateTaskMessage inserts a task chat message.
+// CreateTaskMessage inserts a task chat message and accumulates token stats.
 func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -15,7 +15,32 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Accumulate token stats for assistant/title messages into the cumulative table.
+	if m.Role == "assistant" || m.Role == "title" {
+		_, _ = s.db.Exec(`
+			INSERT INTO project_token_stats (project_id, model_name, provider_name, prompt_tokens, cache_tokens, predicted_tokens, prompt_ms, predicted_ms)
+			SELECT t.project_id, ?, ?, ?, ?, ?, ?, ?
+			FROM tasks t WHERE t.id = ?
+			ON CONFLICT(project_id, model_name, provider_name)
+			DO UPDATE SET
+				prompt_tokens = project_token_stats.prompt_tokens + excluded.prompt_tokens,
+				cache_tokens = project_token_stats.cache_tokens + excluded.cache_tokens,
+				predicted_tokens = project_token_stats.predicted_tokens + excluded.predicted_tokens,
+				prompt_ms = project_token_stats.prompt_ms + excluded.prompt_ms,
+				predicted_ms = project_token_stats.predicted_ms + excluded.predicted_ms
+		`, m.ModelName, m.ProviderName, m.PromptTokens, m.CacheTokens, m.PredictedTokens, m.PromptMs, m.PredictedMs, m.TaskID)
+		// Track this task in the cumulative task counter (idempotent per task).
+		_, _ = s.db.Exec(`
+			INSERT INTO project_token_tasks (project_id, model_name, provider_name, task_id)
+			SELECT t.project_id, ?, ?, ?
+			FROM tasks t WHERE t.id = ?
+			ON CONFLICT(project_id, model_name, provider_name, task_id) DO NOTHING
+		`, m.ModelName, m.ProviderName, m.TaskID, m.TaskID)
+	}
+	return nil
 }
 
 // GetTaskMessages retrieves all messages for a task, optionally filtered by thread.

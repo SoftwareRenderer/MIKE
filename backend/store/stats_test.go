@@ -292,7 +292,7 @@ func TestDeleteProjectStats(t *testing.T) {
 		}
 	}
 
-	// Delete stats for model-a
+	// Delete (reset) stats for model-a
 	if err := s.DeleteProjectStats("proj-1", "model-a", ""); err != nil {
 		t.Fatalf("delete stats: %v", err)
 	}
@@ -302,14 +302,28 @@ func TestDeleteProjectStats(t *testing.T) {
 		t.Fatalf("get stats: %v", err)
 	}
 
-	// model-a should be gone, model-b should remain
-	if len(stats.ByModel) != 1 || stats.ByModel[0].ModelName != "model-b" {
-		t.Fatalf("expected only model-b, got %+v", stats.ByModel)
+	// model-a should have zeroed stats, model-b should remain
+	var modelA, modelB *types.ModelStats
+	for i := range stats.ByModel {
+		if stats.ByModel[i].ModelName == "model-a" {
+			modelA = &stats.ByModel[i]
+		} else if stats.ByModel[i].ModelName == "model-b" {
+			modelB = &stats.ByModel[i]
+		}
 	}
-	// User messages should not have been deleted
+	if modelA == nil {
+		t.Fatal("expected model-a in stats (zeroed, not removed)")
+	}
+	if modelA.PromptTokens != 0 || modelA.GeneratedTokens != 0 {
+		t.Fatalf("expected model-a stats zeroed, got %+v", modelA)
+	}
+	if modelB == nil || modelB.PromptTokens != 200 {
+		t.Fatalf("expected model-b unchanged, got %+v", modelB)
+	}
+	// All messages should still exist (Reset no longer deletes messages)
 	msgs, _ := s.GetTaskMessages("task-1", "")
-	if len(msgs) < 1 {
-		t.Fatalf("user messages should not be deleted")
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages (Reset should not delete messages), got %d", len(msgs))
 	}
 }
 
@@ -341,7 +355,7 @@ func TestDeleteProjectStatsWithProvider(t *testing.T) {
 		}
 	}
 
-	// Delete only provider-a's stats for model-a
+	// Reset only provider-a's stats for model-a
 	if err := s.DeleteProjectStats("proj-1", "model-a", "provider-a"); err != nil {
 		t.Fatalf("delete stats: %v", err)
 	}
@@ -351,11 +365,23 @@ func TestDeleteProjectStatsWithProvider(t *testing.T) {
 		t.Fatalf("get stats: %v", err)
 	}
 
-	if len(stats.ByModel) != 1 {
-		t.Fatalf("expected 1 model group, got %d", len(stats.ByModel))
+	// Both providers should still appear, but provider-a should be zeroed
+	if len(stats.ByModel) != 2 {
+		t.Fatalf("expected 2 model groups, got %d", len(stats.ByModel))
 	}
-	if stats.ByModel[0].ProviderName != "provider-b" {
-		t.Fatalf("expected provider-b, got %s", stats.ByModel[0].ProviderName)
+	var providerA, providerB *types.ModelStats
+	for i := range stats.ByModel {
+		if stats.ByModel[i].ProviderName == "provider-a" {
+			providerA = &stats.ByModel[i]
+		} else if stats.ByModel[i].ProviderName == "provider-b" {
+			providerB = &stats.ByModel[i]
+		}
+	}
+	if providerA == nil || providerA.PromptTokens != 0 {
+		t.Fatalf("expected provider-a zeroed, got %+v", providerA)
+	}
+	if providerB == nil || providerB.PromptTokens != 200 {
+		t.Fatalf("expected provider-b unchanged, got %+v", providerB)
 	}
 }
 
@@ -430,4 +456,242 @@ func TestGetProjectStatsIsolatedByProject(t *testing.T) {
 // floatEquals checks if two floats are approximately equal within a tolerance.
 func floatEquals(a, b, tol float64) bool {
 	return math.Abs(a-b) < tol
+}
+
+func TestStatsSurviveTaskDeletion(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	msg := newMessage("m1", "task-1", "assistant", "response")
+	msg.ModelName = "model-a"
+	msg.PromptTokens = 100
+	msg.PredictedTokens = 50
+	msg.CacheTokens = 10
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	// Verify stats before deletion
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	if stats.TotalPromptTokens != 100 {
+		t.Fatalf("expected 100 prompt tokens before delete, got %d", stats.TotalPromptTokens)
+	}
+	if stats.TotalGeneratedTokens != 50 {
+		t.Fatalf("expected 50 generated tokens before delete, got %d", stats.TotalGeneratedTokens)
+	}
+	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 1 {
+		t.Fatalf("expected task_count=1 before delete, got %+v", stats.ByModel)
+	}
+
+	// Delete the task (cascade deletes messages from task_messages)
+	if err := s.DeleteTask("proj-1", "task-1"); err != nil {
+		t.Fatalf("delete task: %v", err)
+	}
+
+	// Stats should be unchanged (cumulative, survives task deletion)
+	stats, err = s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats after delete: %v", err)
+	}
+	if stats.TotalPromptTokens != 100 {
+		t.Fatalf("expected 100 prompt tokens after delete (cumulative), got %d", stats.TotalPromptTokens)
+	}
+	if stats.TotalGeneratedTokens != 50 {
+		t.Fatalf("expected 50 generated tokens after delete (cumulative), got %d", stats.TotalGeneratedTokens)
+	}
+	if stats.TotalCacheTokens != 10 {
+		t.Fatalf("expected 10 cache tokens after delete (cumulative), got %d", stats.TotalCacheTokens)
+	}
+	// task_count should also be cumulative (survives task deletion)
+	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 1 {
+		t.Fatalf("expected task_count=1 after delete (cumulative), got %+v", stats.ByModel)
+	}
+	// TotalTasks should decrease (active tasks only)
+	if stats.TotalTasks != 0 {
+		t.Fatalf("expected 0 tasks after delete, got %d", stats.TotalTasks)
+	}
+}
+
+func TestStatsCumulativeAcrossTasks(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create two tasks with messages from the same model
+	for _, taskID := range []string{"task-1", "task-2"} {
+		task := newTask(taskID, "proj-1")
+		if err := s.CreateTask(task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		msg := newMessage("m-"+taskID, taskID, "assistant", "response")
+		msg.ModelName = "model-a"
+		msg.PromptTokens = 100
+		msg.PredictedTokens = 50
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+
+	// Stats should sum both tasks
+	if stats.TotalPromptTokens != 200 {
+		t.Fatalf("expected 200 prompt tokens (100+100), got %d", stats.TotalPromptTokens)
+	}
+	if stats.TotalGeneratedTokens != 100 {
+		t.Fatalf("expected 100 generated tokens (50+50), got %d", stats.TotalGeneratedTokens)
+	}
+	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 2 {
+		t.Fatalf("expected task_count=2, got %+v", stats.ByModel)
+	}
+
+	// Delete one task — stats and task_count should remain cumulative
+	if err := s.DeleteTask("proj-1", "task-1"); err != nil {
+		t.Fatalf("delete task: %v", err)
+	}
+	stats, err = s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats after delete: %v", err)
+	}
+	if stats.TotalPromptTokens != 200 {
+		t.Fatalf("expected 200 prompt tokens (cumulative after delete), got %d", stats.TotalPromptTokens)
+	}
+	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 2 {
+		t.Fatalf("expected task_count=2 (cumulative after delete), got %+v", stats.ByModel)
+	}
+	if stats.TotalTasks != 1 {
+		t.Fatalf("expected 1 active task, got %d", stats.TotalTasks)
+	}
+}
+
+func TestResetProjectStatsZerosCumulativeTable(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	msg := newMessage("m1", "task-1", "assistant", "response")
+	msg.ModelName = "model-a"
+	msg.PromptTokens = 100
+	msg.PredictedTokens = 50
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	// Reset stats for model-a
+	if err := s.DeleteProjectStats("proj-1", "model-a", ""); err != nil {
+		t.Fatalf("reset stats: %v", err)
+	}
+
+	// Cumulative stats should be zeroed
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	if stats.TotalPromptTokens != 0 {
+		t.Fatalf("expected 0 prompt tokens after reset, got %d", stats.TotalPromptTokens)
+	}
+	if stats.TotalGeneratedTokens != 0 {
+		t.Fatalf("expected 0 generated tokens after reset, got %d", stats.TotalGeneratedTokens)
+	}
+
+	// Original message should still exist in task_messages
+	msgs, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message (Reset should not delete messages), got %d", len(msgs))
+	}
+}
+
+func TestStatsBackfill(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Insert messages directly into task_messages (simulating pre-migration data)
+	_, err := s.db.Exec(
+		`INSERT INTO task_messages (id, task_id, thread_id, role, content, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		"m1", "task-1", "assistant", "old response", "model-a", "provider-x", 100, 50, 10, 500, 2000, "2024-01-01T00:00:00Z",
+	)
+	if err != nil {
+		t.Fatalf("insert old message: %v", err)
+	}
+
+	// Simulate the backfill that would run on migration
+	_, _ = s.db.Exec(`
+		INSERT INTO project_token_stats (project_id, model_name, provider_name, prompt_tokens, cache_tokens, predicted_tokens, prompt_ms, predicted_ms)
+		SELECT
+			t.project_id,
+			COALESCE(tm.model_name, 'unknown'),
+			COALESCE(tm.provider_name, ''),
+			SUM(tm.prompt_tokens),
+			SUM(COALESCE(tm.cache_tokens, 0)),
+			SUM(tm.predicted_tokens),
+			SUM(tm.prompt_ms),
+			SUM(tm.predicted_ms)
+		FROM task_messages tm
+		JOIN tasks t ON t.id = tm.task_id
+		WHERE tm.role IN ('assistant', 'title')
+		GROUP BY t.project_id, tm.model_name, tm.provider_name
+	`)
+	_, _ = s.db.Exec(`
+		INSERT INTO project_token_tasks (project_id, model_name, provider_name, task_id)
+		SELECT DISTINCT
+			t.project_id,
+			COALESCE(tm.model_name, 'unknown'),
+			COALESCE(tm.provider_name, ''),
+			tm.task_id
+		FROM task_messages tm
+		JOIN tasks t ON t.id = tm.task_id
+		WHERE tm.role IN ('assistant', 'title')
+	`)
+
+	// Stats should reflect the backfilled data
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	if stats.TotalPromptTokens != 100 {
+		t.Fatalf("expected 100 prompt tokens from backfill, got %d", stats.TotalPromptTokens)
+	}
+	if stats.TotalGeneratedTokens != 50 {
+		t.Fatalf("expected 50 generated tokens from backfill, got %d", stats.TotalGeneratedTokens)
+	}
+	if stats.TotalCacheTokens != 10 {
+		t.Fatalf("expected 10 cache tokens from backfill, got %d", stats.TotalCacheTokens)
+	}
+	if len(stats.ByModel) != 1 || stats.ByModel[0].ModelName != "model-a" {
+		t.Fatalf("expected model-a in by_model, got %+v", stats.ByModel)
+	}
+	if stats.ByModel[0].TaskCount != 1 {
+		t.Fatalf("expected task_count=1 from backfill, got %d", stats.ByModel[0].TaskCount)
+	}
 }

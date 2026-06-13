@@ -162,6 +162,28 @@ CREATE TABLE IF NOT EXISTS task_messages (
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS project_token_stats (
+    project_id       TEXT NOT NULL,
+    model_name       TEXT NOT NULL DEFAULT 'unknown',
+    provider_name    TEXT NOT NULL DEFAULT '',
+    prompt_tokens    INTEGER NOT NULL DEFAULT 0,
+    cache_tokens     INTEGER NOT NULL DEFAULT 0,
+    predicted_tokens INTEGER NOT NULL DEFAULT 0,
+    prompt_ms        INTEGER NOT NULL DEFAULT 0,
+    predicted_ms     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_id, model_name, provider_name),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS project_token_tasks (
+    project_id    TEXT NOT NULL,
+    model_name    TEXT NOT NULL DEFAULT 'unknown',
+    provider_name TEXT NOT NULL DEFAULT '',
+    task_id       TEXT NOT NULL,
+    PRIMARY KEY (project_id, model_name, provider_name, task_id),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(parent_task_id);
@@ -201,6 +223,65 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`) // best-effort for existing tables
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`) // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
+	// Cumulative token stats table (survives task deletion)
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS project_token_stats (
+			project_id       TEXT NOT NULL,
+			model_name       TEXT NOT NULL DEFAULT 'unknown',
+			provider_name    TEXT NOT NULL DEFAULT '',
+			prompt_tokens    INTEGER NOT NULL DEFAULT 0,
+			cache_tokens     INTEGER NOT NULL DEFAULT 0,
+			predicted_tokens INTEGER NOT NULL DEFAULT 0,
+			prompt_ms        INTEGER NOT NULL DEFAULT 0,
+			predicted_ms     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (project_id, model_name, provider_name),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)
+	`)
+	// Cumulative task tracking table (survives task deletion)
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS project_token_tasks (
+			project_id    TEXT NOT NULL,
+			model_name    TEXT NOT NULL DEFAULT 'unknown',
+			provider_name TEXT NOT NULL DEFAULT '',
+			task_id       TEXT NOT NULL,
+			PRIMARY KEY (project_id, model_name, provider_name, task_id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)
+	`)
+	// Backfill existing data from task_messages (idempotent)
+	var migrationDone int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM config WHERE key = 'migration_cumulative_stats'`).Scan(&migrationDone)
+	if migrationDone == 0 {
+		_, _ = s.db.Exec(`
+			INSERT INTO project_token_stats (project_id, model_name, provider_name, prompt_tokens, cache_tokens, predicted_tokens, prompt_ms, predicted_ms)
+			SELECT
+				t.project_id,
+				COALESCE(tm.model_name, 'unknown'),
+				COALESCE(tm.provider_name, ''),
+				SUM(tm.prompt_tokens),
+				SUM(COALESCE(tm.cache_tokens, 0)),
+				SUM(tm.predicted_tokens),
+				SUM(tm.prompt_ms),
+				SUM(tm.predicted_ms)
+			FROM task_messages tm
+			JOIN tasks t ON t.id = tm.task_id
+			WHERE tm.role IN ('assistant', 'title')
+			GROUP BY t.project_id, tm.model_name, tm.provider_name
+		`)
+		_, _ = s.db.Exec(`
+			INSERT INTO project_token_tasks (project_id, model_name, provider_name, task_id)
+			SELECT DISTINCT
+				t.project_id,
+				COALESCE(tm.model_name, 'unknown'),
+				COALESCE(tm.provider_name, ''),
+				tm.task_id
+			FROM task_messages tm
+			JOIN tasks t ON t.id = tm.task_id
+			WHERE tm.role IN ('assistant', 'title')
+		`)
+		_, _ = s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_cumulative_stats', '1')`)
+	}
 	return nil
 }
 
