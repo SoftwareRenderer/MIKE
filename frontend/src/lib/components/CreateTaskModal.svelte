@@ -21,6 +21,7 @@
     let providers: Provider[] = $state([]);
     let selectedModel = $state('');
     let selectedUrl = $state('');
+    let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
 
     onMount(async () => {
@@ -64,9 +65,10 @@
         }
     });
 
-    function handleModelSelect(providerName: string, modelName: string, providerUrl: string) {
+    function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
         selectedUrl = providerUrl;
+        selectedReasoningEffort = reasoningEffort || '';
     }
 
     async function handleSubmit() {
@@ -82,6 +84,7 @@
             };
             if (selectedModel) taskData.model_name = selectedModel;
             if (selectedUrl) taskData.llama_server_url = selectedUrl;
+            if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
             if (parentId) taskData.parent_task_id = parentId;
             await createTask(projectId, taskData);
             // Refresh the board
@@ -130,6 +133,7 @@
                         providers={providers}
                         currentModel={selectedModel}
                         currentUrl={selectedUrl}
+                        currentReasoningEffort={selectedReasoningEffort}
                         onSelect={handleModelSelect}
                     />
                 </div>

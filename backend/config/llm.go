@@ -166,9 +166,20 @@ func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *
 			serverURL = p.URL
 		}
 		// Use provider's default model if set
+		// Default model may be in composite format: modelName|reasoningEffort
 		if modelName == "" && p.DefaultModel != "" {
+			defaultName := p.DefaultModel
+			defaultEffort := ""
+			if parts := strings.Split(p.DefaultModel, "|"); len(parts) == 2 {
+				defaultName = parts[0]
+				defaultEffort = parts[1]
+			}
 			for _, m := range p.Models {
-				if m.Name == p.DefaultModel {
+				if m.Name == defaultName {
+					// If composite format, match effort too
+					if defaultEffort != "" && m.ReasoningEffort != defaultEffort {
+						continue
+					}
 					modelName = m.Name
 					break
 				}

@@ -5,11 +5,12 @@
         providers: Provider[];
         currentModel: string;
         currentUrl: string;
+        currentReasoningEffort?: string;
         disabled?: boolean;
-        onSelect: (providerName: string, modelName: string, providerUrl: string) => void;
+        onSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
     }
 
-    let { providers, currentModel, currentUrl, disabled = false, onSelect }: Props = $props();
+    let { providers, currentModel, currentUrl, currentReasoningEffort = '', disabled = false, onSelect }: Props = $props();
 
     let selectedProviderUrl = $state(currentUrl || '');
     let providerDropdownOpen = $state(false);
@@ -29,10 +30,22 @@
     );
 
     let availableModels = $derived(
-        selectedProvider?.models
-            .map(m => typeof m === 'string' ? m : m.name)
-            .filter(m => m.trim())
-            .toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) || []
+        (() => {
+            if (!selectedProvider?.models.length) return [];
+            // Build unique model+effort pairs
+            const pairs = new Map<string, { name: string; effort: string }>();
+            for (const m of selectedProvider.models) {
+                const name = typeof m === 'string' ? m : m.name;
+                const effort = (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium';
+                if (!name.trim()) continue;
+                const key = `${name}|${effort}`;
+                if (!pairs.has(key)) {
+                    pairs.set(key, { name, effort });
+                }
+            }
+            return Array.from(pairs.values())
+                .toSorted((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.effort.localeCompare(b.effort));
+        })()
     );
 
     let activeProviders = $derived(
@@ -105,18 +118,36 @@
     function selectProvider(provider: Provider) {
         selectedProviderUrl = provider.url;
         providerDropdownOpen = false;
-        const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
-        const modelToSelect = provider.default_model && provider.models.some(m => getModelName(m) === provider.default_model)
-            ? provider.default_model
-            : provider.models.length > 0 ? getModelName(provider.models[0]) : null;
+        const getModelInfo = (m: string | { name: string; reasoning_effort?: string }) => ({
+            name: typeof m === 'string' ? m : m.name,
+            effort: (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium',
+        });
+        let modelToSelect: { name: string; effort: string } | null = null;
+        if (provider.default_model) {
+            // Parse composite default: modelName|effort
+            const parts = provider.default_model.split('|');
+            const defaultName = parts[0];
+            const defaultEffort = parts[1] || 'medium';
+            const match = provider.models.map(getModelInfo).find(m => m.name === defaultName && m.effort === defaultEffort);
+            // Fallback: match by name only (backward compat)
+            if (!match) {
+                const nameOnly = provider.models.map(getModelInfo).find(m => m.name === defaultName);
+                if (nameOnly) modelToSelect = nameOnly;
+            } else {
+                modelToSelect = match;
+            }
+        }
+        if (!modelToSelect && provider.models.length > 0) {
+            modelToSelect = getModelInfo(provider.models[0]);
+        }
         if (modelToSelect) {
-            onSelect(provider.name, modelToSelect, provider.url);
+            onSelect(provider.name, modelToSelect.name, provider.url, modelToSelect.effort);
         }
     }
 
-    function selectModel(model: string) {
+    function selectModel(modelName: string, reasoningEffort?: string) {
         if (!selectedProvider) return;
-        onSelect(selectedProvider.name, model, selectedProvider.url);
+        onSelect(selectedProvider.name, modelName, selectedProvider.url, reasoningEffort);
         modelDropdownOpen = false;
     }
 
@@ -299,10 +330,14 @@
         {#if availableModels.length === 0}
             <div class="empty">No models available</div>
         {:else}
-            {#each availableModels as model}
-                <button type="button" class="model-option" class:active={model === currentModel} onclick={() => selectModel(model)} role="option" aria-selected={model === currentModel}>
-                    <span class="option-name">{model}</span>
-                    {#if model === currentModel}
+            {#each availableModels as m}
+                {@const isActive = m.name === currentModel && m.effort === (currentReasoningEffort || 'medium')}
+                <button type="button" class="model-option" class:active={isActive} onclick={() => selectModel(m.name, m.effort)} role="option" aria-selected={isActive}>
+                    <span class="option-name">{m.name}</span>
+                    {#if m.effort && m.effort !== 'medium'}
+                        <span class="effort-badge">{m.effort}</span>
+                    {/if}
+                    {#if isActive}
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
@@ -418,7 +453,7 @@
     .model-option {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 6px;
         width: 100%;
         padding: 6px 8px;
         border-radius: var(--radius-sm);
@@ -442,5 +477,17 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .effort-badge {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-text-tertiary);
+        background: var(--color-surface-3);
+        padding: 1px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        margin-left: 4px;
     }
 </style>

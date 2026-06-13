@@ -164,7 +164,8 @@
         p.testingConnection = true;
         p.testResult = null;
         try {
-            const result = await testConnectionApi(p.url.trim(), p.default_model || (p.models.find(m => m.name)?.name || ''));
+            const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');
+            const result = await testConnectionApi(p.url.trim(), defaultModelName);
             p.testResult = {
                 success: result.success,
                 message: result.message,
@@ -312,21 +313,32 @@
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
         const p = providers[idx];
-        const removedModel = p.models[modelIdx]?.name || '';
+        const removed = p.models[modelIdx];
+        const removedName = removed?.name || '';
+        const removedEffort = removed?.reasoning_effort || 'medium';
+        const removedCompositeKey = removedEffort !== 'medium' ? `${removedName}|${removedEffort}` : removedName;
         p.models.splice(modelIdx, 1);
-        // Clear default if the removed model was the default
-        if (p.default_model === removedModel) {
+        // Clear default if the removed model+effort pair was the default
+        if (p.default_model === removedCompositeKey) {
             p.default_model = '';
         }
     }
 
-    function setProviderDefaultModel(idx: number, modelName: string) {
+    function setProviderDefaultModel(idx: number, modelName: string, reasoningEffort?: string) {
         const p = providers[idx];
-        if (p.default_model === modelName) {
+        const compositeKey = reasoningEffort && reasoningEffort !== 'medium' ? `${modelName}|${reasoningEffort}` : modelName;
+        if (p.default_model === compositeKey) {
             p.default_model = ''; // toggle off
         } else {
-            p.default_model = modelName;
+            p.default_model = compositeKey;
         }
+    }
+
+    /** Parse a default_model value (possibly modelName|effort) into {name, effort}. */
+    function parseDefaultModel(value: string): { name: string; effort: string } {
+        if (!value) return { name: '', effort: '' };
+        const parts = value.split('|');
+        return { name: parts[0], effort: parts[1] || 'medium' };
     }
 
     function toggleDefaultProvider(providerName: string) {
@@ -455,7 +467,8 @@
                                 <div class="provider-actions">
                                     <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
                                     {#if p.default_model}
-                                        <span class="default-model-badge" style="color: {getModelColor(p.default_model)}; background: {getModelColor(p.default_model)}22">{p.default_model}</span>
+                                        {@const defaultModelInfo = parseDefaultModel(p.default_model)}
+                                        <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}22">{defaultModelInfo.name}</span>
                                     {/if}
                                     <button type="button" class="btn-remove-provider" onclick={(e) => { e.stopPropagation(); if (confirm('Remove this provider?')) removeProvider(i); }} title="Remove provider" aria-label="Remove provider">
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -558,8 +571,10 @@
                                             {#each p.models as model, mi}
                                                 <div class="model-row" class:readonly={model.readonly}>
                                                     {#if model.name}
-                                                        <button type="button" class="btn-default" class:active={p.default_model === model.name} onclick={() => setProviderDefaultModel(i, model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === model.name ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
-                                                            {p.default_model === model.name ? 'Default' : 'Set default'}
+                                                        {@const modelEffort = model.reasoning_effort || 'medium'}
+                                                        {@const modelCompositeKey = modelEffort !== 'medium' ? `${model.name}|${modelEffort}` : model.name}
+                                                        <button type="button" class="btn-default" class:active={p.default_model === modelCompositeKey} onclick={() => setProviderDefaultModel(i, model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
+                                                            {p.default_model === modelCompositeKey ? 'Default' : 'Set default'}
                                                         </button>
                                                     {:else}
                                                         <span class="btn-default-placeholder"></span>

@@ -31,7 +31,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
 	providerName := te.configStore.GetProviderNameByURL(serverURL)
-	reasoningEffort := te.configStore.GetModelReasoningEffort(modelName)
+	reasoningEffort := task.ReasoningEffort
+	if reasoningEffort == "" {
+		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
+	}
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort)
 	tools := llama.GetToolDefinitions()
 	var systemPrompt string
@@ -103,7 +106,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					newModel = curModel
 				}
 				mc.set(newURL, newModel)
-				newReasoningEffort := te.configStore.GetModelReasoningEffort(newModel)
+				newReasoningEffort := updatedTask.ReasoningEffort
+				if newReasoningEffort == "" {
+					newReasoningEffort = te.configStore.GetModelReasoningEffort(newModel)
+				}
 				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort)
 				providerName = te.configStore.GetProviderNameByURL(newURL)
 				log.Printf("[model-switch] task=%s url=%s model=%s", task.ID, newURL, newModel)

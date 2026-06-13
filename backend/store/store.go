@@ -223,6 +223,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`) // best-effort for existing tables
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`) // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT DEFAULT NULL`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (
@@ -442,10 +443,10 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoPR, planMode, titleGenerating int
 	var createdAt, updatedAt string
-	var parentTaskID, currentThreadID sql.NullString
+	var parentTaskID, currentThreadID, reasoningEffort sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &t.Output, &t.StatusState,
-		&t.LlamaServerURL, &t.ModelName, &t.MaxConsecutiveFailedTurns,
+		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
 		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt)
 	if err != nil {
 		return err
@@ -456,6 +457,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)
 	t.CurrentThreadID = currentThreadID.String
+	t.ReasoningEffort = reasoningEffort.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return nil

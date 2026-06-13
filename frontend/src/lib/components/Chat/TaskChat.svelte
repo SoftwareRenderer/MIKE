@@ -68,6 +68,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let providers: Provider[] = $state([]);
     let selectedModel = $state('');
     let selectedUrl = $state('');
+    let selectedReasoningEffort = $state('');
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
@@ -644,14 +645,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         scroll();
     }
 
-    async function handleModelSelect(providerName: string, modelName: string, providerUrl: string) {
+    async function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
         selectedUrl = providerUrl;
+        selectedReasoningEffort = reasoningEffort || '';
         // Update task with new model/provider
         try {
             await updateTask(projectId, taskId, {
                 model_name: modelName,
                 llama_server_url: providerUrl,
+                reasoning_effort: reasoningEffort || null,
             });
         } catch (e) {
             console.error('Failed to update task model:', e);
@@ -1054,6 +1057,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             if (task.model_name) {
                 selectedModel = task.model_name;
             }
+            if (task.reasoning_effort) {
+                selectedReasoningEffort = task.reasoning_effort;
+            }
         } catch {
             // Task may not exist yet
         }
@@ -1160,6 +1166,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         providers={providers}
                         currentModel={selectedModel}
                         currentUrl={selectedUrl}
+                        currentReasoningEffort={selectedReasoningEffort}
                         onSelect={handleModelSelect}
                     />
                 </div>
@@ -1216,6 +1223,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             providers={providers}
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}
+            selectedReasoningEffort={selectedReasoningEffort}
             onSubmit={(msg) => handleSend(msg)}
             onStop={handleStop}
             onModelSelect={handleModelSelect}

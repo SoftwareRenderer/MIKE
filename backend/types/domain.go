@@ -16,6 +16,7 @@ type Task struct {
 	StatusState             string    `json:"status_state"`
 	LlamaServerURL          string    `json:"llama_server_url"`
 	ModelName               string    `json:"model_name"`
+	ReasoningEffort         string    `json:"reasoning_effort"`
 	MaxConsecutiveFailedTurns int     `json:"max_consecutive_failed_turns"`
 	AutoCommit              bool      `json:"auto_commit"`
 	AutoPR                  bool      `json:"auto_pr"`

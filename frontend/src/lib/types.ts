@@ -35,6 +35,7 @@ export interface Task {
     status_state: string;
     llama_server_url?: string;
     model_name?: string;
+    reasoning_effort?: string;
     max_consecutive_failed_turns: number;
     auto_commit: boolean;
     auto_pr: boolean;

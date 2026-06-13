@@ -10,9 +10,10 @@
         providers?: Provider[];
         selectedModel?: string;
         selectedUrl?: string;
+        selectedReasoningEffort?: string;
         onSubmit?: (message: string) => void;
         onStop?: () => void;
-        onModelSelect?: (providerName: string, modelName: string, providerUrl: string) => void;
+        onModelSelect?: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
     }
 
     let {
@@ -23,6 +24,7 @@
         providers = [],
         selectedModel = '',
         selectedUrl = '',
+        selectedReasoningEffort = '',
         onSubmit,
         onStop,
         onModelSelect,
@@ -85,6 +87,7 @@
                 {providers}
                 currentModel={selectedModel}
                 currentUrl={selectedUrl}
+                currentReasoningEffort={selectedReasoningEffort}
                 {disabled}
                 onSelect={onModelSelect}
             />

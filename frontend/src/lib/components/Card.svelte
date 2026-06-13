@@ -101,12 +101,13 @@
         pickerRect = null;
     }
 
-    async function selectModel(providerUrl: string, modelName: string) {
+    async function selectModel(providerUrl: string, modelName: string, reasoningEffort?: string) {
         if (!projectId) return;
         try {
-            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl });
+            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl, reasoning_effort: reasoningEffort || null });
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
+            task.reasoning_effort = updated.reasoning_effort;
             boardStore.update(b => {
                 if (!b) return b;
                 const idx = b.tasks.findIndex(t => t.id === task.id);
@@ -480,11 +481,28 @@
         {#each providers as provider}
             {#if provider.models.length > 0}
                 <div class="picker-provider-header">{provider.display_name || provider.name}</div>
-                {#each provider.models as model}
-                    {@const modelName = typeof model === 'string' ? model : model.name}
-                    <button type="button" class="picker-model-option" class:active={modelName === task.model_name} onclick={() => selectModel(provider.url, modelName)} role="option" aria-selected={modelName === task.model_name}>
-                        <span class="option-name">{modelName}</span>
-                        {#if modelName === task.model_name}
+                {@const pairs = (() => {
+                    const seen = new Set<string>();
+                    const result: Array<{name: string; effort: string}> = [];
+                    for (const m of provider.models) {
+                        const name = typeof m === 'string' ? m : m.name;
+                        const effort = (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium';
+                        const key = `${name}|${effort}`;
+                        if (!seen.has(key) && name.trim()) {
+                            seen.add(key);
+                            result.push({ name, effort });
+                        }
+                    }
+                    return result;
+                })()}
+                {#each pairs as m}
+                    {@const isActive = m.name === task.model_name && m.effort === (task.reasoning_effort || 'medium')}
+                    <button type="button" class="picker-model-option" class:active={isActive} onclick={() => selectModel(provider.url, m.name, m.effort)} role="option" aria-selected={isActive}>
+                        <span class="option-name">{m.name}</span>
+                        {#if m.effort && m.effort !== 'medium'}
+                            <span class="effort-badge">{m.effort}</span>
+                        {/if}
+                        {#if isActive}
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         {/if}
                     </button>
@@ -707,7 +725,7 @@
     .picker-model-option {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 6px;
         width: 100%;
         padding: 6px 8px;
         border-radius: var(--radius-sm);
@@ -731,6 +749,17 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .effort-badge {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-text-tertiary);
+        background: var(--color-surface-3);
+        padding: 1px 5px;
+        border-radius: 3px;
+        flex-shrink: 0;
     }
 
     @media (hover: none) {
