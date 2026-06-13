@@ -13,8 +13,6 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/term"
 	"kanban/backend/types"
-
-	"github.com/google/uuid"
 )
 
 // ProjectHandler handles project CRUD operations.
@@ -84,9 +82,16 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		name = Basename(req.Path)
 	}
 
+	// Collect existing project IDs to avoid collisions
+	existingIDs := []string{}
+	projects, _ := h.store.ListProjects()
+	for _, p := range projects {
+		existingIDs = append(existingIDs, p.ID)
+	}
+
 	now := time.Now().UTC()
 	p := &types.Project{
-		ID:        uuid.New().String(),
+		ID:        GenerateProjectID(req.Path, existingIDs),
 		Name:      name,
 		Path:      req.Path,
 		CreatedAt: now,

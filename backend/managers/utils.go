@@ -87,3 +87,36 @@ func Basename(path string) string {
 	parts = strings.Split(path, "\\")
 	return parts[len(parts)-1]
 }
+
+// GenerateProjectID returns a human-readable project ID derived from the folder path.
+// Uses the basename by default; falls back to a slugified full path if the basename
+// collides with an existing project ID.
+func GenerateProjectID(path string, existingIDs []string) string {
+	base := Basename(path)
+	if !contains(existingIDs, base) {
+		return base
+	}
+	// Collision — slugify the full path
+	slug := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, path)
+	// Collapse multiple dashes and trim leading/trailing dashes
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+	slug = strings.Trim(slug, "-")
+	return strings.ToLower(slug)
+}
+
+// contains returns true if the slice contains the given string.
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
