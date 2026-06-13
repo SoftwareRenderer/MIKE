@@ -137,7 +137,7 @@
                         return { name: m, readonly: false, reasoning_effort: 'medium' as const };
                     }
                     return { name: m.name, readonly: false, reasoning_effort: m.reasoning_effort || 'medium' };
-                }),
+                }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
             };
             // Migrate: if old global default_model belongs to this provider and provider has no default set
             if (!draft.default_model && oldGlobalDefault && p.models?.some(m => (typeof m === 'string' ? m : m.name) === oldGlobalDefault)) {
@@ -296,6 +296,7 @@
             } else {
                 // Replace: clear existing models and use fetched list (readonly)
                 p.models = result.models.map(m => ({ name: m, readonly: true, reasoning_effort: 'medium' as const }));
+                p.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
             }
         } catch (e) {
             p.fetchError = String(e);
@@ -306,6 +307,7 @@
 
     function addModelToProvider(idx: number) {
         providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'medium' });
+        providers[idx].models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     }
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
@@ -553,7 +555,7 @@
                                             </button>
                                         </div>
                                         <div class="models-list">
-                                            {#each [...p.models].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) as model, mi}
+                                            {#each p.models as model, mi}
                                                 <div class="model-row" class:readonly={model.readonly}>
                                                     {#if model.name}
                                                         <button type="button" class="btn-default" class:active={p.default_model === model.name} onclick={() => setProviderDefaultModel(i, model.name)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === model.name ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
