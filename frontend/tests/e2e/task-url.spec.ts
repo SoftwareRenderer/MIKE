@@ -198,3 +198,98 @@ test.describe.serial('Task URL Navigation — Project Switch', () => {
     expect(page.url()).toContain('project=');
   });
 });
+
+test.describe.serial('Task URL Navigation — Stale Param Cleanup', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should remove thread param when clicking Back to board', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `stale-thread-back-${Date.now()}`);
+
+    // Navigate to task with a thread param (simulating chat thread navigation)
+    await page.goto(`/?project=${projectId}&task=${taskId}&thread=some-thread-id`);
+    await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    expect(page.url()).toContain('thread=some-thread-id');
+
+    // Click Back to board
+    await page.click('.btn-back');
+    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
+
+    // URL should have project param but NOT task or thread params
+    expect(page.url()).toContain(`project=${projectId}`);
+    expect(page.url()).not.toContain('task=');
+    expect(page.url()).not.toContain('thread=');
+  });
+
+  test('should remove thread param when switching tasks', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const taskId1 = await createTaskViaApi(page, projectId, `stale-thread-switch-1-${Date.now()}`);
+    const taskId2 = await createTaskViaApi(page, projectId, `stale-thread-switch-2-${Date.now()}`);
+
+    // Navigate to first task with a thread param
+    await page.goto(`/?project=${projectId}&task=${taskId1}&thread=some-thread-id`);
+    await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    expect(page.url()).toContain('thread=some-thread-id');
+
+    // Click the second task in the CardDetail sidebar
+    const secondTaskBtn = page.locator('.task-item').filter({ hasText: 'stale-thread-switch-2' });
+    await expect(secondTaskBtn).toBeVisible({ timeout: 10000 });
+    await secondTaskBtn.click();
+
+    // URL should have the new task and project, but NOT the old thread param
+    expect(page.url()).toContain(`task=${taskId2}`);
+    expect(page.url()).toContain(`project=${projectId}`);
+    expect(page.url()).not.toContain('thread=');
+  });
+
+  test('should remove thread param when switching projects', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `stale-thread-proj-${Date.now()}`);
+
+    // Navigate to task with a thread param
+    await page.goto(`/?project=${projectId}&task=${taskId}&thread=some-thread-id`);
+    await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    expect(page.url()).toContain('thread=some-thread-id');
+
+    // Close task detail first
+    await page.click('.btn-back');
+    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
+
+    // Create and switch to a second project
+    const secondProjectId = await page.evaluate(async () => {
+      const listRes = await fetch('/api/projects');
+      const projects = await listRes.json();
+      const existing = projects.find((p: any) => p.path === '/tmp/kanban-test-repo-2');
+      if (existing) return existing.id;
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'stale-param-project', path: '/tmp/kanban-test-repo-2' }),
+      });
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+      return (await res.json()).id;
+    });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    const projectItems = page.locator('.project-item');
+    await expect(async () => {
+      expect(await projectItems.count()).toBeGreaterThanOrEqual(2);
+    }).toPass({ timeout: 5000 });
+
+    // Click the last project
+    const projectCount = await projectItems.count();
+    await projectItems.nth(projectCount - 1).click();
+
+    // URL should have the new project param, no task or thread params
+    expect(page.url()).not.toContain('task=');
+    expect(page.url()).not.toContain('thread=');
+    expect(page.url()).toContain('project=');
+  });
+});

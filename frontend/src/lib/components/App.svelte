@@ -23,6 +23,25 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         return name.slice(0, 2).toUpperCase();
     }
 
+    /**
+     * Update the URL to reflect the current navigation state.
+     * Sets project/task as provided, leaves other params (e.g., `thread`) untouched.
+     * Uses replaceState to avoid polluting browser history.
+     * @param clearThread Also remove the `thread` param (use when leaving task detail).
+     */
+    function updateUrl(params: { project?: string | null; task?: string | null }, clearThread = false) {
+        const url = new URL(location.href);
+        url.searchParams.delete('project');
+        url.searchParams.delete('task');
+        if (clearThread) url.searchParams.delete('thread');
+        if (params.project) url.searchParams.set('project', params.project);
+        if (params.task) url.searchParams.set('task', params.task);
+        const newUrl = location.pathname + (url.search || '');
+        if (location.pathname + location.search !== newUrl) {
+            history.replaceState(null, '', newUrl);
+        }
+    }
+
     let projects: Project[] = $state([]);
     let currentProject: Project | null = $state(null);
     let tasks: Task[] = $state([]);
@@ -64,12 +83,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             selectedTask.subscribe(t => {
                 selectedTaskVal = t;
                 if (t && currentProject) {
-                    const url = new URL(location.href);
-                    url.searchParams.set('project', currentProject.id);
-                    url.searchParams.set('task', t.id);
-                    if (url.search !== location.search) {
-                        history.pushState({ task: t.id, project: currentProject.id }, '', url.search);
-                    }
+                    updateUrl({ project: currentProject.id, task: t.id });
                 }
             }),
             taskDiffStatsStore.subscribe(v => taskDiffStats = v),
@@ -194,15 +208,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         showCardDetailVal = false;
         selectedTask.set(null);
         showCardDetail.set(false);
-        // Clear task param, keep project param for current project
-        if (currentProject) {
-            const url = new URL(location.href);
-            url.searchParams.delete('task');
-            url.searchParams.set('project', currentProject.id);
-            history.replaceState(null, '', location.pathname + url.search);
-        } else {
-            history.replaceState(null, '', location.pathname);
-        }
+        updateUrl({ project: currentProject?.id }, true);
     }
 
     async function selectProject(p: Project) {
@@ -210,17 +216,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         currentProject = p;
         selectedProject.set(p);
         // Update URL with project param
-        // Preserve existing task param from URL (restoreTaskFromUrl will read it)
-        // Only set task param if we have an actively selected task
-        {
-            const url = new URL(location.href);
-            url.searchParams.set('project', p.id);
-            if (selectedTaskVal) {
-                url.searchParams.set('task', selectedTaskVal.id);
-            }
-            // Don't delete task param — restoreTaskFromUrl needs it on initial load
-            history.replaceState(null, '', location.pathname + url.search);
-        }
+        // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
+        const urlTaskId = new URLSearchParams(location.search).get('task');
+        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId });
         try {
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
@@ -432,16 +430,11 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
-                        const url = new URL(location.href);
-                        url.searchParams.delete('task');
-                        history.pushState({ project: currentProject?.id }, '', url.search);
+                        updateUrl({ project: currentProject?.id }, true);
                     }} onSelectTask={(t: Task) => {
                         selectedTaskVal = t;
                         selectedTask.set(t);
-                        const url = new URL(location.href);
-                        url.searchParams.set('project', currentProject?.id || '');
-                        url.searchParams.set('task', t.id);
-                        history.replaceState({ task: t.id, project: currentProject?.id }, '', url.search);
+                        updateUrl({ project: currentProject?.id, task: t.id }, true);
                     }} />
                 {:else}
                     <Board 
