@@ -57,6 +57,14 @@
         }
     }
 
+    function handleFocus() {
+        // On mobile, scroll the textarea into view when the keyboard appears.
+        // This is a fallback for browsers with limited visualViewport support (e.g., Firefox Android).
+        if (textareaEl) {
+            textareaEl.scrollIntoView({ block: 'end', behavior: 'instant' });
+        }
+    }
+
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -109,6 +117,7 @@
             rows="1"
             onkeydown={handleKeydown}
             oninput={autoResize}
+            onfocus={handleFocus}
         ></textarea>
         {#if isLoading}
             <button type="button" class="btn-stop" onclick={handleStop} aria-label="Stop generation" title="Stop generation">

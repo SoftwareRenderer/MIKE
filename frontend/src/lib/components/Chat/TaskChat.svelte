@@ -1098,6 +1098,26 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     let destroyed = $state(false);
 
+    // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
+    let keyboardOffset = $state(0);
+    let chatFormRef: HTMLElement | null = null;
+
+    function setupViewportListener() {
+        const vv = window.visualViewport;
+        if (!vv) return;
+        function onResize() {
+            const diff = Math.max(0, window.innerHeight - vv.height);
+            keyboardOffset = diff;
+        }
+        vv.addEventListener('resize', onResize);
+        // Also listen for orientation changes
+        window.addEventListener('orientationchange', onResize);
+        return () => {
+            vv.removeEventListener('resize', onResize);
+            window.removeEventListener('orientationchange', onResize);
+        };
+    }
+
     /** Re-read thread param from URL and switch if needed (for popstate/Back navigation). */
     async function syncThreadFromUrl() {
         const urlThread = readThreadFromUrl();
@@ -1182,9 +1202,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         window.addEventListener('urlchanged', handleUrlChange);
         // Subscribe to config store to react to settings changes
         const unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
+        // Track visualViewport for mobile keyboard awareness
+        const unsubViewport = setupViewportListener();
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubConfig();
+            unsubViewport?.();
         };
     });
 
@@ -1310,6 +1333,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </button>
         </div>
     {:else}
+        <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
         {#if taskStatus === 'done' && onMoveTask}
             <div class="chat-review-bar">
                 <button class="btn-move" onclick={() => onMoveTask('review')} title="Move task to Review">
@@ -1357,6 +1381,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             onStop={handleStop}
             onModelSelect={handleModelSelect}
         />
+        </div>
     {/if}
 </div>
 
@@ -1659,6 +1684,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         color: var(--color-accent);
         opacity: 0.8;
         white-space: nowrap;
+    }
+    .chat-form-wrapper {
+        flex-shrink: 0;
     }
     .compression-summary {
         margin-top: 6px;
