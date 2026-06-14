@@ -455,14 +455,16 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 2: Chat / Agent Interface -->
             <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={chatWidth}>
                 <div style="flex:1;min-height:0">
-                    <TaskChat
-                        projectId={task.project_id}
-                        taskId={task.id}
-                        taskPrompt={task.prompt}
-                        taskStatus={task.status}
-                        onRefreshDiff={updateDiff}
-                        onMoveTask={handleMove}
-                    />
+                    {#key task.id}
+                        <TaskChat
+                            projectId={task.project_id}
+                            taskId={task.id}
+                            taskPrompt={task.prompt}
+                            taskStatus={task.status}
+                            onRefreshDiff={updateDiff}
+                            onMoveTask={handleMove}
+                        />
+                    {/key}
                 </div>
             </div>
 
