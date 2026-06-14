@@ -1430,7 +1430,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {/if}
         {#if showRestartButton}
             <div class="chat-review-bar">
-                <button class="btn-restart-task" onclick={handleStartTask} disabled={isStarting || disabled} title="Restart the task from the last user message">
+                {#if providers.length > 0}
+                    <div class="restart-model-row">
+                        <ModelSelector
+                            providers={providers}
+                            currentModel={selectedModel}
+                            currentUrl={selectedUrl}
+                            currentReasoningEffort={selectedReasoningEffort}
+                            onSelect={handleModelSelect}
+                        />
+                    </div>
+                {/if}
+                <button class="btn-restart-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Restart the task from the last user message">
                     {#if isStarting}
                         <span class="spinner-inline"></span> Restarting...
                     {:else}
@@ -1611,6 +1622,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .start-model-row {
         display: flex;
         align-items: center;
+    }
+    .restart-model-row {
+        display: flex;
+        align-items: center;
+        margin-right: auto;
     }
     .btn-start-task {
         display: inline-flex;
