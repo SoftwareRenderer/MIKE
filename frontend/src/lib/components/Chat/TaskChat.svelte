@@ -214,6 +214,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'reasoning': {
+                clearAwaiting();
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
@@ -1102,6 +1103,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Task may not exist yet
         }
         connect();
+        // If task was started externally (e.g., from board) and is running with no
+        // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
+        if (taskStatus === 'in_progress' || taskStatus === 'review') {
+            const lastEntry = entries[entries.length - 1];
+            if (lastEntry?.role === 'user') {
+                awaitingResponse = true;
+            }
+        }
         // Listen for URL changes (e.g., browser Back/Forward)
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);

@@ -188,6 +188,12 @@ const server = http.createServer((req, res) => {
                 const lastUser = msgs.filter(m => m.role === 'user').pop();
                 console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) stream=${parsed.stream} last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
 
+                // Check for initial delay: header override or keyword-based routing
+                let initialDelay = parseInt(req.headers['x-initial-delay'] || '50', 10);
+                if (/slow-start/i.test(lastUser?.content || '')) {
+                    initialDelay = 3000; // 3s delay for tests that need a warm-up window
+                }
+
                 // Non-streaming response (stream: false) — return JSON, not SSE
                 if (parsed.stream === false) {
                     const responseBody = buildNonStreamingResponse(parsed, chunks);
@@ -204,7 +210,7 @@ const server = http.createServer((req, res) => {
                     'X-Accel-Buffering': 'no',
                 });
 
-                // Small initial delay to simulate LLM warm-up (50ms)
+                // Initial delay to simulate LLM warm-up (default 50ms, overridable via x-initial-delay header)
                 setTimeout(() => {
                     let i = 0;
                     const sendNext = () => {
@@ -218,7 +224,7 @@ const server = http.createServer((req, res) => {
                         setTimeout(sendNext, chunkDelay);
                     };
                     sendNext();
-                }, 50);
+                }, initialDelay);
             } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid request body' }));
