@@ -226,20 +226,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'tool_call': {
                 clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
-                // If the LLM sent the tool name as text content before the tool call,
-                // clear it in-place to avoid a blank bubble (don't remove entry to prevent flicker)
-                if (currentAssistantId) {
-                    const entry = entries.find(e => e.id === currentAssistantId);
-                    if (entry && entry.content.trim() === data.tool_name && !entry.reasoningContent) {
-                        entry.content = '';
-                    }
-                }
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
                 if (!data.tool_id || data.tool_id === '') {
                     break;
                 }
-                // Attach tool call to the current assistant entry (below its text content)
+                // Attach tool call to the current assistant entry
                 const entry = ensureAssistantEntry();
+                // If the LLM sent the tool name as text content before the tool call,
+                // clear it in-place to avoid a blank bubble
+                if (entry.content.trim() === data.tool_name && !entry.reasoningContent) {
+                    entry.content = '';
+                }
                 if (!entry.toolCalls) entry.toolCalls = [];
                 entry.toolCalls.push({
                     toolId: data.tool_id,
@@ -250,8 +247,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     isPending: true
                 });
                 entry.isStreaming = true;
-                // Force reactivity so child components detect the new tool call
-                entries = entries.map(e => e.id === entry.id ? { ...e, toolCalls: [...e.toolCalls] } : e);
                 activeToolCalls.set(data.tool_id, { entryId: entry.id });
                 scroll();
                 break;
@@ -270,14 +265,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             tc.duration = data.duration;
                             tc.isPending = false;
                         }
-                        // Force reactivity
-                        entries = entries.map(e => e.id === entry.id ? { ...e, toolCalls: [...(e.toolCalls || [])] } : e);
                     }
                 }
                 // All tool results for this turn are done — close the assistant entry
-                // so the next turn's reasoning/tool calls go into a new entry
+                // so the next turn's reasoning/tool calls go into a new entry.
+                // The server will now make another LLM call — show the awaiting spinner.
                 if (activeToolCalls.size === 0) {
                     closeCurrentAssistant();
+                    awaitingResponse = true;
                 }
                 scroll();
                 break;
@@ -1121,6 +1116,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Task may not exist yet
         }
         connect();
+        // Scroll to bottom after history is loaded and DOM has rendered.
+        // scroll() uses requestAnimationFrame internally so the DOM update is ready.
+        scroll();
         // If task was started externally (e.g., from board) and is running with no
         // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
         if (taskStatus === 'in_progress' || taskStatus === 'review') {
