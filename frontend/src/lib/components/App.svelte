@@ -253,6 +253,16 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                 }
             }, (branch) => {
                 currentBranch = branch;
+            }, (updatedTask: Task) => {
+                const idx = tasks.findIndex(t => t.id === updatedTask.id);
+                if (idx !== -1) {
+                    tasks[idx] = updatedTask;
+                }
+                // Update selected task if it's the one that changed
+                if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
+                    selectedTaskVal = updatedTask;
+                    selectedTask.set(updatedTask);
+                }
             });
         } catch (e) {
             console.error('Failed to load board:', e);

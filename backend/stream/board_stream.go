@@ -145,6 +145,23 @@ func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat s
 	}
 }
 
+// BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project.
+func (bsm *BoardStreamManager) BroadcastTaskUpdated(projectID string, task interface{}) {
+	bsm.mu.RLock()
+	clients := bsm.clients[projectID]
+	bsm.mu.RUnlock()
+
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type": "task_updated",
+		"task": task,
+	})
+	for conn := range clients {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected, will be cleaned up on read loop exit
+		}
+	}
+}
+
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
 func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 	if bsm.store == nil {

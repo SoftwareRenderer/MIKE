@@ -644,7 +644,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		}
 
 		log.Printf("[title-gen] task=%s title updated to: %q", taskID, title)
-		h.boardStreamMgr.Broadcast(projectID)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}()
 }
 
@@ -664,6 +664,6 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 		return
 	}
 	if broadcast {
-		h.boardStreamMgr.Broadcast(projectID)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}
 }

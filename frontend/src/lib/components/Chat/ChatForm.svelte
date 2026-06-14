@@ -214,6 +214,11 @@
         .chat-form {
             padding: 8px;
         }
+        .model-bar {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            -webkit-overflow-scrolling: touch;
+        }
         .btn-send,
         .btn-stop {
             width: 44px;
