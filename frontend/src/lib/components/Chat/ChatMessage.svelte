@@ -31,11 +31,18 @@ import { getToolDisplayName } from '$lib/types';
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
+        taskStatus?: string;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog' }: Props = $props();
 
-    let reasoningExpanded = $state(!reasoningContent || (reasoningContent.length <= 200 && !content));
+    let reasoningUserToggled = $state(false);
+    let reasoningUserValue = $state(false); // user's explicit choice after toggling
+    let reasoningExpanded = $derived(
+        reasoningUserToggled
+            ? reasoningUserValue
+            : (!reasoningContent || (reasoningContent.length <= 200 && !content) || (toolCalls && toolCalls.length > 0) || isStreaming)
+    );
 
     function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
         switch (toolName) {
@@ -210,12 +217,18 @@ import { getToolDisplayName } from '$lib/types';
                     ></textarea>
                     <div class="edit-actions">
                         <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
-                        <button class="btn-edit-submit" onclick={submitEdit} title="Save changes">
-                            {#if isFirstUserMessage}
+                        <button class="btn-edit-submit" onclick={submitEdit} title="{isFirstUserMessage && taskStatus === 'backlog' ? 'Save changes' : 'Send'}">
+                            {#if isFirstUserMessage && taskStatus === 'backlog'}
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="20 6 9 17 4 12"/>
                                 </svg>
                                 Save
+                            {:else if isFirstUserMessage}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <line x1="22" y1="2" x2="11" y2="13"/>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                                </svg>
+                                Send
                             {:else if isLastUserMessage}
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <line x1="22" y1="2" x2="11" y2="13"/>
@@ -272,7 +285,7 @@ import { getToolDisplayName } from '$lib/types';
         <div class="message-wrapper assistant-wrapper">
             {#if reasoningContent}
                 <div class="reasoning-block" class:expanded={reasoningExpanded}>
-                    <button class="reasoning-toggle" onclick={() => reasoningExpanded = !reasoningExpanded} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'}>
+                    <button class="reasoning-toggle" onclick={() => { reasoningUserToggled = true; reasoningUserValue = !reasoningExpanded; }} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
                         </svg>

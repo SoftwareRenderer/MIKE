@@ -62,6 +62,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let ws: ReturnType<typeof createTaskStream> | null = null;
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
+    let scrollPending = $state(false);
     let inputValue = $state('');
 
     // Model selection state
@@ -211,6 +212,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.content += data.text;
+                scroll();
                 break;
             }
             case 'reasoning': {
@@ -218,17 +220,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
+                scroll();
                 break;
             }
             case 'tool_call': {
                 clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // If the LLM sent the tool name as text content before the tool call,
-                // remove that entry to avoid a blank bubble above the tool call card
+                // clear it in-place to avoid a blank bubble (don't remove entry to prevent flicker)
                 if (currentAssistantId) {
                     const entry = entries.find(e => e.id === currentAssistantId);
                     if (entry && entry.content.trim() === data.tool_name && !entry.reasoningContent) {
-                        entries = entries.filter(e => e.id !== currentAssistantId);
+                        entry.content = '';
                     }
                 }
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
@@ -247,7 +250,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     isPending: true
                 });
                 entry.isStreaming = true;
+                // Force reactivity so child components detect the new tool call
+                entries = entries.map(e => e.id === entry.id ? { ...e, toolCalls: [...e.toolCalls] } : e);
                 activeToolCalls.set(data.tool_id, { entryId: entry.id });
+                scroll();
                 break;
             }
             case 'tool_result': {
@@ -268,6 +274,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         entries = entries.map(e => e.id === entry.id ? { ...e, toolCalls: [...(e.toolCalls || [])] } : e);
                     }
                 }
+                // All tool results for this turn are done — close the assistant entry
+                // so the next turn's reasoning/tool calls go into a new entry
+                if (activeToolCalls.size === 0) {
+                    closeCurrentAssistant();
+                }
+                scroll();
                 break;
             }
             case 'user_message': {
@@ -641,9 +653,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     function scroll() {
-        if (scrollEl && atBottom) {
-            scrollEl.scrollTop = scrollEl.scrollHeight;
-        }
+        if (!scrollEl || !atBottom) return;
+        if (scrollPending) return; // already scheduled
+        scrollPending = true;
+        requestAnimationFrame(() => {
+            scrollPending = false;
+            if (scrollEl && atBottom) {
+                scrollEl.scrollTop = scrollEl.scrollHeight;
+            }
+        });
     }
 
     function checkScroll() {
@@ -1202,7 +1220,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         <div class="compression-summary">{entry.content}</div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
             {/each}
         {/if}

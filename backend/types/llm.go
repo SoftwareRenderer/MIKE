@@ -2,10 +2,21 @@ package types
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	ToolCallID       string `json:"tool_call_id,omitempty"`
+	Role             string      `json:"role"`
+	Content          string      `json:"content"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallMsg `json:"tool_calls,omitempty"` // assistant's tool calls (for message history)
+	ToolCallID       string      `json:"tool_call_id,omitempty"` // tool result's reference to assistant's call
+}
+
+// ToolCallMsg is a tool call in an assistant message (non-streaming format).
+type ToolCallMsg struct {
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+	Type string `json:"type"`
 }
 
 // ChatTool represents a tool definition.
@@ -17,7 +28,7 @@ type ChatTool struct {
 // ToolDef defines a tool's schema.
 type ToolDef struct {
 	Name        string                 `json:"name"`
-	DisplayName string                 `json:"display_name"`
+	DisplayName string                 // UI-only, not sent to LLM
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 }

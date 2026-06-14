@@ -48,8 +48,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
 	for _, m := range taskMsgs {
 		switch m.Role {
-		case "user", "assistant":
+		case "user":
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
+		case "assistant":
+			// Merge reasoning_content into content so all models see the full assistant message
+			// (reasoning_content field in requests is undefined behavior - works for Qwen, not gemma)
+			content := m.Content
+			if m.ReasoningContent != "" {
+				content = m.ReasoningContent + "\n" + m.Content
+			}
+			messages = append(messages, types.ChatMessage{Role: m.Role, Content: content})
 		case "tool_call":
 			if m.ToolResult != "" {
 				var resultMap map[string]interface{}
@@ -90,6 +98,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var pendingToolCalls []types.ChatToolCall
+	var recentToolSignatures []string // tracks primary tool call signature per turn for loop detection
 	startTime := time.Now()
 
 	for {
@@ -347,10 +356,57 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 			}
-			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
+			// Build assistant message with merged reasoning + content + tool calls.
+			// Including tool_calls in the message history is critical for models like gemma
+			// to understand what tool was called and match it to the result.
+			assistantContentFull := assistantText
+			if reasoningContent.Len() > 0 {
+				assistantContentFull = reasoningContent.String() + "\n" + assistantText
+			}
+			var assistantToolCalls []types.ToolCallMsg
+			for _, tc := range pendingToolCalls {
+				if tc.ID != "" && tc.Function.Name != "" {
+					assistantToolCalls = append(assistantToolCalls, types.ToolCallMsg{
+						ID:   tc.ID,
+						Type: "function",
+					})
+					assistantToolCalls[len(assistantToolCalls)-1].Function.Name = tc.Function.Name
+					assistantToolCalls[len(assistantToolCalls)-1].Function.Arguments = tc.Function.Arguments
+				}
+			}
+			messages = append(messages, types.ChatMessage{
+				Role:      "assistant",
+				Content:   assistantContentFull,
+				ToolCalls: assistantToolCalls,
+			})
 			for _, tr := range toolResults {
 				messages = append(messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
+
+			// Loop detection: track tool call signature and check for repetition
+			if len(pendingToolCalls) > 0 && pendingToolCalls[0].Function.Name != "" {
+				sig := pendingToolCalls[0].Function.Name + ":" + pendingToolCalls[0].Function.Arguments
+				recentToolSignatures = append(recentToolSignatures, sig)
+				if len(recentToolSignatures) >= 3 {
+					last := recentToolSignatures[len(recentToolSignatures)-1]
+					isLoop := true
+					for i := len(recentToolSignatures) - 3; i < len(recentToolSignatures); i++ {
+						if recentToolSignatures[i] != last {
+							isLoop = false
+							break
+						}
+					}
+					if isLoop {
+						task.StatusState = "failed"
+						task.Output = "Model stuck in tool-call loop (repeated same tool call 3+ times)"
+						te.store.UpdateTask(task)
+						te.boardStreamMgr.Broadcast(projectID)
+						te.sendAndPersistError(b, task.ID, "Model stuck in tool-call loop", "tool_loop")
+						return
+					}
+				}
+			}
+
 			pendingToolCalls = nil
 			assistantContent.Reset()
 			reasoningContent.Reset()
@@ -360,7 +416,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 			}
 		} else if assistantText != "" {
-			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantText, ReasoningContent: reasoningContent.String()})
+			// Merge reasoning into content so the model sees its own thinking
+			assistantContentFull := assistantText
+			if reasoningContent.Len() > 0 {
+				assistantContentFull = reasoningContent.String() + "\n" + assistantText
+			}
+			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantContentFull})
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)
 			duration := time.Since(startTime).Milliseconds()
 			te.store.CreateTaskMessage(&types.TaskMessage{
