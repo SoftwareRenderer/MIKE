@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -25,7 +24,10 @@ const (
 	LoopNone LoopType = iota
 	LoopTool // repeated read of same target
 	LoopText // repeated similar text-only responses
+	LoopPhrase // exact phrase repetition within a response
 )
+
+const maxLoopHints = 3
 
 // loopDetector tracks tool call targets and text responses to detect LLM loops.
 type loopDetector struct {
@@ -33,12 +35,15 @@ type loopDetector struct {
 	lastReadTime   time.Time // when the last read occurred
 	textWindow     []string  // recent text-only responses (content, trimmed)
 	hintCount      int       // total hints injected for this task
+	phraseDet      *phraseDetector // real-time phrase repetition tracker
+	phraseFired    bool      // phrase loop detected during current streaming response
 }
 
 // newLoopDetector creates a new loopDetector.
 func newLoopDetector() *loopDetector {
 	return &loopDetector{
 		textWindow: make([]string, 0, 8),
+		phraseDet:  newPhraseDetector(),
 	}
 }
 
@@ -47,6 +52,8 @@ func (d *loopDetector) reset() {
 	d.lastReadTarget = ""
 	d.lastReadTime = time.Time{}
 	d.textWindow = d.textWindow[:0]
+	d.phraseDet.reset()
+	d.phraseFired = false
 }
 
 // resetText clears only the text window (called after a tool call breaks text-only streak).
@@ -62,6 +69,7 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 
 	if hasToolCalls {
 		d.resetText() // tool call breaks text-only streak
+		d.phraseDet.reset() // tool call resets phrase tracker
 
 		// Check each tool call
 		for _, tc := range toolCalls {
@@ -100,14 +108,29 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 	return LoopNone
 }
 
+// checkStreamingText feeds accumulated streaming text into the phrase detector.
+// Sets phraseFired flag and returns LoopPhrase if exact phrase repetition is detected.
+func (d *loopDetector) checkStreamingText(text string) LoopType {
+	if d.phraseDet.check(text) {
+		d.phraseFired = true
+		return LoopPhrase
+	}
+	return LoopNone
+}
+
+// phraseDetected returns true if phrase repetition was detected during the current stream.
+func (d *loopDetector) phraseDetected() bool {
+	return d.phraseFired
+}
+
 // extractTarget extracts the primary file/target from a tool call.
 func extractTarget(toolName, rawArgs string) string {
 	switch toolName {
 	case "read_file", "write_file":
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
-			if path, ok := args["path"].(string); ok {
-				return normalizeTarget(path)
+			if p, ok := args["path"].(string); ok {
+				return normalizeTarget(p)
 			}
 		}
 	case "execute_command":
@@ -130,7 +153,6 @@ func extractCommandTarget(cmd string) string {
 		return ""
 	}
 
-	// Split into tokens, respecting pipes and redirects
 	tokens := shellTokens(cmd)
 	if len(tokens) == 0 {
 		return ""
@@ -165,52 +187,43 @@ func extractCommandTarget(cmd string) string {
 
 	switch verb {
 	case "head", "tail", "cat", "wc", "stat", "file", "diff":
-		// Primary target is the first non-flag arg
 		if len(nonFlags) > 0 {
 			return normalizeTarget(nonFlags[0])
 		}
 	case "grep":
-		// grep PATTERN FILE — target is the last non-flag arg (pattern comes first)
 		if len(nonFlags) >= 2 {
 			return normalizeTarget(nonFlags[len(nonFlags)-1])
 		} else if len(nonFlags) == 1 {
 			return normalizeTarget(nonFlags[0])
 		}
 	case "ls":
-		// ls [DIR] — target is the directory (or "." if none)
 		if len(nonFlags) > 0 {
 			return normalizeTarget(nonFlags[0])
 		}
 		return normalizeTarget(".")
 	case "sed":
-		// sed -i 's/x/y/' FILE — target is the last non-flag arg
 		if len(nonFlags) >= 2 {
 			return normalizeTarget(nonFlags[len(nonFlags)-1])
 		}
 	case "python", "python3":
-		// python script.py — target is the script
 		if len(nonFlags) > 0 {
 			return normalizeTarget(nonFlags[0])
 		}
 	case "echo", "printf":
-		// echo "text" > file — check for redirect target
 		for i, t := range tokens {
 			if (t == ">" || t == ">>") && i+1 < len(tokens) {
 				return normalizeTarget(tokens[i+1])
 			}
 		}
 	case "mv", "cp":
-		// mv src dst — target is the destination
 		if len(nonFlags) >= 2 {
 			return normalizeTarget(nonFlags[len(nonFlags)-1])
 		}
 	case "git":
-		// git add FILE, git commit, git diff
 		if len(args) > 0 {
 			subcmd := args[0]
 			switch subcmd {
 			case "add", "rm":
-				// git add -A → target is ".", git add file.go → target is file.go
 				if slices.Contains(args, "-A") {
 					return normalizeTarget(".")
 				}
@@ -285,13 +298,12 @@ func shellTokens(cmd string) []string {
 }
 
 // normalizeTarget normalizes a file path for comparison.
-func normalizeTarget(path string) string {
-	path = strings.TrimSpace(path)
-	// Remove leading ./
-	for strings.HasPrefix(path, "./") {
-		path = path[2:]
+func normalizeTarget(p string) string {
+	p = strings.TrimSpace(p)
+	for strings.HasPrefix(p, "./") {
+		p = p[2:]
 	}
-	return path
+	return p
 }
 
 // isReadOnlyCall classifies a tool call as read-only (no state changes) or state-changing.
@@ -333,7 +345,6 @@ func isReadOnlyCommand(cmd string) bool {
 		return true
 	}
 
-	// Take only the first command (before any pipe)
 	for i, t := range tokens {
 		if t == "|" {
 			tokens = tokens[:i]
@@ -343,14 +354,12 @@ func isReadOnlyCommand(cmd string) bool {
 
 	verb := tokens[0]
 
-	// Check for redirect (writes to file)
 	for _, t := range tokens {
 		if t == ">" || t == ">>" {
 			return false
 		}
 	}
 
-	// Check for && chains that include writes
 	if strings.Contains(cmd, "&&") {
 		parts := strings.Split(cmd, "&&")
 		for _, part := range parts[1:] {
@@ -360,14 +369,12 @@ func isReadOnlyCommand(cmd string) bool {
 		}
 	}
 
-	// Known read-only verbs
 	for _, ro := range readOnlyCommands {
 		if verb == ro {
 			return true
 		}
 	}
 
-	// Known state-changing verbs
 	stateChanging := []string{
 		"python", "python3", "node", "npm", "pip", "cargo", "go",
 		"make", "gcc", "g++", "rustc", "javac", "ruby", "perl",
@@ -382,105 +389,7 @@ func isReadOnlyCommand(cmd string) bool {
 		}
 	}
 
-	// Default: treat unknown commands as read-only (safer to hint than to miss)
 	return true
-}
-
-// detectTextLoop checks if the text window contains repetitive responses.
-// Fires when 2+ consecutive text-only responses have high similarity.
-func (d *loopDetector) detectTextLoop() bool {
-	if len(d.textWindow) < 2 {
-		return false
-	}
-
-	// Check if the last response is similar to any of the previous ones in the window
-	last := d.textWindow[len(d.textWindow)-1]
-	lastWords := wordSet(last)
-
-	if len(lastWords) < 5 {
-		return false // too short to be meaningful
-	}
-
-	// Compare with each prior response (skip the immediately preceding one if it's from same turn)
-	for i := 0; i < len(d.textWindow)-1; i++ {
-		priorWords := wordSet(d.textWindow[i])
-		if jaccardSimilarity(lastWords, priorWords) > 0.6 {
-			return true
-		}
-	}
-
-	return false
-}
-
-// wordSet tokenizes text into a set of meaningful words (lowercased, stop words removed).
-func wordSet(text string) map[string]bool {
-	// Simple tokenizer: split on non-alphanumeric
-	tokenRe := regexp.MustCompile(`[a-zA-Z]{2,}`)
-	matches := tokenRe.FindAllString(text, -1)
-
-	words := make(map[string]bool)
-	for _, m := range matches {
-		w := strings.ToLower(m)
-		if !isStopWord(w) {
-			words[w] = true
-		}
-	}
-	return words
-}
-
-// jaccardSimilarity computes the Jaccard similarity between two word sets.
-func jaccardSimilarity(a, b map[string]bool) float64 {
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-
-	// Count intersection
-	intersection := 0
-	for w := range a {
-		if b[w] {
-			intersection++
-		}
-	}
-
-	union := len(a) + len(b) - intersection
-	if union == 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-// stopWords is a set of common English stop words to ignore in similarity checks.
-var stopWords = map[string]bool{
-	"the": true, "a": true, "an": true, "is": true, "are": true, "was": true, "were": true,
-	"be": true, "been": true, "being": true, "have": true, "has": true, "had": true,
-	"do": true, "does": true, "did": true, "will": true, "would": true, "could": true,
-	"should": true, "may": true, "might": true, "shall": true, "can": true,
-	"to": true, "of": true, "in": true, "for": true, "on": true, "with": true,
-	"at": true, "by": true, "from": true, "as": true, "into": true, "through": true,
-	"during": true, "before": true, "after": true, "above": true, "below": true,
-	"between": true, "out": true, "off": true, "over": true, "under": true,
-	"and": true, "but": true, "or": true, "nor": true, "not": true, "so": true,
-	"yet": true, "both": true, "either": true, "neither": true,
-	"each": true, "every": true, "all": true, "any": true, "few": true, "more": true,
-	"most": true, "other": true, "some": true, "such": true, "no": true, "only": true,
-	"own": true, "same": true, "than": true, "too": true, "very": true, "just": true,
-	"because": true, "if": true, "when": true, "where": true, "how": true, "what": true,
-	"which": true, "who": true, "whom": true, "this": true, "that": true, "these": true,
-	"those": true, "i": true, "me": true, "my": true, "myself": true, "we": true,
-	"our": true, "you": true, "your": true, "he": true, "him": true, "his": true,
-	"it": true, "its": true, "they": true, "them": true, "their": true,
-	"about": true, "up": true, "then": true, "there": true, "here": true,
-	"also": true, "back": true, "like": true, "new": true, "way": true, "use": true,
-	"uses": true, "used": true, "using": true, "try": true, "trying": true,
-	"need": true, "needs": true, "think": true, "know": true, "see": true,
-	 "get": true, "got": true, "going": true, "make": true, "made": true,
-	 "want": true, "wanting": true, "let": true, "say": true, "said": true,
-	 "says": true, "well": true, "still": true, "even": true, "much": true,
-	 "many": true, "since": true, "until": true, "while": true,
-}
-
-func isStopWord(w string) bool {
-	return stopWords[w]
 }
 
 // buildHint generates a targeted system message based on loop type.
@@ -490,12 +399,12 @@ func buildHint(loopType LoopType, target string) string {
 		return fmt.Sprintf("You've read/checked `%s` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action \u2014 edit the file, run a command, or mark the task complete.", target)
 	case LoopText:
 		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `task_complete` if the task is done."
+	case LoopPhrase:
+		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	default:
 		return ""
 	}
 }
-
-const maxLoopHints = 3
 
 // executeTask runs the AI conversation loop.
 func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage) {
@@ -694,6 +603,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 					assistantContent.WriteString(*choice.Delta.Content)
 					b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+					// Real-time phrase repetition detection
+					if loopType := detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
+						log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
+						b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
+					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
 					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
@@ -939,7 +853,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					target = extractTarget(pendingToolCalls[0].Function.Name, pendingToolCalls[0].Function.Arguments)
 				}
 				hint := buildHint(loopType, target)
-				log.Printf("[loop] task=%s detected %s loop (hint %d/%d), target=%s", task.ID, loopType, detector.hintCount+1, maxLoopHints, target)
+				log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d), target=%s", task.ID, loopType, detector.hintCount+1, maxLoopHints, target)
 				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
 				detector.hintCount++
 				detector.reset()
@@ -977,6 +891,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 			// Loop detection for text-only responses
 			loopType := detector.recordTurn(nil, assistantText)
+			// Also check for phrase repetition detected during streaming
+			if loopType == LoopNone && detector.phraseDetected() {
+				loopType = LoopPhrase
+			}
 			if loopType != LoopNone {
 				if detector.hintCount >= maxLoopHints {
 					task.StatusState = "failed"
@@ -987,7 +905,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 				hint := buildHint(loopType, "")
-				log.Printf("[loop] task=%s detected %s loop (hint %d/%d)", task.ID, loopType, detector.hintCount+1, maxLoopHints)
+				log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d)", task.ID, loopType, detector.hintCount+1, maxLoopHints)
 				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
 				detector.hintCount++
 				detector.reset()

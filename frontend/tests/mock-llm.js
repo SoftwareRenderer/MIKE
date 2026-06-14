@@ -39,10 +39,12 @@ const toolCallComplete = loadFixture('tool_call_complete');
 const toolCallLoop = loadFixture('tool_call_loop');
 const toolCallTaskComplete = loadFixture('tool_call_task_complete');
 const textLoop = loadFixture('text_loop');
+const phraseRepeat = loadFixture('phrase_repeat');
 
 let requestCount = 0;
 let loopToolCount = 0;  // per-scenario counter for tool loop test
 let loopTextCount = 0;  // per-scenario counter for text loop test
+let loopPhraseCount = 0;  // per-scenario counter for phrase loop test
 let autoContinueCount = 0;  // tracks auto-continue cycles to eventually terminate
 
 /**
@@ -119,8 +121,9 @@ function selectResponse(parsed) {
     // Loop detection tests: return repeated responses to trigger loop detection.
     // Tool loop: return same tool call (head /tmp/test_file.txt) 2x, then task_complete.
     // Text loop: return similar text 3x, then task_complete.
+    // Phrase loop: return response with repeated phrases, then task_complete after hint.
     // System hint messages (injected by backend) break the loop.
-    const hasSystemHint = messages.some(m => m.role === 'system' && /twice in a row|similar responses/i.test(m.content || ''));
+    const hasSystemHint = messages.some(m => m.role === 'system' && /twice in a row|similar responses|repeated yourself/i.test(m.content || ''));
     if (/loop-test-tool/i.test(lastUserMsg)) {
         if (hasSystemHint || loopToolCount >= 2) {
             loopToolCount = 0;
@@ -136,6 +139,14 @@ function selectResponse(parsed) {
         }
         loopTextCount++;
         return { chunks: textLoop, chunkDelay: 1 };
+    }
+    if (/loop-test-phrase/i.test(lastUserMsg)) {
+        if (hasSystemHint) {
+            loopPhraseCount = 0;
+            return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+        }
+        loopPhraseCount++;
+        return { chunks: phraseRepeat, chunkDelay: 1 };
     }
 
     // If there are tool results in the conversation, the LLM should respond
@@ -217,6 +228,7 @@ const server = http.createServer((req, res) => {
                                     chunks === toolCallLoop ? 'tool_call_loop' :
                                     chunks === toolCallTaskComplete ? 'tool_call_task_complete' :
                                     chunks === textLoop ? 'text_loop' :
+                                    chunks === phraseRepeat ? 'phrase_repeat' :
                                     chunks === toolCallResponse ? 'tool_call' :
                                     chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === textResponseSlow ? 'text_slow' :

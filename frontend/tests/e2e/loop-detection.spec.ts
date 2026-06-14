@@ -36,4 +36,31 @@ test.describe('Loop Detection', () => {
     const finalTask = await getTaskData(page, projectId, taskId);
     expect(finalTask.output).not.toContain('loop');
   });
+
+  test('should detect phrase repetition in streaming response and recover after hint', async ({ page }) => {
+    // Create a task that triggers the mock to return a response with repeated phrases.
+    // The backend should detect phrase repetition during streaming, let the response
+    // finish, inject a hint, and the mock should then return task_complete.
+    const taskId = await createAndOpenTask(page, `loop-test-phrase: analyze this ${Date.now()}`);
+    await ensureChatForm(page);
+
+    // Send a message to trigger the executor (lazy-start)
+    const chatTextarea = page.locator('textarea[placeholder*="message"]');
+    await chatTextarea.fill('loop-test-phrase: please analyze the requirements');
+    await chatTextarea.press('Enter');
+    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+
+    // Wait for the task to reach a terminal state.
+    // Flow: text response with repeated phrase → hint injected → task_complete.
+    const projectId = await getProjectId(page);
+    await expect(async () => {
+      const task = await getTaskData(page, projectId, taskId);
+      const state = task.status_state as string;
+      expect(['completed', 'awaiting_review', 'failed', 'stopped']).toContain(state);
+    }).toPass({ timeout: 60000 });
+
+    // Verify the task did NOT fail with a loop error (it should have recovered).
+    const finalTask = await getTaskData(page, projectId, taskId);
+    expect(finalTask.output).not.toContain('loop');
+  });
 });

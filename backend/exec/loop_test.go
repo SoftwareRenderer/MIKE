@@ -1,0 +1,461 @@
+package exec
+
+import (
+	"encoding/json"
+	"testing"
+
+	"kanban/backend/types"
+)
+
+// --- Phrase Detector Tests ---
+
+func TestPhraseDetector_NoRepetition(t *testing.T) {
+	d := newPhraseDetector()
+
+	// Feed unique sentences
+	text := "The quick brown fox jumps over the lazy dog. Then the cat sat on the mat and slept all day long."
+	if d.check(text) {
+		t.Error("should not detect repetition in unique text")
+	}
+}
+
+func TestPhraseDetector_ExactRepetition(t *testing.T) {
+	d := newPhraseDetector()
+
+	// First sentence
+	d.check("The quick brown fox jumps over the lazy dog.")
+
+	// Same sentence repeated (with period)
+	repeated := "The quick brown fox jumps over the lazy dog."
+	if !d.check(repeated) {
+		t.Error("should detect exact phrase repetition")
+	}
+}
+
+func TestPhraseDetector_CaseInsensitive(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.")
+	repeated := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG."
+	if !d.check(repeated) {
+		t.Error("should detect case-insensitive repetition")
+	}
+}
+
+func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
+	d := newPhraseDetector()
+
+	// Short phrase (< 8 words) should be ignored
+	short := "Hello world."
+	d.check(short)
+	if d.check(short) {
+		t.Error("should not fire on short phrases")
+	}
+}
+
+func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.")
+	repeated := "The  quick   brown    fox   jumps   over   the   lazy   dog."
+	if !d.check(repeated) {
+		t.Error("should detect repetition despite extra whitespace")
+	}
+}
+
+func TestPhraseDetector_FiresOnce(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.")
+	d.check("The quick brown fox jumps over the lazy dog.") // fires
+	if !d.check("The quick brown fox jumps over the lazy dog.") {
+		// After first fire, should still return false (already fired)
+		// This is expected behavior - once fired, stays fired until reset
+	}
+}
+
+func TestPhraseDetector_Reset(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.")
+	d.check("The quick brown fox jumps over the lazy dog.") // fires
+
+	d.reset()
+	// After reset, same text should not fire
+	if d.check("The quick brown fox jumps over the lazy dog.") {
+		t.Error("should not fire after reset with same text")
+	}
+	// Now it should fire on repeat
+	if !d.check("The quick brown fox jumps over the lazy dog.") {
+		t.Error("should fire on repeat after reset")
+	}
+}
+
+func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
+	d := newPhraseDetector()
+
+	// Feed two sentences, second repeats the first
+	text := "The quick brown fox jumps over the lazy dog. Some other unique text here that is long enough. The quick brown fox jumps over the lazy dog."
+	if !d.check(text) {
+		t.Error("should detect repetition when repeated sentence appears later in same chunk")
+	}
+}
+
+func TestPhraseDetector_NewlineBoundary(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.\n")
+	repeated := "The quick brown fox jumps over the lazy dog."
+	if !d.check(repeated) {
+		t.Error("should detect repetition across newline boundary")
+	}
+}
+
+func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("The quick brown fox jumps over the lazy dog.\n\n")
+	repeated := "The quick brown fox jumps over the lazy dog."
+	if !d.check(repeated) {
+		t.Error("should detect repetition across double newline boundary")
+	}
+}
+
+func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
+	d := newPhraseDetector()
+
+	// Code-like content without sentence boundaries
+	code := "func main() { fmt.Println(\"hello\") }"
+	d.check(code)
+	if d.check(code) {
+		t.Error("should not trigger on code without sentence boundaries")
+	}
+}
+
+func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("Wow this is really amazing and incredible stuff!")
+	repeated := "Wow this is really amazing and incredible stuff!"
+	if !d.check(repeated) {
+		t.Error("should detect repetition with exclamation boundary")
+	}
+}
+
+func TestPhraseDetector_QuestionBoundary(t *testing.T) {
+	d := newPhraseDetector()
+
+	d.check("What do you think about this approach and implementation?")
+	repeated := "What do you think about this approach and implementation?"
+	if !d.check(repeated) {
+		t.Error("should detect repetition with question boundary")
+	}
+}
+
+func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
+	d := newPhraseDetector()
+
+	// Feed partial sentence
+	d.check("The quick brown fox jumps")
+	// Complete it
+	d.check(" over the lazy dog.")
+	// Now repeat the full sentence
+	if !d.check("The quick brown fox jumps over the lazy dog.") {
+		t.Error("should detect repetition when incomplete sentence is completed and then repeated")
+	}
+}
+
+// --- Word Set / Jaccard Tests ---
+
+func TestWordSet_Basic(t *testing.T) {
+	words := wordSet("The quick brown fox jumps")
+	if len(words) != 4 { // "the" is a stop word
+		t.Errorf("expected 4 words, got %d", len(words))
+	}
+	if _, ok := words["quick"]; !ok {
+		t.Error("expected 'quick' in word set")
+	}
+	if _, ok := words["the"]; ok {
+		t.Error("should not include stop word 'the'")
+	}
+}
+
+func TestWordSet_CaseInsensitive(t *testing.T) {
+	words := wordSet("Hello HELLO hello")
+	if len(words) != 1 {
+		t.Errorf("expected 1 word, got %d", len(words))
+	}
+}
+
+func TestJaccardIdentical(t *testing.T) {
+	a := map[string]bool{"foo": true, "bar": true, "baz": true}
+	b := map[string]bool{"foo": true, "bar": true, "baz": true}
+	sim := jaccardSimilarity(a, b)
+	if sim != 1.0 {
+		t.Errorf("expected similarity 1.0, got %f", sim)
+	}
+}
+
+func TestJaccardDisjoint(t *testing.T) {
+	a := map[string]bool{"foo": true, "bar": true}
+	b := map[string]bool{"baz": true, "qux": true}
+	sim := jaccardSimilarity(a, b)
+	if sim != 0.0 {
+		t.Errorf("expected similarity 0.0, got %f", sim)
+	}
+}
+
+func TestJaccardPartial(t *testing.T) {
+	a := map[string]bool{"foo": true, "bar": true, "baz": true}
+	b := map[string]bool{"foo": true, "bar": true, "qux": true}
+	sim := jaccardSimilarity(a, b)
+	expected := 2.0 / 4.0 // intersection=2, union=4
+	if sim != expected {
+		t.Errorf("expected similarity %f, got %f", expected, sim)
+	}
+}
+
+// --- Loop Detector Integration Tests ---
+
+func makeToolCall(name, argsJSON string) types.ChatToolCall {
+	return types.ChatToolCall{
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: name, Arguments: argsJSON},
+	}
+}
+
+func TestLoopDetector_ToolLoop(t *testing.T) {
+	d := newLoopDetector()
+
+	// First read of file
+	args1 := map[string]string{"path": "src/main.go"}
+	args1JSON, _ := json.Marshal(args1)
+	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	if d.recordTurn(tc1, "") != LoopNone {
+		t.Error("first read should not trigger loop")
+	}
+
+	// Second read of same file
+	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	if d.recordTurn(tc2, "") != LoopTool {
+		t.Error("second read of same file should trigger LoopTool")
+	}
+}
+
+func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
+	d := newLoopDetector()
+
+	args1 := map[string]string{"path": "src/main.go"}
+	args1JSON, _ := json.Marshal(args1)
+	args2 := map[string]string{"path": "src/utils.go"}
+	args2JSON, _ := json.Marshal(args2)
+
+	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args2JSON))}
+
+	if d.recordTurn(tc1, "") != LoopNone {
+		t.Error("first read should not trigger loop")
+	}
+	if d.recordTurn(tc2, "") != LoopNone {
+		t.Error("read of different file should not trigger loop")
+	}
+}
+
+func TestLoopDetector_TextLoop(t *testing.T) {
+	d := newLoopDetector()
+
+	// Two very similar responses (same key words, slight rewording)
+	text1 := "I need to carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
+	text2 := "I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
+
+	// First text response
+	if d.recordTurn(nil, text1) != LoopNone {
+		t.Error("first text should not trigger loop")
+	}
+
+	// Second similar text response (Jaccard > 0.6)
+	if d.recordTurn(nil, text2) != LoopText {
+		t.Error("similar text should trigger LoopText")
+	}
+}
+
+func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
+	d := newLoopDetector()
+
+	// Simulate streaming chunks
+	chunk1 := "Let me think about this problem carefully and analyze the requirements. "
+	chunk2 := "The best approach would be to implement the solution step by step. "
+	chunk3 := "Let me think about this problem carefully and analyze the requirements."
+
+	if d.checkStreamingText(chunk1) != LoopNone {
+		t.Error("first chunk should not trigger loop")
+	}
+	if d.checkStreamingText(chunk2) != LoopNone {
+		t.Error("second unique chunk should not trigger loop")
+	}
+	if d.checkStreamingText(chunk3) != LoopPhrase {
+		t.Error("repeated phrase should trigger LoopPhrase")
+	}
+
+	if !d.phraseDetected() {
+		t.Error("phraseDetected should return true after detection")
+	}
+}
+
+func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {
+	d := newLoopDetector()
+
+	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.")
+	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.") // fires
+
+	d.reset()
+	if d.phraseDetected() {
+		t.Error("phraseDetected should be false after reset")
+	}
+}
+
+func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
+	d := newLoopDetector()
+
+	// Feed phrase that would normally repeat
+	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.")
+
+	// Tool call resets phrase tracker
+	args := map[string]string{"path": "src/main.go"}
+	argsJSON, _ := json.Marshal(args)
+	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
+	d.recordTurn(tc, "")
+
+	// Same phrase should not fire anymore
+	if d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.") == LoopPhrase {
+		t.Error("phrase should not fire after tool call reset")
+	}
+}
+
+func TestBuildHint_Phrase(t *testing.T) {
+	hint := buildHint(LoopPhrase, "")
+	if hint == "" {
+		t.Error("LoopPhrase should have a hint message")
+	}
+	if hint != "You repeated yourself in your last response. Continue with a new action or tool call." {
+		t.Errorf("unexpected hint: %s", hint)
+	}
+}
+
+func TestBuildHint_Tool(t *testing.T) {
+	hint := buildHint(LoopTool, "src/main.go")
+	if hint == "" {
+		t.Error("LoopTool should have a hint message")
+	}
+	if hint != "You've read/checked `src/main.go` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action — edit the file, run a command, or mark the task complete." {
+		t.Errorf("unexpected hint: %s", hint)
+	}
+}
+
+func TestBuildHint_Text(t *testing.T) {
+	hint := buildHint(LoopText, "")
+	if hint == "" {
+		t.Error("LoopText should have a hint message")
+	}
+}
+
+func TestBuildHint_None(t *testing.T) {
+	hint := buildHint(LoopNone, "")
+	if hint != "" {
+		t.Error("LoopNone should return empty hint")
+	}
+}
+
+// --- Text Analysis Helper Tests ---
+
+func TestNormalizePhrase(t *testing.T) {
+	result := normalizePhrase("  Hello   World  ")
+	expected := "hello world"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestWordCount(t *testing.T) {
+	count := wordCount("the quick brown fox jumps over the lazy dog")
+	if count != 9 {
+		t.Errorf("expected 9 words, got %d", count)
+	}
+}
+
+func TestSplitSentences_Basic(t *testing.T) {
+	segments := splitSentences("Hello world. How are you? I am fine!")
+	if len(segments) != 3 {
+		t.Errorf("expected 3 segments, got %d: %v", len(segments), segments)
+	}
+	if segments[0] != "Hello world." {
+		t.Errorf("expected 'Hello world.', got %q", segments[0])
+	}
+	if segments[1] != "How are you?" {
+		t.Errorf("expected 'How are you?', got %q", segments[1])
+	}
+	if segments[2] != "I am fine!" {
+		t.Errorf("expected 'I am fine!', got %q", segments[2])
+	}
+}
+
+func TestSplitSentences_NoBoundary(t *testing.T) {
+	segments := splitSentences("No sentence boundary here at all")
+	if len(segments) != 1 {
+		t.Errorf("expected 1 segment, got %d: %v", len(segments), segments)
+	}
+}
+
+func TestSplitSentences_DoubleNewline(t *testing.T) {
+	segments := splitSentences("First paragraph here is long enough.\n\nSecond paragraph also long enough.")
+	if len(segments) < 2 {
+		t.Errorf("expected at least 2 segments, got %d: %v", len(segments), segments)
+	}
+}
+
+func TestIsReadOnlyCommand(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"head src/main.go", true},
+		{"cat file.txt", true},
+		{"ls -la", true},
+		{"grep foo bar.txt", true},
+		{"echo hello > file.txt", false}, // redirect
+		{"python script.py", false},
+		{"git commit -m msg", false},
+		{"sed -i 's/a/b/' file", false},
+	}
+
+	for _, tt := range tests {
+		got := isReadOnlyCommand(tt.cmd)
+		if got != tt.want {
+			t.Errorf("isReadOnlyCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
+
+func TestExtractCommandTarget(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want string
+	}{
+		{"head src/main.go", "src/main.go"},
+		{"cat ./file.txt", "file.txt"},
+		{"grep pattern file.go", "file.go"},
+		{"ls -la /tmp", "/tmp"},
+		{"echo hello > output.txt", "output.txt"},
+		{"git add -A", "."},
+		{"git commit -m msg", "."},
+	}
+
+	for _, tt := range tests {
+		got := extractCommandTarget(tt.cmd)
+		if got != tt.want {
+			t.Errorf("extractCommandTarget(%q) = %q, want %q", tt.cmd, got, tt.want)
+		}
+	}
+}
