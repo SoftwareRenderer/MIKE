@@ -437,6 +437,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'diff_changed': {
                 const data = event.data as DiffData;
+                console.log('[TaskChat] diff_changed received, diff length:', data.diff?.length ?? 0, 'untracked:', data.untracked?.length ?? 0, 'hasContent:', !!(data.diff && data.diff.trim()) || (data.untracked?.length ?? 0) > 0);
                 onRefreshDiff?.(data);
                 break;
             }
@@ -1084,6 +1085,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const syncBuffer = firstConnectDone && !skipSync;
         ws = createTaskStream(projectId, taskId, (event) => handleEvent(event), syncBuffer);
         ws.ws.onopen = () => {
+            console.log('[TaskChat] WebSocket opened for task', taskId, 'syncBuffer=', syncBuffer);
             connecting = false;
             connected = true;
             if (!firstConnectDone) {

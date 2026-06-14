@@ -7,8 +7,11 @@
     let props = $props();
     let files = $derived(props.files || []);
     let untracked = $derived(props.untracked || []);
-    let version = $derived(props.version ?? 0);
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
+
+    $effect(() => {
+        console.log('[DiffViewer] re-render: files=', files.length, 'untracked=', untracked.length);
+    });
 
     // Track which collapsed blocks are expanded
     let expandedBlocks = $state<Record<string, boolean>>({});
@@ -45,7 +48,6 @@
     </div>
 {:else}
     <div class="diff-scroll">
-        {#key version}
         <div class="diff-content-wrapper">
         {#each untracked as entry (entry.path)}
             {@const ufile = entry.file}
@@ -249,23 +251,13 @@
             </section>
         {/each}
         </div>
-        {/key}
     </div>
 {/if}
 
 <style>
-    @keyframes diffWrapperIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
     @keyframes diffFadeIn {
         from { opacity: 0; transform: translateY(-4px); }
         to { opacity: 1; transform: translateY(0); }
-    }
-
-    .diff-content-wrapper {
-        animation: diffWrapperIn 200ms ease-out;
     }
 
     .diff-file-enter {

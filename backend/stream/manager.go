@@ -79,15 +79,12 @@ func (sm *StreamManager) Get(taskID string) *Broadcaster {
 // When the shortstat output changes (line counts differ), it sends a diff_changed event to all connected clients.
 // Using --shortstat instead of status --porcelain ensures we detect content changes to the same file
 // (e.g., "+5" becoming "+10" additions), not just new/modified file states.
+// If the worktree doesn't exist yet (task in backlog), polling is skipped until it appears.
 func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Broadcaster) {
 	var lastShortstat string
+	var baselineSet bool
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
-
-	// Initial check to establish baseline
-	if shortstat, err := sm.worktreeMgr.GitShortstat(taskID); err == nil {
-		lastShortstat = shortstat
-	}
 
 	for {
 		select {
@@ -96,7 +93,13 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 		case <-tick.C:
 			shortstat, err := sm.worktreeMgr.GitShortstat(taskID)
 			if err != nil {
-				log.Printf("[git poll] task=%s shortstat check failed: %v", taskID, err)
+				// Worktree may not exist yet (task still in backlog) — skip silently
+				continue
+			}
+			// First successful check — establish baseline, don't send event
+			if !baselineSet {
+				lastShortstat = shortstat
+				baselineSet = true
 				continue
 			}
 			if shortstat != lastShortstat {
@@ -140,16 +143,12 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	if sm.worktreeMgr != nil {
 		b.SetLifecycleCallback(func(hasClients bool) {
 			if hasClients {
-				// Don't poll for tasks that haven't started (no worktree exists)
-				task, _ := sm.store.GetTaskByTaskID(taskID)
-				if task != nil && task.Status == "backlog" {
-					return
-				}
 				sm.pollersMu.Lock()
 				if _, exists := sm.pollers[taskID]; !exists {
 					ctx, cancel := context.WithCancel(context.Background())
 					sm.pollers[taskID] = cancel
 					sm.pollersMu.Unlock()
+					log.Printf("[git poll] task=%s starting poller", taskID)
 					go sm.pollGitStatus(ctx, taskID, b)
 				} else {
 					sm.pollersMu.Unlock()
@@ -159,8 +158,11 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 				if cancel, exists := sm.pollers[taskID]; exists {
 					cancel()
 					delete(sm.pollers, taskID)
+					sm.pollersMu.Unlock()
+					log.Printf("[git poll] task=%s stopping poller (no clients)", taskID)
+				} else {
+					sm.pollersMu.Unlock()
 				}
-				sm.pollersMu.Unlock()
 			}
 		})
 	}
