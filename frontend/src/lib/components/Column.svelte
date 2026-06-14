@@ -77,7 +77,6 @@
     .column {
         flex: 1;
         min-width: 260px;
-        max-width: 340px;
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
         display: flex;
