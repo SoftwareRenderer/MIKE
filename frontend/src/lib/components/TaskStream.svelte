@@ -19,6 +19,7 @@
     let ws: WebSocket | null = null;
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
+    let prevScrollHeight = $state(0);
 
     let currentTextSection: StreamSection | null = $state(null);
     let currentReasoningSection: StreamSection | null = $state(null);
@@ -162,7 +163,16 @@
 
     function checkScroll() {
         if (scrollEl) {
-            atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 32;
+            const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+            if (scrollEl.scrollHeight < prevScrollHeight) {
+                // Content shrank (e.g., section collapsed).
+                // Check if user was near the bottom BEFORE the shrink.
+                const prevGap = prevScrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+                atBottom = prevGap < 32;
+            } else {
+                atBottom = gap < 32;
+            }
+            prevScrollHeight = scrollEl.scrollHeight;
         }
     }
 

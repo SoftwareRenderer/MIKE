@@ -63,6 +63,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
     let scrollPending = $state(false);
+    let prevScrollHeight = $state(0);
     let inputValue = $state('');
 
     // Model selection state
@@ -76,6 +77,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
+    let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
 
@@ -282,6 +284,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
                 if (lastSentMessage === data.content) {
                     lastSentMessage = null;
+                    isRegenerating = false;
                     if (data.id) {
                         // Find the last user entry (our optimistic message) and update its ID
                         for (let i = entries.length - 1; i >= 0; i--) {
@@ -323,6 +326,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 clearAwaiting();
                 markNotStreaming();
                 closeCurrentAssistant();
+                isRegenerating = false;
                 connected = false;
                 const data = event.data as { message: string; code?: string };
                 const code = data.code || 'error';
@@ -398,7 +402,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 // Thread was switched (possibly from another tab or API call)
                 const data = event.data as { thread_id: string; task_id: string };
                 updateActiveThread(data.thread_id);
-                loadHistory();
+                // Skip loadHistory during regenerate to avoid clobbering the
+                // optimistic user message entry before the echo arrives.
+                // loadHistory will be called after the LLM response completes.
+                if (!isRegenerating) {
+                    loadHistory();
+                }
                 break;
             }
             case 'queue': {
@@ -471,7 +480,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         contextState.limit = (model as { context_window?: number })?.context_window || 0;
     }
 
-    async function loadHistory() {
+    async function loadHistory(scrollAfter = false) {
         try {
             const messages = await getTaskMessages(projectId, taskId);
             // Filter out title generation messages (invisible, used for stats only)
@@ -526,6 +535,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             if (lastAssistant?.stats?.prompt_tokens) {
                 contextState.used = lastAssistant.stats.prompt_tokens;
             }
+            // After replacing entries, the DOM re-renders and scroll state may be lost.
+            // Scroll to bottom on the next frame.
+            if (scrollAfter) {
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                scroll();
+            }
         } catch { /* No history yet */ }
     }
 
@@ -566,31 +581,50 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     /** Get the thread whose label should be shown at a given checkpoint.
      * Finds the most specific (deepest) ancestor of the active thread whose
-     * fork point is at or before the message time. */
-    function getCheckpointThreads(entry: ChatEntry): Thread | null {
-        if (threads.length <= 1) return threads[0] || null;
+     * fork point is at or before the message time.
+     * When requireOptions is true, only returns a thread if 2+ threads are
+     * relevant at this checkpoint (used for the first message to avoid
+     * showing a divider with no switch options). */
+    function getCheckpointThreads(entry: ChatEntry, requireOptions = false): Thread | null {
+        if (!threads.length) return null;
         const entryTime = entry.createdAt;
-        if (!entryTime) return threads.find(t => t.is_active) || threads[0] || null;
+        if (!entryTime) return null;
 
         const activeThread = threads.find(t => t.is_active);
-        if (!activeThread) return threads[0] || null;
+        if (!activeThread) return null;
 
         // Walk from active thread up to root. Return first (most specific) ancestor
         // whose checkpoint is at or before the entry time.
         const threadMap = new Map(threads.map(t => [t.id, t]));
         let current: Thread = activeThread;
+        let checkpointThread: Thread | null = null;
 
         while (true) {
             const ct = current.checkpoint_message_time;
             // No checkpoint (root/Main), zero/epoch, or checkpoint <= entry → qualifies
             if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
-                return current;
+                checkpointThread = current;
+                break;
             }
             // This thread's fork point is after the entry; try parent
             const parent = threadMap.get(current.parent_thread_id || '');
-            if (!parent) return threads[0] || null; // fallback to root
+            if (!parent) return null; // fallback to null
             current = parent;
         }
+
+        // For the first message, only show checkpoint if there are actual switch options
+        if (requireOptions) {
+            let relevantCount = 0;
+            for (const t of threads) {
+                const ct = t.checkpoint_message_time;
+                if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
+                    relevantCount++;
+                }
+            }
+            if (relevantCount < 2) return null;
+        }
+
+        return checkpointThread;
     }
 
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
@@ -661,7 +695,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function checkScroll() {
         if (scrollEl) {
-            atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 32;
+            const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+            if (scrollEl.scrollHeight < prevScrollHeight) {
+                // Content shrank (e.g., reasoning auto-collapsed, loadHistory replaced entries).
+                // If scrollTop decreased by roughly the same amount as content shrank,
+                // the browser clamped it — meaning the user was at the bottom.
+                // We can't know the old scrollTop, but if the current gap is small
+                // (within the shrink amount + tolerance), the user was at the bottom.
+                const shrinkAmount = prevScrollHeight - scrollEl.scrollHeight;
+                atBottom = gap < shrinkAmount + 32;
+            } else {
+                atBottom = gap < 32;
+            }
+            prevScrollHeight = scrollEl.scrollHeight;
         }
     }
 
@@ -723,7 +769,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         if (!lastUser) return;
         // Regenerate from backend starting after the last user message
         try {
-            await regenerateTaskMessages(projectId, taskId, lastUser.id);
+            await regenerateTaskMessages(projectId, taskId, lastUser.id, true);
         } catch (e) {
             console.error('Failed to regenerate messages:', e);
         }
@@ -733,6 +779,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         // Re-send the user message to trigger a new LLM response
         lastSentMessage = lastUser.content;
+        isRegenerating = true;
         awaitingResponse = true;
         if (ws) ws.send(lastUser.content);
         scroll();
@@ -1007,6 +1054,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             closeCurrentAssistant();
             isStarting = false;
             lastSentMessage = null;
+            isRegenerating = false;
             ws = null;
             // Show connection lost error if this was an unexpected disconnect
             if (!event.wasClean && (wasConnected || connecting) && !destroyed) {
@@ -1162,13 +1210,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </div>
         {:else}
             {#each entries as entry, entryIdx (entry.id)}
-                {#if entry.role === 'user' && threads.length > 0 && entryIdx > 0}
-                    {#if getCheckpointThreads(entry)}
+                {#if entry.role === 'user' && threads.length > 0}
+                    {#if getCheckpointThreads(entry, entryIdx === 0)}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
                             threadId={entry.threadId || activeThreadId}
                             threads={threads}
-                            activeThreadId={getCheckpointThreads(entry)!.id}
+                            activeThreadId={getCheckpointThreads(entry, entryIdx === 0)!.id}
                             onSwitch={handleThreadSwitch}
                         />
                     {/if}

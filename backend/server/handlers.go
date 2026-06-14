@@ -24,8 +24,9 @@ import (
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method == http.MethodDelete {
 		var req struct {
-			MessageID   string `json:"message_id"`
+			MessageID    string `json:"message_id"`
 			DeleteSingle bool   `json:"delete_single"`
+			Regenerate   bool   `json:"regenerate"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
 			JSONError(w, http.StatusBadRequest, "message_id required")
@@ -54,9 +55,11 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		}
 		// Check if the deleted message was a checkpoint for any fork threads.
 		// If so, delete those orphaned fork threads and switch to parent if needed.
-		// Match by message ID first (direct match), then by created_at time (for copied messages
-		// in fork threads that have new IDs but preserved timestamps).
-		checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(req.MessageID)
+		// Skip during regeneration — the message is being re-sent, not permanently removed.
+		if !req.Regenerate {
+			// Match by message ID first (direct match), then by created_at time (for copied messages
+			// in fork threads that have new IDs but preserved timestamps).
+			checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(req.MessageID)
 		if len(checkpointThreads) == 0 && msgTimeErr == nil && msgCreatedAt != nil {
 			checkpointThreads, _ = s.store.GetThreadsByCheckpointMessageTime(msgCreatedAt.Format(time.RFC3339))
 		}
@@ -126,6 +129,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			s.boardStreamMgr.Broadcast(projectID)
 			b := s.executor.GetOrCreateStream(taskID)
 			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
+			}
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return

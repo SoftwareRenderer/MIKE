@@ -231,11 +231,11 @@ export async function createTaskMessage(projectId: string, taskId: string, role:
     return res.json();
 }
 
-export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string): Promise<void> {
+export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message_id: messageId }),
+        body: JSON.stringify({ message_id: messageId, regenerate }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to delete messages');
 }
