@@ -63,6 +63,25 @@ import { getToolDisplayName } from '$lib/types';
         }
     }
 
+    let expandedArgs = $state<Set<string>>(new Set());
+
+    function toggleArgs(toolId: string) {
+        const next = new Set(expandedArgs);
+        if (next.has(toolId)) {
+            next.delete(toolId);
+        } else {
+            next.add(toolId);
+        }
+        expandedArgs = next;
+    }
+
+    const ARGS_MAX_LEN = 50;
+
+    function truncateArgs(display: string): { text: string; truncated: boolean } {
+        if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
+        return { text: display.slice(0, ARGS_MAX_LEN) + '\u2026', truncated: true };
+    }
+
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
         const date = new Date(isoStr);
         if (isNaN(date.getTime())) return { display: '', tooltip: '' };
@@ -305,7 +324,19 @@ import { getToolDisplayName } from '$lib/types';
                             <div class="tool-call-header">
                                 <span class="tool-icon">{#if tc.toolName === 'execute_command'}⚡{:else if tc.toolName === 'read_file'}📄{:else if tc.toolName === 'write_file'}✏️{:else if tc.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
                                 <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
-                                <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                                {#if expandedArgs.has(tc.toolId)}
+                                    <span class="tool-args-wrapper" role="button" tabindex="0" onclick={() => toggleArgs(tc.toolId)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleArgs(tc.toolId); } }}>
+                                        <pre class="tool-args tool-args-expanded">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                                    </span>
+                                {:else}
+                                    {#if truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).truncated}
+                                        <span class="tool-args-wrapper" role="button" tabindex="0" onclick={() => toggleArgs(tc.toolId)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleArgs(tc.toolId); } }}>
+                                            <pre class="tool-args tool-args-collapsed">{truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).text}</pre>
+                                        </span>
+                                    {:else}
+                                        <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                                    {/if}
+                                {/if}
                                 {#if tc.isPending}
                                     <span class="tool-status pending"><span class="spinner"></span> Running...</span>
                                 {:else if !tc.success}
@@ -739,7 +770,7 @@ import { getToolDisplayName } from '$lib/types';
         animation: tool-spin 0.6s linear infinite;
     }
     @keyframes tool-spin { to { transform: rotate(360deg); } }
-    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); align-self: flex-end; padding-top: 4px; }
+    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); align-self: flex-start; padding-top: 4px; }
     .tool-args {
         display: inline;
         font-size: 0.75rem;
@@ -747,6 +778,21 @@ import { getToolDisplayName } from '$lib/types';
         margin: 0 6px;
         color: var(--color-text-secondary);
         white-space: pre;
+    }
+    .tool-args-wrapper {
+        display: inline;
+        cursor: pointer;
+    }
+    .tool-args-wrapper:hover .tool-args-collapsed {
+        color: var(--color-text-primary);
+    }
+    .tool-args-expanded {
+        text-decoration: underline;
+        text-decoration-color: var(--color-text-tertiary);
+        text-underline-offset: 2px;
+    }
+    .tool-args-wrapper:hover .tool-args-expanded {
+        color: var(--color-text-primary);
     }
     .tool-result {
         background: var(--color-surface-0);
