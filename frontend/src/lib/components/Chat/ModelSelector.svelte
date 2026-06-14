@@ -12,12 +12,16 @@
 
     let { providers, currentModel, currentUrl, currentReasoningEffort = '', disabled = false, onSelect }: Props = $props();
 
-    let selectedProviderUrl = $state(currentUrl || '');
+    let selectedProviderUrl = $state('');
     let providerDropdownOpen = $state(false);
     let modelDropdownOpen = $state(false);
 
-    let providerTriggerEl: HTMLButtonElement | null = null;
-    let modelTriggerEl: HTMLButtonElement | null = null;
+    $effect(() => {
+        selectedProviderUrl = currentUrl || '';
+    });
+
+    let providerTriggerEl: HTMLButtonElement | null = $state(null);
+    let modelTriggerEl: HTMLButtonElement | null = $state(null);
 
     let providerRect = $state<{ top: number; left: number } | null>(null);
     let modelRect = $state<{ top: number; left: number } | null>(null);
@@ -309,7 +313,7 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this="div" class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#each activeProviders as provider}
             <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)} role="option" aria-selected={provider.url === selectedProviderUrl}>
                 <span class="provider-name">{provider.display_name || provider.name}</span>
@@ -326,7 +330,7 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this="div" class="portal-model-dropdown" role="listbox" aria-label="Select model" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label="Select model" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if availableModels.length === 0}
             <div class="empty">No models available</div>
         {:else}

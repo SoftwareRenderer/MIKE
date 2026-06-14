@@ -112,6 +112,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
+    // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
+    // and the last message is from the user (agent hasn't responded yet).
+    let showRestartButton = $derived(
+        taskStatus === 'in_progress' &&
+        !isLoading &&
+        queuePosition === 0 &&
+        entries.length > 0 &&
+        entries[entries.length - 1].role === 'user'
+    );
+
     // Set of user message IDs that have no assistant/tool_call entry after them.
     // Used to determine whether to show "Send" or "New Thread" in the edit form.
     let lastUserMessageIds = $derived(new Set((() => {
@@ -1141,7 +1151,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
-    let chatFormRef: HTMLElement | null = null;
+    let chatFormRef: HTMLElement | null = $state(null);
 
     function setupViewportListener() {
         const vv = window.visualViewport;
@@ -1272,7 +1282,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     <div class="sr-only" aria-live="polite" aria-atomic="true">
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
-    <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput}>
+    <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages">
         {#if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
@@ -1345,14 +1355,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 {/if}
             {/each}
         {/if}
-        {#if awaitingResponse}
+        {#if awaitingResponse && connected && isLoading}
             <div class="awaiting-llm">
                 <span class="spinner"></span>
-                {#if queuePosition > 0}
-                    <span>Waiting in queue — position {queuePosition}, ~{queueEstimatedWait}s</span>
-                {:else}
-                    <span>Awaiting LLM provider...</span>
-                {/if}
+                <span>Awaiting LLM provider...</span>
+            </div>
+        {/if}
+        {#if queuePosition > 0}
+            <div class="awaiting-llm">
+                <span class="spinner"></span>
+                <span>Waiting in queue — position {queuePosition}, ~{queueEstimatedWait}s</span>
             </div>
         {/if}
     </div>
@@ -1416,6 +1428,22 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 </button>
             </div>
         {/if}
+        {#if showRestartButton}
+            <div class="chat-review-bar">
+                <button class="btn-restart-task" onclick={handleStartTask} disabled={isStarting || disabled} title="Restart the task from the last user message">
+                    {#if isStarting}
+                        <span class="spinner-inline"></span> Restarting...
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Restart Task
+                    {/if}
+                </button>
+            </div>
+        {/if}
+        {#if !showRestartButton}
         <ChatForm
             bind:value={inputValue}
             disabled={disabled}
@@ -1431,6 +1459,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             onStop={handleStop}
             onModelSelect={handleModelSelect}
         />
+        {/if}
         </div>
     {/if}
 </div>
@@ -1475,19 +1504,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
     .chat-empty .hint { font-size: 0.75rem; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .tool-call-entry { padding: 4px 0; }
-    .tool-call-card {
-        background: var(--color-surface-2);
-        border-radius: var(--radius-md);
-        border-left: 3px solid;
-        padding: 8px 12px;
-    }
-    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-accent); }
-    .tool-status { font-size: 0.75rem; font-weight: 500; }
-    .tool-status.pending { color: var(--color-status-yellow); }
-    .tool-status.success { color: var(--color-status-green); }
-    .tool-status.error { color: var(--color-status-red); }
     .spinner {
         display: inline-block;
         width: 10px;
@@ -1505,30 +1521,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         padding: 8px 12px;
         font-size: 0.8125rem;
         color: var(--color-text-tertiary);
-    }
-    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); margin-left: auto; }
-    .tool-args {
-        background: var(--color-surface-0);
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        overflow-x: auto;
-        margin: 0;
-        color: var(--color-text-secondary);
-    }
-    .tool-result {
-        background: var(--color-surface-0);
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        overflow-x: auto;
-        margin: 4px 0 0;
-        max-height: 120px;
-        overflow-y: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
     }
 
     /* Error entry styles */
@@ -1639,6 +1631,27 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         transform: translateY(-1px);
     }
     .btn-start-task:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .btn-restart-task {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .btn-restart-task:hover:not(:disabled) {
+        opacity: 0.85;
+    }
+    .btn-restart-task:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }

@@ -477,7 +477,7 @@
 
 <!-- Model picker dropdown (portal to escape card overflow) -->
 {#if modelPickerOpen && pickerRect && providers.length > 0}
-    <svelte:element this="div" class="portal-card-model-picker" role="listbox" aria-label="Select model" style="position:fixed;top:{pickerRect.top}px;left:{pickerRect.left}px;z-index:10000;min-width:200px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-card-model-picker" role="listbox" aria-label="Select model" style="position:fixed;top:{pickerRect.top}px;left:{pickerRect.left}px;z-index:10000;min-width:200px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#each providers as provider}
             {#if provider.models.length > 0}
                 <div class="picker-provider-header">{provider.display_name || provider.name}</div>
@@ -664,9 +664,6 @@
         border-radius: var(--radius-sm);
         font-weight: 500;
         font-family: inherit;
-    }
-    .badge[model-badge] {
-        /* read-only badge (div) */
     }
     button.badge {
         border: none;

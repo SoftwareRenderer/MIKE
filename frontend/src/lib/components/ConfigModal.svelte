@@ -21,11 +21,11 @@
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
 
-    let workspaceDir = $state(config?.workspace_dir || '');
-    let defaultProvider = $state(config?.default_provider || '');
-    let defaultAutoCommit = $state(config?.default_auto_commit ?? false);
-    let defaultPlanMode = $state(config?.default_plan_mode ?? false);
-    let defaultMaxFailedTurns = $state(config?.default_max_failed_turns ?? 3);
+    let workspaceDir = $state('');
+    let defaultProvider = $state('');
+    let defaultAutoCommit = $state(false);
+    let defaultPlanMode = $state(false);
+    let defaultMaxFailedTurns = $state(3);
     let loading = $state(false);
     let error = $state('');
 
@@ -113,11 +113,11 @@
         }
     }
 
-    // Migrate old global default_model to the matching provider's default_model
-    const oldGlobalDefault = config?.default_model || '';
+    let providers = $state<ProviderDraft[]>([]);
 
-    let providers = $state<ProviderDraft[]>(
-        (config?.providers || []).map(p => {
+    function buildProviders(cfg: Config | null): ProviderDraft[] {
+        const oldGlobalDefault = cfg?.default_model || '';
+        return (cfg?.providers || []).map(p => {
             const draft: ProviderDraft = {
                 ...p,
                 concurrency: p.concurrency || 1,
@@ -144,8 +144,18 @@
                 draft.default_model = oldGlobalDefault;
             }
             return draft;
-        })
-    );
+        });
+    }
+
+    // Sync form fields and providers from config on mount and when config changes
+    $effect(() => {
+        workspaceDir = config?.workspace_dir || '';
+        defaultProvider = config?.default_provider || '';
+        defaultAutoCommit = config?.default_auto_commit ?? false;
+        defaultPlanMode = config?.default_plan_mode ?? false;
+        defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
+        providers = buildProviders(config);
+    });
 
     function toggleProvider(idx: number) {
         providers[idx].expanded = !providers[idx].expanded;
@@ -438,7 +448,7 @@
                     {#each providers as p, i}
                         <div class="provider-card" data-index={i} bind:this={providerCards[i]} class:dragging={dragIndex === i}>
                             <!-- Card header: always visible -->
-                            <div class="provider-card-header" onclick={() => toggleProvider(i)} aria-expanded={p.expanded}>
+                            <div class="provider-card-header" onclick={() => toggleProvider(i)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleProvider(i); } }} role="button" aria-expanded={p.expanded} tabindex="0">
                                 <div class="reorder-buttons">
                                     <button type="button" class="btn-drag-handle" onpointerdown={(e) => handleDragStart(e, i)} title="Drag to reorder" aria-label="Drag to reorder provider">
                                         <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
@@ -832,19 +842,6 @@
         border-radius: 3px;
     }
 
-    /* Screen-reader only utility */
-    .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-    }
-
     /* Section fieldsets */
     .section {
         border: none;
@@ -966,57 +963,6 @@
         font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
-    }
-
-    /* Radio group */
-    .radio-group {
-        padding: 8px 0;
-        border-top: 1px solid var(--color-border);
-    }
-    .radio-group-label {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-        display: block;
-        margin-bottom: 8px;
-    }
-    .radio-options {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .radio-option {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        padding: 8px 10px;
-        border-radius: var(--radius-md);
-        cursor: pointer;
-        transition: background 0.1s ease;
-    }
-    .radio-option:hover {
-        background: var(--color-surface-2);
-    }
-    .radio-option input[type="radio"] {
-        margin-top: 3px;
-        flex-shrink: 0;
-        accent-color: var(--color-accent);
-    }
-    .radio-text {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        min-width: 0;
-    }
-    .radio-title {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .radio-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        line-height: 1.3;
     }
 
     /* Inputs */
@@ -1254,20 +1200,6 @@
     .provider-card.dragging {
         opacity: 0.4;
         border-color: var(--color-accent);
-    }
-
-    /* Drag preview (follows cursor) */
-    .drag-preview {
-        position: fixed;
-        pointer-events: none;
-        z-index: 10001;
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--color-accent);
-        opacity: 0.8;
     }
 
     /* Remove provider button */
@@ -1528,10 +1460,6 @@
         -webkit-appearance: none;
         margin: 0;
     }
-    .pricing-input[type=number] {
-        -moz-appearance: textfield;
-    }
-
     /* Models section */
     .models-section {
         display: flex;
@@ -1596,17 +1524,6 @@
         align-items: center;
         gap: 6px;
         min-width: 0;
-    }
-    .in-use-badge {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        color: var(--color-status-blue);
-        background: rgba(76, 154, 255, 0.12);
-        padding: 1px 5px;
-        border-radius: 3px;
-        flex-shrink: 0;
     }
     .context-window-badge {
         font-size: 0.65rem;

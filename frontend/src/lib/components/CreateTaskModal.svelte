@@ -217,7 +217,7 @@
         font-weight: 500;
         color: var(--color-text-secondary);
     }
-    input[type="text"], textarea {
+    textarea {
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
@@ -225,7 +225,7 @@
         color: var(--color-text-primary);
         font-size: 0.875rem;
     }
-    input[type="text"]:focus-visible, textarea:focus-visible {
+    textarea:focus-visible {
         border-color: var(--color-accent);
         outline: none;
     }

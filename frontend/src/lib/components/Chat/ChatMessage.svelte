@@ -121,8 +121,12 @@ import { getToolDisplayName } from '$lib/types';
     }
 
     let isEditing = $state(false);
-    let editContent = $state(content);
+    let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
+
+    $effect(() => {
+        editContent = content;
+    });
     let copied = $state(false);
 
     // Generated token count for stats display
@@ -758,18 +762,7 @@ import { getToolDisplayName } from '$lib/types';
     .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-text-primary); }
     .tool-status { font-size: 0.75rem; font-weight: 500; }
     .tool-status.pending { color: var(--color-status-yellow); }
-    .tool-status.success { color: var(--color-status-green); }
     .tool-status.error { color: var(--color-status-red); }
-    .tool-spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 1.5px solid var(--color-status-yellow);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: tool-spin 0.6s linear infinite;
-    }
-    @keyframes tool-spin { to { transform: rotate(360deg); } }
     .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); align-self: flex-start; padding-top: 4px; }
     .tool-args {
         display: inline;

@@ -423,7 +423,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                             title={`Select task: ${t.title || '(untitled)'}`}
                                         >
                                             <span class="task-item-title">{t.title || '(untitled)'}</span>
-                                            <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} role="button" aria-label="Edit title" title="Edit title" tabindex="0">
+                                            <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEditTaskTitle(t.id, t.title, e); } }} role="button" aria-label="Edit title" title="Edit title" tabindex="0">
                                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                                             </span>
                                             {#if getStatusBadge(t).text}

@@ -124,6 +124,7 @@
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
 <div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
     <div class="terminal-header">
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div class="resize-handle" onmousedown={onResizeStart} role="separator" aria-orientation="horizontal" aria-label="Resize terminal"></div>
         <span class="title">Terminal</span>
         <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
