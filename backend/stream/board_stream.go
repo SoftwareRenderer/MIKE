@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,11 @@ type diffSnapshot struct {
 	shortStat      string
 	untrackedN     int
 	untrackedLines int
+}
+
+// branchSnapshot holds the last-known branch for a project.
+type branchSnapshot struct {
+	branch string
 }
 
 // BoardStreamManager manages per-project WebSocket connections for board updates.
@@ -102,6 +108,23 @@ func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 	}
 }
 
+// BroadcastBranch sends a project_branch event to all clients of a project.
+func (bsm *BoardStreamManager) BroadcastBranch(projectID, branch string) {
+	bsm.mu.RLock()
+	clients := bsm.clients[projectID]
+	bsm.mu.RUnlock()
+
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":   "project_branch",
+		"branch": branch,
+	})
+	for conn := range clients {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected
+		}
+	}
+}
+
 // BroadcastDiffStats sends a task_diff_stats event to all clients of a project.
 func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat string, untrackedN, untrackedLines int) {
 	bsm.mu.RLock()
@@ -136,7 +159,7 @@ func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 }
 
 // pollProjectDiffStats periodically checks git diff stats for tasks in in_progress/review
-// and broadcasts updates when file/line counts change.
+// and broadcasts updates when file/line counts change. Also monitors the project's current branch.
 func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, projectID string) {
 	if bsm.store == nil || bsm.worktreeMgr == nil {
 		return
@@ -146,12 +169,22 @@ func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, project
 
 	// Track last-known stats per task to detect changes
 	snapshots := make(map[string]diffSnapshot)
+	var lastBranch string
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			// Check for branch changes
+			branch, _ := bsm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+			branch = strings.TrimSpace(branch)
+			if branch != lastBranch {
+				log.Printf("[board poll] project=%s branch changed: %s -> %s", projectID, lastBranch, branch)
+				lastBranch = branch
+				bsm.BroadcastBranch(projectID, branch)
+			}
+
 			tasks, err := bsm.store.GetTasksByProject(projectID)
 			if err != nil {
 				continue
@@ -248,6 +281,19 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 					bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 				}
 			}
+		}
+	}
+
+	// Send initial branch to this client
+	if bsm.worktreeMgr != nil {
+		branch, _ := bsm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+		branch = strings.TrimSpace(branch)
+		if branch != "" {
+			msg, _ := json.Marshal(map[string]interface{}{
+				"type":   "project_branch",
+				"branch": branch,
+			})
+			conn.Write(context.Background(), websocket.MessageText, msg)
 		}
 	}
 

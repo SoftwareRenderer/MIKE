@@ -96,6 +96,11 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	baselineBranch := fmt.Sprintf("__kanban_baseline_%s", taskID)
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
 
+	// Save the originating branch to the project (best-effort)
+	if originalBranch != "" && !strings.HasPrefix(originalBranch, "fatal:") {
+		_ = wm.store.UpdateProjectOriginBranch(projectID, originalBranch)
+	}
+
 	cleanup := func() {
 		if originalBranch != "" {
 			wm.gitRun(project.Path, "checkout", originalBranch)
@@ -582,7 +587,8 @@ func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, err
 }
 
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
-	return wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	return strings.TrimSpace(out), err
 }
 
 // GitRunInWorktree runs a git command in the task's worktree directory.
@@ -607,4 +613,22 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 		return "", fmt.Errorf("worktree not found")
 	}
 	return wm.gitRunOutput(worktreePath, args...)
+}
+
+// GitRunInProject runs a git command in the project's main directory.
+func (wm *WorktreeManager) GitRunInProject(projectID string, args ...string) error {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+	return wm.gitRun(project.Path, args...)
+}
+
+// GitRunInProjectOutput runs a git command in the project's main directory and returns its output.
+func (wm *WorktreeManager) GitRunInProjectOutput(projectID string, args ...string) (string, error) {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return "", fmt.Errorf("get project: %w", err)
+	}
+	return wm.gitRunOutput(project.Path, args...)
 }

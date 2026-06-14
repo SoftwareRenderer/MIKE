@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -254,7 +256,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleCommitAndDone commits the worktree changes and moves the task to Done.
+// HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -272,7 +274,8 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	// Try to commit worktree changes (skip if worktree doesn't exist)
 	diffStat, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
-	if wtErr == nil {
+	worktreeExists := wtErr == nil
+	if worktreeExists {
 		// Worktree exists — stage and commit
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 		commitMsg := task.Title
@@ -281,7 +284,20 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, "commit", "-m", commitMsg, "--allow-empty")
 	}
-	// If worktree doesn't exist, skip git operations and just move to done
+
+	// Merge worktree into origin branch
+	mergeErr := h.mergeWorktreeIntoOrigin(projectID, taskID, task)
+	if mergeErr != nil {
+		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
+		// Log merge error as system message in the task thread
+		h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", mergeErr))
+		// Continue to move task to done even if merge fails
+	}
+
+	// Clean up worktree after merge attempt
+	if worktreeExists {
+		_ = h.worktreeMgr.RemoveWorktreeDir(projectID, taskID)
+	}
 
 	// Move task to Done
 	task.Status = "done"
@@ -294,6 +310,248 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// mergeWorktreeIntoOrigin merges the task's worktree branch into the project's current branch.
+// On merge conflict, it uses the LLM to resolve conflicts.
+func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *types.Task) error {
+	// Query the live current branch from the project's git repo
+	originBranch, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
+		return nil
+	}
+	originBranch = strings.TrimSpace(originBranch)
+	if originBranch == "" || originBranch == "HEAD" {
+		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
+		return nil
+	}
+	taskBranch := task.Branch
+	if taskBranch == "" {
+		log.Printf("[merge] task=%s no task branch set, skipping merge", taskID)
+		return nil
+	}
+
+	// Stash any working tree changes to allow clean checkout
+	hadStash := false
+	if err := h.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban merge stash"); err == nil {
+		hadStash = true
+	}
+	defer func() {
+		if hadStash {
+			_ = h.worktreeMgr.GitRunInProject(projectID, "stash", "pop")
+		}
+	}()
+
+	// Checkout origin branch in the project directory (force to handle dirty working tree)
+	if err := h.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", originBranch); err != nil {
+		return fmt.Errorf("checkout origin branch %s: %w", originBranch, err)
+	}
+
+	// Merge the task branch
+	mergeOut, mergeErr := h.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch)
+	if mergeErr == nil {
+		log.Printf("[merge] task=%s merged into %s successfully: %s", taskID, originBranch, strings.TrimSpace(mergeOut))
+		return nil
+	}
+
+	// Merge conflict detected — resolve with LLM
+	log.Printf("[merge] task=%s conflict merging into %s, resolving with LLM", taskID, originBranch)
+	conflictedFiles := h.getConflictedFiles(projectID)
+	if len(conflictedFiles) == 0 {
+		// Abort merge if no conflicted files found (shouldn't happen)
+		_ = h.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+		return fmt.Errorf("merge conflict but no conflicted files found")
+	}
+
+	// Log conflict detection as system message
+	fileList := strings.Join(conflictedFiles, ", ")
+	h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge conflict detected in: %s. Resolving with LLM...", fileList))
+
+	// Resolve conflicts with LLM
+	resolutionMsg, resolveErr := h.resolveMergeConflicts(projectID, taskID, task, conflictedFiles)
+	if resolveErr != nil {
+		log.Printf("[merge] task=%s LLM conflict resolution failed: %v", taskID, resolveErr)
+		// Abort merge and return error
+		_ = h.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+		return fmt.Errorf("LLM conflict resolution failed: %w", resolveErr)
+	}
+
+	// Stage resolved files and commit
+	for _, f := range conflictedFiles {
+		_ = h.worktreeMgr.GitRunInProject(projectID, "add", f)
+	}
+	commitMsg := fmt.Sprintf("Resolve merge conflicts for task: %s\n\n%s", task.Title, resolutionMsg)
+	if err := h.worktreeMgr.GitRunInProject(projectID, "commit", "-m", commitMsg); err != nil {
+		return fmt.Errorf("commit resolved merge: %w", err)
+	}
+
+	log.Printf("[merge] task=%s conflicts resolved and committed", taskID)
+	return nil
+}
+
+// getConflictedFiles returns a list of files with merge conflicts.
+func (h *TaskHandler) getConflictedFiles(projectID string) []string {
+	statusOut, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(statusOut, "\n") {
+		f := strings.TrimSpace(line)
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+// resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
+func (h *TaskHandler) resolveMergeConflicts(projectID, taskID string, task *types.Task, conflictedFiles []string) (string, error) {
+	serverURL := task.LlamaServerURL
+	modelName := task.ModelName
+	if serverURL == "" || modelName == "" {
+		return "", fmt.Errorf("no LLM config on task")
+	}
+
+	// Build conflict context for each file
+	var conflictParts []string
+	for _, f := range conflictedFiles {
+		project, _ := h.store.GetProject(projectID)
+		filePath := filepath.Join(project.Path, f)
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			log.Printf("[merge] task=%s failed to read conflicted file %s: %v", taskID, f, err)
+			continue
+		}
+		conflictParts = append(conflictParts, fmt.Sprintf("FILE: %s\n---BEGIN---\n%s\n---END---", f, string(content)))
+	}
+
+	if len(conflictParts) == 0 {
+		return "", fmt.Errorf("no conflict content to resolve")
+	}
+
+	conflictContext := strings.Join(conflictParts, "\n\n")
+	prompt := fmt.Sprintf(`You are resolving merge conflicts. The following files have merge conflict markers (<<<<<<< , =======, >>>>>>> ).
+
+Task title: %s
+Task description: %s
+
+Conflicted files:
+
+%s
+
+For each file, provide the fully resolved content WITHOUT any conflict markers. Maintain the intent of the newer changes. If any functionality was lost during resolution, note it.
+
+Output format: For each file, output:
+RESOLVE <filepath>
+<full resolved file content>
+END_RESOLVE
+
+Then output a summary:
+SUMMARY
+<Brief summary of changes made and any lost functionality>
+END_SUMMARY`, task.Title, task.Prompt, conflictContext)
+
+	client := llama.NewLlamaClient(serverURL, modelName, "off")
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "You are an expert developer resolving git merge conflicts. Output the fully resolved file contents and a summary."},
+		{Role: "user", Content: prompt},
+	}
+
+	_, response, err := client.ChatCompletion(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Parse the response and write resolved files
+	project, _ := h.store.GetProject(projectID)
+	var summary string
+	currentFile := ""
+	var currentContent strings.Builder
+	inResolve := false
+	inSummary := false
+
+	for _, line := range strings.Split(response, "\n") {
+		if strings.HasPrefix(line, "RESOLVE ") {
+			// Write previous file if any
+			if currentFile != "" && inResolve {
+				fullPath := filepath.Join(project.Path, currentFile)
+				if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
+					log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
+				}
+			}
+			currentFile = strings.TrimPrefix(line, "RESOLVE ")
+			currentContent.Reset()
+			inResolve = true
+			inSummary = false
+			continue
+		}
+		if line == "END_RESOLVE" {
+			// Write current file
+			if currentFile != "" && inResolve {
+				fullPath := filepath.Join(project.Path, currentFile)
+				if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
+					log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
+				}
+				inResolve = false
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "SUMMARY") {
+			inSummary = true
+			inResolve = false
+			continue
+		}
+		if line == "END_SUMMARY" {
+			inSummary = false
+			continue
+		}
+		if inResolve {
+			currentContent.WriteString(line + "\n")
+		} else if inSummary {
+			if summary != "" {
+				summary += "\n"
+			}
+			summary += line
+		}
+	}
+	// Write last file if any
+	if currentFile != "" && inResolve {
+		fullPath := filepath.Join(project.Path, currentFile)
+		if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
+			log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
+		}
+	}
+
+	if summary == "" {
+		summary = "Conflicts resolved (no summary provided by LLM)"
+	}
+
+	// Log resolution as system message
+	h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge conflicts resolved:\n\n%s", summary))
+
+	return summary, nil
+}
+
+// logSystemMessage creates a system message in the task's conversation thread.
+func (h *TaskHandler) logSystemMessage(taskID, threadID, content string) {
+	if threadID == "" {
+		return
+	}
+	if err := h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        uuid.New().String(),
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "system",
+		Content:   content,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Printf("[system-msg] task=%s failed to log message: %v", taskID, err)
+	}
 }
 
 // cleanupTask performs all cleanup steps for a deleted task.

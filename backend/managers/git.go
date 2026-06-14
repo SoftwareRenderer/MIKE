@@ -78,6 +78,24 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request, proj
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
 
+// HandleCurrentBranch returns the current branch name for a project.
+func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request, projectID string) {
+	project, err := h.store.GetProject(projectID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	c := exec.Command("git", "-C", project.Path, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := c.CombinedOutput()
+	branch := strings.TrimSpace(string(out))
+	if err != nil {
+		// Not a git repo or other error
+		httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": ""})
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": branch})
+}
+
 // HandleDiff returns diff between refs.
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request, projectID string) {
 	project, err := h.store.GetProject(projectID)

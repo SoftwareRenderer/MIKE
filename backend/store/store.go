@@ -63,11 +63,12 @@ func (s *Store) Exec(query string, args ...interface{}) (sql.Result, error) {
 func (s *Store) initSchema() error {
 	schema := `
 CREATE TABLE IF NOT EXISTS projects (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    path        TEXT NOT NULL UNIQUE,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    path          TEXT NOT NULL UNIQUE,
+    origin_branch TEXT DEFAULT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -224,6 +225,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`) // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (

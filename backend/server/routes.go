@@ -31,6 +31,7 @@ var (
 	reTaskReorder          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/reorder$`)
 	reTasksDone            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/done$`)
 	reProjectGitLog        = regexp.MustCompile(`^/api/projects/([^/]+)/git/log$`)
+	reProjectGitBranch     = regexp.MustCompile(`^/api/projects/([^/]+)/git/branch$`)
 	reProjectGitBranches   = regexp.MustCompile(`^/api/projects/([^/]+)/git/branches$`)
 	reProjectGitDiff       = regexp.MustCompile(`^/api/projects/([^/]+)/git/diff$`)
 	reProjectGitStatus     = regexp.MustCompile(`^/api/projects/([^/]+)/git/status$`)
@@ -225,6 +226,10 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 
 	if m := reProjectGitLog.FindStringSubmatch(path); m != nil {
 		s.gitHandler.HandleLog(w, r, m[1])
+		return
+	}
+	if m := reProjectGitBranch.FindStringSubmatch(path); m != nil {
+		s.gitHandler.HandleCurrentBranch(w, r, m[1])
 		return
 	}
 	if m := reProjectGitBranches.FindStringSubmatch(path); m != nil {

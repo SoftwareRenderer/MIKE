@@ -57,6 +57,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     let showCardDetailVal = $state(false);
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
+    let currentBranch = $state('');
     let selectedTaskVal: Task | null = $state(null);
     let creatingChildOf: string | null = $state(null);
     let mobileMenuOpen = $state(false);
@@ -214,6 +215,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     async function selectProject(p: Project) {
         disconnectBoardStream();
         currentProject = p;
+        currentBranch = '';
         selectedProject.set(p);
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
@@ -249,6 +251,8 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         return map;
                     });
                 }
+            }, (branch) => {
+                currentBranch = branch;
             });
         } catch (e) {
             console.error('Failed to load board:', e);
@@ -401,7 +405,7 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         </svg>
                     </button>
                 {/if}
-                <span class="project-title">{getHomeRelativePath(currentProject.path)}</span>
+                <span class="project-title">{getHomeRelativePath(currentProject.path)}{currentBranch ? ` (${currentBranch})` : ''}</span>
                 <div class="actions">
                     <button class="icon-btn" onclick={() => showTerminal.set(true)} aria-label="Open terminal" title="Open terminal">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">

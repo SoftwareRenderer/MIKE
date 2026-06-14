@@ -813,6 +813,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (!b) return b;
                 return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
             });
+            // Reload history to show any system messages from merge conflict resolution
+            await loadHistory();
         } catch (e) {
             showToast(String(e));
         }
