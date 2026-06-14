@@ -64,6 +64,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let atBottom = $state(true);
     let prevScrollHeight = 0;
     let userInputPending = false;
+    let inputTimeout: ReturnType<typeof setTimeout> | null = null;
     let inputValue = $state('');
 
     // Model selection state
@@ -692,7 +693,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function checkScroll() {
         if (!scrollEl || !userInputPending) return;
-        userInputPending = false;
+        // Don't clear flag here — keep it active during inertial scrolling.
+        // Reset a timeout instead; flag clears when scrolling settles.
+        if (inputTimeout) clearTimeout(inputTimeout);
+        inputTimeout = setTimeout(() => { userInputPending = false; inputTimeout = null; }, 150);
         const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         if (scrollEl.scrollHeight < (prevScrollHeight || scrollEl.scrollHeight)) {
             const shrinkAmount = (prevScrollHeight || scrollEl.scrollHeight) - scrollEl.scrollHeight;
@@ -1218,6 +1222,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     onDestroy(() => {
         destroyed = true;
         if (ws) ws.close();
+        if (inputTimeout) clearTimeout(inputTimeout);
     });
 </script>
 
