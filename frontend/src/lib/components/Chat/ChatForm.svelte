@@ -119,7 +119,7 @@
             oninput={autoResize}
             onfocus={handleFocus}
         ></textarea>
-        {#if isLoading}
+        {#if isLoading && !value.trim()}
             <button type="button" class="btn-stop" onclick={handleStop} aria-label="Stop generation" title="Stop generation">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>

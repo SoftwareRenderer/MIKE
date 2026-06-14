@@ -103,6 +103,12 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 	defer resp.Body.Close()
 
+	// Close body on context cancellation to unblock the scanner.
+	go func() {
+		<-ctx.Done()
+		resp.Body.Close()
+	}()
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
@@ -114,6 +120,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	scanner.Buffer(buf, 1024*1024)
 
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return usage, ctx.Err()
+		default:
+		}
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue

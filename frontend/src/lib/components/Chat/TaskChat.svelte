@@ -370,6 +370,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
+                } else if (data.state === 'cancelled') {
+                    // Response was cancelled by new user message — clear streaming state.
+                    closeCurrentAssistant();
+                    activeToolCalls.clear();
+                    entries = entries.filter(e => !e.isStreaming);
+                    markNotStreaming();
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
                     // Executor finished — clear streaming state
                     markNotStreaming();
@@ -713,6 +719,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     async function handleSend(msg: string) {
         if (!msg || disabled) return;
+        // If LLM is streaming, cancel the current response by clearing partial assistant entry.
+        if (isLoading) {
+            entries = entries.filter(e => !e.isStreaming);
+            if (currentAssistantId) {
+                currentAssistantId = null;
+            }
+            activeToolCalls.clear();
+            markNotStreaming();
+        }
         // If task is in Done, move it back to In Progress before sending
         if (taskStatus === 'done') {
             try {

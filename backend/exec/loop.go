@@ -143,6 +143,20 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 		}
 
+		// Check for user messages that arrived during tool execution.
+		select {
+		case um := <-userMsgChan:
+			log.Printf("[user-msg] task=%s received message before LLM call", task.ID)
+			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+			if um.ModelName != "" {
+				mc.set(um.ServerURL, um.ModelName)
+				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+			}
+		default:
+		}
+
 		// Acquire concurrency gate slot before LLM call.
 		serverURL, activeModel := mc.get()
 		concurrency := te.configStore.GetProviderConcurrency(serverURL)
@@ -185,81 +199,150 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		var streamTokenCount int
 		streamStart := time.Time{}
 
-		usage, err := client.ChatStream(ctx, messages, tools, func(choice types.ChatChoice) {
-			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-				reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-				b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
-				streamTokenCount++
-				if streamStart.IsZero() {
-					streamStart = time.Now()
-				}
-				if streamTokenCount%10 == 0 {
-					elapsed := time.Since(streamStart).Milliseconds()
-					b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
-						"model_name":       activeModel,
-						"predicted_tokens": streamTokenCount,
-						"predicted_ms":     int(elapsed),
-					}})
-				}
-			}
-			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-				assistantContent.WriteString(*choice.Delta.Content)
-				b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
-				streamTokenCount++
-				if streamStart.IsZero() {
-					streamStart = time.Now()
-				}
-				if streamTokenCount%10 == 0 {
-					elapsed := time.Since(streamStart).Milliseconds()
-					b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
-						"model_name":       activeModel,
-						"predicted_tokens": streamTokenCount,
-						"predicted_ms":     int(elapsed),
-					}})
-				}
-			}
-			if len(choice.Delta.ToolCalls) > 0 {
-				pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
-			}
-		})
+		// Per-call context — can be cancelled independently to abort the LLM stream.
+		callCtx, callCancel := context.WithCancel(ctx)
 
-		if err != nil {
-			for i := 0; i < 3; i++ {
+		streamDone := make(chan struct{})
+		var usage *types.ChatUsage
+		var streamErr error
+
+		go func() {
+			usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
+				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+					reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+					b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+					streamTokenCount++
+					if streamStart.IsZero() {
+						streamStart = time.Now()
+					}
+					if streamTokenCount%10 == 0 {
+						elapsed := time.Since(streamStart).Milliseconds()
+						b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
+							"model_name":       activeModel,
+							"predicted_tokens": streamTokenCount,
+							"predicted_ms":     int(elapsed),
+						}})
+					}
+				}
+				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
+					assistantContent.WriteString(*choice.Delta.Content)
+					b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+					streamTokenCount++
+					if streamStart.IsZero() {
+						streamStart = time.Now()
+					}
+					if streamTokenCount%10 == 0 {
+						elapsed := time.Since(streamStart).Milliseconds()
+						b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
+							"model_name":       activeModel,
+							"predicted_tokens": streamTokenCount,
+							"predicted_ms":     int(elapsed),
+						}})
+					}
+				}
+				if len(choice.Delta.ToolCalls) > 0 {
+					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
+				}
+			})
+
+			// Retry on transient errors (skip if cancelled by user message).
+			if streamErr != nil && callCtx.Err() == nil {
+				for i := 0; i < 3; i++ {
+					select {
+					case <-callCtx.Done():
+						close(streamDone)
+						return
+					case <-time.After(time.Duration(i+1) * 2 * time.Second):
+					}
+					usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
+						if choice.Delta.ReasoningContent != nil {
+							reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+							b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+						}
+						if choice.Delta.Content != nil {
+							b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+						}
+					})
+					if streamErr == nil {
+						break
+					}
+				}
+			}
+
+			close(streamDone)
+		}()
+
+		// Wait for: stream complete, new user message, or task stop.
+		select {
+		case <-ctx.Done():
+			callCancel()
+			<-streamDone
+			te.gate.Release(serverURL)
+			task.StatusState = "stopped"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			return
+		case <-streamDone:
+			// Stream completed normally (or all retries exhausted)
+		case um := <-userMsgChan:
+			// New user message — cancel current LLM call.
+			log.Printf("[cancel] task=%s user message received during streaming, cancelling", task.ID)
+			callCancel()
+			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
+			select {
+			case <-streamDone:
+			case <-time.After(2 * time.Second):
+				log.Printf("[cancel] task=%s streamDone timeout, forcing continue", task.ID)
+			}
+			te.gate.Release(serverURL)
+
+			// Drain all queued messages from channel (non-blocking).
+			var queuedMsgs []stream.UserMessage
+			queuedMsgs = append(queuedMsgs, um)
+			for i := 0; i < 16; i++ {
 				select {
-				case <-ctx.Done():
-					te.gate.Release(serverURL)
-					task.StatusState = "stopped"
-					task.Output = "Stopped by user"
-					te.store.UpdateTask(task)
-					te.boardStreamMgr.Broadcast(projectID)
-					return
-				case <-time.After(time.Duration(i+1) * 2 * time.Second):
-				}
-				usage, err = client.ChatStream(ctx, messages, tools, func(choice types.ChatChoice) {
-					if choice.Delta.ReasoningContent != nil {
-						reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-						b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
-					}
-					if choice.Delta.Content != nil {
-						b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
-					}
-				})
-				if err == nil {
-					break
+				case q := <-userMsgChan:
+					queuedMsgs = append(queuedMsgs, q)
+				default:
+					goto drainDone
 				}
 			}
-			if err != nil {
-				te.gate.Release(serverURL)
-				task.StatusState = "failed"
-				task.Output = fmt.Sprintf("Connection failed: %v", err)
-				te.store.UpdateTask(task)
-				te.boardStreamMgr.Broadcast(projectID)
-				te.sendAndPersistError(b, task.ID, err.Error(), "connection_failed")
-				return
+		drainDone:
+
+			// Clear partial assistant state.
+			assistantContent.Reset()
+			reasoningContent.Reset()
+			pendingToolCalls = nil
+
+			// Add queued messages to conversation history.
+			for _, qm := range queuedMsgs {
+				messages = append(messages, types.ChatMessage{Role: "user", Content: qm.Content})
+				if qm.ModelName != "" {
+					mc.set(qm.ServerURL, qm.ModelName)
+					newReasoningEffort := te.configStore.GetModelReasoningEffort(qm.ModelName)
+					client = llama.NewLlamaClient(qm.ServerURL, qm.ModelName, newReasoningEffort)
+					providerName = te.configStore.GetProviderNameByURL(qm.ServerURL)
+				}
 			}
+
+			// Notify frontend that response was cancelled.
+			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "cancelled", "activity": "Response cancelled, processing new message"}})
+
+			continue
+		}
+		callCancel()
+
+		if streamErr != nil {
+			task.StatusState = "failed"
+			task.Output = fmt.Sprintf("Connection failed: %v", streamErr)
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			te.sendAndPersistError(b, task.ID, streamErr.Error(), "connection_failed")
+			return
 		}
 
-		// Release gate slot after LLM call (before tool execution)
+		// Release gate slot after LLM call (before tool execution).
 		te.gate.Release(serverURL)
 
 		assistantText := assistantContent.String()
@@ -434,6 +517,23 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			})
 			assistantContent.Reset()
 			reasoningContent.Reset()
+			// Check for queued user messages before sending complete.
+			select {
+			case um := <-userMsgChan:
+				log.Printf("[user-msg] task=%s received message after response, continuing", task.ID)
+				messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+				if um.ModelName != "" {
+					mc.set(um.ServerURL, um.ModelName)
+					newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+					client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+					providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+				}
+				task.StatusState = "running"
+				te.store.UpdateTask(task)
+				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+				continue
+			default:
+			}
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.Broadcast(projectID)

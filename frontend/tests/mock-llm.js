@@ -139,8 +139,8 @@ function selectResponse(parsed) {
         return { chunks: toolCallResponse, chunkDelay: 1 };
     }
 
-    // Slow response: for stop button test (needs streaming to be visible)
-    if (/stop button|stop-test/i.test(lastUserMsg)) {
+    // Slow response: for stop button test and cancel-during-streaming test (needs streaming to be visible)
+    if (/stop button|stop-test|cancel-test|interrupt-test/i.test(lastUserMsg)) {
         return { chunks: textResponseSlow, chunkDelay: 100 };
     }
 
