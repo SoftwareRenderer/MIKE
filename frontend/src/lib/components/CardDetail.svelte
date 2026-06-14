@@ -211,6 +211,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         return () => window.removeEventListener('resize', check);
     });
 
+    // Refresh diff when switching to Changes tab on mobile (WebSocket events may have been missed)
+    // Pass bumpVersion=false to avoid DOM flicker from {#key version} re-mount
+    $effect(() => {
+        if (activeTab === 'diff') {
+            loadDiff(false);
+        }
+    });
+
     onMount(() => {
         const unsubBoard = boardStore.subscribe(b => {
             if (b) {
@@ -271,7 +279,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    function updateDiff(data: DiffData) {
+    function updateDiff(data: DiffData, bumpVersion = true) {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
         diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path));
         untrackedFiles = (data.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
@@ -279,14 +287,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             fileSize: u.file_size,
             file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
         }));
-        diffVersion++;
+        if (bumpVersion) diffVersion++;
     }
 
-    async function loadDiff() {
+    async function loadDiff(bumpVersion = true) {
         if (!task || task.status === 'backlog') return;
         try {
             const result = await getTaskDiff(task.project_id, task.id);
-            updateDiff(result);
+            updateDiff(result, bumpVersion);
         } catch (e) {
             diffFiles = [];
             untrackedFiles = [];

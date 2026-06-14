@@ -320,7 +320,7 @@ import { getToolDisplayName } from '$lib/types';
                                     <span class="tool-status error">Failed</span>
                                 {/if}
                             </div>
-                            {#if tc.result !== undefined}
+                            {#if tc.result && tc.result.trim()}
                                 <pre class="tool-result">{tc.result}</pre>
                             {/if}
                             {#if tc.duration !== undefined}

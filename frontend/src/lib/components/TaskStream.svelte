@@ -242,7 +242,7 @@
                                 {/if}
                             </div>
                             <pre class="tool-args">{JSON.stringify(sec.toolCall.args, null, 2)}</pre>
-                            {#if sec.toolCall.result !== undefined}
+                            {#if sec.toolCall.result && sec.toolCall.result.trim()}
                                 <pre class="tool-result" class:success={sec.toolCall.success} class:failure={!sec.toolCall.success}>{sec.toolCall.result}</pre>
                             {/if}
                         </div>
