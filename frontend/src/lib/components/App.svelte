@@ -356,15 +356,15 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                         <span class="project-abbr" title={p.name}>{getProjectAbbr(p.name)}</span>
                         {#if !collapsed && projectCounts[p.id]}
                             <span class="project-stats">
-                                <span class="stat-badge" style="color: var(--color-column-backlog)">
+                                <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
                                     {projectCounts[p.id].backlog}
                                 </span>
-                                <span class="stat-badge" style="color: var(--color-column-in-progress)">
+                                <span class="stat-badge" style="color: var(--color-column-in-progress)" title="In Progress">
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                                     {projectCounts[p.id].in_progress}
                                 </span>
-                                <span class="stat-badge" style="color: var(--color-column-review)">
+                                <span class="stat-badge" style="color: var(--color-column-review)" title="Review">
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                                     {projectCounts[p.id].review}
                                 </span>

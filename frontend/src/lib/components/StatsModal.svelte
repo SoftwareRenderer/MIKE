@@ -146,7 +146,7 @@
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatCost(stats.total_cost)}</span>
-                            <span class="summary-label">Total Cost</span>
+                            <span class="summary-label">Est. Total Cost</span>
                         </div>
                     </div>
                 </div>
@@ -162,7 +162,7 @@
                             <th class="col-num">Generated</th>
                             <th class="col-num">Prompt Speed</th>
                             <th class="col-num">Gen Speed</th>
-                            <th class="col-num">Cost</th>
+                            <th class="col-num">Est. Cost</th>
                             <th class="col-action"></th>
                         </tr>
                     </thead>
