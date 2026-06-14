@@ -196,9 +196,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		close(queueDone)
 
-		var streamTokenCount int
-		streamStart := time.Time{}
-
 		// Per-call context — can be cancelled independently to abort the LLM stream.
 		callCtx, callCancel := context.WithCancel(ctx)
 
@@ -211,34 +208,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 					reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 					b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
-					streamTokenCount++
-					if streamStart.IsZero() {
-						streamStart = time.Now()
-					}
-					if streamTokenCount%10 == 0 {
-						elapsed := time.Since(streamStart).Milliseconds()
-						b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
-							"model_name":       activeModel,
-							"predicted_tokens": streamTokenCount,
-							"predicted_ms":     int(elapsed),
-						}})
-					}
 				}
 				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 					assistantContent.WriteString(*choice.Delta.Content)
 					b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
-					streamTokenCount++
-					if streamStart.IsZero() {
-						streamStart = time.Now()
-					}
-					if streamTokenCount%10 == 0 {
-						elapsed := time.Since(streamStart).Milliseconds()
-						b.Send(types.StreamEvent{Type: types.WSTypeStats, Data: map[string]interface{}{
-							"model_name":       activeModel,
-							"predicted_tokens": streamTokenCount,
-							"predicted_ms":     int(elapsed),
-						}})
-					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
 					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)

@@ -104,6 +104,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Context usage tracking
     let contextState = $state({ used: 0, limit: 0 });
 
+    // Hybrid token counting: frontend counts per-token for smooth display,
+    // backend stats events correct accuracy, complete event provides final count.
+    let streamTokenCount = $state(0);
+    let lastPromptTokens = $state(0);
+
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
@@ -200,6 +205,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         streamingTaskIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
         queuePosition = 0;
         queueEstimatedWait = 0;
+        streamTokenCount = 0;
+        contextState.used = lastPromptTokens;
     }
 
     /** Clear the "awaiting LLM" spinner — first response from provider has arrived. */
@@ -212,6 +219,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'token': {
                 clearAwaiting();
                 markStreaming();
+                // First token of a new turn — reset counter
+                if (!currentAssistantId) {
+                    streamTokenCount = 0;
+                }
+                streamTokenCount++;
+                contextState.used = lastPromptTokens + streamTokenCount;
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.content += data.text;
@@ -220,6 +233,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'reasoning': {
                 clearAwaiting();
+                // First reasoning chunk of a new turn — reset counter
+                if (!currentAssistantId) {
+                    streamTokenCount = 0;
+                }
+                streamTokenCount++;
+                contextState.used = lastPromptTokens + streamTokenCount;
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
@@ -311,8 +330,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 markNotStreaming();
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
                 closeCurrentAssistant();
-                // Track context usage from the last turn's prompt tokens
+                // Store prompt tokens for next turn's context baseline
                 if (data.prompt_tokens !== undefined) {
+                    lastPromptTokens = data.prompt_tokens;
                     contextState.used = data.prompt_tokens;
                 }
                 // Attach stats to the last assistant entry
@@ -384,6 +404,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'stats': {
                 const data = event.data as { model_name: string; predicted_tokens: number; predicted_ms: number };
+                // Sync frontend counter with backend count for accuracy
+                if (data.predicted_tokens !== streamTokenCount) {
+                    streamTokenCount = data.predicted_tokens;
+                    contextState.used = lastPromptTokens + streamTokenCount;
+                }
                 // Update real-time stats on the current streaming assistant entry
                 if (currentAssistantId) {
                     const entry = entries.find(e => e.id === currentAssistantId);
@@ -540,7 +565,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Restore context usage from the last assistant message
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
             if (lastAssistant?.stats?.prompt_tokens) {
-                contextState.used = lastAssistant.stats.prompt_tokens;
+                lastPromptTokens = lastAssistant.stats.prompt_tokens;
+                contextState.used = lastPromptTokens;
             }
             // After replacing entries, the DOM re-renders and scroll state may be lost.
             // Scroll to bottom on the next frame.

@@ -104,18 +104,10 @@ import { getToolDisplayName } from '$lib/types';
     let isEditing = $state(false);
     let editContent = $state(content);
     let textareaEl: HTMLTextAreaElement | null = $state(null);
-    let statsView = $state<'reading' | 'generation'>('generation');
     let copied = $state(false);
 
-    // Derived stats for generation view
+    // Generated token count for stats display
     let genTokens = $derived(stats?.predicted_tokens ?? 0);
-    let genTime = $derived(stats ? (stats.predicted_ms / 1000) : 0);
-    let genSpeed = $derived(genTime > 0 ? Math.round(genTokens / genTime) : 0);
-
-    // Derived stats for reading view
-    let readTokens = $derived(stats?.prompt_tokens ?? 0);
-    let readTime = $derived(stats ? (stats.prompt_ms / 1000) : 0);
-    let readSpeed = $derived(readTime > 0 ? Math.round(readTokens / readTime) : 0);
 
     let renderedHtml = $derived(
         (role === 'assistant' || role === 'system')
@@ -332,55 +324,9 @@ import { getToolDisplayName } from '$lib/types';
             {/if}
             {#if stats}
                 <div class="message-stats">
-                    <div class="stats-row">
-                        <span class="stats-model-name">{stats.model_name || 'model'}</span>
-                        <span class="stat-separator">·</span>
-                        <div class="stats-toggle" role="group" aria-label="Statistics view">
-                            <button
-                                type="button"
-                                class="toggle-btn {statsView === 'reading' ? 'active' : ''}"
-                                data-view="reading"
-                                onclick={() => statsView = 'reading'}
-                                aria-label="Reading stats (prompt processing)"
-                                aria-pressed={statsView === 'reading'}
-                                title="Reading stats (prompt processing)"
-                            >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
-                                </svg>
-                            </button>
-                            <button
-                                type="button"
-                                class="toggle-btn {statsView === 'generation' ? 'active' : ''}"
-                                data-view="generation"
-                                onclick={() => statsView = 'generation'}
-                                aria-label="Generation stats (token output)"
-                                aria-pressed={statsView === 'generation'}
-                                title="Generation stats (token output)"
-                            >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
-                                    <path d="M19 15l.5 1.5L21 17l-1.5.5L19 19l-.5-1.5L17 17l1.5-.5L19 15z"/>
-                                    <path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="stat-values">
-                            {#if statsView === 'generation'}
-                                <span class="stat-item">{genTokens} tokens</span>
-                                <span class="stat-separator">·</span>
-                                <span class="stat-item">{genTime.toFixed(1)}s</span>
-                                <span class="stat-separator">·</span>
-                                <span class="stat-item">{genSpeed} tok/s</span>
-                            {:else}
-                                <span class="stat-item">{readTokens} tokens</span>
-                                <span class="stat-separator">·</span>
-                                <span class="stat-item">{readTime.toFixed(1)}s</span>
-                                <span class="stat-separator">·</span>
-                                <span class="stat-item">{readSpeed} tok/s</span>
-                            {/if}
-                        </div>
-                    </div>
+                    <span class="stats-model-name">{stats.model_name || 'model'}</span>
+                    <span class="stat-separator">·</span>
+                    <span class="stat-item">{genTokens} tokens</span>
                 </div>
             {/if}
             {#if content || reasoningContent}
@@ -617,47 +563,6 @@ import { getToolDisplayName } from '$lib/types';
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.7;
-    }
-    .stats-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .stats-toggle {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 3px;
-        background: var(--color-text-tertiary);
-        background: color-mix(in srgb, var(--color-text-tertiary) 15%, transparent);
-        padding: 2px;
-        gap: 0;
-    }
-    .toggle-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 16px;
-        height: 16px;
-        border: none;
-        background: none;
-        border-radius: 2px;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        transition: all 0.15s ease;
-        padding: 0;
-    }
-    .toggle-btn.active {
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-    }
-    .toggle-btn:hover:not(.active) {
-        color: var(--color-text-primary);
-    }
-    .stat-values {
-        display: flex;
-        align-items: center;
-        gap: 4px;
     }
     .stat-separator {
         font-size: 0.75rem;
