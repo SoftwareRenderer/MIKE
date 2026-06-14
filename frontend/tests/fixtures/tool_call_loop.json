@@ -1,0 +1,45 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "id": "call_loop001",
+              "function": {
+                "name": "execute_command",
+                "arguments": "{\"command\":\"head /tmp/test_file.txt\"}"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 12,
+      "total_tokens": 67,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 400,
+      "predicted_ms": 250,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]

@@ -1,0 +1,45 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "id": "call_complete001",
+              "function": {
+                "name": "task_complete",
+                "arguments": "{}"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 70,
+      "completion_tokens": 10,
+      "total_tokens": 80,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 350,
+      "predicted_ms": 200,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]

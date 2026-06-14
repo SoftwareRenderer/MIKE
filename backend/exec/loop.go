@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +17,485 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// LoopType indicates the type of loop detected.
+type LoopType int
+
+const (
+	LoopNone LoopType = iota
+	LoopTool // repeated read of same target
+	LoopText // repeated similar text-only responses
+)
+
+// loopDetector tracks tool call targets and text responses to detect LLM loops.
+type loopDetector struct {
+	lastReadTarget string    // normalized target of the most recent read-only call
+	lastReadTime   time.Time // when the last read occurred
+	textWindow     []string  // recent text-only responses (content, trimmed)
+	hintCount      int       // total hints injected for this task
+}
+
+// newLoopDetector creates a new loopDetector.
+func newLoopDetector() *loopDetector {
+	return &loopDetector{
+		textWindow: make([]string, 0, 8),
+	}
+}
+
+// reset clears all tracked state (called on user message or after hint injection).
+func (d *loopDetector) reset() {
+	d.lastReadTarget = ""
+	d.lastReadTime = time.Time{}
+	d.textWindow = d.textWindow[:0]
+}
+
+// resetText clears only the text window (called after a tool call breaks text-only streak).
+func (d *loopDetector) resetText() {
+	d.textWindow = d.textWindow[:0]
+}
+
+// recordTurn records an LLM turn and returns the loop type if detected.
+// toolCalls: the tool calls made this turn (nil or empty for text-only).
+// assistantText: the text content of the response.
+func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText string) LoopType {
+	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
+
+	if hasToolCalls {
+		d.resetText() // tool call breaks text-only streak
+
+		// Check each tool call
+		for _, tc := range toolCalls {
+			if tc.Function.Name == "" {
+				continue
+			}
+			target := extractTarget(tc.Function.Name, tc.Function.Arguments)
+			if target == "" {
+				continue
+			}
+
+			if isReadOnlyCall(tc.Function.Name, tc.Function.Arguments) {
+				// Read-only call: check if it repeats the last read target
+				if d.lastReadTarget != "" && target == d.lastReadTarget {
+					return LoopTool
+				}
+				d.lastReadTarget = target
+				d.lastReadTime = time.Now()
+			} else {
+				// State-changing call: clear the read tracker
+				d.lastReadTarget = ""
+				d.lastReadTime = time.Time{}
+			}
+		}
+	} else if strings.TrimSpace(assistantText) != "" {
+		// Text-only response: add to window and check for repetition
+		trimmed := strings.TrimSpace(assistantText)
+		d.textWindow = append(d.textWindow, trimmed)
+		if len(d.textWindow) >= 2 {
+			if d.detectTextLoop() {
+				return LoopText
+			}
+		}
+	}
+
+	return LoopNone
+}
+
+// extractTarget extracts the primary file/target from a tool call.
+func extractTarget(toolName, rawArgs string) string {
+	switch toolName {
+	case "read_file", "write_file":
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
+			if path, ok := args["path"].(string); ok {
+				return normalizeTarget(path)
+			}
+		}
+	case "execute_command":
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
+			if cmd, ok := args["command"].(string); ok {
+				return extractCommandTarget(cmd)
+			}
+		}
+	}
+	return ""
+}
+
+// extractCommandTarget extracts the primary file/target from a shell command.
+// Handles: head file, wc file, grep pattern file, cat file, ls dir, tail file, diff f1 f2,
+// sed file, python script.py, etc.
+func extractCommandTarget(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return ""
+	}
+
+	// Split into tokens, respecting pipes and redirects
+	tokens := shellTokens(cmd)
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	// Take only the first command (before any pipe)
+	pipeIdx := -1
+	for i, t := range tokens {
+		if t == "|" {
+			pipeIdx = i
+			break
+		}
+	}
+	if pipeIdx >= 0 {
+		tokens = tokens[:pipeIdx]
+	}
+
+	if len(tokens) < 2 {
+		return ""
+	}
+
+	verb := tokens[0]
+	args := tokens[1:]
+
+	// Filter out flags (tokens starting with -)
+	nonFlags := make([]string, 0, len(args))
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") && a != ">" && a != ">>" && a != "2>&1" && a != "&&" {
+			nonFlags = append(nonFlags, a)
+		}
+	}
+
+	switch verb {
+	case "head", "tail", "cat", "wc", "stat", "file", "diff":
+		// Primary target is the first non-flag arg
+		if len(nonFlags) > 0 {
+			return normalizeTarget(nonFlags[0])
+		}
+	case "grep":
+		// grep PATTERN FILE — target is the last non-flag arg (pattern comes first)
+		if len(nonFlags) >= 2 {
+			return normalizeTarget(nonFlags[len(nonFlags)-1])
+		} else if len(nonFlags) == 1 {
+			return normalizeTarget(nonFlags[0])
+		}
+	case "ls":
+		// ls [DIR] — target is the directory (or "." if none)
+		if len(nonFlags) > 0 {
+			return normalizeTarget(nonFlags[0])
+		}
+		return normalizeTarget(".")
+	case "sed":
+		// sed -i 's/x/y/' FILE — target is the last non-flag arg
+		if len(nonFlags) >= 2 {
+			return normalizeTarget(nonFlags[len(nonFlags)-1])
+		}
+	case "python", "python3":
+		// python script.py — target is the script
+		if len(nonFlags) > 0 {
+			return normalizeTarget(nonFlags[0])
+		}
+	case "echo", "printf":
+		// echo "text" > file — check for redirect target
+		for i, t := range tokens {
+			if (t == ">" || t == ">>") && i+1 < len(tokens) {
+				return normalizeTarget(tokens[i+1])
+			}
+		}
+	case "mv", "cp":
+		// mv src dst — target is the destination
+		if len(nonFlags) >= 2 {
+			return normalizeTarget(nonFlags[len(nonFlags)-1])
+		}
+	case "git":
+		// git add FILE, git commit, git diff
+		if len(args) > 0 {
+			subcmd := args[0]
+			switch subcmd {
+			case "add", "rm":
+				// git add -A → target is ".", git add file.go → target is file.go
+				if slices.Contains(args, "-A") {
+					return normalizeTarget(".")
+				}
+				if len(nonFlags) > 0 {
+					return normalizeTarget(nonFlags[0])
+				}
+			case "commit", "diff", "status", "log":
+				return normalizeTarget(".")
+			}
+		}
+	}
+
+	return ""
+}
+
+// shellTokens splits a shell command into tokens, handling pipes and redirects.
+func shellTokens(cmd string) []string {
+	var tokens []string
+	current := strings.Builder{}
+	inSingleQuote, inDoubleQuote := false, false
+	for _, r := range cmd {
+		switch r {
+		case '\'':
+			inSingleQuote = !inSingleQuote
+		case '"':
+			if !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+			} else {
+				current.WriteRune(r)
+			}
+		case ' ', '\t':
+			if !inSingleQuote && !inDoubleQuote {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+			} else {
+				current.WriteRune(r)
+			}
+		case '|', '&':
+			if !inSingleQuote && !inDoubleQuote {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+				if r == '|' {
+					tokens = append(tokens, "|")
+				} else {
+					tokens = append(tokens, "&&")
+				}
+			} else {
+				current.WriteRune(r)
+			}
+		case '>':
+			if !inSingleQuote && !inDoubleQuote {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+				tokens = append(tokens, ">")
+			} else {
+				current.WriteRune(r)
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
+
+// normalizeTarget normalizes a file path for comparison.
+func normalizeTarget(path string) string {
+	path = strings.TrimSpace(path)
+	// Remove leading ./
+	for strings.HasPrefix(path, "./") {
+		path = path[2:]
+	}
+	return path
+}
+
+// isReadOnlyCall classifies a tool call as read-only (no state changes) or state-changing.
+func isReadOnlyCall(toolName, rawArgs string) bool {
+	switch toolName {
+	case "read_file":
+		return true
+	case "write_file":
+		return false
+	case "task_complete":
+		return false
+	case "execute_command":
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
+			if cmd, ok := args["command"].(string); ok {
+				return isReadOnlyCommand(cmd)
+			}
+		}
+		return true // default to read-only for unknown commands (safer)
+	}
+	return true
+}
+
+// readOnlyCommands are commands that only read data without modifying files.
+var readOnlyCommands = []string{
+	"head", "tail", "cat", "wc", "ls", "stat", "file", "diff",
+	"grep", "find", "echo", "printf", "pwd", "whoami", "uname",
+	"date", "which", "type", "command", "test", "du", "df",
+	"tree", "xxd", "od", "hexdump", "strings", "tr", "cut",
+	"sort", "uniq", "comm", "fold", "join", "paste", "split",
+	"basename", "dirname", "realpath", "readlink", "mktemp",
+}
+
+// isReadOnlyCommand checks if a shell command is read-only.
+func isReadOnlyCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	tokens := shellTokens(cmd)
+	if len(tokens) == 0 {
+		return true
+	}
+
+	// Take only the first command (before any pipe)
+	for i, t := range tokens {
+		if t == "|" {
+			tokens = tokens[:i]
+			break
+		}
+	}
+
+	verb := tokens[0]
+
+	// Check for redirect (writes to file)
+	for _, t := range tokens {
+		if t == ">" || t == ">>" {
+			return false
+		}
+	}
+
+	// Check for && chains that include writes
+	if strings.Contains(cmd, "&&") {
+		parts := strings.Split(cmd, "&&")
+		for _, part := range parts[1:] {
+			if !isReadOnlyCommand(strings.TrimSpace(part)) {
+				return false
+			}
+		}
+	}
+
+	// Known read-only verbs
+	for _, ro := range readOnlyCommands {
+		if verb == ro {
+			return true
+		}
+	}
+
+	// Known state-changing verbs
+	stateChanging := []string{
+		"python", "python3", "node", "npm", "pip", "cargo", "go",
+		"make", "gcc", "g++", "rustc", "javac", "ruby", "perl",
+		"sed", "awk", "vim", "nano", "emacs", "touch",
+		"mv", "cp", "rm", "mkdir", "rmdir", "chmod", "chown",
+		"install", "curl", "wget", "apt", "yum", "dnf", "brew",
+		"git", "docker", "kubectl", "terraform", "ansible",
+	}
+	for _, sc := range stateChanging {
+		if verb == sc {
+			return false
+		}
+	}
+
+	// Default: treat unknown commands as read-only (safer to hint than to miss)
+	return true
+}
+
+// detectTextLoop checks if the text window contains repetitive responses.
+// Fires when 2+ consecutive text-only responses have high similarity.
+func (d *loopDetector) detectTextLoop() bool {
+	if len(d.textWindow) < 2 {
+		return false
+	}
+
+	// Check if the last response is similar to any of the previous ones in the window
+	last := d.textWindow[len(d.textWindow)-1]
+	lastWords := wordSet(last)
+
+	if len(lastWords) < 5 {
+		return false // too short to be meaningful
+	}
+
+	// Compare with each prior response (skip the immediately preceding one if it's from same turn)
+	for i := 0; i < len(d.textWindow)-1; i++ {
+		priorWords := wordSet(d.textWindow[i])
+		if jaccardSimilarity(lastWords, priorWords) > 0.6 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// wordSet tokenizes text into a set of meaningful words (lowercased, stop words removed).
+func wordSet(text string) map[string]bool {
+	// Simple tokenizer: split on non-alphanumeric
+	tokenRe := regexp.MustCompile(`[a-zA-Z]{2,}`)
+	matches := tokenRe.FindAllString(text, -1)
+
+	words := make(map[string]bool)
+	for _, m := range matches {
+		w := strings.ToLower(m)
+		if !isStopWord(w) {
+			words[w] = true
+		}
+	}
+	return words
+}
+
+// jaccardSimilarity computes the Jaccard similarity between two word sets.
+func jaccardSimilarity(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0
+	}
+
+	// Count intersection
+	intersection := 0
+	for w := range a {
+		if b[w] {
+			intersection++
+		}
+	}
+
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
+// stopWords is a set of common English stop words to ignore in similarity checks.
+var stopWords = map[string]bool{
+	"the": true, "a": true, "an": true, "is": true, "are": true, "was": true, "were": true,
+	"be": true, "been": true, "being": true, "have": true, "has": true, "had": true,
+	"do": true, "does": true, "did": true, "will": true, "would": true, "could": true,
+	"should": true, "may": true, "might": true, "shall": true, "can": true,
+	"to": true, "of": true, "in": true, "for": true, "on": true, "with": true,
+	"at": true, "by": true, "from": true, "as": true, "into": true, "through": true,
+	"during": true, "before": true, "after": true, "above": true, "below": true,
+	"between": true, "out": true, "off": true, "over": true, "under": true,
+	"and": true, "but": true, "or": true, "nor": true, "not": true, "so": true,
+	"yet": true, "both": true, "either": true, "neither": true,
+	"each": true, "every": true, "all": true, "any": true, "few": true, "more": true,
+	"most": true, "other": true, "some": true, "such": true, "no": true, "only": true,
+	"own": true, "same": true, "than": true, "too": true, "very": true, "just": true,
+	"because": true, "if": true, "when": true, "where": true, "how": true, "what": true,
+	"which": true, "who": true, "whom": true, "this": true, "that": true, "these": true,
+	"those": true, "i": true, "me": true, "my": true, "myself": true, "we": true,
+	"our": true, "you": true, "your": true, "he": true, "him": true, "his": true,
+	"it": true, "its": true, "they": true, "them": true, "their": true,
+	"about": true, "up": true, "then": true, "there": true, "here": true,
+	"also": true, "back": true, "like": true, "new": true, "way": true, "use": true,
+	"uses": true, "used": true, "using": true, "try": true, "trying": true,
+	"need": true, "needs": true, "think": true, "know": true, "see": true,
+	 "get": true, "got": true, "going": true, "make": true, "made": true,
+	 "want": true, "wanting": true, "let": true, "say": true, "said": true,
+	 "says": true, "well": true, "still": true, "even": true, "much": true,
+	 "many": true, "since": true, "until": true, "while": true,
+}
+
+func isStopWord(w string) bool {
+	return stopWords[w]
+}
+
+// buildHint generates a targeted system message based on loop type.
+func buildHint(loopType LoopType, target string) string {
+	switch loopType {
+	case LoopTool:
+		return fmt.Sprintf("You've read/checked `%s` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action \u2014 edit the file, run a command, or mark the task complete.", target)
+	case LoopText:
+		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `task_complete` if the task is done."
+	default:
+		return ""
+	}
+}
+
+const maxLoopHints = 3
 
 // executeTask runs the AI conversation loop.
 func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage) {
@@ -98,7 +579,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var pendingToolCalls []types.ChatToolCall
-	var recentToolSignatures []string // tracks primary tool call signature per turn for loop detection
+	detector := newLoopDetector()
 	startTime := time.Now()
 
 	for {
@@ -147,6 +628,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		select {
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message before LLM call", task.ID)
+			detector.reset() // user input breaks any loop pattern
 			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
 			if um.ModelName != "" {
 				mc.set(um.ServerURL, um.ModelName)
@@ -261,6 +743,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case um := <-userMsgChan:
 			// New user message — cancel current LLM call.
 			log.Printf("[cancel] task=%s user message received during streaming, cancelling", task.ID)
+			detector.reset() // user input breaks any loop pattern
 			callCancel()
 			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
 			select {
@@ -439,28 +922,29 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				messages = append(messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
 
-			// Loop detection: track tool call signature and check for repetition
-			if len(pendingToolCalls) > 0 && pendingToolCalls[0].Function.Name != "" {
-				sig := pendingToolCalls[0].Function.Name + ":" + pendingToolCalls[0].Function.Arguments
-				recentToolSignatures = append(recentToolSignatures, sig)
-				if len(recentToolSignatures) >= 3 {
-					last := recentToolSignatures[len(recentToolSignatures)-1]
-					isLoop := true
-					for i := len(recentToolSignatures) - 3; i < len(recentToolSignatures); i++ {
-						if recentToolSignatures[i] != last {
-							isLoop = false
-							break
-						}
-					}
-					if isLoop {
-						task.StatusState = "failed"
-						task.Output = "Model stuck in tool-call loop (repeated same tool call 3+ times)"
-						te.store.UpdateTask(task)
-						te.boardStreamMgr.Broadcast(projectID)
-						te.sendAndPersistError(b, task.ID, "Model stuck in tool-call loop", "tool_loop")
-						return
-					}
+			// Loop detection: record this turn and check for repetition
+			loopType := detector.recordTurn(pendingToolCalls, assistantText)
+			if loopType != LoopNone {
+				if detector.hintCount >= maxLoopHints {
+					task.StatusState = "failed"
+					task.Output = "Model stuck in loop (max hints exhausted)"
+					te.store.UpdateTask(task)
+					te.boardStreamMgr.Broadcast(projectID)
+					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+					return
 				}
+				// Extract target for hint message
+				target := ""
+				if loopType == LoopTool && len(pendingToolCalls) > 0 && pendingToolCalls[0].Function.Name != "" {
+					target = extractTarget(pendingToolCalls[0].Function.Name, pendingToolCalls[0].Function.Arguments)
+				}
+				hint := buildHint(loopType, target)
+				log.Printf("[loop] task=%s detected %s loop (hint %d/%d), target=%s", task.ID, loopType, detector.hintCount+1, maxLoopHints, target)
+				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
+				detector.hintCount++
+				detector.reset()
+				// Notify frontend
+				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 			}
 
 			pendingToolCalls = nil
@@ -490,10 +974,34 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			})
 			assistantContent.Reset()
 			reasoningContent.Reset()
+
+			// Loop detection for text-only responses
+			loopType := detector.recordTurn(nil, assistantText)
+			if loopType != LoopNone {
+				if detector.hintCount >= maxLoopHints {
+					task.StatusState = "failed"
+					task.Output = "Model stuck in loop (max hints exhausted)"
+					te.store.UpdateTask(task)
+					te.boardStreamMgr.Broadcast(projectID)
+					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+					return
+				}
+				hint := buildHint(loopType, "")
+				log.Printf("[loop] task=%s detected %s loop (hint %d/%d)", task.ID, loopType, detector.hintCount+1, maxLoopHints)
+				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
+				detector.hintCount++
+				detector.reset()
+				task.StatusState = "running"
+				te.store.UpdateTask(task)
+				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
+				continue
+			}
+
 			// Check for queued user messages before sending complete.
 			select {
 			case um := <-userMsgChan:
 				log.Printf("[user-msg] task=%s received message after response, continuing", task.ID)
+				detector.reset() // user input breaks any loop pattern
 				messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
 				if um.ModelName != "" {
 					mc.set(um.ServerURL, um.ModelName)
@@ -517,7 +1025,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				"prompt_ms": promptMs, "predicted_ms": predictedMs,
 				"model_name": activeModel, "duration": duration,
 			}})
-			return
 		}
 
 		// Context compression: check if we're approaching the context window limit

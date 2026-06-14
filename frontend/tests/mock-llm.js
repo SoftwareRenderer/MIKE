@@ -36,8 +36,14 @@ const toolCallFail = loadFixture('tool_call_fail');
 const toolCallStreaming = loadFixture('tool_call_streaming');
 const toolCallWithText = loadFixture('tool_call_with_text');
 const toolCallComplete = loadFixture('tool_call_complete');
+const toolCallLoop = loadFixture('tool_call_loop');
+const toolCallTaskComplete = loadFixture('tool_call_task_complete');
+const textLoop = loadFixture('text_loop');
 
 let requestCount = 0;
+let loopToolCount = 0;  // per-scenario counter for tool loop test
+let loopTextCount = 0;  // per-scenario counter for text loop test
+let autoContinueCount = 0;  // tracks auto-continue cycles to eventually terminate
 
 /**
  * Build a non-streaming JSON response (matching real LLM behavior for stream: false).
@@ -110,10 +116,38 @@ function selectResponse(parsed) {
         .map(m => (m.content || '').toLowerCase());
     const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : '';
 
+    // Loop detection tests: return repeated responses to trigger loop detection.
+    // Tool loop: return same tool call (head /tmp/test_file.txt) 2x, then task_complete.
+    // Text loop: return similar text 3x, then task_complete.
+    // System hint messages (injected by backend) break the loop.
+    const hasSystemHint = messages.some(m => m.role === 'system' && /twice in a row|similar responses/i.test(m.content || ''));
+    if (/loop-test-tool/i.test(lastUserMsg)) {
+        if (hasSystemHint || loopToolCount >= 2) {
+            loopToolCount = 0;
+            return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+        }
+        loopToolCount++;
+        return { chunks: toolCallLoop, chunkDelay: 1 };
+    }
+    if (/loop-test-text/i.test(lastUserMsg)) {
+        if (hasSystemHint) {
+            loopTextCount = 0;
+            return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+        }
+        loopTextCount++;
+        return { chunks: textLoop, chunkDelay: 1 };
+    }
+
     // If there are tool results in the conversation, the LLM should respond
     // with text (not another tool call) to avoid infinite tool-call loops.
+    // After a few auto-continue cycles, call task_complete to terminate.
     const hasToolResults = messages.some(m => m.role === 'tool');
     if (hasToolResults) {
+        autoContinueCount++;
+        if (autoContinueCount >= 2) {
+            autoContinueCount = 0;
+            return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+        }
         return { chunks: toolCallComplete, chunkDelay: 1 };
     }
 
@@ -180,6 +214,9 @@ const server = http.createServer((req, res) => {
                 const fixtureName = chunks === toolCallFail ? 'tool_call_fail' :
                                     chunks === toolCallStreaming ? 'tool_call_streaming' :
                                     chunks === toolCallWithText ? 'tool_call_with_text' :
+                                    chunks === toolCallLoop ? 'tool_call_loop' :
+                                    chunks === toolCallTaskComplete ? 'tool_call_task_complete' :
+                                    chunks === textLoop ? 'text_loop' :
                                     chunks === toolCallResponse ? 'tool_call' :
                                     chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === textResponseSlow ? 'text_slow' :

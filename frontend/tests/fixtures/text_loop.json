@@ -1,0 +1,36 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "I think the best approach is to carefully analyze the requirements and then implement the solution step by step. Let me think through this more."
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 24,
+      "total_tokens": 79,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 400,
+      "predicted_ms": 300,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]
