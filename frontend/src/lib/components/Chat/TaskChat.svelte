@@ -62,8 +62,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let ws: ReturnType<typeof createTaskStream> | null = null;
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
-    let scrollPending = $state(false);
-    let prevScrollHeight = $state(0);
+    let prevScrollHeight = 0;
+    let userInputPending = false;
     let inputValue = $state('');
 
     // Model selection state
@@ -683,10 +683,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function scroll() {
         if (!scrollEl || !atBottom) return;
-        if (scrollPending) return; // already scheduled
-        scrollPending = true;
         requestAnimationFrame(() => {
-            scrollPending = false;
             if (scrollEl && atBottom) {
                 scrollEl.scrollTop = scrollEl.scrollHeight;
             }
@@ -694,21 +691,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     function checkScroll() {
-        if (scrollEl) {
-            const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-            if (scrollEl.scrollHeight < prevScrollHeight) {
-                // Content shrank (e.g., reasoning auto-collapsed, loadHistory replaced entries).
-                // If scrollTop decreased by roughly the same amount as content shrank,
-                // the browser clamped it — meaning the user was at the bottom.
-                // We can't know the old scrollTop, but if the current gap is small
-                // (within the shrink amount + tolerance), the user was at the bottom.
-                const shrinkAmount = prevScrollHeight - scrollEl.scrollHeight;
-                atBottom = gap < shrinkAmount + 32;
-            } else {
-                atBottom = gap < 32;
-            }
-            prevScrollHeight = scrollEl.scrollHeight;
+        if (!scrollEl || !userInputPending) return;
+        userInputPending = false;
+        const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+        if (scrollEl.scrollHeight < (prevScrollHeight || scrollEl.scrollHeight)) {
+            const shrinkAmount = (prevScrollHeight || scrollEl.scrollHeight) - scrollEl.scrollHeight;
+            atBottom = gap < shrinkAmount + 32;
+        } else {
+            atBottom = gap < 32;
         }
+        prevScrollHeight = scrollEl.scrollHeight;
+    }
+
+    function markUserInput() {
+        userInputPending = true;
     }
 
     async function handleSend(msg: string) {
@@ -1204,10 +1200,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
         // Track visualViewport for mobile keyboard awareness
         const unsubViewport = setupViewportListener();
+        // Mark keyboard navigation as user input (arrow keys, page up/down, home/end)
+        const handleKeydown = (e: KeyboardEvent) => {
+            if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
+                markUserInput();
+            }
+        };
+        window.addEventListener('keydown', handleKeydown);
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubConfig();
             unsubViewport?.();
+            window.removeEventListener('keydown', handleKeydown);
         };
     });
 
@@ -1222,7 +1226,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     <div class="sr-only" aria-live="polite" aria-atomic="true">
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
-    <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll}>
+    <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput}>
         {#if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
