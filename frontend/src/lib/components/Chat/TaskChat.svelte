@@ -351,6 +351,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
                 }
                 connected = false;
+                // Force scroll to bottom after all state changes settle.
+                // Multiple re-renders happen (cursor disappears, stats appear, tool results finalize).
+                // Double requestAnimationFrame in scroll() ensures the final DOM is measured.
+                scroll(true);
                 break;
             }
             case 'error': {
@@ -725,12 +729,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    function scroll() {
-        if (!scrollEl || !atBottom) return;
+    function scroll(force = false) {
+        if (!scrollEl) return;
+        if (!force && !atBottom) return;
         requestAnimationFrame(() => {
-            if (scrollEl && atBottom) {
-                scrollEl.scrollTop = scrollEl.scrollHeight;
-            }
+            if (!scrollEl) return;
+            scrollEl.scrollTop = scrollEl.scrollHeight;
+            // Second frame to correct for DOM shrink (e.g., streaming cursor disappearing)
+            // that happens after the first frame sets scrollTop.
+            requestAnimationFrame(() => {
+                if (scrollEl) {
+                    scrollEl.scrollTop = scrollEl.scrollHeight;
+                }
+            });
         });
     }
 
