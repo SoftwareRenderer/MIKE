@@ -1,6 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
+    import homeIcon from '$lib/assets/icons/home.svg';
+    import folderIcon from '$lib/assets/icons/folder.svg';
+    import fileIcon from '$lib/assets/icons/file.svg';
 
     let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string, sandboxEnabled: boolean) => void } = $props();
 
@@ -155,7 +158,9 @@
             <!-- Path bar -->
             <div class="path-bar">
                 <div class="path-bar-row">
-                    <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">🏠</button>
+                    <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">
+                        <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
+                    </button>
                     <input
                         type="text"
                         class="path-input"
@@ -210,7 +215,13 @@
                             aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
                             title={`${entry.isDir ? 'Open folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ' (git repository)' : ''}`}
                         >
-                            <span class="icon" aria-hidden="true">{entry.isDir ? '📁' : '📄'}</span>
+                            <span class="icon" aria-hidden="true">
+                                {#if entry.isDir}
+                                    <img src={folderIcon} width="16" height="16" alt="" />
+                                {:else}
+                                    <img src={fileIcon} width="16" height="16" alt="" />
+                                {/if}
+                            </span>
                             <span class="name">{entry.name}</span>
                             {#if entry.isGitRepo}
                                 <span class="git-badge">git</span>
@@ -305,28 +316,36 @@
         top: 0;
         z-index: 5;
         background: var(--color-surface-1);
-        padding-bottom: 8px;
+        padding: 12px 0 8px;
     }
     .path-bar-row {
         display: flex;
         gap: 8px;
         align-items: stretch;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+        padding: 4px;
     }
     .home-btn {
-        font-size: 1.125rem;
-        padding: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px;
+        background: transparent;
+        border-radius: var(--radius-sm);
+    }
+    .home-btn:hover {
         background: var(--color-surface-3);
-        border-radius: var(--radius-md);
     }
     .path-input {
         flex: 1;
-        padding: 8px 12px;
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
+        padding: 6px 10px;
+        background: transparent;
+        border: none;
         color: var(--color-text-primary);
         font-size: 0.875rem;
         font-family: var(--font-mono);
+        outline: none;
     }
     .path-input:focus-visible {
         border-color: var(--color-accent);
@@ -392,9 +411,9 @@
         background: var(--color-surface-4);
     }
     .icon-btn-sm {
-        padding: 8px;
-        background: var(--color-surface-3);
-        border-radius: var(--radius-md);
+        padding: 6px;
+        background: transparent;
+        border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
         display: flex;
         align-items: center;
@@ -439,7 +458,8 @@
         background: var(--color-status-green)22;
     }
     .icon {
-        font-size: 1rem;
+        display: flex;
+        align-items: center;
         flex-shrink: 0;
     }
     .name {
