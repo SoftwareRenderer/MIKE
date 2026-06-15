@@ -9,10 +9,6 @@
     let untracked = $derived(props.untracked || []);
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
-    $effect(() => {
-        console.log('[DiffViewer] re-render: files=', files.length, 'untracked=', untracked.length);
-    });
-
     // Track which collapsed blocks are expanded
     let expandedBlocks = $state<Record<string, boolean>>({});
 

@@ -237,6 +237,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 contextState.used = lastPromptTokens + streamTokenCount;
                 const data = event.data as { text: string };
                 const entry = ensureAssistantEntry();
+                if (!currentAssistantId) currentAssistantId = entry.id;
                 entry.content += data.text;
                 scroll();
                 break;
@@ -350,7 +351,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (lastAssistant && data.predicted_tokens !== undefined) {
                     lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
                 }
-                connected = false;
                 // Force scroll to bottom after all state changes settle.
                 // Multiple re-renders happen (cursor disappears, stats appear, tool results finalize).
                 // Double requestAnimationFrame in scroll() ensures the final DOM is measured.
@@ -441,7 +441,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'diff_changed': {
                 const data = event.data as DiffData;
-                console.log('[TaskChat] diff_changed received, diff length:', data.diff?.length ?? 0, 'untracked:', data.untracked?.length ?? 0, 'hasContent:', !!(data.diff && data.diff.trim()) || (data.untracked?.length ?? 0) > 0);
                 onRefreshDiff?.(data);
                 break;
             }
@@ -1097,7 +1096,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const syncBuffer = firstConnectDone && !skipSync;
         ws = createTaskStream(projectId, taskId, (event) => handleEvent(event), syncBuffer);
         ws.ws.onopen = () => {
-            console.log('[TaskChat] WebSocket opened for task', taskId, 'syncBuffer=', syncBuffer);
             connecting = false;
             connected = true;
             if (!firstConnectDone) {

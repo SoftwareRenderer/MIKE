@@ -289,10 +289,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     function updateDiff(data: DiffData, fromApi = false) {
         const hasContent = (data.diff && data.diff.trim().length > 0) || (data.untracked && data.untracked.length > 0);
-        console.log('[CardDetail] updateDiff called, fromApi:', fromApi, 'diff length:', data.diff?.length ?? 0, 'untracked:', data.untracked?.length ?? 0, 'hasContent:', hasContent);
         // Don't overwrite existing diff with empty data from WebSocket baseline sync
         if (!fromApi && !hasContent && (diffFiles.length > 0 || untrackedFiles.length > 0)) {
-            console.log('[CardDetail] skipping empty diff_changed (preserving existing diff)');
             return;
         }
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
@@ -302,18 +300,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             fileSize: u.file_size,
             file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
         }));
-        console.log('[CardDetail] updateDiff done, diffFiles:', diffFiles.length, 'untrackedFiles:', untrackedFiles.length);
     }
 
     async function loadDiff() {
-        console.log('[CardDetail] loadDiff called for task', task?.id, 'status=', task?.status);
         if (!task || task.status === 'backlog') return;
         try {
             const result = await getTaskDiff(task.project_id, task.id);
-            console.log('[CardDetail] loadDiff API returned, diff length:', result.diff?.length ?? 0, 'untracked:', result.untracked?.length ?? 0);
             updateDiff(result, true);
         } catch (e) {
-            console.log('[CardDetail] loadDiff error:', e);
             diffFiles = [];
             untrackedFiles = [];
         }

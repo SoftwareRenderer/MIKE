@@ -467,15 +467,6 @@ function isTerminalQuery(data: string): boolean {
 // Shared WebSocket setup for terminal connections
 function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): WebSocket {
     const ws = new WebSocket(url);
-    ws.onopen = () => {
-        console.log('Terminal WebSocket connected');
-    };
-    ws.onerror = (e) => {
-        console.error('Terminal WebSocket error:', e);
-    };
-    ws.onclose = (e) => {
-        console.log('Terminal WebSocket closed:', e.code, e.reason);
-    };
     term.onData((data) => {
         // Filter out xterm.js init queries that the PTY echoes back as garbage text.
         // These are terminal capability queries (DA1, OSC color/title, DCS) sent on mount.

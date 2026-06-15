@@ -902,6 +902,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID); err == nil && (shortStat != "" || untrackedN > 0) {
 				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 			}
+			// Continue to call LLM again with tool results — don't fall through to blocking select
+			continue
 		} else if assistantText != "" {
 			// Merge reasoning into content so the model sees its own thinking
 			assistantContentFull := assistantText
