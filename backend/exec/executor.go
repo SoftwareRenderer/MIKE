@@ -199,12 +199,13 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	modelName := task.ModelName
 	branchName := fmt.Sprintf("task/%s", task.ID)
 
-	worktreePath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
+	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
 
 	task.Branch = branchName
+	task.BaseRef = baseRef
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
 		thread, terr := te.store.GetThread(task.CurrentThreadID)
@@ -344,7 +345,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	branchName := fmt.Sprintf("task/%s", task.ID)
 
-	wtPath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
+	wtPath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s worktree error: %v", taskID, err)
 		task.StatusState = "failed"
@@ -358,6 +359,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	task.StatusState = "running"
 	task.Status = "in_progress"
+	task.BaseRef = baseRef
 	_ = te.store.UpdateTask(task)
 	te.boardStreamMgr.Broadcast(projectID)
 

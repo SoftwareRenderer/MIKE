@@ -47,15 +47,16 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 }
 
 // CreateWorktree creates a git worktree for a task, capturing the current working tree state.
-func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) (string, error) {
+// Returns (worktreePath, originalBranch, error).
+func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) (string, string, error) {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
-		return "", fmt.Errorf("get project: %w", err)
+		return "", "", fmt.Errorf("get project: %w", err)
 	}
 
 	cfg, err := wm.configStore.GetConfig()
 	if err != nil {
-		return "", fmt.Errorf("get config: %w", err)
+		return "", "", fmt.Errorf("get config: %w", err)
 	}
 
 	worktreesDir := cfg.WorkspaceDir
@@ -81,20 +82,20 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
-		return "", fmt.Errorf("timeout waiting for worktree lock (another task is initializing)")
+		return "", "", fmt.Errorf("timeout waiting for worktree lock (another task is initializing)")
 	}
 	defer mu.Unlock()
 
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
-		return "", fmt.Errorf("create worktrees dir: %w", err)
-	}
-
-	if _, err := os.Stat(worktreePath); err == nil {
-		return worktreePath, nil
+		return "", "", fmt.Errorf("create worktrees dir: %w", err)
 	}
 
 	baselineBranch := fmt.Sprintf("__kanban_baseline_%s", taskID)
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
+
+	if _, err := os.Stat(worktreePath); err == nil {
+		return worktreePath, originalBranch, nil
+	}
 
 	// Save the originating branch to the project (best-effort)
 	if originalBranch != "" && !strings.HasPrefix(originalBranch, "fatal:") {
@@ -110,27 +111,27 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 
 	hasChanges, err := wm.hasWorkingTreeChanges(project.Path)
 	if err != nil {
-		return "", fmt.Errorf("check working tree: %w", err)
+		return "", "", fmt.Errorf("check working tree: %w", err)
 	}
 
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
 	if hasChanges {
 		if err := wm.gitRun(project.Path, "stash", "push", "-m", "kanban baseline stash"); err != nil {
-			return "", fmt.Errorf("stash changes: %w", err)
+			return "", "", fmt.Errorf("stash changes: %w", err)
 		}
 		defer func() {
 			wm.gitRun(project.Path, "stash", "pop")
 		}()
 
 		if err := wm.gitRun(project.Path, "branch", baselineBranch); err != nil {
-			return "", fmt.Errorf("create baseline branch: %w", err)
+			return "", "", fmt.Errorf("create baseline branch: %w", err)
 		}
 		defer cleanup()
 
 		if err := wm.gitRun(project.Path, "checkout", baselineBranch); err != nil {
-			return "", fmt.Errorf("checkout baseline: %w", err)
-		}
+			return "", "", fmt.Errorf("checkout baseline: %w", err)
+	}
 
 		if err := wm.gitRun(project.Path, "stash", "pop"); err != nil {
 			wm.gitRun(project.Path, "stash", "drop")
@@ -153,12 +154,12 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
 	cmd.Dir = project.Path
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("create worktree: %s: %w", string(out), err)
+		return "", "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
 
 	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-B", branchName); err != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
-		return "", fmt.Errorf("create branch: %s: %w", out, err)
+		return "", "", fmt.Errorf("create branch: %s: %w", out, err)
 	}
 
 	wm.gitRun(worktreePath, "add", "-A")
@@ -166,7 +167,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
-	return worktreePath, nil
+	return worktreePath, originalBranch, nil
 }
 
 // RemoveWorktree removes a task's worktree and its branch.
@@ -279,6 +280,26 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	}
 	for _, p := range projects {
 		wm.gitRun(p.Path, "worktree", "prune")
+		// Prune orphaned task branches (task/<id> with no matching task in DB)
+		branchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "task/*")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(branchesOut, "\n") {
+			branch := strings.TrimSpace(line)
+			if branch == "" || !strings.HasPrefix(branch, "task/") {
+				continue
+			}
+			taskID := strings.TrimPrefix(branch, "task/")
+			if !activeSet[taskID] {
+				if dryRun {
+					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
+				} else {
+					log.Printf("[gc] deleting orphaned branch %s in project %s", branch, p.Name)
+					wm.gitRun(p.Path, "branch", "-D", branch)
+				}
+			}
+		}
 	}
 
 	if dryRun {

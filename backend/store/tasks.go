@@ -13,9 +13,9 @@ func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, t.Output, t.StatusState,
+		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), t.Output, t.StatusState,
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR), b2i(t.PlanMode),
 		ptrStr(t.ParentTaskID), b2i(t.TitleGenerating), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339),
 	)
@@ -34,7 +34,7 @@ func (s *Store) GetTaskByTaskID(taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE id = ?`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE id = ?`,
 		taskID,
 	)
 	var t types.Task
@@ -47,7 +47,7 @@ func (s *Store) GetTaskByTaskID(taskID string) (*types.Task, error) {
 
 func (s *Store) queryTask(projectID, taskID string) (*types.Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?`,
 		taskID, projectID,
 	)
 	var t types.Task
@@ -67,7 +67,7 @@ func (s *Store) GetTasksByProject(projectID string) ([]types.Task, error) {
 
 func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
 		projectID,
 	)
 	if err != nil {
@@ -91,8 +91,8 @@ func (s *Store) UpdateTask(t *types.Task) error {
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
-		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, output = ?, status_state = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_pr = ?, plan_mode = ?, parent_task_id = ?, title_generating = ?, current_thread_id = ?, updated_at = ? WHERE id = ?`,
-		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, t.Output, t.StatusState,
+		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, output = ?, status_state = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_pr = ?, plan_mode = ?, parent_task_id = ?, title_generating = ?, current_thread_id = ?, updated_at = ? WHERE id = ?`,
+		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), t.Output, t.StatusState,
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoPR), b2i(t.PlanMode), ptrStr(t.ParentTaskID), b2i(t.TitleGenerating), ptrStr(t.CurrentThreadID), now.Format(time.RFC3339), t.ID,
 	)
 	return err

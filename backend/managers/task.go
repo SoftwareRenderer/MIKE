@@ -347,11 +347,16 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 // mergeWorktreeIntoOrigin merges the task's worktree branch into the project's current branch.
 // On merge conflict, it uses the LLM to resolve conflicts.
 func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *types.Task) error {
-	// Query the live current branch from the project's git repo
-	originBranch, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
-		return nil
+	// Use the base ref captured at worktree creation time.
+	// Fall back to querying live HEAD for tasks created before this field was added.
+	originBranch := task.BaseRef
+	if originBranch == "" {
+		var err error
+		originBranch, err = h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
+			return nil
+		}
 	}
 	originBranch = strings.TrimSpace(originBranch)
 	if originBranch == "" || originBranch == "HEAD" {
@@ -595,8 +600,8 @@ func (h *TaskHandler) cleanupTask(taskID string) {
 	if h.worktreeMgr != nil {
 		// Best-effort, find project from task
 		task, err := h.store.GetTaskByTaskID(taskID)
-		if err == nil {
-			if err := h.worktreeMgr.RemoveWorktreeDir(task.ProjectID, taskID); err != nil {
+		if err == nil && task.Branch != "" {
+			if err := h.worktreeMgr.RemoveWorktree(task.ProjectID, taskID, task.Branch); err != nil {
 				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
 			}
 		}

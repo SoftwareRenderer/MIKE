@@ -12,6 +12,7 @@ type Task struct {
 	ColumnOrder             int       `json:"column_order"`
 	SessionID               string    `json:"session_id"`
 	Branch                  string    `json:"branch"`
+	BaseRef                 string    `json:"base_ref,omitempty"`
 	Output                  string    `json:"output"`
 	StatusState             string    `json:"status_state"`
 	LlamaServerURL          string    `json:"llama_server_url"`

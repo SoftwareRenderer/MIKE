@@ -74,7 +74,7 @@ func TestGitStatusPoll(t *testing.T) {
 
 	// Create worktree
 	wm := git.NewWorktreeManager(s, cfgStore)
-	_, err = wm.CreateWorktree(projID, taskID, branchName)
+	_, _, err = wm.CreateWorktree(projID, taskID, branchName)
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}

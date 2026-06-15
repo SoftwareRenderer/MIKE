@@ -225,8 +225,8 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 			return
 		}
 		for _, task := range tasks {
-			if h.worktreeMgr != nil {
-				_ = h.worktreeMgr.RemoveWorktreeDir(id, task.ID)
+			if h.worktreeMgr != nil && task.Branch != "" {
+				_ = h.worktreeMgr.RemoveWorktree(id, task.ID, task.Branch)
 			}
 			if h.terminalMgr != nil {
 				h.terminalMgr.RemoveSession(task.ID)
