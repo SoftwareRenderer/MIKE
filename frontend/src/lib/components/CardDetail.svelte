@@ -4,7 +4,7 @@
     import type { Task } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask, checkWorktreeExists } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -46,27 +46,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
-    // Terminal
-    let worktreeExists = $state(true);
-
-    async function checkWorktree() {
-        if (!task.project_id) return;
-        try {
-            const result = await checkWorktreeExists(task.project_id, task.id);
-            worktreeExists = result.exists;
-        } catch {
-            worktreeExists = false;
-        }
-    }
-
-    // Re-check worktree when the board is refreshed (task status may have changed)
-    // Uses $boardStore (store $-prefix) which is guaranteed reactive in Svelte 5
-    $effect(() => {
-        const currentTaskId = $boardStore?.tasks?.find(t => t.id === task.id)?.id;
-        if (currentTaskId) {
-            checkWorktree();
-        }
-    });
+    // Terminal - worktree_exists is populated by the server on task/board fetch
+    let worktreeExists = $derived(task.worktree_exists ?? false);
 
     // Inline title editing for task list items
     let editingTaskId = $state<string | null>(null);

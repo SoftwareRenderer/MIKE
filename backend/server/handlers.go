@@ -455,25 +455,6 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 }
 
-func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	cfg, err := s.configStore.GetConfig()
-	if err != nil {
-		JSONError(w, http.StatusInternalServerError, "failed to get config")
-		return
-	}
-
-	worktreePath := filepath.Join(cfg.WorkspaceDir, taskID)
-	_, err = os.Stat(worktreePath)
-	exists := err == nil
-
-	JSONResponse(w, http.StatusOK, map[string]bool{"exists": exists})
-}
-
 // handleThreads lists all threads for a task.
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	switch r.Method {

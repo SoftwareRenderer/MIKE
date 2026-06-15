@@ -40,6 +40,23 @@ func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManage
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr}
 }
 
+// EnrichWorktreeExists sets the WorktreeExists field on tasks based on filesystem state.
+// It uses the workspace_dir from config to build the worktree path.
+func EnrichWorktreeExists(tasks []types.Task, workspaceDir string) {
+	for i := range tasks {
+		path := filepath.Join(workspaceDir, tasks[i].ID)
+		_, err := os.Stat(path)
+		tasks[i].WorktreeExists = err == nil
+	}
+}
+
+// enrichTaskWorktree sets the WorktreeExists field on a single task.
+func enrichTaskWorktree(task *types.Task, workspaceDir string) {
+	path := filepath.Join(workspaceDir, task.ID)
+	_, err := os.Stat(path)
+	task.WorktreeExists = err == nil
+}
+
 // HandleList lists or creates tasks for a project.
 func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, projectID string) {
 	switch r.Method {
@@ -48,6 +65,11 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if h.configStore != nil {
+			if cfg, err := h.configStore.GetConfig(); err == nil {
+				EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
+			}
 		}
 		httputil.JSONResponse(w, http.StatusOK, tasks)
 	case http.MethodPost:
@@ -158,6 +180,11 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, project
 			httputil.JSONError(w, http.StatusNotFound, "task not found")
 			return
 		}
+		if h.configStore != nil {
+			if cfg, err := h.configStore.GetConfig(); err == nil {
+				enrichTaskWorktree(task, cfg.WorkspaceDir)
+			}
+		}
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodPut:
 		task, err := h.store.GetTask(projectID, taskID)
@@ -173,6 +200,11 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, project
 		if err := h.store.UpdateTask(task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if h.configStore != nil {
+			if cfg, err := h.configStore.GetConfig(); err == nil {
+				enrichTaskWorktree(task, cfg.WorkspaceDir)
+			}
 		}
 		h.boardStreamMgr.Broadcast(projectID)
 		httputil.JSONResponse(w, http.StatusOK, task)

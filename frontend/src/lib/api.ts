@@ -429,13 +429,6 @@ export async function deleteTaskThread(projectId: string, taskId: string, thread
     return res.json();
 }
 
-// -- Worktree --
-export async function checkWorktreeExists(projectId: string, taskId: string): Promise<{ exists: boolean }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/worktree-exists`);
-    if (!res.ok) throw await apiError(res, 'Failed to check worktree');
-    return res.json();
-}
-
 // -- Terminal --
 export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal): WebSocket {
     return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term);

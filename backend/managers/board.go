@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"kanban/backend/config"
 	"kanban/backend/httputil"
 	"kanban/backend/stream"
 	"kanban/backend/store"
@@ -14,11 +15,12 @@ import (
 type BoardHandler struct {
 	store          *store.Store
 	boardStreamMgr *stream.BoardStreamManager
+	configStore    *config.ConfigStore
 }
 
 // NewBoardHandler creates a new BoardHandler.
-func NewBoardHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager) *BoardHandler {
-	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr}
+func NewBoardHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore) *BoardHandler {
+	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore}
 }
 
 // HandleGetBoard returns the board (all tasks) for a project.
@@ -40,6 +42,13 @@ func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request, pr
 	}
 	if tasks == nil {
 		tasks = []types.Task{}
+	}
+
+	// Enrich tasks with worktree existence info
+	if h.configStore != nil {
+		if cfg, err := h.configStore.GetConfig(); err == nil {
+			EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
+		}
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, types.Board{Tasks: tasks})

@@ -45,7 +45,6 @@ var (
 	reProjectTerminal      = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 	reTaskTerminal         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
 	reTaskCommit           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commit$`)
-	reTaskWorktreeExists   = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/worktree-exists$`)
 	reTaskThreads          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads$`)
 	reTaskThreadSwitch     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/switch$`)
 	reTaskThreadFork       = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/fork$`)
@@ -267,11 +266,6 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := reProjectHomeAgentStream.FindStringSubmatch(path); m != nil {
 		s.homeAgentMgr.HandleStream(w, r, m[1])
-		return
-	}
-
-	if m := reTaskWorktreeExists.FindStringSubmatch(path); m != nil {
-		s.handleWorktreeExists(w, r, m[1], m[2])
 		return
 	}
 

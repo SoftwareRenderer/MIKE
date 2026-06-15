@@ -63,7 +63,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
-	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr)
+	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr, cfgStore)
 	sandboxMgr := sandbox.NewSandboxManager()
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
