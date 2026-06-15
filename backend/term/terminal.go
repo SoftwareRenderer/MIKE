@@ -93,12 +93,17 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !tm.sandboxMgr.IsAvailable() {
 			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
 		}
+		// Get configured base image from global config
+		baseImage := ""
+		if cfg, cfgErr := tm.cfgStore.GetConfig(); cfgErr == nil {
+			baseImage = cfg.DefaultSandboxImage
+		}
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, baseImage)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

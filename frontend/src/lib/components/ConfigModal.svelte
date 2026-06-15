@@ -26,6 +26,7 @@
     let defaultAutoCommit = $state(false);
     let defaultPlanMode = $state(false);
     let defaultMaxFailedTurns = $state(3);
+    let defaultSandboxImage = $state('');
     let loading = $state(false);
     let error = $state('');
 
@@ -154,6 +155,7 @@
         defaultAutoCommit = config?.default_auto_commit ?? false;
         defaultPlanMode = config?.default_plan_mode ?? false;
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
+        defaultSandboxImage = config?.default_sandbox_image || '';
         providers = buildProviders(config);
     });
 
@@ -396,6 +398,7 @@
                 default_auto_commit: defaultAutoCommit,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
+                default_sandbox_image: defaultSandboxImage.trim(),
             });
             configStore.set(cfg);
             loading = false;
@@ -699,6 +702,11 @@
                     <div class="readonly-value">{config?.database_path || '—'}</div>
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
+                <label class="field-label">
+                    Sandbox Base Image
+                    <input type="text" bind:value={defaultSandboxImage} placeholder="docker.io/library/alpine:latest" />
+                    <span class="field-help">Docker image for sandbox containers (e.g. alpine:latest, ubuntu:22.04). Left empty uses default (alpine:latest).</span>
+                </label>
             </fieldset>
 
             <!-- Task Defaults Section -->

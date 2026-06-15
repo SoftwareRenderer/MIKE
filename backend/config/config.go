@@ -54,6 +54,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
+	defaultSandboxImageRaw, _ := cs.store.GetConfigValue("default_sandbox_image")
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -69,6 +70,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
+	}
+	if defaultSandboxImageRaw != "" {
+		cfg.DefaultSandboxImage = defaultSandboxImageRaw
 	}
 	return cfg, nil
 }
@@ -106,6 +110,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	}
 	if c.DefaultMaxFailedTurns != nil {
 		if err := cs.store.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
+			return err
+		}
+	}
+	if c.DefaultSandboxImage != "" {
+		if err := cs.store.SetConfigValue("default_sandbox_image", c.DefaultSandboxImage); err != nil {
 			return err
 		}
 	}
@@ -163,6 +172,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			if f, ok := dmft.(float64); ok {
 				v := int(f)
 				current.DefaultMaxFailedTurns = &v
+			}
+		}
+		if dsi, ok := updates["default_sandbox_image"]; ok {
+			if s, ok := dsi.(string); ok {
+				current.DefaultSandboxImage = s
 			}
 		}
 		if err := cs.UpdateConfig(current); err != nil {

@@ -408,7 +408,7 @@ func buildHint(loopType LoopType, target string) string {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool, baseImage string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -439,7 +439,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
 			return
 		}
-		if err := te.sandboxMgr.Create(task.ID, worktreePath); err != nil {
+		if err := te.sandboxMgr.Create(task.ID, worktreePath, baseImage); err != nil {
 			task.StatusState = "failed"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 			te.store.UpdateTask(task)

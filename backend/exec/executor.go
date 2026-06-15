@@ -260,8 +260,14 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		return fmt.Errorf("get project for sandbox check: %w", projErr)
 	}
 	sandboxEnabled := project.SandboxEnabled
+	baseImage := ""
+	if sandboxEnabled {
+		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
+			baseImage = cfg.DefaultSandboxImage
+		}
+	}
 
-	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled)
+	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, baseImage)
 	return nil
 }
 
@@ -384,8 +390,14 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	sandboxEnabled := project.SandboxEnabled
+	baseImage := ""
+	if sandboxEnabled {
+		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
+			baseImage = cfg.DefaultSandboxImage
+		}
+	}
 
-	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled)
+	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, baseImage)
 }
 
 // -- Helper functions --

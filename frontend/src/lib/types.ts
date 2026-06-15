@@ -73,6 +73,7 @@ export interface Config {
     default_auto_commit?: boolean;
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
+    default_sandbox_image?: string;
 }
 
 export interface ProviderModel {

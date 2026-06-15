@@ -56,6 +56,7 @@ type Config struct {
 	DefaultAutoCommit     *bool      `json:"default_auto_commit,omitempty"`
 	DefaultPlanMode       *bool      `json:"default_plan_mode,omitempty"`
 	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
+	DefaultSandboxImage   string     `json:"default_sandbox_image,omitempty"`
 }
 
 // ModelConfig represents a model with its per-model settings.
