@@ -424,7 +424,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
 		te.taskMu.Unlock()
-		te.streamMgr.Remove(task.ID)
+		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
+		// It's removed only when the task is deleted (via RemoveStream in cleanupTask).
 	}()
 
 	// Create sandbox if enabled

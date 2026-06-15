@@ -4,7 +4,7 @@
     import type { Task } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -260,8 +260,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const taskId = task.id;
         try {
             await deleteTask(projectId, taskId);
-            const board = await getBoard(projectId);
-            boardStore.set(board);
+            // Board stream WebSocket will push the update
             onClose();
         } catch (e) {
             showToast('Failed to delete task: ' + String(e), 'error');

@@ -196,7 +196,7 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.Ping(context.Background()); err != nil {
+				if err := b.PingConn(conn); err != nil {
 					return
 				}
 			case <-done:

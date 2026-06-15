@@ -28,6 +28,7 @@ type LifecycleCallback func(hasClients bool)
 type Broadcaster struct {
 	mu             sync.RWMutex
 	clients        map[*websocket.Conn]bool
+	writeMu        sync.Mutex // serializes all writes to prevent concurrent Read/Write races
 	bufMu          sync.Mutex
 	ringBuffer     []types.WSMessage
 	bufSize        int
@@ -135,8 +136,15 @@ func (b *Broadcaster) Send(event types.StreamEvent) {
 
 	// Send to all connected clients
 	b.mu.RLock()
-	defer b.mu.RUnlock()
+	clientConns := make([]*websocket.Conn, 0, len(b.clients))
 	for conn := range b.clients {
+		clientConns = append(clientConns, conn)
+	}
+	b.mu.RUnlock()
+
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	for _, conn := range clientConns {
 		if b.closed.Load() {
 			break
 		}
@@ -148,6 +156,14 @@ func (b *Broadcaster) Send(event types.StreamEvent) {
 			// Client disconnected, will be cleaned up
 		}
 	}
+}
+
+// PingConn sends a WebSocket ping frame to a connection, serialized through writeMu
+// to avoid concurrent Read/Write races with the main read loop.
+func (b *Broadcaster) PingConn(conn *websocket.Conn) error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	return conn.Ping(context.Background())
 }
 
 // getBuffer returns the last N buffered messages.

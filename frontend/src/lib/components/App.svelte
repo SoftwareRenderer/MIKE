@@ -52,6 +52,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, string> = $state({});
+    let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showCreateTaskVal = $state(false);
     let showConfigVal = $state(false);
     let showTerminalVal = $state(false);
@@ -188,7 +189,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
 
     async function refreshBoard() {
-        if (!currentProject) return;
+        if (!currentProject || boardRefreshPending) return;
+        boardRefreshPending = true;
         try {
             const b = await getBoard(currentProject.id);
             tasks = b.tasks || [];
@@ -203,6 +205,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             }
         } catch (e) {
             console.error('Failed to refresh board:', e);
+        } finally {
+            boardRefreshPending = false;
         }
     }
 
@@ -551,7 +555,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             projectId={currentProject?.id}
             parentId={creatingChildOf ?? undefined}
             onClose={() => { showCreateTask.set(false); creatingChildOf = null; }}
-            onTaskCreated={() => { refreshBoard(); creatingChildOf = null; }}
+            onTaskCreated={() => { creatingChildOf = null; }} // board stream pushes update
         />
     {/if}
     {#if showConfigVal}

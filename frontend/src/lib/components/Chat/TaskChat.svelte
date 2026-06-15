@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getConfig, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -62,6 +62,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let connecting = $state(true);
     let ws: ReturnType<typeof createTaskStream> | null = null;
     let scrollEl: HTMLElement | null = null;
+
     let atBottom = $state(true);
     let prevScrollHeight = 0;
     let userInputPending = false;
@@ -509,35 +510,23 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         scroll();
     }
 
-    async function loadProviders() {
-        try {
-            const cfg = await getConfig();
-            providers = cfg.providers || [];
+    /** Update providers from the config store (reacts to settings changes). */
+    function updateProvidersFromStore() {
+        const cfg = get(configStore);
+        if (cfg && cfg.providers) {
+            providers = cfg.providers;
             // Initialize model selection from highest-priority provider's default model
-            if (providers.length > 0) {
+            if (providers.length > 0 && (!selectedModel || !providers.some(p => p.url === selectedUrl))) {
                 const firstProvider = providers[0];
                 const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
                 if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
                     selectedUrl = firstProvider.url;
                     selectedModel = firstProvider.default_model;
                 } else if (firstProvider.models.length > 0) {
-                    // Fallback: first available model of highest-priority provider
                     selectedUrl = firstProvider.url;
                     selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
-            updateContextLimit();
-
-        } catch {
-            providers = [];
-        }
-    }
-
-    /** Update providers from the config store (reacts to settings changes). */
-    function updateProvidersFromStore() {
-        const cfg = get(configStore);
-        if (cfg && cfg.providers) {
-            providers = cfg.providers;
             updateContextLimit();
         }
     }
@@ -733,20 +722,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Refresh threads list from server to pick up any changes (deletions, etc.)
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = switched.id;
-            await loadHistory();
             // Notify parent to refresh the diff panel for the new thread
             onThreadSwitch?.();
             // Update URL with new thread param
             updateThreadUrl(threadId);
-            // Reconnect WebSocket — clear onclose to prevent stale handler
-            // from nulling out the new ws reference after it's created.
-            if (ws) {
-                ws.ws.onclose = null;
-                ws.close();
-                ws = null;
-                connected = false;
-            }
-            connect(true); // skip sync buffer after thread switch
+            // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
+            // Server sends thread_switch + diff_changed events over existing connection.
         } catch (e) {
             showToast(String(e));
         }
@@ -759,18 +740,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Refresh threads list from server to ensure consistency
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
-            await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
-            // Reconnect WebSocket — clear onclose to prevent stale handler
-            // from nulling out the new ws reference after it's created.
-            if (ws) {
-                ws.ws.onclose = null;
-                ws.close();
-                ws = null;
-                connected = false;
-            }
-            connect(true); // skip sync buffer after fork
+            // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
         } catch (e) {
             showToast(String(e));
         }
@@ -1046,16 +1018,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
-            // Reconnect WebSocket — clear onclose to prevent stale handler
-            // from nulling out the new ws reference after it's created.
-            if (ws) {
-                ws.ws.onclose = null;
-                ws.close();
-                ws = null;
-                connected = false;
-            }
-            connect(true); // skip sync buffer after fork
-            // Wait for WebSocket to be OPEN before sending the edited message.
+            // Wait for existing WebSocket to be OPEN before sending the edited message.
             // sendWithModel silently drops messages when readyState !== OPEN.
             const wsReady = new Promise<void>((resolve, reject) => {
                 const maxWait = 5000;
@@ -1239,14 +1202,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const switched = await switchTaskThread(projectId, taskId, urlThread);
                 updateActiveThread(switched.id);
                 await loadHistory();
-                // Reconnect WebSocket — clear onclose to prevent stale handler
-                if (ws) {
-                    ws.ws.onclose = null;
-                    ws.close();
-                    ws = null;
-                    connected = false;
-                }
-                connect(true); // skip sync buffer after thread switch
+                // No reconnect needed — broadcaster is per-task
             } catch (e) {
                 showToast(String(e));
             }
@@ -1254,7 +1210,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     onMount(async () => {
-        await loadProviders();
+        // Providers loaded via configStore subscription (no separate fetch needed)
+        updateProvidersFromStore();
         await loadThreads();
         // If URL has a thread param, switch to that thread before loading history
         const urlThread = readThreadFromUrl();

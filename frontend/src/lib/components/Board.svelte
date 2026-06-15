@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
-    import { moveTask, reorderTasks, clearDoneTasks, getBoard } from '$lib/api';
+    import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
     import { board as boardStore, showConfirm, showToast } from '$lib/store';
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
@@ -94,8 +94,7 @@
         if (!confirmed) return;
         try {
             await clearDoneTasks(projectId);
-            const board = await getBoard(projectId);
-            boardStore.set(board);
+            // Board stream WebSocket will push the update
         } catch (e) {
             showToast('Failed to clear done tasks: ' + String(e), 'error');
         }

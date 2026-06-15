@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, getBoard } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask } from '$lib/api';
 
     let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -305,8 +305,7 @@
         if (!confirmed) return;
         try {
             await deleteTask(projectId, task.id);
-            const board = await getBoard(projectId);
-            boardStore.set(board);
+            // Board stream WebSocket will push the update
         } catch (err) {
             showToast('Failed to delete task: ' + String(err), 'error');
         }

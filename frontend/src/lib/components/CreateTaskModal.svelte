@@ -2,8 +2,8 @@
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
     import type { Provider } from '$lib/types';
-    import { createTask, getBoard, getConfig, getTask } from '$lib/api';
-    import { board as boardStore, showCreateTask } from '$lib/store';
+    import { createTask, getTask } from '$lib/api';
+    import { config as configStore, showCreateTask } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { createFocusTrap } from '$lib/a11y';
 
@@ -26,18 +26,10 @@
 
     onMount(async () => {
         triggerEl = document.activeElement as HTMLElement;
-        try {
-            const cfg = await getConfig();
-            providers = cfg.providers || [];
-            // Fetch parent task title if creating a subtask
-            if (parentId && projectId) {
-                try {
-                    const parentTask = await getTask(projectId, parentId);
-                    parentTitle = parentTask.title;
-                } catch {
-                    parentTitle = 'Parent task';
-                }
-            }
+        // Use config from store (already fetched by App) instead of separate API call
+        const cfg = get(configStore);
+        if (cfg && cfg.providers) {
+            providers = cfg.providers;
             // Pre-select highest-priority provider's default model
             if (providers.length > 0) {
                 const firstProvider = providers[0];
@@ -51,8 +43,15 @@
                     selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
-        } catch {
-            providers = [];
+        }
+        // Fetch parent task title if creating a subtask
+        if (parentId && projectId) {
+            try {
+                const parentTask = await getTask(projectId, parentId);
+                parentTitle = parentTask.title;
+            } catch {
+                parentTitle = 'Parent task';
+            }
         }
         // Setup focus trap after modal is rendered
         if (modalEl) {
@@ -87,9 +86,7 @@
             if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
             if (parentId) taskData.parent_task_id = parentId;
             await createTask(projectId, taskData);
-            // Refresh the board
-            const board = await getBoard(projectId);
-            boardStore.set(board);
+            // Board stream WebSocket will push the update; onTaskCreated triggers refreshBoard as fallback
             showCreateTask.set(false);
             onTaskCreated?.();
             onClose();

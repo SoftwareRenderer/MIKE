@@ -32,6 +32,7 @@ type branchSnapshot struct {
 type BoardStreamManager struct {
 	mu      sync.RWMutex
 	clients map[string]map[*websocket.Conn]bool // projectID -> set of connections
+	writeMu sync.Mutex // serializes all writes to prevent concurrent Read/Write races
 	store   *store.Store
 	worktreeMgr *git.WorktreeManager
 	// pollers tracks the git diff stats poller context per project (one poller per project, not per client)
@@ -100,11 +101,13 @@ func (bsm *BoardStreamManager) Broadcast(projectID string) {
 	bsm.mu.RUnlock()
 
 	msg, _ := json.Marshal(map[string]string{"type": "board_refresh"})
+	bsm.writeMu.Lock()
 	for conn := range clients {
 		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
 			// Client disconnected, will be cleaned up on read loop exit
 		}
 	}
+	bsm.writeMu.Unlock()
 
 	bsm.BroadcastProjectCounts()
 }
@@ -112,15 +115,21 @@ func (bsm *BoardStreamManager) Broadcast(projectID string) {
 // BroadcastAll sends a raw message to ALL connected WebSocket clients across all projects.
 func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 	bsm.mu.RLock()
-	defer bsm.mu.RUnlock()
-
+	allConns := make([]*websocket.Conn, 0)
 	for _, conns := range bsm.clients {
 		for conn := range conns {
-			if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
-				// Client disconnected
-			}
+			allConns = append(allConns, conn)
 		}
 	}
+	bsm.mu.RUnlock()
+
+	bsm.writeMu.Lock()
+	for _, conn := range allConns {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected
+		}
+	}
+	bsm.writeMu.Unlock()
 }
 
 // BroadcastBranch sends a project_branch event to all clients of a project.
@@ -133,11 +142,13 @@ func (bsm *BoardStreamManager) BroadcastBranch(projectID, branch string) {
 		"type":   "project_branch",
 		"branch": branch,
 	})
+	bsm.writeMu.Lock()
 	for conn := range clients {
 		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
 			// Client disconnected
 		}
 	}
+	bsm.writeMu.Unlock()
 }
 
 // BroadcastDiffStats sends a task_diff_stats event to all clients of a project.
@@ -153,11 +164,13 @@ func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat s
 		"untracked_n":     untrackedN,
 		"untracked_lines": untrackedLines,
 	})
+	bsm.writeMu.Lock()
 	for conn := range clients {
 		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
 			// Client disconnected
 		}
 	}
+	bsm.writeMu.Unlock()
 }
 
 // BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project.
@@ -170,11 +183,13 @@ func (bsm *BoardStreamManager) BroadcastTaskUpdated(projectID string, task inter
 		"type": "task_updated",
 		"task": task,
 	})
+	bsm.writeMu.Lock()
 	for conn := range clients {
 		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
 			// Client disconnected, will be cleaned up on read loop exit
 		}
 	}
+	bsm.writeMu.Unlock()
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -327,7 +342,9 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 				"type":   "project_branch",
 				"branch": branch,
 			})
+			bsm.writeMu.Lock()
 			conn.Write(context.Background(), websocket.MessageText, msg)
+			bsm.writeMu.Unlock()
 		}
 	}
 
@@ -340,7 +357,10 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.Ping(context.Background()); err != nil {
+				bsm.writeMu.Lock()
+				err := conn.Ping(context.Background())
+				bsm.writeMu.Unlock()
+				if err != nil {
 					return
 				}
 			case <-done:
