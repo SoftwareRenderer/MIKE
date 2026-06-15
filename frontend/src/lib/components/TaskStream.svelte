@@ -102,7 +102,7 @@
                     type: 'tool_call',
                     content: '',
                     isStreaming: true,
-                    toolCall: { toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args }
+                    toolCall: { toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args, sandbox: data.sandbox }
                 };
                 sections.push(sec);
                 activeToolCalls.set(data.tool_id, sec);

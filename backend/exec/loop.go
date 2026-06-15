@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -427,6 +428,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 	// Create sandbox if enabled
 	var execFn execFunc
+	var readFn readFunc
+	var writeFn writeFunc
 	if sandboxEnabled {
 		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
 			task.StatusState = "failed"
@@ -449,6 +452,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Build sandbox exec function
 		execFn = func(command string) (string, error) {
 			return te.sandboxMgr.Exec(task.ID, command, nil)
+		}
+		// Build sandbox read/write functions
+		readFn = func(path string) ([]byte, error) {
+			out, err := te.sandboxMgr.Exec(task.ID, "cat "+shellQuote(path), nil)
+			if err != nil {
+				return nil, fmt.Errorf("%v: %s", err, out)
+			}
+			return []byte(out), nil
+		}
+		writeFn = func(path, content string) error {
+			_, err := te.sandboxMgr.ExecWithInput(task.ID, "mkdir -p "+shellQuote(filepath.Dir(path))+" && cat > "+shellQuote(path), []byte(content), nil)
+			if err != nil {
+				return fmt.Errorf("write failed: %w", err)
+			}
+			return nil
 		}
 	}
 
@@ -777,9 +795,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				args := parseToolArgs(tc.Function.Arguments)
 				toolStart := time.Now()
-				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, execFn)
+				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
-				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments}})
+				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
+				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
 				b.Send(types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
@@ -789,6 +808,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
 					"args":              args,
 					"raw_args":          tc.Function.Arguments,
+					"sandbox":           sandboxEnabled && isSandboxableTool(tc.Function.Name),
 				})
 				resultJSON, _ := json.Marshal(map[string]interface{}{
 					"output":   result,
@@ -1142,4 +1162,20 @@ func compressContext(messages []types.ChatMessage, lastCompressIdx int, client *
 		summary:            summary,
 		oldLen:             oldLen,
 	}, nil
+}
+
+// shellQuote safely quotes a string for use in a shell command.
+// Uses single quotes and escapes any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// isSandboxableTool returns true if the tool can run inside a sandbox.
+func isSandboxableTool(name string) bool {
+	switch name {
+	case "read_file", "write_file", "execute_command":
+		return true
+	default:
+		return false
+	}
 }

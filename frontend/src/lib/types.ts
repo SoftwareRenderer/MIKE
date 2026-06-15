@@ -250,6 +250,7 @@ export interface StreamToolCallEvent {
     tool_name: string;
     tool_display_name?: string;
     args: Record<string, unknown>;
+    sandbox?: boolean;
 }
 
 export interface StreamToolResultEvent {
@@ -297,6 +298,7 @@ export interface StreamSection {
         toolName: string;
         displayName?: string;
         args: Record<string, unknown>;
+        sandbox?: boolean;
         result?: string;
         success?: boolean;
         duration?: number;

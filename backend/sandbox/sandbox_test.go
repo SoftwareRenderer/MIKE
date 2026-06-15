@@ -124,6 +124,56 @@ func TestExecNotAllowed(t *testing.T) {
 	t.Logf("sandbox ps output: %s (error: %v)", output, err)
 }
 
+func TestExecWithInput(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-exec-input-task"
+
+	err := sm.Create(taskID, dir)
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() {
+		// Clean up files from inside the container (they're owned by root)
+		_, _ = sm.Exec(taskID, "rm -rf test_input.txt sub", nil)
+		_ = sm.Stop(taskID)
+	})
+
+	// Write a file via stdin (cat > file)
+	content := []byte("line1\nline2\nline3")
+	output, err := sm.ExecWithInput(taskID, "cat > test_input.txt", content, nil)
+	if err != nil {
+		t.Fatalf("exec with input: %v (output: %s)", err, output)
+	}
+
+	// Verify the file was created with correct content
+	data, err := os.ReadFile(filepath.Join(dir, "test_input.txt"))
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != string(content) {
+		t.Fatalf("unexpected content: %q (expected %q)", string(data), string(content))
+	}
+
+	// Test with content containing special shell characters
+	specialContent := []byte("hello 'world' && echo $PATH > /dev/null")
+	_, err = sm.ExecWithInput(taskID, "mkdir -p sub && cat > sub/special.txt", specialContent, nil)
+	if err != nil {
+		t.Fatalf("exec with special chars: %v", err)
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "sub", "special.txt"))
+	if err != nil {
+		t.Fatalf("read special file: %v", err)
+	}
+	if string(data) != string(specialContent) {
+		t.Fatalf("unexpected special content: %q (expected %q)", string(data), string(specialContent))
+	}
+}
+
 func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{

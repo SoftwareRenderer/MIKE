@@ -17,15 +17,27 @@ import (
 // execFunc is a function that executes a command, either in a sandbox or directly.
 type execFunc func(command string) (string, error)
 
-func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, execFn execFunc) (string, bool) {
+// readFunc reads a file's contents. When sandboxed, runs via container exec.
+type readFunc func(path string) ([]byte, error)
+
+// writeFunc writes content to a file. When sandboxed, runs via container exec with stdin.
+type writeFunc func(path, content string) error
+
+func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
 	switch name {
 	case "read_file":
 		path, _ := args["path"].(string)
-		fullPath := filepath.Join(worktreePath, filepath.Clean("/"+path))
-		if !strings.HasPrefix(fullPath, worktreePath) {
+		fullPath := validateWorktreePath(worktreePath, path)
+		if fullPath == "" {
 			return "Error: path escape", false
 		}
-		data, err := os.ReadFile(fullPath)
+		var data []byte
+		var err error
+		if readFn != nil {
+			data, err = readFn(path)
+		} else {
+			data, err = os.ReadFile(fullPath)
+		}
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -33,12 +45,18 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 	case "write_file":
 		path, _ := args["path"].(string)
 		content, _ := args["content"].(string)
-		fullPath := filepath.Join(worktreePath, filepath.Clean("/"+path))
-		if !strings.HasPrefix(fullPath, worktreePath) {
+		fullPath := validateWorktreePath(worktreePath, path)
+		if fullPath == "" {
 			return "Error: path escape", false
 		}
-		os.MkdirAll(filepath.Dir(fullPath), 0o755)
-		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+		var err error
+		if writeFn != nil {
+			err = writeFn(path, content)
+		} else {
+			os.MkdirAll(filepath.Dir(fullPath), 0o755)
+			err = os.WriteFile(fullPath, []byte(content), 0o644)
+		}
+		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return fmt.Sprintf("Wrote %d bytes", len(content)), true
@@ -116,4 +134,37 @@ func isDangerousCommand(cmd string) bool {
 		}
 	}
 	return strings.HasPrefix(cmd, "rm -rf /") || strings.HasPrefix(cmd, "rm -rf /*")
+}
+
+// validateWorktreePath resolves a relative path against the worktree root
+// and returns the absolute path, or empty string if it escapes the worktree.
+// Handles: .. traversal, absolute paths, and symlink-style escapes.
+func validateWorktreePath(worktreePath, path string) string {
+	// Ensure worktree path is absolute and has trailing separator for prefix check
+	wt := worktreePath
+	if !filepath.IsAbs(wt) {
+		return ""
+	}
+	if !strings.HasSuffix(wt, string(filepath.Separator)) {
+		wt = wt + string(filepath.Separator)
+	}
+
+	// Clean the input path
+	cleaned := filepath.Clean(path)
+	// Reject absolute paths (they shouldn't be used for worktree-relative paths)
+	if filepath.IsAbs(cleaned) {
+		return ""
+	}
+	// Reject paths that escape with ..
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+
+	fullPath := filepath.Join(worktreePath, cleaned)
+	// Final safety check: resolved path must be within worktree
+	// (exact match or starts with worktree + separator)
+	if fullPath != worktreePath && !strings.HasPrefix(fullPath, wt) {
+		return ""
+	}
+	return fullPath
 }

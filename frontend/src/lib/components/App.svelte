@@ -4,6 +4,8 @@
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
+import shieldIcon from '$lib/assets/icons/shield.svg';
+import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import TerminalPanel from './TerminalPanel.svelte';
@@ -403,12 +405,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                                     class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
                                     role="button"
                                     tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
-                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox enabled — cannot change, tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
-                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode — tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
+                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox enabled — cannot change while tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
+                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode while tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
                                     onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
                                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
                                 >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                    <img src={shieldIcon} width="14" height="14" alt="" />
                                 </span>
                             {:else}
                                 <span
@@ -416,12 +418,12 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                                     class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
                                     role="button"
                                     tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
-                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox disabled — cannot change, tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
-                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode — tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
+                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox disabled — cannot change while tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
+                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode while tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
                                     onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
                                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
                                 >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                                    <img src={shieldOffIcon} width="14" height="14" alt="" />
                                 </span>
                             {/if}
                         {/if}
@@ -725,10 +727,6 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     }
     .sandbox-badge-locked {
         cursor: not-allowed;
-        opacity: 0.5;
-    }
-    .sandbox-badge-locked:hover {
-        opacity: 0.5;
     }
     .sandbox-badge-off {
         color: var(--color-status-red, #f85149);

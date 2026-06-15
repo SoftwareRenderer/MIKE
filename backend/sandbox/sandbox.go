@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -162,6 +163,18 @@ func (sm *SandboxManager) Create(taskID, worktreePath string) error {
 // Exec runs a command inside the task's sandbox container.
 // Returns the combined stdout/stderr output.
 func (sm *SandboxManager) Exec(taskID, command string, env []string) (string, error) {
+	return sm.execInternal(taskID, command, nil, env)
+}
+
+// ExecWithInput runs a command inside the task's sandbox container with stdin input.
+// Returns the combined stdout/stderr output.
+func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, env []string) (string, error) {
+	return sm.execInternal(taskID, command, stdin, env)
+}
+
+// execInternal is the shared implementation for Exec and ExecWithInput.
+// When stdin is non-nil, it is piped to the command's standard input.
+func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []string) (string, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	sm.mu.Unlock()
@@ -173,19 +186,30 @@ func (sm *SandboxManager) Exec(taskID, command string, env []string) (string, er
 	// Build exec arguments
 	execArgs := []string{
 		"exec",
+	}
+	if stdin != nil {
+		execArgs = append(execArgs, "-i") // keep STDIN open
+	}
+	execArgs = append(execArgs,
 		"-w", "/worktree",
 		containerName,
-	}
+	)
 
 	// Add environment variables
 	for _, e := range env {
 		execArgs = append(execArgs, "-e", e)
 	}
 
-	// Run bash -c to handle shell features
+	// Run sh -c to handle shell features
 	execArgs = append(execArgs, "sh", "-c", command)
 
-	out, err := sm.podmanExec(execArgs...)
+	c := exec.Command("sudo", append([]string{"podman"}, execArgs...)...)
+
+	if stdin != nil {
+		c.Stdin = bytes.NewReader(stdin)
+	}
+
+	out, err := c.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("exec failed: %w", err)
 	}

@@ -22,6 +22,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             displayName?: string;
             args: Record<string, unknown>;
             raw_args?: string;
+            sandbox?: boolean;
             result?: string;
             success?: boolean;
             duration?: number;
@@ -277,6 +278,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     displayName: data.tool_display_name,
                     args: data.args,
                     raw_args: data.raw_args,
+                    sandbox: data.sandbox,
                     isPending: true
                 });
                 entry.isStreaming = true;
@@ -555,6 +557,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             displayName: tc.tool_display_name,
                             args: tc.args ?? {},
                             raw_args: tc.raw_args,
+                            sandbox: tc.sandbox,
                             result: result?.output,
                             success: result?.success ?? true,
                             duration: result?.duration,

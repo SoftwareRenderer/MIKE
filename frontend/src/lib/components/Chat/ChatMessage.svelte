@@ -1,6 +1,14 @@
 <script lang="ts">
     import { marked } from 'marked';
 import { getToolDisplayName } from '$lib/types';
+import shieldGreenIcon from '$lib/assets/icons/shield-green.svg';
+import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+import zapIcon from '$lib/assets/icons/zap.svg';
+import fileTextIcon from '$lib/assets/icons/file-text.svg';
+import editIcon from '$lib/assets/icons/edit.svg';
+import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
+
+    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'execute_command'];
 
     interface ToolCallInfo {
         toolId: string;
@@ -8,6 +16,7 @@ import { getToolDisplayName } from '$lib/types';
         displayName?: string;
         args: Record<string, unknown>;
         raw_args?: string;
+        sandbox?: boolean;
         result?: string;
         success?: boolean;
         duration?: number;
@@ -79,7 +88,7 @@ import { getToolDisplayName } from '$lib/types';
 
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
-        return { text: display.slice(0, ARGS_MAX_LEN) + '\u2026', truncated: true };
+        return { text: display.slice(0, ARGS_MAX_LEN) + ' \u2026', truncated: true };
     }
 
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
@@ -326,17 +335,27 @@ import { getToolDisplayName } from '$lib/types';
                     <div class="tool-call-entry">
                         <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
                             <div class="tool-call-header">
-                                <span class="tool-icon">{#if tc.toolName === 'execute_command'}⚡{:else if tc.toolName === 'read_file'}📄{:else if tc.toolName === 'write_file'}✏️{:else if tc.toolName === 'task_complete'}✅{:else}⚡{/if}</span>
+                                {#if tc.sandbox}
+                                    <img class="tool-sandbox-icon" src={shieldGreenIcon} width="14" height="14" alt="" title="Sandboxed" />
+                                {:else if SANDBOXABLE_TOOLS.includes(tc.toolName)}
+                                    <img class="tool-sandbox-icon" src={shieldOffIcon} width="14" height="14" alt="" title="Not sandboxed" />
+                                {/if}
+                                <img class="tool-icon" width="14" height="14" alt="" src={
+                                    tc.toolName === 'read_file' ? fileTextIcon :
+                                    tc.toolName === 'write_file' ? editIcon :
+                                    tc.toolName === 'task_complete' ? checkCircleIcon :
+                                    zapIcon
+                                } />
                                 <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
                                 {#if expandedArgs.has(tc.toolId)}
-                                    <span class="tool-args-wrapper" role="button" tabindex="0" onclick={() => toggleArgs(tc.toolId)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleArgs(tc.toolId); } }}>
+                                    <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Collapse arguments">
                                         <pre class="tool-args tool-args-expanded">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
-                                    </span>
+                                    </button>
                                 {:else}
                                     {#if truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).truncated}
-                                        <span class="tool-args-wrapper" role="button" tabindex="0" onclick={() => toggleArgs(tc.toolId)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleArgs(tc.toolId); } }}>
+                                        <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Expand arguments">
                                             <pre class="tool-args tool-args-collapsed">{truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).text}</pre>
-                                        </span>
+                                        </button>
                                     {:else}
                                         <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
                                     {/if}
@@ -760,6 +779,8 @@ import { getToolDisplayName } from '$lib/types';
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
     .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-text-primary); }
+    .tool-sandbox-icon { flex-shrink: 0; cursor: help; }
+    .tool-icon { flex-shrink: 0; }
     .tool-status { font-size: 0.75rem; font-weight: 500; }
     .tool-status.pending { color: var(--color-status-yellow); }
     .tool-status.error { color: var(--color-status-red); }
@@ -772,11 +793,15 @@ import { getToolDisplayName } from '$lib/types';
         color: var(--color-text-secondary);
         white-space: pre;
     }
-    .tool-args-wrapper {
-        display: inline;
+    .tool-args-link {
+        display: contents;
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
         cursor: pointer;
     }
-    .tool-args-wrapper:hover .tool-args-collapsed {
+    .tool-args-collapsed:hover {
         color: var(--color-text-primary);
     }
     .tool-args-expanded {
@@ -784,7 +809,7 @@ import { getToolDisplayName } from '$lib/types';
         text-decoration-color: var(--color-text-tertiary);
         text-underline-offset: 2px;
     }
-    .tool-args-wrapper:hover .tool-args-expanded {
+    .tool-args-expanded:hover {
         color: var(--color-text-primary);
     }
     .tool-result {
