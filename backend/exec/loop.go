@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"kanban/backend/llama"
+	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
@@ -478,11 +479,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort)
 	tools := llama.GetToolDefinitions()
+	// In sandbox mode, use the container mount path so the LLM sees
+	// the actual working directory inside the sandbox.
+	promptPath := worktreePath
+	if sandboxEnabled {
+		promptPath = sandbox.SandboxMountPath
+	}
 	var systemPrompt string
 	if task.PlanMode {
-		systemPrompt = llama.BuildPlanModeSystemPrompt(worktreePath)
+		systemPrompt = llama.BuildPlanModeSystemPrompt(promptPath)
 	} else {
-		systemPrompt = llama.BuildSystemPrompt(worktreePath)
+		systemPrompt = llama.BuildSystemPrompt(promptPath)
 	}
 
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)

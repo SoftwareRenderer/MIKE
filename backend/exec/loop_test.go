@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
 
@@ -457,5 +458,37 @@ func TestExtractCommandTarget(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractCommandTarget(%q) = %q, want %q", tt.cmd, got, tt.want)
 		}
+	}
+}
+
+// --- Sandbox Prompt Path Tests ---
+
+func TestPromptPath_SandboxEnabled(t *testing.T) {
+	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
+	sandboxEnabled := true
+
+	// Simulate the prompt path logic from executeTask
+	promptPath := worktreePath
+	if sandboxEnabled {
+		promptPath = sandbox.SandboxMountPath
+	}
+
+	if promptPath != "/worktree" {
+		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/worktree")
+	}
+}
+
+func TestPromptPath_SandboxDisabled(t *testing.T) {
+	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
+	sandboxEnabled := false
+
+	// Simulate the prompt path logic from executeTask
+	promptPath := worktreePath
+	if sandboxEnabled {
+		promptPath = sandbox.SandboxMountPath
+	}
+
+	if promptPath != worktreePath {
+		t.Errorf("sandbox disabled: promptPath = %q, want %q", promptPath, worktreePath)
 	}
 }

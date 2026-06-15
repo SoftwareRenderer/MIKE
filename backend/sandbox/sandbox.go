@@ -20,6 +20,8 @@ const (
 	ContainerNamePrefix = "kanban-sandbox"
 	// BaseImage is the default container image.
 	BaseImage = "docker.io/library/alpine:latest"
+	// SandboxMountPath is where the worktree is bind-mounted inside the container.
+	SandboxMountPath = "/worktree"
 	// KeepAliveTimeout is how long to wait for container cleanup.
 	KeepAliveTimeout = 30 * time.Second
 )
@@ -81,7 +83,7 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 }
 
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted read-write at /worktree inside the container.
+// The worktree is bind-mounted read-write at SandboxMountPath inside the container.
 // If baseImage is empty, the default BaseImage constant is used.
 func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string) error {
 	sm.mu.Lock()
@@ -139,9 +141,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string) error {
 		"--cap-add", "CAP_DAC_OVERRIDE", // needed to bypass file permission checks
 		"--security-opt", "no-new-privileges",
 		"--read-only",
-		"--workdir", "/worktree",
-		"-v", absWorktree + ":/worktree:rprivate,rw",
-		"-e", "HOME=/worktree",
+		"--workdir", SandboxMountPath,
+		"-v", absWorktree + ":" + SandboxMountPath + ":rprivate,rw",
+		"-e", "HOME=" + SandboxMountPath,
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		image,
@@ -197,7 +199,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		execArgs = append(execArgs, "-i") // keep STDIN open
 	}
 	execArgs = append(execArgs,
-		"-w", "/worktree",
+		"-w", SandboxMountPath,
 		containerName,
 	)
 
@@ -268,7 +270,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	// -t: allocate a pseudo-TTY
 	cmd := exec.Command(
 		"sudo", "podman", "exec", "-it",
-		"-w", "/worktree",
+		"-w", SandboxMountPath,
 		containerName,
 		"sh",
 	)
