@@ -91,11 +91,12 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	p := &types.Project{
-		ID:        GenerateProjectID(req.Path, existingIDs),
-		Name:      name,
-		Path:      req.Path,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:             GenerateProjectID(req.Path, existingIDs),
+		Name:           name,
+		Path:           req.Path,
+		SandboxEnabled: req.SandboxEnabled,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	if err := h.store.CreateProject(p); err != nil {
@@ -195,13 +196,23 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" {
-			httputil.JSONError(w, http.StatusBadRequest, "name is required")
-			return
+		// Partial update: apply only provided fields
+		if req.Name != "" {
+			if _, updateErr := h.store.UpdateProject(id, req.Name); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
+				return
+			}
 		}
-		p, err := h.store.UpdateProject(id, req.Name)
+		if req.SandboxEnabled != nil {
+			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
+				return
+			}
+		}
+		// Fetch latest state
+		p, err := h.store.GetProject(id)
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
+			httputil.JSONError(w, http.StatusNotFound, "project not found")
 			return
 		}
 		httputil.JSONResponse(w, http.StatusOK, p)
@@ -220,6 +231,10 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 			if h.terminalMgr != nil {
 				h.terminalMgr.RemoveSession(task.ID)
 			}
+		}
+		// Clean up project-level terminal session
+		if h.terminalMgr != nil {
+			h.terminalMgr.RemoveSession("proj:" + id)
 		}
 		if err := h.store.DeleteProject(id); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")

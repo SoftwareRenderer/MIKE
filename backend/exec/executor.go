@@ -14,6 +14,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -27,6 +28,7 @@ type TaskExecutor struct {
 	configStore    *config.ConfigStore
 	boardStreamMgr *stream.BoardStreamManager
 	worktreeMgr    *git.WorktreeManager
+	sandboxMgr     *sandbox.SandboxManager
 	streamMgr      *stream.StreamManager
 	gate           *ConcurrencyGate
 	taskMu         sync.Mutex
@@ -60,12 +62,13 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardStreamMgr *stream.BoardStreamManager, worktreeMgr *git.WorktreeManager) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardStreamMgr *stream.BoardStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager) *TaskExecutor {
 	te := &TaskExecutor{
 		store:          store,
 		configStore:    configStore,
 		boardStreamMgr: boardStreamMgr,
 		worktreeMgr:    worktreeMgr,
+		sandboxMgr:     sandboxMgr,
 		gate:           NewConcurrencyGate(),
 		tasks:          make(map[string]*executionState),
 	}
@@ -251,7 +254,14 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		}
 	})
 
-	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan)
+	// Check if project has sandbox enabled
+	project, projErr := te.store.GetProject(projectID)
+	if projErr != nil {
+		return fmt.Errorf("get project for sandbox check: %w", projErr)
+	}
+	sandboxEnabled := project.SandboxEnabled
+
+	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled)
 	return nil
 }
 
@@ -349,7 +359,21 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	})
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
-	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan)
+
+	// Check if project has sandbox enabled
+	project, projErr := te.store.GetProject(projectID)
+	if projErr != nil {
+		log.Printf("[lazy-start] task=%s get project error: %v", taskID, projErr)
+		task.StatusState = "failed"
+		task.Output = fmt.Sprintf("Failed to load project: %v", projErr)
+		_ = te.store.UpdateTask(task)
+		te.boardStreamMgr.Broadcast(projectID)
+		te.sendAndPersistError(b, task.ID, "Failed to load project", "project_not_found")
+		return
+	}
+	sandboxEnabled := project.SandboxEnabled
+
+	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled)
 }
 
 // -- Helper functions --

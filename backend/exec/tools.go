@@ -14,7 +14,10 @@ import (
 	"kanban/backend/types"
 )
 
-func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task) (string, bool) {
+// execFunc is a function that executes a command, either in a sandbox or directly.
+type execFunc func(command string) (string, error)
+
+func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, execFn execFunc) (string, bool) {
 	switch name {
 	case "read_file":
 		path, _ := args["path"].(string)
@@ -51,15 +54,27 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		if timeout > 300 {
 			timeout = 300
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-		defer cancel()
-		c := exec.CommandContext(ctx, "bash", "-c", cmd)
-		c.Dir = worktreePath
-		out, err := c.CombinedOutput()
+
+		var out string
+		var err error
+		if execFn != nil {
+			// Use sandbox execution
+			out, err = execFn(cmd)
+		} else {
+			// Direct execution (no sandbox)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+			defer cancel()
+			c := exec.CommandContext(ctx, "bash", "-c", cmd)
+			c.Dir = worktreePath
+			rawOut, cmdErr := c.CombinedOutput()
+			out = string(rawOut)
+			err = cmdErr
+		}
+
 		if err != nil {
 			return fmt.Sprintf("Failed: %v\n%s", err, out), false
 		}
-		return string(out), true
+		return out, true
 	case "task_complete":
 		return "Task complete", true
 	default:

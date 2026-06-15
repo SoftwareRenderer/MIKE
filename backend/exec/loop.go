@@ -407,17 +407,50 @@ func buildHint(loopType LoopType, target string) string {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+		}
+		// Clean up sandbox
+		if sandboxEnabled && te.sandboxMgr != nil {
+			if err := te.sandboxMgr.Stop(task.ID); err != nil {
+				log.Printf("[sandbox] task=%s cleanup error: %v", task.ID, err)
+			}
 		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
 		te.taskMu.Unlock()
 		te.streamMgr.Remove(task.ID)
 	}()
+
+	// Create sandbox if enabled
+	var execFn execFunc
+	if sandboxEnabled {
+		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
+			task.StatusState = "failed"
+			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
+			return
+		}
+		if err := te.sandboxMgr.Create(task.ID, worktreePath); err != nil {
+			task.StatusState = "failed"
+			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
+			return
+		}
+		log.Printf("[sandbox] task=%s sandbox created", task.ID)
+
+		// Build sandbox exec function
+		execFn = func(command string) (string, error) {
+			return te.sandboxMgr.Exec(task.ID, command, nil)
+		}
+	}
 
 	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
 	providerName := te.configStore.GetProviderNameByURL(serverURL)
@@ -744,7 +777,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				args := parseToolArgs(tc.Function.Arguments)
 				toolStart := time.Now()
-				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task)
+				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, execFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments}})
 				b.Send(types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})

@@ -2,7 +2,9 @@
     import { onMount } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
 
-    let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void } = $props();
+    let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string, sandboxEnabled: boolean) => void } = $props();
+
+    let sandboxEnabled = $state(true);
 
     let currentPath = $state('');
     let entries = $state<{ name: string; isDir: boolean; path: string; isGitRepo: boolean }[]>([]);
@@ -37,7 +39,7 @@
 
     function handleClick(entry: { isDir: boolean; path: string; isGitRepo: boolean }) {
         if (entry.isGitRepo) {
-            onSelect(entry.path);
+            onSelect(entry.path, sandboxEnabled);
         } else if (entry.isDir) {
             loadDir(entry.path);
         }
@@ -45,7 +47,7 @@
 
     function handleSelect() {
         if (isGitRepo) {
-            onSelect(currentPath);
+            onSelect(currentPath, sandboxEnabled);
         }
     }
 
@@ -71,7 +73,7 @@
             }
             // Refresh directory to confirm git init succeeded, then auto-select
             await loadDir(currentPath);
-            onSelect(currentPath);
+            onSelect(currentPath, sandboxEnabled);
         } catch (e) {
             error = String(e);
         } finally {
@@ -222,6 +224,10 @@
         <div class="browser-footer">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
+                <label class="sandbox-toggle">
+                    <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
+                    <span>Sandbox tasks (gVisor)</span>
+                </label>
                 <button class="btn-cancel" onclick={handleClose} title="Cancel">Cancel</button>
                 {#if isGitRepo}
                     <button
@@ -470,6 +476,21 @@
     .footer-actions {
         display: flex;
         gap: 8px;
+        align-items: center;
+    }
+    .sandbox-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .sandbox-toggle input[type="checkbox"] {
+        cursor: pointer;
+        accent-color: var(--color-primary);
     }
     .btn-cancel {
         padding: 6px 16px;

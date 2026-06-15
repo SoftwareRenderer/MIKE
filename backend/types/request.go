@@ -13,13 +13,15 @@ type ReorderRequest struct {
 
 // CreateProjectRequest is the request body for creating a project.
 type CreateProjectRequest struct {
-	Path string `json:"path"`
-	Name string `json:"name,omitempty"`
+	Path           string `json:"path"`
+	Name           string `json:"name,omitempty"`
+	SandboxEnabled bool   `json:"sandbox_enabled"`
 }
 
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
-	Name string `json:"name"`
+	Name           string `json:"name,omitempty"`
+	SandboxEnabled *bool  `json:"sandbox_enabled,omitempty"`
 }
 
 // CreateDependencyRequest is the request body for creating a dependency.

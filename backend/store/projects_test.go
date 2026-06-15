@@ -234,3 +234,55 @@ func TestProjectCreatedAtUpdatedAt(t *testing.T) {
 		t.Fatal("timestamps should be set")
 	}
 }
+
+func TestProjectSandboxEnabled(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with sandbox disabled (default)
+	proj := newProject("proj-1", "test", "/tmp/repo")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	got, _ := s.GetProject("proj-1")
+	if got.SandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be false by default")
+	}
+
+	// Enable sandbox
+	if err := s.UpdateProjectSandboxEnabled("proj-1", true); err != nil {
+		t.Fatalf("update sandbox: %v", err)
+	}
+	got, _ = s.GetProject("proj-1")
+	if !got.SandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be true after update")
+	}
+
+	// Disable sandbox
+	if err := s.UpdateProjectSandboxEnabled("proj-1", false); err != nil {
+		t.Fatalf("update sandbox: %v", err)
+	}
+	got, _ = s.GetProject("proj-1")
+	if got.SandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be false after disable")
+	}
+
+	// Create project with sandbox enabled
+	proj2 := newProject("proj-2", "sandboxed", "/tmp/repo2")
+	proj2.SandboxEnabled = true
+	if err := s.CreateProject(proj2); err != nil {
+		t.Fatalf("create sandboxed project: %v", err)
+	}
+	got2, _ := s.GetProject("proj-2")
+	if !got2.SandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be true for newly created project")
+	}
+
+	// Verify ListProjects includes sandbox_enabled
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(projects))
+	}
+}

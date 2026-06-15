@@ -274,14 +274,14 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         addProjectError = '';
     }
 
-    async function handleSelectProjectPath(path: string) {
+    async function handleSelectProjectPath(path: string, sandboxEnabled: boolean) {
         showFileBrowserVal = false;
         addProjectError = '';
         try {
             const p = await fetch('/api/projects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path }),
+                body: JSON.stringify({ path, sandbox_enabled: sandboxEnabled }),
             });
             if (!p.ok) {
                 const err = await p.json();
@@ -360,10 +360,21 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     <button
                         class="project-item"
                         onclick={() => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
-                        title={`Open project: ${p.name}`}
+                        title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
+                        {#if !collapsed}
+                            {#if p.sandbox_enabled}
+                                <span class="sandbox-badge" title="Sandbox enabled (gVisor)">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                </span>
+                            {:else}
+                                <span class="sandbox-badge sandbox-badge-off" title="Sandbox disabled (tasks run without isolation)">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                                </span>
+                            {/if}
+                        {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" title={p.name}>{getProjectAbbr(p.name)}</span>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>{getProjectAbbr(p.name)}</span>
                         {#if !collapsed && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
@@ -647,6 +658,17 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    .sandbox-badge {
+        flex-shrink: 0;
+        margin-right: 6px;
+        color: var(--color-primary);
+        display: flex;
+        align-items: center;
+        height: 1em;
+    }
+    .sandbox-badge-off {
+        color: var(--color-status-red, #f85149);
+    }
     .project-item:hover {
         background: var(--color-surface-2);
     }
@@ -698,6 +720,9 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     }
     .collapsed .project-abbr {
         display: block;
+    }
+    .collapsed .project-abbr-no-sandbox {
+        color: var(--color-status-red, #f85149);
     }
     .project-stats {
         display: flex;

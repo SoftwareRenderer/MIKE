@@ -12,6 +12,7 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/managers"
+	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/store"
 	"kanban/backend/term"
@@ -63,9 +64,10 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr)
-	s.terminalMgr = term.NewTerminalManager(store, cfgStore)
+	sandboxMgr := sandbox.NewSandboxManager()
+	s.terminalMgr = term.NewTerminalManager(store, cfgStore, sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr)
+	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, sandboxMgr)
 	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr)
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)

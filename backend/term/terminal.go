@@ -3,16 +3,19 @@ package term
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"kanban/backend/config"
 	"kanban/backend/httputil"
+	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
 
@@ -27,35 +30,39 @@ const (
 
 // taskTerminal holds a persistent PTY session for a single task.
 type taskTerminal struct {
-	cmd        *exec.Cmd
-	ptmx       *os.File
-	mu         sync.Mutex
-	conns      map[*websocket.Conn]bool
-	buf        [][]byte
-	lastActive time.Time
+	cmd         *exec.Cmd
+	ptmx        *os.File
+	shell       *sandbox.ShellProcess // non-nil when running in sandbox
+	mu          sync.Mutex
+	conns       map[*websocket.Conn]bool
+	buf         [][]byte
+	lastActive  time.Time
 }
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
-	mu       sync.RWMutex
-	sessions map[string]*taskTerminal
-	store    *store.Store
-	cfgStore *config.ConfigStore
+	mu         sync.RWMutex
+	sessions   map[string]*taskTerminal
+	store      *store.Store
+	cfgStore   *config.ConfigStore
+	sandboxMgr *sandbox.SandboxManager
 }
 
 // NewTerminalManager creates a new TerminalManager.
-func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore) *TerminalManager {
+func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr *sandbox.SandboxManager) *TerminalManager {
 	return &TerminalManager{
-		sessions: make(map[string]*taskTerminal),
-		store:    store,
-		cfgStore: cfgStore,
+		sessions:   make(map[string]*taskTerminal),
+		store:      store,
+		cfgStore:   cfgStore,
+		sandboxMgr: sandboxMgr,
 	}
 }
 
 // getOrCreate returns an existing session or creates a new one for the task.
-func (tm *TerminalManager) getOrCreate(taskID string, worktreePath string) (*taskTerminal, error) {
+// projectID is used to check if sandbox is enabled for the project.
+func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktreePath string, projectID string) (*taskTerminal, error) {
 	tm.mu.RLock()
-	session, ok := tm.sessions[taskID]
+	session, ok := tm.sessions[sessionKey]
 	tm.mu.RUnlock()
 	if ok {
 		return session, nil
@@ -64,36 +71,80 @@ func (tm *TerminalManager) getOrCreate(taskID string, worktreePath string) (*tas
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	if session, ok = tm.sessions[taskID]; ok {
+	if session, ok = tm.sessions[sessionKey]; ok {
 		return session, nil
 	}
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	// Check if sandbox is enabled for this project
+	sandboxEnabled := false
+	if projectID != "" {
+		proj, err := tm.store.GetProject(projectID)
+		if err != nil {
+			return nil, fmt.Errorf("get project for sandbox check: %w", err)
+		}
+		sandboxEnabled = proj.SandboxEnabled
 	}
 
-	cmd := exec.Command(shell)
-	cmd.Dir = worktreePath
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
-	if err != nil {
-		return nil, err
+	var sess *taskTerminal
+	if sandboxEnabled {
+		// Sandbox is required — no fallback
+		if tm.sandboxMgr == nil {
+			return nil, fmt.Errorf("sandbox manager not configured")
+		}
+		if !tm.sandboxMgr.IsAvailable() {
+			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
+		}
+		var shell *sandbox.ShellProcess
+		var err error
+		// Project terminals (sessionKey starts with "proj:") create the container on demand.
+		// Task terminals expect the container to already exist (created by task executor).
+		if strings.HasPrefix(sessionKey, "proj:") {
+			shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath)
+		} else {
+			shell, err = tm.sandboxMgr.StartShell(taskID)
+		}
+		if err != nil {
+			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
+			return nil, fmt.Errorf("sandbox not available: %w", err)
+		}
+		sess = &taskTerminal{
+			cmd:        shell.Cmd,
+			ptmx:       shell.Ptmx,
+			shell:      shell,
+			conns:      make(map[*websocket.Conn]bool),
+			lastActive: time.Now(),
+		}
+		log.Printf("[terminal] %s started sandbox shell", sessionKey)
 	}
 
-	session = &taskTerminal{
-		cmd:        cmd,
-		ptmx:       ptmx,
-		conns:      make(map[*websocket.Conn]bool),
-		lastActive: time.Now(),
+	if sess == nil {
+		// Direct shell (sandbox not enabled for this project)
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+
+		cmd := exec.Command(shell)
+		cmd.Dir = worktreePath
+		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
+		if err != nil {
+			return nil, err
+		}
+
+		sess = &taskTerminal{
+			cmd:        cmd,
+			ptmx:       ptmx,
+			conns:      make(map[*websocket.Conn]bool),
+			lastActive: time.Now(),
+		}
 	}
 
-	tm.sessions[taskID] = session
+	tm.sessions[sessionKey] = sess
+	go sess.readLoop()
 
-	go session.readLoop()
-
-	return session, nil
+	return sess, nil
 }
 
 // RemoveSession kills the PTY for a task (called when task is deleted).
@@ -148,9 +199,13 @@ func (t *taskTerminal) close() {
 	t.conns = nil
 	t.mu.Unlock()
 
-	t.ptmx.Close()
-	t.cmd.Process.Kill()
-	t.cmd.Wait()
+	if t.shell != nil {
+		_ = t.shell.Close()
+	} else {
+		t.ptmx.Close()
+		t.cmd.Process.Kill()
+		t.cmd.Wait()
+	}
 }
 
 // HandleTerminal handles WebSocket connections for a task terminal.
@@ -167,7 +222,7 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 	}
 	worktreePath := filepath.Join(cfg.WorkspaceDir, taskID)
 
-	session, err := tm.getOrCreate(taskID, worktreePath)
+	session, err := tm.getOrCreate(taskID, taskID, worktreePath, projectID)
 	if err != nil {
 		log.Printf("terminal pty error for task %s: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")
@@ -191,7 +246,7 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 	}
 
 	sessionKey := "proj:" + projectID
-	session, err := tm.getOrCreate(sessionKey, project.Path)
+	session, err := tm.getOrCreate(sessionKey, sessionKey, project.Path, projectID)
 	if err != nil {
 		log.Printf("terminal pty error for project %s: %v", projectID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")

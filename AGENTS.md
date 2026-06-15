@@ -1,5 +1,27 @@
 # AGENTS.md
 
+## Required Dependencies
+
+### gVisor
+
+gVisor (`runsc`) is required for project sandboxing. When a project has sandboxing enabled, task tool calls and terminal sessions run inside gVisor-isolated containers.
+
+**Install:**
+```bash
+sudo bash scripts/install-gvisor.sh
+```
+
+**Verify:**
+```bash
+runsc --version
+sudo podman run --rm --runtime runsc --security-opt label=disable alpine echo hello
+```
+
+**Notes:**
+- gVisor must be installed system-wide (`/usr/local/bin/runsc`) — it needs root-level cgroup access
+- Podman sandbox commands run via `sudo podman --runtime runsc`
+- Without gVisor, projects with sandboxing enabled will refuse to start tasks (hard error, no fallback)
+
 ## Server Management
 
 The agent is responsible for starting/stopping the server.
