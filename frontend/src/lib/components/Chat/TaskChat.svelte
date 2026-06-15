@@ -151,6 +151,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         return Math.random().toString(36).slice(2, 10);
     }
 
+    // Watch for task config changes from the board store (e.g., inline edit)
+    // Updates model selection when the task's model/provider is changed externally
+    $effect(() => {
+        const boardTask = $boardStore?.tasks.find(t => t.id === taskId);
+        if (boardTask) {
+            if (boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
+            if (boardTask.model_name) selectedModel = boardTask.model_name;
+            if (boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
+        }
+    });
+
     /** Read the `thread` URL param from the current URL. */
     function readThreadFromUrl(): string | null {
         return new URLSearchParams(location.search).get('thread');

@@ -471,11 +471,6 @@
                                             <span class="priority-badge">Default</span>
                                         {/if}
                                     </div>
-                                    {#if p.expanded}
-                                        <div class="provider-subtitle">
-                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
-                                        </div>
-                                    {/if}
                                 </div>
                                 <div class="provider-actions">
                                     <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
@@ -500,6 +495,10 @@
                             <!-- Expanded details -->
                             {#if p.expanded}
                                 <div class="provider-details">
+                                    <div class="url-field">
+                                        <label class="url-label">Provider URL</label>
+                                        <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                    </div>
                                     <div class="details-actions">
                                         <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}
@@ -1095,27 +1094,31 @@
         padding: 2px 6px;
         border-radius: 3px;
     }
-    .provider-subtitle {
+    /* URL field in expanded details */
+    .url-field {
         display: flex;
-        align-items: center;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 10px;
     }
-
-    /* URL input in header */
-    .url-input {
-        font-size: 0.75rem;
+    .url-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
         color: var(--color-text-secondary);
-        background: transparent;
-        border: 1px solid transparent;
-        padding: 2px 6px;
+    }
+    .url-input {
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        padding: 6px 10px;
         border-radius: var(--radius-sm);
         width: 100%;
         min-width: 0;
         font-family: var(--font-mono, monospace);
     }
     .url-input:focus {
-        background: var(--color-surface-0);
         border-color: var(--color-accent);
-        color: var(--color-text-primary);
         outline: none;
     }
     .url-input::placeholder {

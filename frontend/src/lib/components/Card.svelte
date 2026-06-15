@@ -1,6 +1,7 @@
 <script lang="ts">
-    import type { Task } from '$lib/types';
+    import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
+    import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask } from '$lib/api';
 
     let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
@@ -174,32 +175,78 @@
         return unsub;
     });
 
-    // Inline title editing
+    // Inline editing
     let editingTitle = $state(false);
     let titleDraft = $state('');
     let titleInputRef: HTMLInputElement | null = $state(null);
+    let editPlanMode = $state(false);
+    let editAutoCommit = $state(false);
+    let editAutoPr = $state(false);
+    let editModel = $state('');
+    let editUrl = $state('');
+    let editReasoningEffort = $state('');
+    let editProviders: Provider[] = $state([]);
 
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
         editingTitle = true;
         titleDraft = task.title;
+        editPlanMode = task.plan_mode ?? false;
+        editAutoCommit = task.auto_commit ?? false;
+        editAutoPr = task.auto_pr ?? false;
+        editModel = task.model_name ?? '';
+        editUrl = task.llama_server_url ?? '';
+        editReasoningEffort = task.reasoning_effort ?? '';
+        const cfg = $configStore;
+        editProviders = cfg?.providers || [];
     }
 
-    function saveTitle() {
+    function saveEdit() {
         const trimmed = titleDraft.trim();
-        if (trimmed && trimmed !== task.title && projectId) {
-            task.title = trimmed;
-            updateTask(projectId, task.id, { title: trimmed }).catch(err => {
-                task.title = titleDraft; // revert on error
-                console.error('Failed to update title:', err);
-            });
+        if (!trimmed || !projectId) {
+            cancelEdit();
+            return;
         }
-        editingTitle = false;
+        const updates: Record<string, unknown> = { title: trimmed };
+        updates.plan_mode = editPlanMode;
+        updates.auto_commit = editAutoCommit;
+        updates.auto_pr = editAutoPr;
+        if (editModel) updates.model_name = editModel;
+        if (editUrl) updates.llama_server_url = editUrl;
+        if (editReasoningEffort) updates.reasoning_effort = editReasoningEffort;
+        task.title = trimmed;
+        task.plan_mode = editPlanMode;
+        task.auto_commit = editAutoCommit;
+        task.auto_pr = editAutoPr;
+        if (editModel) task.model_name = editModel;
+        if (editUrl) task.llama_server_url = editUrl;
+        if (editReasoningEffort) task.reasoning_effort = editReasoningEffort;
+        boardStore.update(b => {
+            if (!b) return b;
+            return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
+        });
+        updateTask(projectId, task.id, updates).catch(err => {
+            console.error('Failed to update task:', err);
+        });
+        cancelEdit();
     }
 
     function cancelEdit() {
         editingTitle = false;
         titleDraft = '';
+        editPlanMode = false;
+        editAutoCommit = false;
+        editAutoPr = false;
+        editModel = '';
+        editUrl = '';
+        editReasoningEffort = '';
+        editProviders = [];
+    }
+
+    function handleEditModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
+        editModel = modelName;
+        editUrl = providerUrl;
+        editReasoningEffort = reasoningEffort || '';
     }
 
     $effect(() => {
@@ -335,16 +382,59 @@
     style={`--depth: ${depth}; --actions: ${actionCount}`}
 >
     {#if editingTitle}
-        <input
-            class="card-title-input"
-            type="text"
-            bind:value={titleDraft}
-            onblur={saveTitle}
-            onkeydown={(e) => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') cancelEdit(); e.stopPropagation(); }}
-            oninput={(e) => e.stopPropagation()}
-            bind:this={titleInputRef}
-            placeholder="Task title"
-        />
+        <div class="card-edit-panel" onclick={(e) => e.stopPropagation()}>
+            <div class="card-edit-header">
+                <span class="card-edit-title">Edit Task</span>
+                <button type="button" class="card-edit-close" onclick={(e) => { e.stopPropagation(); cancelEdit(); }} aria-label="Close">✕</button>
+            </div>
+            <div class="card-edit-body">
+                <label class="card-edit-field">
+                    <span class="card-edit-label">Title</span>
+                    <input
+                        class="card-edit-input"
+                        type="text"
+                        bind:value={titleDraft}
+                        onkeydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); e.stopPropagation(); }}
+                        oninput={(e) => e.stopPropagation()}
+                        bind:this={titleInputRef}
+                        placeholder="Task title"
+                    />
+                </label>
+                {#if editProviders.length > 0}
+                    <div class="card-edit-model-row">
+                        <span class="card-edit-label">Model</span>
+                        <ModelSelector
+                            providers={editProviders}
+                            currentModel={editModel}
+                            currentUrl={editUrl}
+                            currentReasoningEffort={editReasoningEffort}
+                            onSelect={handleEditModelSelect}
+                        />
+                    </div>
+                {/if}
+                <div class="card-edit-options">
+                    <label class="card-edit-checkbox">
+                        <input type="checkbox" bind:checked={editPlanMode} />
+                        <span class="card-edit-option-text">
+                            <span class="card-edit-option-title">Plan mode</span>
+                            <span class="card-edit-option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
+                        </span>
+                    </label>
+                    <label class="card-edit-checkbox">
+                        <input type="checkbox" bind:checked={editAutoCommit} />
+                        <span>Auto-commit on completion</span>
+                    </label>
+                    <label class="card-edit-checkbox" class:disabled={!editAutoCommit}>
+                        <input type="checkbox" bind:checked={editAutoPr} disabled={!editAutoCommit} />
+                        <span>Auto-create PR branch</span>
+                    </label>
+                </div>
+            </div>
+            <div class="card-edit-footer">
+                <button type="button" class="card-edit-btn-cancel" onclick={(e) => { e.stopPropagation(); cancelEdit(); }}>Cancel</button>
+                <button type="button" class="card-edit-btn-save" onclick={(e) => { e.stopPropagation(); saveEdit(); }}>Save</button>
+            </div>
+        </div>
     {:else}
         <div class="card-title">
             {#if task.title_generating}
@@ -647,6 +737,146 @@
         color: var(--color-text-primary);
         font-family: inherit;
         outline: none;
+    }
+    .card-edit-panel {
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+    }
+    .card-edit-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .card-edit-title {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .card-edit-close {
+        font-size: 1rem;
+        color: var(--color-text-secondary);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        line-height: 1;
+    }
+    .card-edit-close:hover {
+        color: var(--color-text-primary);
+    }
+    .card-edit-body {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .card-edit-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .card-edit-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+    }
+    .card-edit-input {
+        width: 100%;
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 6px 8px;
+        font-family: inherit;
+        outline: none;
+    }
+    .card-edit-input:focus {
+        border-color: var(--color-accent);
+    }
+    .card-edit-model-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .card-edit-options {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .card-edit-checkbox {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+    }
+    .card-edit-checkbox.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    .card-edit-checkbox input[type="checkbox"] {
+        accent-color: var(--color-accent);
+        margin-top: 1px;
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+    .card-edit-option-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+    .card-edit-option-title {
+        font-weight: 600;
+        font-size: 0.8125rem;
+    }
+    .card-edit-option-desc {
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+        font-weight: 400;
+    }
+    .card-edit-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 8px 10px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-2);
+    }
+    .card-edit-btn-cancel {
+        padding: 6px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+    }
+    .card-edit-btn-cancel:hover {
+        background: var(--color-surface-4);
+    }
+    .card-edit-btn-save {
+        padding: 6px 16px;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent);
+        color: #fff;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+    }
+    .card-edit-btn-save:hover {
+        background: var(--color-accent-hover);
     }
     .badges-row {
         display: flex;

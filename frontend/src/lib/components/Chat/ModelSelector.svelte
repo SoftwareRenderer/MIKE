@@ -356,8 +356,8 @@
     .model-selector {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 4px;
-        flex-shrink: 0;
     }
 
     .selector-trigger {

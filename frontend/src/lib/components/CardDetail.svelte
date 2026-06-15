@@ -1,13 +1,14 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
-    import type { Task } from '$lib/types';
+    import type { Task, Provider } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import shieldIcon from '$lib/assets/icons/shield.svg';
+    import ModelSelector from './Chat/ModelSelector.svelte';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -51,36 +52,84 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Terminal - worktree_exists is populated by the server on task/board fetch
     let worktreeExists = $derived(task.worktree_exists ?? false);
 
-    // Inline title editing for task list items
+    // Inline editing for task list items
     let editingTaskId = $state<string | null>(null);
     let editingTitleDraft = $state('');
     let editingTitleInput: HTMLInputElement | null = $state(null);
+    let editingPlanMode = $state(false);
+    let editingAutoCommit = $state(false);
+    let editingAutoPr = $state(false);
+    let editingModel = $state('');
+    let editingUrl = $state('');
+    let editingReasoningEffort = $state('');
+    let editingProviders: Provider[] = $state([]);
 
     function startEditTaskTitle(taskId: string, currentTitle: string, e: MouseEvent) {
         e.stopPropagation();
+        const t = allTasks.find(t => t.id === taskId);
         editingTaskId = taskId;
         editingTitleDraft = currentTitle;
+        editingPlanMode = t?.plan_mode ?? false;
+        editingAutoCommit = t?.auto_commit ?? false;
+        editingAutoPr = t?.auto_pr ?? false;
+        editingModel = t?.model_name ?? '';
+        editingUrl = t?.llama_server_url ?? '';
+        editingReasoningEffort = t?.reasoning_effort ?? '';
+        // Load providers from config store
+        const cfg = get(configStore);
+        editingProviders = cfg?.providers || [];
     }
 
-    function finishEditTaskTitle() {
-        if (editingTaskId && editingTitleDraft.trim() && task.project_id) {
-            const trimmed = editingTitleDraft.trim();
-            const targetTask = allTasks.find(t => t.id === editingTaskId);
-            if (targetTask && targetTask.title !== trimmed) {
-                targetTask.title = trimmed;
-                updateTask(task.project_id, editingTaskId, { title: trimmed }).catch(err => {
-                    targetTask.title = editingTitleDraft;
-                    console.error('Failed to update title:', err);
-                });
-            }
+    function finishEditTask() {
+        if (!editingTaskId || !editingTitleDraft.trim() || !task.project_id) {
+            cancelEditTask();
+            return;
         }
-        editingTaskId = null;
-        editingTitleDraft = '';
+        const trimmed = editingTitleDraft.trim();
+        const targetTask = allTasks.find(t => t.id === editingTaskId);
+        const updates: Record<string, unknown> = { title: trimmed };
+        updates.plan_mode = editingPlanMode;
+        updates.auto_commit = editingAutoCommit;
+        updates.auto_pr = editingAutoPr;
+        if (editingModel) updates.model_name = editingModel;
+        if (editingUrl) updates.llama_server_url = editingUrl;
+        if (editingReasoningEffort) updates.reasoning_effort = editingReasoningEffort;
+        if (targetTask) {
+            targetTask.title = trimmed;
+            targetTask.plan_mode = editingPlanMode;
+            targetTask.auto_commit = editingAutoCommit;
+            targetTask.auto_pr = editingAutoPr;
+            if (editingModel) targetTask.model_name = editingModel;
+            if (editingUrl) targetTask.llama_server_url = editingUrl;
+            if (editingReasoningEffort) targetTask.reasoning_effort = editingReasoningEffort;
+            // Update board store so TaskChat picks up the changes
+            boardStore.update(b => {
+                if (!b) return b;
+                return { ...b, tasks: b.tasks.map(t => t.id === editingTaskId ? targetTask : t) };
+            });
+            updateTask(task.project_id, editingTaskId, updates).catch(err => {
+                console.error('Failed to update task:', err);
+            });
+        }
+        cancelEditTask();
     }
 
-    function cancelEditTaskTitle() {
+    function cancelEditTask() {
         editingTaskId = null;
         editingTitleDraft = '';
+        editingPlanMode = false;
+        editingAutoCommit = false;
+        editingAutoPr = false;
+        editingModel = '';
+        editingUrl = '';
+        editingReasoningEffort = '';
+        editingProviders = [];
+    }
+
+    function handleEditModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
+        editingModel = modelName;
+        editingUrl = providerUrl;
+        editingReasoningEffort = reasoningEffort || '';
     }
 
     $effect(() => {
@@ -401,16 +450,57 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                 <div class="section-body">
                                     {#each sectionTasks as t (t.id)}
                                     {#if editingTaskId === t.id}
-                                        <div class="task-item task-item-editing">
-                                            <input
-                                                class="task-item-title-input"
-                                                type="text"
-                                                bind:value={editingTitleDraft}
-                                                onblur={finishEditTaskTitle}
-                                                onkeydown={(e) => { if (e.key === 'Enter') finishEditTaskTitle(); if (e.key === 'Escape') cancelEditTaskTitle(); e.stopPropagation(); }}
-                                                bind:this={editingTitleInput}
-                                                placeholder="Task title"
-                                            />
+                                        <div class="task-item-editing-panel">
+                                            <div class="task-item-editing-header">
+                                                <span class="task-item-editing-title">Edit Task</span>
+                                                <button type="button" class="task-item-editing-close" onclick={cancelEditTask} aria-label="Close">✕</button>
+                                            </div>
+                                            <div class="task-item-editing-body">
+                                                <label class="task-item-editing-field">
+                                                    <span class="task-item-editing-label">Title</span>
+                                                    <input
+                                                        class="task-item-editing-input"
+                                                        type="text"
+                                                        bind:value={editingTitleDraft}
+                                                        onkeydown={(e) => { if (e.key === 'Enter') finishEditTask(); if (e.key === 'Escape') cancelEditTask(); e.stopPropagation(); }}
+                                                        bind:this={editingTitleInput}
+                                                        placeholder="Task title"
+                                                    />
+                                                </label>
+                                                {#if editingProviders.length > 0}
+                                                    <div class="task-item-editing-model-row">
+                                                        <span class="task-item-editing-label">Model</span>
+                                                        <ModelSelector
+                                                            providers={editingProviders}
+                                                            currentModel={editingModel}
+                                                            currentUrl={editingUrl}
+                                                            currentReasoningEffort={editingReasoningEffort}
+                                                            onSelect={handleEditModelSelect}
+                                                        />
+                                                    </div>
+                                                {/if}
+                                                <div class="task-item-editing-options">
+                                                    <label class="task-item-editing-checkbox">
+                                                        <input type="checkbox" bind:checked={editingPlanMode} />
+                                                        <span class="task-item-editing-option-text">
+                                                            <span class="task-item-editing-option-title">Plan mode</span>
+                                                            <span class="task-item-editing-option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
+                                                        </span>
+                                                    </label>
+                                                    <label class="task-item-editing-checkbox">
+                                                        <input type="checkbox" bind:checked={editingAutoCommit} />
+                                                        <span>Auto-commit on completion</span>
+                                                    </label>
+                                                    <label class="task-item-editing-checkbox" class:disabled={!editingAutoCommit}>
+                                                        <input type="checkbox" bind:checked={editingAutoPr} disabled={!editingAutoCommit} />
+                                                        <span>Auto-create PR branch</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="task-item-editing-footer">
+                                                <button type="button" class="task-item-editing-btn-cancel" onclick={cancelEditTask}>Cancel</button>
+                                                <button type="button" class="task-item-editing-btn-save" onclick={finishEditTask}>Save</button>
+                                            </div>
                                         </div>
                                     {:else}
                                         <button
@@ -433,6 +523,9 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                         </button>
                                     {/if}
                                     {/each}
+                                    {#if section.id === 'backlog'}
+                                        <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
+                                    {/if}
                                 </div>
                                 {/if}
                             </div>
@@ -670,10 +763,26 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         padding: 4px 6px 6px 6px;
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
+    }
+    .task-item-add {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        border: none;
+        font-family: inherit;
+    }
+    .task-item-add:hover {
+        background: var(--color-accent);
+        color: #fff;
     }
     .task-item {
-        padding: 8px 10px;
+        padding: 6px 8px;
         border-radius: var(--radius-sm);
         cursor: pointer;
         display: flex;
@@ -685,11 +794,11 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         width: 100%;
         font: inherit;
         color: inherit;
-        background: none;
+        background: var(--color-surface-2);
         border: none;
         box-sizing: border-box;
     }
-    .task-item:hover { background: var(--color-surface-2); }
+    .task-item:hover { background: var(--color-surface-3); }
     .task-item.selected {
         background: var(--color-accent)18;
         outline: 1px solid var(--color-accent);
@@ -753,6 +862,146 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         padding: 3px 6px;
         font-family: inherit;
         outline: none;
+    }
+    .task-item-editing-panel {
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+    }
+    .task-item-editing-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .task-item-editing-title {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .task-item-editing-close {
+        font-size: 1rem;
+        color: var(--color-text-secondary);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        line-height: 1;
+    }
+    .task-item-editing-close:hover {
+        color: var(--color-text-primary);
+    }
+    .task-item-editing-body {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .task-item-editing-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .task-item-editing-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+    }
+    .task-item-editing-input {
+        width: 100%;
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 6px 8px;
+        font-family: inherit;
+        outline: none;
+    }
+    .task-item-editing-input:focus {
+        border-color: var(--color-accent);
+    }
+    .task-item-editing-model-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .task-item-editing-options {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .task-item-editing-checkbox {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+    }
+    .task-item-editing-checkbox.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    .task-item-editing-checkbox input[type="checkbox"] {
+        accent-color: var(--color-accent);
+        margin-top: 1px;
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+    .task-item-editing-option-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+    .task-item-editing-option-title {
+        font-weight: 600;
+        font-size: 0.8125rem;
+    }
+    .task-item-editing-option-desc {
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+        font-weight: 400;
+    }
+    .task-item-editing-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 10px 12px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+    }
+    .task-item-editing-btn-cancel {
+        padding: 6px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+    }
+    .task-item-editing-btn-cancel:hover {
+        background: var(--color-surface-4);
+    }
+    .task-item-editing-btn-save {
+        padding: 6px 16px;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent);
+        color: #fff;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+    }
+    .task-item-editing-btn-save:hover {
+        background: var(--color-accent-hover);
     }
     .task-item-badge {
         font-size: 0.75rem;

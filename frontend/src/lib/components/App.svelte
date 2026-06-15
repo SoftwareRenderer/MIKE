@@ -676,9 +676,16 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         display: none;
     }
     .toggle-btn {
-        font-size: 0.75rem;
+        font-size: 0.875rem;
         padding: 4px 8px;
         color: var(--color-text-secondary);
+        background: transparent;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s ease, color 0.15s ease;
+    }
+    .toggle-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
     }
     .project-list {
         flex: 1;
