@@ -871,7 +871,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
                 });
             } catch (e) {
-                console.error('Failed to start task:', e);
+                showToast(String(e), 'error');
             }
             return;
         }
@@ -888,8 +888,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
             });
         } catch (e) {
-            console.error('Failed to start task:', e);
+            showToast(String(e), 'error');
             isStarting = false;
+            awaitingResponse = false;
             return;
         }
         isStarting = false;

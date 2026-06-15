@@ -316,15 +316,18 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		}
 	}
 
-	task.StatusState = "running"
-	task.Status = "in_progress"
-	_ = te.store.UpdateTask(task)
-	te.boardStreamMgr.Broadcast(projectID)
+	b := te.streamMgr.GetOrCreate(taskID)
 
 	if serverURL == "" {
 		serverURL = task.LlamaServerURL
 	}
 	if serverURL == "" {
+		log.Printf("[lazy-start] task=%s no server URL configured", taskID)
+		task.StatusState = "failed"
+		task.Output = "LLM server URL not configured"
+		_ = te.store.UpdateTask(task)
+		te.boardStreamMgr.Broadcast(projectID)
+		te.sendAndPersistError(b, task.ID, "LLM server URL not configured", "no_server_configured")
 		return
 	}
 
@@ -338,11 +341,20 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	wtPath, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s worktree error: %v", taskID, err)
+		task.StatusState = "failed"
+		task.Output = fmt.Sprintf("Failed to create worktree: %v", err)
+		_ = te.store.UpdateTask(task)
+		te.boardStreamMgr.Broadcast(projectID)
+		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Worktree creation failed: %v", err), "worktree_failed")
 		return
 	}
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, wtPath)
 
-	b := te.streamMgr.GetOrCreate(taskID)
+	task.StatusState = "running"
+	task.Status = "in_progress"
+	_ = te.store.UpdateTask(task)
+	te.boardStreamMgr.Broadcast(projectID)
+
 	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
