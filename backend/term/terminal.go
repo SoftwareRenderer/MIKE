@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -96,13 +95,10 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		var shell *sandbox.ShellProcess
 		var err error
-		// Project terminals (sessionKey starts with "proj:") create the container on demand.
-		// Task terminals expect the container to already exist (created by task executor).
-		if strings.HasPrefix(sessionKey, "proj:") {
-			shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath)
-		} else {
-			shell, err = tm.sandboxMgr.StartShell(taskID)
-		}
+		// Both project and task terminals create the container on demand if it doesn't exist.
+		// Task executor also creates the container, but the terminal may be opened before
+		// the task starts (or the task was never started), so we create it here as needed.
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)
