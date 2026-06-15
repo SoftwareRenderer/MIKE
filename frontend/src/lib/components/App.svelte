@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, createBoardStream, getProjectCounts } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
@@ -331,6 +331,40 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
             addProjectError = String(e);
         }
     }
+
+    async function toggleSandbox(p: Project) {
+        const inProgressCount = projectCounts[p.id]?.in_progress ?? 0;
+        if (inProgressCount > 0) return; // Cannot change when tasks are In Progress
+
+        const newEnabled = !p.sandbox_enabled;
+        if (newEnabled) {
+            // Turning ON — no confirmation needed
+        } else {
+            // Turning OFF — require confirmation
+            const confirmed = await showConfirm({
+                title: 'Disable Sandbox',
+                message: `Disable sandbox isolation for "${p.name}"?\n\nTasks will run without gVisor sandboxing, executing commands directly on the host.`,
+                confirmText: 'Disable',
+                cancelText: 'Cancel',
+            });
+            if (!confirmed) return;
+        }
+
+        try {
+            const updated = await updateProject(p.id, { sandbox_enabled: newEnabled });
+            const index = projects.indexOf(p);
+            if (index !== -1) {
+                projects[index] = updated;
+                projectsStore.set(projects);
+            }
+            if (currentProject?.id === p.id) {
+                currentProject = updated;
+                selectedProject.set(updated);
+            }
+        } catch (e) {
+            addProjectError = String(e);
+        }
+    }
 </script>
 
 <div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
@@ -364,11 +398,29 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
                     >
                         {#if !collapsed}
                             {#if p.sandbox_enabled}
-                                <span class="sandbox-badge" title="Sandbox enabled (gVisor)">
+                                <span
+                                    class="sandbox-badge"
+                                    class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
+                                    role="button"
+                                    tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
+                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox enabled — cannot change, tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
+                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode — tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
+                                    onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
+                                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
+                                >
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
                                 </span>
                             {:else}
-                                <span class="sandbox-badge sandbox-badge-off" title="Sandbox disabled (tasks run without isolation)">
+                                <span
+                                    class="sandbox-badge sandbox-badge-off"
+                                    class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
+                                    role="button"
+                                    tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
+                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox disabled — cannot change, tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
+                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode — tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
+                                    onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
+                                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
+                                >
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
                                 </span>
                             {/if}
@@ -665,6 +717,18 @@ import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
         display: flex;
         align-items: center;
         height: 1em;
+        cursor: pointer;
+        transition: opacity 0.15s;
+    }
+    .sandbox-badge:hover {
+        opacity: 0.7;
+    }
+    .sandbox-badge-locked {
+        cursor: not-allowed;
+        opacity: 0.5;
+    }
+    .sandbox-badge-locked:hover {
+        opacity: 0.5;
     }
     .sandbox-badge-off {
         color: var(--color-status-red, #f85149);

@@ -19,6 +19,7 @@ export interface Project {
     name: string;
     path: string;
     origin_branch?: string;
+    sandbox_enabled?: boolean;
     created_at: string;
     updated_at: string;
 }

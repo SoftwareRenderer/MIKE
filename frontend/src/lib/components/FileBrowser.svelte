@@ -226,7 +226,7 @@
             <div class="footer-actions">
                 <label class="sandbox-toggle">
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
-                    <span>Sandbox tasks (gVisor)</span>
+                    <span>Use Sandbox</span>
                 </label>
                 <button class="btn-cancel" onclick={handleClose} title="Cancel">Cancel</button>
                 {#if isGitRepo}

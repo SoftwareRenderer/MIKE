@@ -46,11 +46,11 @@ export async function createProject(path: string): Promise<Project> {
     return res.json();
 }
 
-export async function updateProject(id: string, name: string): Promise<Project> {
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean }): Promise<Project> {
     const res = await fetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(updates),
     });
     if (!res.ok) throw await apiError(res, 'Failed to update project');
     return res.json();
