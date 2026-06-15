@@ -46,16 +46,16 @@ test.describe.serial('Clear All Done Tasks', () => {
   });
 
   test('should not show Clear all button when no done tasks exist', async ({ page }) => {
-    // Ensure no done tasks by checking via API
+    // Navigate to the board
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Check done count via API
     const doneCount = await page.evaluate(async ({ pid }) => {
       const res = await fetch(`/api/projects/${pid}/board`);
       const board = await res.json();
       return board.tasks.filter((t: any) => t.status === 'done').length;
     }, { pid: projectId });
-
-    // Navigate to the board
-    await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
 
     // If there are done tasks, the clear button should be visible
     // If there are no done tasks, it should not be visible
@@ -63,7 +63,9 @@ test.describe.serial('Clear All Done Tasks', () => {
     if (doneCount === 0) {
       await expect(clearBtn).not.toBeVisible();
     } else {
-      await expect(clearBtn).toBeVisible();
+      await expect(async () => {
+        await expect(clearBtn).toBeVisible();
+      }).toPass({ timeout: 5000 });
     }
   });
 

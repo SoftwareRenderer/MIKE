@@ -968,6 +968,32 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 		}
+
+		// Block waiting for a user message before the next LLM call.
+		// Without this, the executor would immediately loop and call the LLM again
+		// with the same conversation (text-only response already added to history).
+		select {
+		case <-ctx.Done():
+			task.StatusState = "stopped"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.Broadcast(projectID)
+			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
+			return
+		case um := <-userMsgChan:
+			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
+			detector.reset()
+			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+			if um.ModelName != "" {
+				mc.set(um.ServerURL, um.ModelName)
+				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+			}
+			task.StatusState = "running"
+			te.store.UpdateTask(task)
+			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+		}
 	}
 }
 

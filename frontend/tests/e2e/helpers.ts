@@ -132,7 +132,7 @@ export async function waitForWidthChange(locator: Locator, timeout = 5000): Prom
   }).toPass({ timeout });
 }
 
-// Helper: get the first project ID from the API
+// Helper: get the first project ID from the API.
 export async function getProjectId(page: Page): Promise<string> {
   return await page.evaluate(async () => {
     const res = await fetch('/api/projects');

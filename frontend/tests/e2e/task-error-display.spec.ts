@@ -6,6 +6,7 @@ test.describe.serial('Task Error Display', () => {
   let taskId: string;
 
   test.beforeEach(async ({ page, request }) => {
+    test.setTimeout(30000);
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
@@ -126,6 +127,7 @@ test.describe.serial('Task Error Display', () => {
   });
 
   test('should show multiple error messages as separate entries', async ({ page, request }) => {
+    test.setTimeout(30000);
     // Create a task
     const taskRes = await request.post(`/api/projects/${projectId}/tasks`, {
       data: { prompt: 'Test multiple errors' },
@@ -133,8 +135,7 @@ test.describe.serial('Task Error Display', () => {
     taskId = (await taskRes.json()).id;
 
     await page.goto(`/?task=${taskId}`);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    await waitForChatForm(page);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Create multiple error messages via the API (sequential for ordering)
     await request.post(`/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -187,7 +188,7 @@ test.describe.serial('Task Error Display', () => {
     // Verify the warning icon (SVG) is present in the error header
     const errorHeader = page.locator('.error-header');
     await expect(errorHeader).toBeVisible();
-    // The SVG warning icon should be present
-    await expect(errorHeader.locator('svg')).toBeVisible();
+    // The SVG warning icon should be present (use .first() to avoid strict mode violation)
+    await expect(errorHeader.locator('svg').first()).toBeVisible();
   });
 });

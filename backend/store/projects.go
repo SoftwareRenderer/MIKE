@@ -44,11 +44,11 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 	return &p, nil
 }
 
-// ListProjects returns all projects ordered by name.
+// ListProjects returns all projects ordered by creation time (oldest first).
 func (s *Store) ListProjects() ([]types.Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, created_at, updated_at FROM projects ORDER BY name COLLATE NOCASE`)
+	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, created_at, updated_at FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}

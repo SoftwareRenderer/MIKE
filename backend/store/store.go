@@ -31,6 +31,16 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// Enable WAL mode for better concurrent read/write performance
+	_, err = db.Exec("PRAGMA journal_mode = WAL")
+	if err != nil {
+		return nil, fmt.Errorf("set journal mode: %w", err)
+	}
+	// Set busy timeout to handle concurrent access (e.g., during parallel test runs)
+	_, err = db.Exec("PRAGMA busy_timeout = 10000")
+	if err != nil {
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
 	// Enable foreign key enforcement (disabled by default in SQLite)
 	_, err = db.Exec("PRAGMA foreign_keys = ON")
 	if err != nil {
