@@ -1,4 +1,4 @@
-import { test, expect, getProjectId } from './helpers';
+import { test, expect, getProjectId, createTaskViaApi } from './helpers';
 
 test.describe.serial('Sandbox Toggle', () => {
   test.beforeEach(async ({ page }) => {
@@ -195,5 +195,49 @@ test.describe.serial('Sandbox Toggle', () => {
     // Verify URL didn't change (no navigation)
     const urlAfter = page.url();
     expect(urlAfter).toBe(urlBefore);
+  });
+
+  test('should show sandbox icon in task detail header when enabled', async ({ page }) => {
+    const projectId = await getProjectId(page);
+
+    // Ensure sandbox is on
+    await page.evaluate(async (pid) => {
+      await fetch(`/api/projects/${pid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sandbox_enabled: true }),
+      });
+    }, projectId);
+
+    // Create a task and open it
+    const taskId = await createTaskViaApi(page, projectId, `sandbox-icon-test-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    // Verify sandbox badge is visible in the header (shield icon, not shield-off)
+    const detailBadge = page.locator('.task-detail-page .header .sandbox-badge:not(.sandbox-badge-off)');
+    await expect(detailBadge).toBeVisible({ timeout: 5000 });
+  });
+
+  test('should show sandbox-off icon in task detail header when disabled', async ({ page }) => {
+    const projectId = await getProjectId(page);
+
+    // Ensure sandbox is off
+    await page.evaluate(async (pid) => {
+      await fetch(`/api/projects/${pid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sandbox_enabled: false }),
+      });
+    }, projectId);
+
+    // Create a task and open it
+    const taskId = await createTaskViaApi(page, projectId, `sandbox-icon-off-test-${Date.now()}`);
+    await page.goto(`/?task=${taskId}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    // Verify sandbox-off badge is visible in the header
+    const detailBadge = page.locator('.task-detail-page .header .sandbox-badge.sandbox-badge-off');
+    await expect(detailBadge).toBeVisible({ timeout: 5000 });
   });
 });

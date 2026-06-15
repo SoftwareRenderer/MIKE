@@ -75,7 +75,8 @@ func (sm *StreamManager) Get(taskID string) *Broadcaster {
 	return sm.broadcasts[taskID]
 }
 
-// pollGitStatus runs a polling loop that checks git diff HEAD --shortstat in the task's worktree.
+// pollGitStatus runs a polling loop that checks git diff --shortstat in the task's worktree.
+// Diffs are computed relative to the task's base_ref (or HEAD if not set).
 // When the shortstat output changes (line counts differ), it sends a diff_changed event to all connected clients.
 // Using --shortstat instead of status --porcelain ensures we detect content changes to the same file
 // (e.g., "+5" becoming "+10" additions), not just new/modified file states.
@@ -91,7 +92,8 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			shortstat, err := sm.worktreeMgr.GitShortstat(taskID)
+			baseRef := sm.getDiffBaseline(taskID)
+			shortstat, err := sm.worktreeMgr.GitShortstat(taskID, baseRef)
 			if err != nil {
 				// Worktree may not exist yet (task still in backlog) — skip silently
 				continue
@@ -105,7 +107,7 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 			if shortstat != lastShortstat {
 				log.Printf("[git poll] task=%s diff changed", taskID)
 				lastShortstat = shortstat
-				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID)
+				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID, baseRef)
 				if err != nil {
 					log.Printf("[git poll] task=%s GetTaskDiff failed: %v", taskID, err)
 					continue
@@ -114,6 +116,21 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 			}
 		}
 	}
+}
+
+// getDiffBaseline computes the effective diff baseline for a task.
+func (sm *StreamManager) getDiffBaseline(taskID string) string {
+	task, err := sm.store.GetTaskByTaskID(taskID)
+	if err != nil || task.Branch == "" {
+		return ""
+	}
+	thread, _ := sm.store.GetThread(task.CurrentThreadID)
+	forkBranch := ""
+	if thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	baseRef, _ := sm.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
+	return baseRef
 }
 
 // ResetForTest closes all broadcasters and clears state. Used by e2e tests.

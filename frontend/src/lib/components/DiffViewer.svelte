@@ -40,7 +40,7 @@
             <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
             <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
         </svg>
-        <p>No changes yet</p>
+        <p>No changes since last commit</p>
     </div>
 {:else}
     <div class="diff-scroll">

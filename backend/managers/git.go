@@ -186,7 +186,7 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request, projectI
 
 // HandleTaskDiff returns diff and untracked files for a task's worktree.
 func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	_, err := h.store.GetTask(projectID, taskID)
+	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
 		return
@@ -195,7 +195,13 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
 		return
 	}
-	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID)
+	thread, _ := h.store.GetThread(task.CurrentThreadID)
+	forkBranch := ""
+	if thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
+	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef)
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
 		return

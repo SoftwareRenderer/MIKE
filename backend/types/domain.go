@@ -174,6 +174,7 @@ type TaskMessage struct {
 	PromptMs         int       `json:"prompt_ms,omitempty"`
 	PredictedMs      int       `json:"predicted_ms,omitempty"`
 	Duration         int64     `json:"duration,omitempty"`
+	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 

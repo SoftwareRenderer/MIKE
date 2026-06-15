@@ -125,11 +125,21 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 					s.deleteThreadBranch(taskID, branch)
 				}
 			}
+			// Reset file state to match the (possibly new) active thread's conversation
+			lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
+			s.resetWorktreeToCommit(taskID, lastCommit)
+			s.broadcastTaskDiff(taskID)
 			// Broadcast thread_switch event so frontend refreshes
 			s.boardStreamMgr.Broadcast(projectID)
 			b := s.executor.GetOrCreateStream(taskID)
 			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
-			}
+		} else {
+			// No fork threads affected, but messages were deleted.
+			// Reset file state to match remaining conversation in active thread.
+			lastCommit := s.getLastCommitHashInThread(threadID)
+			s.resetWorktreeToCommit(taskID, lastCommit)
+			s.broadcastTaskDiff(taskID)
+		}
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -524,6 +534,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 			// Checkout the new active thread's branch and delete orphaned branch
 			targetThread, _ := s.store.GetThread(remaining[0].ID)
 			s.checkoutThreadBranch(taskID, targetThread)
+			// Reset file state to match the new thread's conversation
+			lastCommit := s.getLastCommitHashInThread(remaining[0].ID)
+			s.resetWorktreeToCommit(taskID, lastCommit)
+			s.broadcastTaskDiff(taskID)
 			s.deleteThreadBranch(taskID, deletedBranch)
 		}
 	} else if deletedBranch != "" {
@@ -568,12 +582,21 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 		oldThreadID := task.CurrentThreadID
 		if oldThreadID != "" && oldThreadID != req.ThreadID {
 			// Commit current state to old thread's branch
-			if thread.GitBranch != "" {
-				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
-				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Thread switch snapshot", "--allow-empty")
-				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-B", thread.GitBranch)
+			oldThread, _ := s.store.GetThread(oldThreadID)
+			oldBranch := oldThread.GitBranch
+			if oldBranch == "" {
+				oldBranch = task.Branch
 			}
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Thread switch snapshot", "--allow-empty")
 		}
+		// Checkout target thread's branch (or task's main branch if none)
+		targetBranch := thread.GitBranch
+		if targetBranch == "" {
+			targetBranch = task.Branch
+		}
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
 	}
 	// Set new active thread
 	if err := s.store.SetActiveThread(req.ThreadID); err != nil {
@@ -591,6 +614,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 	// Broadcast thread_switch event to WebSocket clients
 	b := s.executor.GetOrCreateStream(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
+	// Send fresh diff so the Changes panel reflects the new thread's branch
+	s.broadcastTaskDiff(taskID)
 	JSONResponse(w, http.StatusOK, thread)
 }
 
@@ -629,9 +654,24 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	// Generate new thread ID and branch name
 	newThreadID := uuid.New().String()
 	newBranchName := fmt.Sprintf("thread/%s", newThreadID[:8])
-	// Create new git branch from current HEAD (current worktree state)
+	// Find the file state at the checkpoint: last commit BEFORE the checkpoint message.
+	// This is the state before its tool calls ran, so the fork starts from a clean slate.
+	checkpointCommit, _ := s.store.GetLastCommitHashBeforeMessage(req.FromMessageID, req.FromThreadID)
+	// Save current worktree state to the current branch before forking,
+	// so uncommitted changes aren't lost when we switch away.
 	if task.Branch != "" {
-		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName)
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Fork snapshot", "--allow-empty")
+		// Create new git branch from the checkpoint commit.
+		// If no commit found before the checkpoint, use the task's base_ref (e.g., "master").
+		branchPoint := checkpointCommit
+		if branchPoint == "" {
+			branchPoint = task.BaseRef
+		}
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
+		// Checkout the new branch (use plain checkout, not -B, since branch was just created)
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)
 	}
 	// Look up the checkpoint message's created_at for frontend filtering
 	var checkpointMsgTime *time.Time
@@ -693,6 +733,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	// Broadcast thread_switch event
 	b := s.executor.GetOrCreateStream(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
+	// Send fresh diff so the Changes panel reflects the forked branch
+	s.broadcastTaskDiff(taskID)
 	JSONResponse(w, http.StatusCreated, newThread)
 }
 
@@ -740,7 +782,7 @@ func (s *Server) checkoutThreadBranch(taskID string, targetThread *types.TaskThr
 	if targetThread == nil || targetThread.GitBranch == "" {
 		return
 	}
-	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-B", targetThread.GitBranch)
+	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetThread.GitBranch)
 }
 
 // deleteThreadBranch removes a thread's git branch from the repo.
@@ -749,4 +791,47 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 		return
 	}
 	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", "-D", branchName)
+}
+
+// resetWorktreeToCommit resets the task's worktree to a specific commit.
+func (s *Server) resetWorktreeToCommit(taskID, commitHash string) {
+	if commitHash == "" {
+		return
+	}
+	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "reset", "--hard", commitHash)
+}
+
+// getLastCommitHashInThread finds the last commit hash in a thread's messages.
+func (s *Server) getLastCommitHashInThread(threadID string) string {
+	messages, err := s.store.GetTaskMessages("", threadID)
+	if err != nil || len(messages) == 0 {
+		return ""
+	}
+	// Walk backward to find the last message with a commit hash
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].GitCommitHash != "" {
+			return messages[i].GitCommitHash
+		}
+	}
+	return ""
+}
+
+// broadcastTaskDiff sends the current git diff for a task's worktree via WebSocket.
+func (s *Server) broadcastTaskDiff(taskID string) {
+	task, _ := s.store.GetTaskByTaskID(taskID)
+	if task == nil {
+		return
+	}
+	thread, _ := s.store.GetThread(task.CurrentThreadID)
+	forkBranch := ""
+	if thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	baseRef, _ := s.executor.WorktreeMgr().ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
+	taskDiff, err := s.executor.WorktreeMgr().GetTaskDiff(taskID, baseRef)
+	if err != nil {
+		return
+	}
+	b := s.executor.GetOrCreateStream(taskID)
+	b.Send(types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
 }

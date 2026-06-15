@@ -55,7 +55,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff, onMoveTask }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff, onMoveTask, onThreadSwitch }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -86,6 +86,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Thread state
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
+
+    // Pending file checkpoints — set of assistant message IDs awaiting git commit
+    let pendingCheckpoints = $state(new Set<string>());
+    // Completed checkpoint labels — message_id -> label
+    let checkpointLabels = $state(new Map<string, string>());
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -450,6 +455,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 // Thread was switched (possibly from another tab or API call)
                 const data = event.data as { thread_id: string; task_id: string };
                 updateActiveThread(data.thread_id);
+                onThreadSwitch?.();
                 // Skip loadHistory during regenerate to avoid clobbering the
                 // optimistic user message entry before the echo arrives.
                 // loadHistory will be called after the LLM response completes.
@@ -478,6 +484,25 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     isStreaming: false,
                     createdAt: new Date().toISOString(),
                 }];
+                break;
+            }
+            case 'git_checkpoint_pending': {
+                const data = event.data as { message_id: string };
+                const pending = new Set(pendingCheckpoints);
+                pending.add(data.message_id);
+                pendingCheckpoints = pending;
+                break;
+            }
+            case 'git_checkpoint_complete': {
+                const data = event.data as { message_id: string; commit_hash: string; label: string };
+                const pending = new Set(pendingCheckpoints);
+                pending.delete(data.message_id);
+                pendingCheckpoints = pending;
+                if (data.label) {
+                    const labels = new Map(checkpointLabels);
+                    labels.set(data.message_id, data.label);
+                    checkpointLabels = labels;
+                }
                 break;
             }
         }
@@ -677,6 +702,24 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         return checkpointThread;
     }
 
+    /** Get the checkpoint pending/label state for the checkpoint divider before a user message.
+     * Looks at the last assistant entry (with tool calls) before the given entry index.
+     * Returns { isPending, commitLabel } or null if no checkpoint state to show. */
+    function getCheckpointEntryCheckpointState(entryIdx: number): { isPending: boolean; commitLabel?: string } | null {
+        // Walk backward to find the last assistant entry with tool calls
+        for (let i = entryIdx - 1; i >= 0; i--) {
+            const prev = entries[i];
+            if (prev.role === 'assistant' && prev.toolCalls && prev.toolCalls.length > 0) {
+                return {
+                    isPending: pendingCheckpoints.has(prev.id),
+                    commitLabel: checkpointLabels.get(prev.id),
+                };
+            }
+            if (prev.role === 'user') break; // stop at previous user message
+        }
+        return null;
+    }
+
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
     function updateActiveThread(threadId: string) {
         activeThreadId = threadId;
@@ -691,6 +734,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = switched.id;
             await loadHistory();
+            // Notify parent to refresh the diff panel for the new thread
+            onThreadSwitch?.();
             // Update URL with new thread param
             updateThreadUrl(threadId);
             // Reconnect WebSocket — clear onclose to prevent stale handler
@@ -1316,6 +1361,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             threads={threads}
                             activeThreadId={getCheckpointThreads(entry, entryIdx === 0)!.id}
                             onSwitch={handleThreadSwitch}
+                            isPending={getCheckpointEntryCheckpointState(entryIdx)?.isPending || false}
+                            commitLabel={getCheckpointEntryCheckpointState(entryIdx)?.commitLabel || undefined}
                         />
                     {/if}
                 {/if}

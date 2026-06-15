@@ -146,6 +146,7 @@ export interface TaskMessage {
     prompt_ms?: number;
     predicted_ms?: number;
     duration?: number;
+    git_commit_hash?: string;
     created_at: string;
 }
 
@@ -227,7 +228,9 @@ export type StreamEventType =
     | 'user_message'
     | 'stats'
     | 'thread_switch'
-    | 'compression';
+    | 'compression'
+    | 'git_checkpoint_pending'
+    | 'git_checkpoint_complete';
 
 export interface StreamEvent {
     type: StreamEventType;
@@ -285,6 +288,16 @@ export interface StreamCompleteEvent {
 export interface StreamErrorEvent {
     message: string;
     code?: string;
+}
+
+export interface StreamCheckpointPendingEvent {
+    message_id: string; // assistant message ID being committed
+}
+
+export interface StreamCheckpointCompleteEvent {
+    message_id: string;
+    commit_hash: string;
+    label: string;
 }
 
 export type StreamSectionType = 'text' | 'reasoning' | 'tool_call';

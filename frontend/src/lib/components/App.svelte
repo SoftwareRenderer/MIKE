@@ -506,7 +506,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             {/if}
             <section class="board-container" aria-label="Kanban board">
                 {#if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         updateUrl({ project: currentProject?.id }, true);

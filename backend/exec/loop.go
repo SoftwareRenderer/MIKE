@@ -786,8 +786,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			msgCountBefore := len(messages)
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
 			assistantCreatedAt := time.Now().UTC()
+			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
+				ID: assistantMsgID, TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
 				Content: assistantText, ReasoningContent: reasoningContent.String(),
 				ModelName: activeModel, ProviderName: providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
@@ -925,8 +926,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			assistantContent.Reset()
 			reasoningContent.Reset()
 
+			// Auto-commit file changes as a checkpoint
+			te.createCheckpoint(task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, b, sandboxEnabled)
+
 			// Broadcast updated diff stats to board viewers
-			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID); err == nil && (shortStat != "" || untrackedN > 0) {
+			thread, _ := te.store.GetThread(task.CurrentThreadID)
+			forkBranch := ""
+			if thread != nil {
+				forkBranch = thread.GitBranch
+			}
+			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil && (shortStat != "" || untrackedN > 0) {
 				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 			}
 			// Continue to call LLM again with tool results — don't fall through to blocking select
@@ -1185,4 +1195,107 @@ func isSandboxableTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+// createCheckpoint checks for file changes after tool calls and creates a git commit.
+// Runs the LLM labeler in a goroutine so it does not block the main execution loop.
+func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assistantMsgID string, b *stream.Broadcaster, sandboxEnabled bool) {
+	// Skip sandbox mode for now (handled separately)
+	if sandboxEnabled {
+		return
+	}
+
+	// Check for file changes
+	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
+	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {
+		return // no changes
+	}
+
+	// Send pending event to frontend
+	b.Send(types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
+
+	// Run commit + LLM labeler in background (non-blocking)
+	go func() {
+		// Get diff stat for the LLM labeler
+		diffStat, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+		if err != nil {
+			diffStat = "file changes"
+		}
+
+		// Generate commit label via LLM
+		label := te.generateCommitLabel(taskID, diffStat)
+
+		// Create the commit
+		_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
+		commitOutput, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "commit", "-m", label)
+		if err != nil {
+			log.Printf("[checkpoint] task=%s commit failed: %v (%s)", taskID, err, commitOutput)
+			b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+				"message_id":  assistantMsgID,
+				"commit_hash": "",
+				"label":       label,
+			}})
+			return
+		}
+
+		// Extract commit hash from output ("<branch> <hash> (X insertions...)")
+		commitHash := ""
+		for _, part := range strings.Fields(strings.TrimSpace(commitOutput)) {
+			if len(part) == 40 {
+				commitHash = part
+				break
+			}
+		}
+		// Fallback: get hash from git rev-parse
+		if commitHash == "" {
+			if hashOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "HEAD"); err == nil {
+				commitHash = strings.TrimSpace(hashOut)
+			}
+		}
+
+		// Store commit hash on the assistant message
+		if commitHash != "" {
+			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, commitHash)
+		}
+
+		// Send complete event to frontend
+		b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+			"message_id":  assistantMsgID,
+			"commit_hash": commitHash,
+			"label":       label,
+		}})
+	}()
+}
+
+// generateCommitLabel uses the LLM to generate a short commit message from git diff stat output.
+// Falls back to "file changes" on any error.
+func (te *TaskExecutor) generateCommitLabel(taskID, diffStat string) string {
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
+		return "file changes"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output, generate a very short, descriptive commit message (max 50 characters, imperative mood, no period at end). Return only the message, nothing else."},
+		{Role: "user", Content: diffStat},
+	}
+
+	_, label, err := client.ChatCompletion(ctx, messages)
+	if err != nil {
+		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
+		return "file changes"
+	}
+	label = strings.TrimSpace(label)
+	if len(label) > 50 {
+		label = label[:50]
+	}
+	if label == "" {
+		return "file changes"
+	}
+	log.Printf("[checkpoint-label] task=%s generated: %q", taskID, label)
+	return label
 }

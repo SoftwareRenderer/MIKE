@@ -7,11 +7,13 @@
     import { moveTask, deleteTask, getTaskDiff, getBoard, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
+    import shieldIcon from '$lib/assets/icons/shield.svg';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
 
-    let { task, tasks: columnTasks, projectPath, workspaceDir, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
+    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -316,6 +318,11 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     </svg>
                 </button>
                 <div class="header-main">
+                    {#if sandboxEnabled !== undefined}
+                        <span class="sandbox-badge" class:sandbox-badge-off={!sandboxEnabled} title={sandboxEnabled ? 'Sandbox enabled (gVisor)' : 'Sandbox disabled'}>
+                            <img src={sandboxEnabled ? shieldIcon : shieldOffIcon} width="14" height="14" alt="" />
+                        </span>
+                    {/if}
                     <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', task.id)}>{getWorktreeDisplayPath(workspaceDir || '', task.id)}</span>
                     <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                         {badge.text}
@@ -456,6 +463,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                             taskStatus={task.status}
                             onRefreshDiff={updateDiff}
                             onMoveTask={handleMove}
+                            onThreadSwitch={() => loadDiff()}
                         />
                     {/key}
                 </div>
@@ -544,6 +552,16 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         border: 1px solid;
         text-transform: uppercase;
         letter-spacing: 0.3px;
+    }
+    .sandbox-badge {
+        flex-shrink: 0;
+        color: var(--color-primary);
+        display: flex;
+        align-items: center;
+        height: 1em;
+    }
+    .sandbox-badge-off {
+        color: var(--color-status-red, #f85149);
     }
     .header-actions {
         display: flex;

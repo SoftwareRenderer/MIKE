@@ -12,8 +12,8 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), m.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return err
@@ -51,13 +51,13 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	var err error
 	if threadID != "" {
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
 			taskID, threadID,
 		)
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 			taskID,
 		)
 	}
@@ -69,8 +69,8 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	for rows.Next() {
 		var m types.TaskMessage
 		var createdAt string
-		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &createdAt); err != nil {
+		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &createdAt); err != nil {
 			return nil, err
 		}
 		if threadID.Valid {
@@ -90,6 +90,9 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		}
 		if toolResult.Valid {
 			m.ToolResult = toolResult.String
+		}
+		if gitCommitHash.Valid {
+			m.GitCommitHash = gitCommitHash.String
 		}
 		m.CreatedAt = scanTime(createdAt)
 		messages = append(messages, m)
@@ -196,4 +199,53 @@ func (s *Store) GetHomeAgentMessages(projectID string) ([]types.HomeAgentMessage
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
+}
+
+// UpdateTaskMessageCommitHash updates the git_commit_hash of a message.
+func (s *Store) UpdateTaskMessageCommitHash(messageID, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE task_messages SET git_commit_hash = ? WHERE id = ?`, hash, messageID)
+	return err
+}
+
+// GetLastCommitHashBeforeMessage walks backward from the given message to find
+// the last message (in any role) with a non-empty git_commit_hash.
+// Returns empty string if no commit hash is found.
+func (s *Store) GetLastCommitHashBeforeMessage(messageID, threadID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Get the created_at of the target message
+	var cutoffTime string
+	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&cutoffTime)
+	if err != nil {
+		return "", err
+	}
+	// Find the last message with a commit hash at or before the cutoff
+	var hash string
+	query := `SELECT git_commit_hash FROM task_messages WHERE task_id = (SELECT task_id FROM task_messages WHERE id = ?) AND thread_id = ? AND created_at < ? AND git_commit_hash IS NOT NULL AND git_commit_hash != '' ORDER BY created_at DESC LIMIT 1`
+	err = s.db.QueryRow(query, messageID, threadID, cutoffTime).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return hash, err
+}
+
+// GetLastAssistantMessageIdBeforeMessage walks backward from the given message
+// to find the last assistant message. Returns the message ID or empty string.
+func (s *Store) GetLastAssistantMessageIdBeforeMessage(messageID, threadID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var cutoffTime string
+	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&cutoffTime)
+	if err != nil {
+		return "", err
+	}
+	var id string
+	query := `SELECT id FROM task_messages WHERE task_id = (SELECT task_id FROM task_messages WHERE id = ?) AND thread_id = ? AND role = 'assistant' AND created_at <= ? ORDER BY created_at DESC LIMIT 1`
+	err = s.db.QueryRow(query, messageID, threadID, cutoffTime).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
 }

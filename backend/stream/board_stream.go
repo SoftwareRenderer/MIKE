@@ -11,6 +11,7 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/store"
+	"kanban/backend/types"
 
 	"github.com/coder/websocket"
 )
@@ -53,6 +54,20 @@ func (bsm *BoardStreamManager) getProjectClients(projectID string) map[*websocke
 	bsm.mu.RLock()
 	defer bsm.mu.RUnlock()
 	return bsm.clients[projectID]
+}
+
+// getDiffBaseline computes the effective diff baseline for a task.
+func (bsm *BoardStreamManager) getDiffBaseline(task types.Task) string {
+	if task.Branch == "" || bsm.worktreeMgr == nil {
+		return task.BaseRef
+	}
+	thread, _ := bsm.store.GetThread(task.CurrentThreadID)
+	forkBranch := ""
+	if thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	baseRef, _ := bsm.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+	return baseRef
 }
 
 // add registers a new client for a project.
@@ -210,7 +225,8 @@ func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, project
 				if task.Status != "in_progress" && task.Status != "review" {
 					continue
 				}
-				shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID)
+				baseRef := bsm.getDiffBaseline(task)
+			shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID, baseRef)
 				if err != nil {
 					continue
 				}
@@ -294,7 +310,8 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		tasks, err := bsm.store.GetTasksByProject(projectID)
 		if err == nil {
 			for _, task := range tasks {
-				if shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID); err == nil && (shortStat != "" || untrackedN > 0) {
+				baseRef := bsm.getDiffBaseline(task)
+			if shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil && (shortStat != "" || untrackedN > 0) {
 					bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
 				}
 			}

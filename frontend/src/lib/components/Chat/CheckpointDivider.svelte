@@ -7,9 +7,11 @@
         threads: Thread[];
         activeThreadId: string;
         onSwitch?: (threadId: string) => void;
+        isPending?: boolean;
+        commitLabel?: string;
     }
 
-    let { timestamp, threadId, threads, activeThreadId, onSwitch }: Props = $props();
+    let { timestamp, threadId, threads, activeThreadId, onSwitch, isPending = false, commitLabel }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint
     let relevantThreads = $derived(threads.filter(t => {
@@ -60,11 +62,17 @@
 <div class="checkpoint-divider">
     <div class="divider-line"></div>
     <div class="divider-content" bind:this={menuRef}>
-        <span class="checkpoint-label">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-            </svg>
-            Checkpoint
+        <span class="checkpoint-label" title={commitLabel || undefined}>
+            {#if isPending}
+                <svg class="checkpoint-spinner" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>
+            {:else}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                </svg>
+            {/if}
+            {commitLabel || 'Checkpoint'}
         </span>
         <div class="divider-actions">
             {#if relevantThreads.length > 1}
@@ -133,6 +141,13 @@
     }
     .checkpoint-label svg {
         opacity: 0.5;
+    }
+    .checkpoint-spinner {
+        animation: checkpoint-spin 1s linear infinite;
+    }
+    @keyframes checkpoint-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
     }
     .divider-actions {
         display: flex;

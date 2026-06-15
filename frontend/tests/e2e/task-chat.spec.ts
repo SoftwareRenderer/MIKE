@@ -76,7 +76,7 @@ test.describe('Task Chat', () => {
 
     // Diff column should show empty state
     await expect(page.locator('.diff-empty')).toBeVisible();
-    await expect(page.locator('.diff-empty p')).toContainText('No changes yet');
+    await expect(page.locator('.diff-empty p')).toContainText('No changes since last commit');
   });
 
   test('should show task list in context column', async ({ page }) => {

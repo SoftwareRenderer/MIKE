@@ -312,10 +312,10 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 }
 
 // GitShortstat returns a snapshot of the worktree's change state for polling.
-// Combines tracked file changes (git diff HEAD --shortstat) with a hash of untracked
+// Combines tracked file changes (git diff <baseRef> --shortstat) with a hash of untracked
 // file paths + sizes. This detects both content changes to existing files AND
 // new/modified/deleted untracked files.
-func (wm *WorktreeManager) GitShortstat(taskID string) (string, error) {
+func (wm *WorktreeManager) GitShortstat(taskID, baseRef string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return "", err
@@ -325,8 +325,13 @@ func (wm *WorktreeManager) GitShortstat(taskID string) (string, error) {
 		return "", fmt.Errorf("worktree not found")
 	}
 
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+
 	// Tracked file changes (line counts — changes when content changes)
-	trackedOut, err := wm.gitRunOutput(worktreePath, "diff", "HEAD", "--shortstat")
+	trackedOut, err := wm.gitRunOutput(worktreePath, "diff", target, "--shortstat")
 	if err != nil {
 		return "", fmt.Errorf("git diff --shortstat: %w", err)
 	}
@@ -394,8 +399,8 @@ type TaskDiff struct {
 	ShortStat string          `json:"short_stat"`
 }
 
-// GetDiff returns the git diff for a task's worktree.
-func (wm *WorktreeManager) GetDiff(taskID string) (string, error) {
+// GetDiff returns the git diff for a task's worktree relative to baseRef (or HEAD if empty).
+func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return "", err
@@ -405,7 +410,11 @@ func (wm *WorktreeManager) GetDiff(taskID string) (string, error) {
 		return "", fmt.Errorf("worktree not found")
 	}
 
-	out, err := wm.gitRunOutput(worktreePath, "diff", "HEAD")
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+	out, err := wm.gitRunOutput(worktreePath, "diff", target)
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
@@ -413,7 +422,8 @@ func (wm *WorktreeManager) GetDiff(taskID string) (string, error) {
 }
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
-func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
+// baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
+func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef string) (*TaskDiff, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return nil, err
@@ -423,15 +433,20 @@ func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
 		return nil, fmt.Errorf("worktree not found")
 	}
 
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+
 	// Get tracked file diff, filtering out large/binary files
-	diffOut, err := wm.gitRunOutput(worktreePath, "diff", "HEAD")
+	diffOut, err := wm.gitRunOutput(worktreePath, "diff", target)
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
 	diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 	// Get shortstat summary
-	shortStat, _ := wm.gitRunOutput(worktreePath, "diff", "--shortstat", "HEAD")
+	shortStat, _ := wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
 
 	// Get untracked files from git status --porcelain (lines starting with "?? ")
 	statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
@@ -469,7 +484,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID string) (*TaskDiff, error) {
 }
 
 // GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
-func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrackedN int, untrackedLines int, err error) {
+// baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
+func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat string, untrackedN int, untrackedLines int, err error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return "", 0, 0, err
@@ -477,7 +493,11 @@ func (wm *WorktreeManager) GetDiffStats(taskID string) (shortStat string, untrac
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return "", 0, 0, fmt.Errorf("worktree not found")
 	}
-	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", "HEAD")
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
 	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
 	for _, line := range strings.Split(statusOut, "\n") {
 		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
@@ -652,4 +672,25 @@ func (wm *WorktreeManager) GitRunInProjectOutput(projectID string, args ...strin
 		return "", fmt.Errorf("get project: %w", err)
 	}
 	return wm.gitRunOutput(project.Path, args...)
+}
+
+// ResolveDiffBaseline computes the effective git ref to diff against for a task.
+// For the original thread, returns baseRef (e.g., "master").
+// For a forked thread, returns the merge-base between forkBranch and taskBranch,
+// which is the divergence point (what the fork inherited from the parent).
+func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
+	if forkBranch == "" {
+		// Original thread — diff against base_ref
+		return baseRef, nil
+	}
+	// Forked thread — find the divergence point via merge-base
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return baseRef, err
+	}
+	mb, err := wm.gitRunOutput(worktreePath, "merge-base", forkBranch, taskBranch)
+	if err != nil {
+		return baseRef, fmt.Errorf("git merge-base: %w", err)
+	}
+	return strings.TrimSpace(mb), nil
 }
