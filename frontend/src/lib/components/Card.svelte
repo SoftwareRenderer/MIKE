@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -476,7 +476,7 @@
     tabindex="0"
     aria-label={`Open task: ${task.title || '(untitled)'}`}
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}`}
+    style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     {#if editingTitle}
         <div class="card-edit-panel" onclick={(e) => e.stopPropagation()}>
@@ -694,7 +694,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} />
             {/each}
         </div>
     {/if}
@@ -769,6 +769,9 @@
     }
     .card.selected.is-subtask {
         border-left-color: var(--status-color, var(--color-border));
+    }
+    .card.selected.has-children:not(.is-subtask) {
+        border-left-color: var(--column-color, var(--color-border));
     }
     .card:active {
         cursor: grabbing;
@@ -1157,7 +1160,7 @@
         background: var(--color-surface-4);
     }
     .subtask-progress-bar.is-expanded {
-        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-3));
+        background: var(--color-surface-4);
     }
     .subtask-progress-fill {
         position: absolute;
@@ -1165,14 +1168,9 @@
         left: 0;
         height: 100%;
         opacity: 0.35;
-        transition: width 0.3s ease;
+        transition: width 0.3s ease, opacity 0.15s ease;
         pointer-events: none;
-        /* Theme colors: red(#F85149) -> orange(#D29922) -> green(#3FB950) */
-        background: hsl(
-            calc(4 + var(--pct, 0) * 1.36),
-            calc(93% - var(--pct, 0) * 0.66%),
-            calc(64% - var(--pct, 0) * 0.34%)
-        );
+        background: #009933;
     }
     .subtask-progress-bar.is-expanded .subtask-progress-fill {
         opacity: 0.5;
@@ -1187,7 +1185,7 @@
         font-weight: 600;
         font-family: inherit;
         font-variant-numeric: tabular-nums;
-        color: var(--color-text-secondary);
+        color: #FAFAFA;
         pointer-events: none;
         transition: opacity 0.15s ease;
     }
@@ -1213,11 +1211,11 @@
     .subtask-progress-bar:hover .subtask-progress-pct {
         opacity: 0;
     }
-    .subtask-progress-bar:hover .subtask-progress-pct {
-        color: var(--color-text-primary);
-    }
     .subtask-progress-bar.is-expanded .subtask-progress-pct {
-        color: var(--color-accent);
+        color: #FAFAFA;
+    }
+    .subtask-progress-bar.is-expanded .subtask-progress-count {
+        color: #FAFAFA;
     }
     .subtask-chevron {
         position: absolute;
