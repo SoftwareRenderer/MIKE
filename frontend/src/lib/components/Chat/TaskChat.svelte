@@ -55,7 +55,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, onRefreshDiff, onMoveTask, onThreadSwitch }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -66,6 +66,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let atBottom = $state(true);
     let prevScrollHeight = 0;
     let userInputPending = false;
+    let showHeader = $state(false);
     let inputTimeout: ReturnType<typeof setTimeout> | null = null;
     let inputValue = $state('');
 
@@ -776,7 +777,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     function checkScroll() {
-        if (!scrollEl || !userInputPending) return;
+        if (!scrollEl) return;
+        // Update sticky header visibility on every scroll
+        showHeader = scrollEl.scrollTop > 60;
+        if (!userInputPending) return;
         // Don't clear flag here — keep it active during inertial scrolling.
         // Reset a timeout instead; flag clears when scrolling settles.
         if (inputTimeout) clearTimeout(inputTimeout);
@@ -1310,7 +1314,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     <div class="sr-only" aria-live="polite" aria-atomic="true">
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
-    <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages">
+    <div class="chat-messages-wrapper">
+        {#if taskTitle && entries.length > 0}
+            <div class="chat-task-header" class:visible={showHeader} role="status" aria-live="polite">
+                <span class="chat-task-title">{taskTitle}</span>
+            </div>
+        {/if}
+        <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages" tabindex="0">
         {#if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
@@ -1397,6 +1407,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 <span>Waiting in queue — position {queuePosition}, ~{queueEstimatedWait}s</span>
             </div>
         {/if}
+        </div>
     </div>
 
 
@@ -1525,11 +1536,44 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         min-height: 0;
         overflow: hidden;
     }
+    .chat-messages-wrapper {
+        flex: 1;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
     .chat-messages {
         flex: 1;
         overflow-y: auto;
         padding: 8px 12px;
         min-height: 0;
+    }
+    .chat-task-header {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--color-surface-1);
+        border-bottom: 1px solid var(--color-border);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+    }
+    .chat-task-header.visible {
+        opacity: 1;
+    }
+    .chat-task-title {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .chat-empty {
         display: flex;

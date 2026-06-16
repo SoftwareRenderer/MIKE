@@ -538,6 +538,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                             taskId={task.id}
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
+                            taskTitle={task.title}
                             onRefreshDiff={updateDiff}
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
