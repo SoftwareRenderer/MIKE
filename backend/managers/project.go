@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -236,7 +237,18 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 		if h.terminalMgr != nil {
 			h.terminalMgr.RemoveSession("proj:" + id)
 		}
-		if err := h.store.DeleteProject(id); err != nil {
+		// Clean up any project-level worktree directory (safety check)
+		if h.worktreeMgr != nil {
+			cfg, cfgErr := h.configStore.GetConfig()
+			if cfgErr == nil {
+				worktreesDir := cfg.WorkspaceDir
+				if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
+					worktreesDir = wtDir
+				}
+				_ = os.RemoveAll(filepath.Join(worktreesDir, id))
+			}
+		}
+		if err := h.store.DeleteProjectWithData(id); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
 			return
 		}

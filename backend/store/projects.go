@@ -104,10 +104,37 @@ func (s *Store) UpdateProjectSandboxEnabled(id string, enabled bool) error {
 	return err
 }
 
-// DeleteProject removes a project.
+// DeleteProject removes a project row (relies on CASCADE for related data).
 func (s *Store) DeleteProject(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	return err
+}
+
+// DeleteProjectWithData explicitly deletes all data related to a project,
+// including tasks, messages, threads, dependencies, reviews, home agent messages,
+// and token stats. This is the primary cleanup mechanism — CASCADE constraints
+// serve as a safety net.
+func (s *Store) DeleteProjectWithData(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Delete task-level data first (FK to tasks)
+	_, _ = s.db.Exec(`DELETE FROM task_messages WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
+	_, _ = s.db.Exec(`DELETE FROM task_threads WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
+	_, _ = s.db.Exec(`DELETE FROM task_dependencies WHERE parent_task_id IN (SELECT id FROM tasks WHERE project_id = ?) OR child_task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id, id)
+	_, _ = s.db.Exec(`DELETE FROM review_comments WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
+
+	// Delete tasks (FK to projects)
+	_, _ = s.db.Exec(`DELETE FROM tasks WHERE project_id = ?`, id)
+
+	// Delete project-level data (FK to projects)
+	_, _ = s.db.Exec(`DELETE FROM home_agent_messages WHERE project_id = ?`, id)
+	_, _ = s.db.Exec(`DELETE FROM project_token_stats WHERE project_id = ?`, id)
+	_, _ = s.db.Exec(`DELETE FROM project_token_tasks WHERE project_id = ?`, id)
+
+	// Delete the project itself
 	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
 	return err
 }

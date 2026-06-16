@@ -235,6 +235,177 @@ func TestProjectCreatedAtUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestDeleteProjectWithData(t *testing.T) {
+	s := testStore(t)
+
+	// Create two projects
+	proj1 := newProject("proj-1", "Project One", "/tmp/repo1")
+	if err := s.CreateProject(proj1); err != nil {
+		t.Fatalf("create project 1: %v", err)
+	}
+	proj2 := newProject("proj-2", "Project Two", "/tmp/repo2")
+	if err := s.CreateProject(proj2); err != nil {
+		t.Fatalf("create project 2: %v", err)
+	}
+
+	// Create tasks for both projects
+	task1a := newTask("task-1a", "proj-1")
+	task1b := newTask("task-1b", "proj-1")
+	task2a := newTask("task-2a", "proj-2")
+	for _, task := range []*types.Task{task1a, task1b, task2a} {
+		if err := s.CreateTask(task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	// Create messages for proj-1 tasks
+	for _, taskID := range []string{"task-1a", "task-1b"} {
+		msg := newMessage("msg-"+taskID, taskID, "assistant", "hello")
+		msg.ModelName = "test-model"
+		msg.ProviderName = "test-provider"
+		msg.PromptTokens = 10
+		msg.PredictedTokens = 5
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+	// Create a message for proj-2 task (should survive)
+	msg2 := newMessage("msg-task-2a", "task-2a", "assistant", "world")
+	msg2.ModelName = "test-model"
+	msg2.ProviderName = "test-provider"
+	msg2.PromptTokens = 20
+	if err := s.CreateTaskMessage(msg2); err != nil {
+		t.Fatalf("create message for proj-2: %v", err)
+	}
+
+	// Create threads for proj-1 tasks
+	for _, taskID := range []string{"task-1a", "task-1b"} {
+		th := newThread("thread-"+taskID, taskID, "Main")
+		if err := s.CreateThread(th); err != nil {
+			t.Fatalf("create thread: %v", err)
+		}
+	}
+
+	// Create dependencies between proj-1 tasks
+	dep := newDependency("dep-1", "task-1a", "task-1b")
+	if err := s.CreateDependency(dep); err != nil {
+		t.Fatalf("create dependency: %v", err)
+	}
+
+	// Create review comments for proj-1 tasks
+	review := newReviewComment("review-1", "task-1a", "main.go", "looks good", 42)
+	if err := s.CreateReviewComment(review); err != nil {
+		t.Fatalf("create review: %v", err)
+	}
+
+	// Create home agent messages for proj-1
+	homeMsg := newHomeAgentMessage("home-1", "proj-1", "assistant", "home agent msg")
+	if err := s.CreateHomeAgentMessage(homeMsg); err != nil {
+		t.Fatalf("create home agent message: %v", err)
+	}
+
+	// --- Delete proj-1 ---
+	if err := s.DeleteProjectWithData("proj-1"); err != nil {
+		t.Fatalf("delete project with data: %v", err)
+	}
+
+	// Verify proj-1 is gone
+	_, err := s.GetProject("proj-1")
+	if err == nil {
+		t.Fatal("expected error for deleted project")
+	}
+
+	// Verify all proj-1 tasks are gone
+	tasks, err := s.GetTasksByProject("proj-1")
+	if err != nil {
+		t.Fatalf("get tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks for proj-1, got %d", len(tasks))
+	}
+
+	// Verify messages for proj-1 tasks are gone
+	messages1a, err := s.GetTaskMessages("task-1a", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(messages1a) != 0 {
+		t.Fatalf("expected 0 messages for task-1a, got %d", len(messages1a))
+	}
+	messages1b, err := s.GetTaskMessages("task-1b", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(messages1b) != 0 {
+		t.Fatalf("expected 0 messages for task-1b, got %d", len(messages1b))
+	}
+
+	// Verify threads for proj-1 tasks are gone
+	threads1a, err := s.GetThreadsByTask("task-1a")
+	if err != nil {
+		t.Fatalf("get threads: %v", err)
+	}
+	if len(threads1a) != 0 {
+		t.Fatalf("expected 0 threads for task-1a, got %d", len(threads1a))
+	}
+
+	// Verify dependencies are gone
+	deps, err := s.GetDependencies("task-1b")
+	if err != nil {
+		t.Fatalf("get dependencies: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Fatalf("expected 0 dependencies, got %d", len(deps))
+	}
+
+	// Verify review comments are gone
+	reviews, err := s.GetReviewComments("task-1a")
+	if err != nil {
+		t.Fatalf("get reviews: %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("expected 0 reviews, got %d", len(reviews))
+	}
+
+	// Verify home agent messages are gone
+	homeMsgs, err := s.GetHomeAgentMessages("proj-1")
+	if err != nil {
+		t.Fatalf("get home agent messages: %v", err)
+	}
+	if len(homeMsgs) != 0 {
+		t.Fatalf("expected 0 home agent messages, got %d", len(homeMsgs))
+	}
+
+	// Verify token stats are gone
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	if stats.TotalPromptTokens != 0 || stats.TotalGeneratedTokens != 0 {
+		t.Fatalf("expected zero stats for proj-1, got prompt=%d generated=%d", stats.TotalPromptTokens, stats.TotalGeneratedTokens)
+	}
+
+	// --- Verify proj-2 is untouched ---
+	_, err = s.GetProject("proj-2")
+	if err != nil {
+		t.Fatalf("proj-2 should still exist: %v", err)
+	}
+	tasks2, err := s.GetTasksByProject("proj-2")
+	if err != nil {
+		t.Fatalf("get tasks for proj-2: %v", err)
+	}
+	if len(tasks2) != 1 {
+		t.Fatalf("expected 1 task for proj-2, got %d", len(tasks2))
+	}
+	messages2, err := s.GetTaskMessages("task-2a", "")
+	if err != nil {
+		t.Fatalf("get messages for proj-2: %v", err)
+	}
+	if len(messages2) != 1 {
+		t.Fatalf("expected 1 message for proj-2, got %d", len(messages2))
+	}
+}
+
 func TestProjectSandboxEnabled(t *testing.T) {
 	s := testStore(t)
 

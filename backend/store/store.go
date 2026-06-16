@@ -31,6 +31,9 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// Use a single connection so PRAGMA settings (foreign_keys, journal_mode) apply to all operations.
+	// The store already serializes access via s.mu, so pooling provides no benefit.
+	db.SetMaxOpenConns(1)
 	// Enable WAL mode for better concurrent read/write performance
 	_, err = db.Exec("PRAGMA journal_mode = WAL")
 	if err != nil {
