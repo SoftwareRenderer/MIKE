@@ -1025,7 +1025,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Context compression: check if we're approaching the context window limit
 		if contextWindow != nil && lastCompressIdx < len(messages)-1 {
 			if shouldCompress(messages, *contextWindow) {
-				compressResult, err := compressContext(messages, lastCompressIdx, client, systemPrompt)
+				compressResult, err := te.compressContext(messages, lastCompressIdx, systemPrompt, serverURL, activeModel)
 				if err != nil {
 					log.Printf("[compress] task=%s compression failed: %v", task.ID, err)
 				} else {
@@ -1132,7 +1132,7 @@ func shouldCompress(messages []types.ChatMessage, contextWindow int) bool {
 // compressContext summarizes the conversation history to reduce context size.
 // It sends a non-streaming chat completion with a summarization prompt,
 // then returns a new messages array: [system, summary] + last N recent messages.
-func compressContext(messages []types.ChatMessage, lastCompressIdx int, client *llama.LlamaClient, systemPrompt string) (compressResult, error) {
+func (te *TaskExecutor) compressContext(messages []types.ChatMessage, lastCompressIdx int, systemPrompt, serverURL, modelName string) (compressResult, error) {
 	oldLen := len(messages)
 
 	// Build the summarization request: system prompt + all messages since last compression
@@ -1153,8 +1153,10 @@ func compressContext(messages []types.ChatMessage, lastCompressIdx int, client *
 		compressMessages = append(compressMessages, messages[i])
 	}
 
-	// Send non-streaming summarization request
-	_, summary, err := client.ChatCompletion(context.Background(), compressMessages)
+	// Send non-streaming summarization request (concurrency handled by ChatCompletion)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	_, summary, err := te.ChatCompletion(ctx, serverURL, modelName, compressMessages)
+	cancel()
 	if err != nil {
 		return compressResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
@@ -1273,23 +1275,22 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 }
 
 // generateCommitLabel uses the LLM to generate a short commit message from git diff stat output.
-// Falls back to "file changes" on any error.
+// Falls back to "file changes" on any error. Respects provider concurrency limits.
 func (te *TaskExecutor) generateCommitLabel(taskID, diffStat string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
 		return "file changes"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output, generate a very short, descriptive commit message (max 50 characters, imperative mood, no period at end). Return only the message, nothing else."},
 		{Role: "user", Content: diffStat},
 	}
 
-	_, label, err := client.ChatCompletion(ctx, messages)
+	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages)
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return "file changes"

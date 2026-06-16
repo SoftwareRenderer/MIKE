@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"kanban/backend/llama"
 	"kanban/backend/managers"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
@@ -751,13 +750,12 @@ func (s *Server) generateThreadName(task *types.Task, content string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
 		messages := []types.ChatMessage{
 			{Role: "system", Content: "You are a thread name generator. Given a user message, generate a very short, descriptive thread label (max 30 characters, no quotes). Return only the label, nothing else."},
 			{Role: "user", Content: trimmed},
 		}
 
-		_, name, err := client.ChatCompletion(ctx, messages)
+		_, name, err := s.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages)
 		if err == nil && strings.TrimSpace(name) != "" {
 			name = strings.TrimSpace(name)
 			if len(name) > 35 {
@@ -766,7 +764,6 @@ func (s *Server) generateThreadName(task *types.Task, content string) string {
 			log.Printf("[thread-name] task=%s generated: %q", task.ID, name)
 			return name
 		}
-		log.Printf("[thread-name] task=%s LLM call failed, using fallback: %v", task.ID, err)
 	}
 
 	// Fallback: truncate the text

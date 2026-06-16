@@ -18,7 +18,6 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
-	"kanban/backend/llama"
 	"kanban/backend/stream"
 	"kanban/backend/store"
 	"kanban/backend/term"
@@ -558,7 +557,6 @@ SUMMARY
 <Brief summary of changes made and any lost functionality>
 END_SUMMARY`, task.Title, task.Prompt, conflictContext)
 
-	client := llama.NewLlamaClient(serverURL, modelName, "off")
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -567,7 +565,7 @@ END_SUMMARY`, task.Title, task.Prompt, conflictContext)
 		{Role: "user", Content: prompt},
 	}
 
-	_, response, err := client.ChatCompletion(ctx, messages)
+	_, response, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages)
 	if err != nil {
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -636,8 +634,8 @@ END_SUMMARY`, task.Title, task.Prompt, conflictContext)
 		summary = "Conflicts resolved (no summary provided by LLM)"
 	}
 
-	// Log resolution as system message
-	h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge conflicts resolved:\n\n%s", summary))
+	// Log resolution as a merge_resolution message (persisted + broadcast)
+	h.logMergeResolution(taskID, task.CurrentThreadID, conflictedFiles, summary)
 
 	return summary, nil
 }
@@ -657,6 +655,36 @@ func (h *TaskHandler) logSystemMessage(taskID, threadID, content string) {
 	}); err != nil {
 		log.Printf("[system-msg] task=%s failed to log message: %v", taskID, err)
 	}
+}
+
+// logMergeResolution persists a merge_resolution message and broadcasts it to task stream clients.
+func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFiles []string, summary string) {
+	if threadID == "" {
+		return
+	}
+	content := fmt.Sprintf("Merge conflicts resolved in %d file(s): %s\n\n%s",
+		len(conflictedFiles), strings.Join(conflictedFiles, ", "), summary)
+	msgID := uuid.New().String()
+	if err := h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        msgID,
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "merge_resolution",
+		Content:   content,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		return
+	}
+	// Broadcast to task stream clients for real-time display
+	b := h.executor.GetOrCreateStream(taskID)
+	b.Send(types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]interface{}{
+		"id":              msgID,
+		"conflicted_files": conflictedFiles,
+		"summary":         summary,
+		"content":         content,
+		"created_at":      time.Now().UTC().Format(time.RFC3339),
+	}})
 }
 
 // cleanupTask performs all cleanup steps for a deleted task.
@@ -698,13 +726,12 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			return
 		}
 
-		client := llama.NewLlamaClient(task.LlamaServerURL, task.ModelName, "off")
 		messages := []types.ChatMessage{
 			{Role: "system", Content: "You are a title generator. Given a task description, generate a short, descriptive title (max 50 characters). Return only the title, nothing else. No quotes, no explanation."},
 			{Role: "user", Content: prompt},
 		}
 
-		usage, title, err := client.ChatCompletion(ctx, messages)
+		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages)
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)
@@ -967,7 +994,6 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 		return deepest[0].ID
 	}
 
-	client := llama.NewLlamaClient(serverURL, modelName, "off")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -976,7 +1002,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 		{Role: "user", Content: prompt},
 	}
 
-	_, response, err := client.ChatCompletion(ctx, messages)
+	_, response, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages)
 	if err != nil {
 		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
 		return deepest[0].ID

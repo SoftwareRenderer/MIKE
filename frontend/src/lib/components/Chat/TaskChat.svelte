@@ -499,6 +499,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 }];
                 break;
             }
+            case 'merge_resolution': {
+                const data = event.data as { id: string; conflicted_files: string[]; summary: string; content: string; created_at: string };
+                entries = [...entries, {
+                    id: data.id || genId(),
+                    role: 'merge_resolution',
+                    content: data.content || `Merge conflicts resolved in ${data.conflicted_files?.length || 0} file(s)`,
+                    isStreaming: false,
+                    createdAt: data.created_at || new Date().toISOString(),
+                }];
+                break;
+            }
             case 'git_checkpoint_pending': {
                 const data = event.data as { message_id: string };
                 const pending = new Set(pendingCheckpoints);
@@ -1390,6 +1401,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                         <div class="compression-summary">{entry.content}</div>
                     </div>
+                {:else if entry.role === 'merge_resolution'}
+                    <div class="merge-resolution-entry">
+                        <div class="merge-resolution-card">
+                            <div class="merge-resolution-header">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="18" cy="18" r="3"/>
+                                    <circle cx="6" cy="6" r="3"/>
+                                    <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+                                    <line x1="6" y1="9" x2="6" y2="21"/>
+                                </svg>
+                                <span class="merge-resolution-label">Merge conflicts resolved</span>
+                            </div>
+                            <div class="merge-resolution-content">{entry.content}</div>
+                        </div>
+                    </div>
                 {:else}
                     <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
@@ -1847,6 +1873,34 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         background: color-mix(in srgb, var(--color-accent) 5%, transparent);
         border-radius: var(--radius-md);
         border-left: 3px solid var(--color-accent);
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        white-space: pre-wrap;
+    }
+    .merge-resolution-entry {
+        padding: 8px 0;
+    }
+    .merge-resolution-card {
+        background: color-mix(in srgb, var(--color-status-green) 6%, transparent);
+        border-radius: var(--radius-md);
+        border-left: 3px solid var(--color-status-green);
+        overflow: hidden;
+    }
+    .merge-resolution-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px 4px;
+        color: var(--color-status-green);
+    }
+    .merge-resolution-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-status-green);
+    }
+    .merge-resolution-content {
+        padding: 4px 12px 10px;
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
         line-height: 1.5;

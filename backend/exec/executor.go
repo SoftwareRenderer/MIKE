@@ -14,6 +14,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/llama"
 	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/store"
@@ -156,6 +157,34 @@ func (te *TaskExecutor) GetOrCreateStream(taskID string) *stream.Broadcaster {
 // WorktreeMgr returns the WorktreeManager. Used by server wiring.
 func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 	return te.worktreeMgr
+}
+
+// RunWithGate executes fn while holding a concurrency gate slot for the given provider.
+// Blocks until a slot is available, respecting per-provider concurrency limits.
+// Queueing is transparent to the caller — if the gate can't be acquired (e.g. context
+// timeout), the function is not run and the gate error is returned. Any error from fn
+// is returned directly. The caller treats both cases identically.
+func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
+	concurrency := te.configStore.GetProviderConcurrency(serverURL)
+	if _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
+		return err
+	}
+	defer te.gate.Release(serverURL)
+	return fn()
+}
+
+// ChatCompletion sends a non-streaming chat request through the concurrency gate.
+// The caller passes messages and gets a result — queue management is fully transparent.
+func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage) (*types.ChatUsage, string, error) {
+	client := llama.NewLlamaClient(serverURL, modelName, "off")
+	var usage *types.ChatUsage
+	var text string
+	err := te.RunWithGate(ctx, serverURL, func() error {
+		var err error
+		usage, text, err = client.ChatCompletion(ctx, messages)
+		return err
+	})
+	return usage, text, err
 }
 
 // ResetForTest stops all running executors and clears state.
