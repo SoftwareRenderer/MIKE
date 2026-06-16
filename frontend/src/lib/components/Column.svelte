@@ -2,10 +2,11 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
+    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
         columnId: string;
         title: string;
         color: string;
+        columnColor: string;
         tasks: Task[];
         childrenMap: Map<string, Task[]>;
         expandedTasks: Set<string>;
@@ -69,7 +70,7 @@
             <button class="add-task-btn" onclick={onAddTask} title="Add a new task">+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} />
+            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} />
         {/each}
     </div>
 </div>

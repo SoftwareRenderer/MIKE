@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -19,6 +19,19 @@
         const total = totalChildren + 1;
         const done = doneChildren + parentDone;
         return { done, total, pct: done / total };
+    });
+
+    // Whether this is a completed subtask (hide edit/move buttons)
+    let isDoneSubtask = $derived(task.parent_task_id && task.status === 'done');
+
+    // Status color for subtask indicator
+    let statusColor = $derived.by(() => {
+        const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
+        if (state === 'running') return 'var(--color-status-blue)';
+        if (state === 'failed') return 'var(--color-status-red)';
+        if (state === 'stopped') return 'var(--color-status-yellow)';
+        if (task.status === 'done') return 'var(--color-column-done)';
+        return 'var(--color-text-tertiary)';
     });
 
     // Expand/collapse state (managed by Board for stability)
@@ -438,6 +451,7 @@
     class:selected={isSelected}
     class:has-children={hasChildren}
     class:is-expanded={expanded}
+    class:is-subtask={!!task.parent_task_id}
     data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
@@ -447,7 +461,7 @@
     tabindex="0"
     aria-label={`Open task: ${task.title || '(untitled)'}`}
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}`}
+    style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}`}
 >
     {#if editingTitle}
         <div class="card-edit-panel" onclick={(e) => e.stopPropagation()}>
@@ -523,6 +537,7 @@
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
+                {#if !isDoneSubtask}
                 <button
                     type="button"
                     class="action-icon"
@@ -532,6 +547,7 @@
                 >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                 </button>
+                {/if}
                 {#if isPausable}
                     <button
                         type="button"
@@ -555,6 +571,19 @@
                 {:else if isIdle}
                     <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
                 {:else if columnId === 'done'}
+                    <button
+                        type="button"
+                        class="action-icon action-delete"
+                        onclick={handleDelete}
+                        aria-label="Delete task"
+                        title="Delete task"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                {:else if isDoneSubtask}
                     <button
                         type="button"
                         class="action-icon action-delete"
@@ -648,7 +677,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} />
             {/each}
         </div>
     {/if}
@@ -702,8 +731,17 @@
         transition: border-color 0.15s ease;
         --depth: 0;
     }
+    .card.has-children:not(.is-subtask) {
+        border-color: var(--column-color, var(--color-border));
+    }
+    .card.is-subtask {
+        border-left: 3px solid var(--status-color, var(--color-border));
+    }
     .card:hover {
         border-color: var(--color-border-bright);
+    }
+    .card.is-subtask:hover {
+        border-left-color: var(--status-color, var(--color-border));
     }
     .card.selected {
         border-color: var(--color-accent);

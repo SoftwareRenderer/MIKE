@@ -104,6 +104,7 @@
             columnId={col.id}
             title={col.title}
             color={col.color}
+            columnColor={col.color}
             tasks={getTasksForColumn(col.id)}
             childrenMap={childrenMap}
             expandedTasks={expandedTasks}
