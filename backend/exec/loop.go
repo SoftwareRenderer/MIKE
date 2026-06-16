@@ -1010,6 +1010,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				continue
 			default:
 			}
+			task.Status = "review"
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.Broadcast(projectID)

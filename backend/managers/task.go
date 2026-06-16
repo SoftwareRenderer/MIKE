@@ -699,14 +699,26 @@ func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFile
 	}})
 }
 
-// cleanupTask performs all cleanup steps for a deleted task.
+// cleanupTask performs all cleanup steps for a deleted task,
+// including recursively cleaning up all descendant subtasks.
 func (h *TaskHandler) cleanupTask(taskID string) {
+	// Collect all descendants first (before any deletions)
+	descendants, _ := h.store.GetAllDescendants(taskID)
+	// Clean up descendants deep-first (reverse order ensures children before parents)
+	for i := len(descendants) - 1; i >= 0; i-- {
+		h.cleanupSingleTask(descendants[i].ID)
+	}
+	// Clean up the parent task last
+	h.cleanupSingleTask(taskID)
+}
+
+// cleanupSingleTask performs cleanup for a single task (no recursion).
+func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.executor != nil {
 		_ = h.executor.StopTask(taskID)
 		h.executor.RemoveStream(taskID)
 	}
 	if h.worktreeMgr != nil {
-		// Best-effort, find project from task
 		task, err := h.store.GetTaskByTaskID(taskID)
 		if err == nil && task.Branch != "" {
 			if err := h.worktreeMgr.RemoveWorktree(task.ProjectID, taskID, task.Branch); err != nil {
