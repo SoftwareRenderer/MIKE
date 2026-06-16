@@ -123,19 +123,46 @@
         draggedTaskId = taskId;
     }
 
+    /** Walk up the ancestor chain to check if any ancestor is In Progress. */
+    function hasAncestorInProgress(task: Task): boolean {
+        const taskMap = new Map(tasks.map(t => [t.id, t]));
+        let current = task;
+        while (current.parent_task_id) {
+            const parent = taskMap.get(current.parent_task_id);
+            if (!parent) break;
+            if (parent.status === 'in_progress') return true;
+            current = parent;
+        }
+        return false;
+    }
+
     async function handleDrop(taskId: string, targetStatus: string) {
         if (!taskId || !targetStatus) return;
         const task = tasks.find(t => t.id === taskId);
         if (!task || task.status === targetStatus) return;
+        // Block subtasks from moving to Backlog when an ancestor is In Progress.
+        if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) {
+            showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+            draggedTaskId = null;
+            return;
+        }
         try {
             const updated = await moveTask(projectId, taskId, targetStatus);
-            // Update boardStore with new task; WebSocket broadcast will refresh the full board
-            boardStore.update(b => {
-                if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
-            });
+            // Skip optimistic update if this subtask will be consolidated into its parent.
+            // The immediate status change triggers consolidatedSubtaskIds to recalculate,
+            // which hides the card mid-drop and makes the drag appear to fail.
+            // Let the WebSocket broadcast handle the full board refresh instead.
+            const willConsolidate = task.parent_task_id &&
+                tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
+            if (!willConsolidate) {
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                });
+            }
         } catch (e) {
             console.error('Failed to move task:', e);
+            showToast('Failed to move task: ' + String(e), 'error');
         }
         draggedTaskId = null;
     }
@@ -172,6 +199,11 @@
             onToggleExpanded={toggleTaskExpanded}
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
+            canDrop={(taskId: string, colId: string) => {
+                const task = tasks.find(t => t.id === taskId);
+                if (!task || !task.parent_task_id || colId !== 'backlog') return true;
+                return !hasAncestorInProgress(task);
+            }}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
             onCreateChildTask={onCreateChildTask}
             onClearAll={col.id === 'done' ? handleClearDone : undefined}

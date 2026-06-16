@@ -264,6 +264,13 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	// Block subtasks from moving to Backlog when an ancestor is In Progress.
+	if req.Status == "backlog" && task.ParentTaskID != "" {
+		if err := h.checkAncestorInProgress(task); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	task.Status = req.Status
 	task.UpdatedAt = time.Now()
 
@@ -274,7 +281,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		task.StatusState = "idle"
 	}
 	if req.Status == "in_progress" && task.StatusState != "running" {
-		// If this task is a subtask, use subtask-aware start (moves parent + siblings)
+		// If this task is a subtask, use subtask-aware start (moves parent only, not siblings)
 		if task.ParentTaskID != "" {
 			if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
@@ -282,9 +289,20 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 				task.Output = err.Error()
 			}
 		} else {
-			// Check if task has subtasks — if so, use LLM to pick one
+			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
 			children, _ := h.store.GetChildren(taskID)
 			if len(children) > 0 {
+				// Move all incomplete children to in_progress
+				for i := range children {
+					if children[i].Status == "backlog" || (children[i].Status == "in_progress" && children[i].StatusState == "idle") {
+						children[i].Status = "in_progress"
+						children[i].StatusState = "idle"
+						children[i].UpdatedAt = time.Now().UTC()
+						if err := h.store.UpdateTask(&children[i]); err != nil {
+							log.Printf("[move] failed to update child %s: %v", children[i].ID, err)
+						}
+					}
+				}
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
@@ -320,6 +338,28 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 // autoStartNextSibling delegates to the executor's sibling auto-start logic.
 func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
 	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus)
+}
+
+// checkAncestorInProgress walks up the ancestor chain and returns an error
+// if any ancestor (parent, grandparent, etc.) has status "in_progress".
+func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
+	visited := make(map[string]struct{})
+	currentID := task.ParentTaskID
+	for currentID != "" {
+		if _, ok := visited[currentID]; ok {
+			break // avoid infinite loop on circular references
+		}
+		visited[currentID] = struct{}{}
+		ancestor, err := h.store.GetTaskByTaskID(currentID)
+		if err != nil {
+			break // ancestor not found, stop walking
+		}
+		if ancestor.Status == "in_progress" {
+			return fmt.Errorf("cannot move to Backlog: parent task is In Progress")
+		}
+		currentID = ancestor.ParentTaskID
+	}
+	return nil
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
@@ -794,6 +834,17 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 
 	if len(children) > 0 {
+		// Move all incomplete children to in_progress
+		for i := range children {
+			if children[i].Status == "backlog" || (children[i].Status == "in_progress" && children[i].StatusState == "idle") {
+				children[i].Status = "in_progress"
+				children[i].StatusState = "idle"
+				children[i].UpdatedAt = time.Now().UTC()
+				if err := h.store.UpdateTask(&children[i]); err != nil {
+					log.Printf("[start-parent] failed to update child %s: %v", children[i].ID, err)
+				}
+			}
+		}
 		// Task has subtasks — use LLM to pick the best one
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {

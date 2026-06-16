@@ -74,9 +74,36 @@
         done: 'Done',
     };
 
+    let mouseDownPos = $state<{ x: number; y: number } | null>(null);
+
+    function handleMouseDown(e: MouseEvent) {
+        mouseDownPos = { x: e.clientX, y: e.clientY };
+    }
+
     function handleDragStart(e: DragEvent) {
         e.stopPropagation();
         e.dataTransfer?.setData('text/plain', task.id);
+        e.dataTransfer.effectAllowed = 'move';
+    }
+
+    function handleCardClick(e: MouseEvent) {
+        // If the mouse moved significantly between mousedown and click,
+        // it was a drag gesture — suppress the click to avoid opening CardDetail
+        if (mouseDownPos) {
+            const dx = e.clientX - mouseDownPos.x;
+            const dy = e.clientY - mouseDownPos.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 5) {
+                mouseDownPos = null;
+                if (inline && task.parent_task_id) e.stopPropagation();
+                return;
+            }
+        }
+        mouseDownPos = null;
+        // Skip if the click originated from a child button (progress bar, action icons, etc.)
+        const target = e.target as HTMLElement;
+        if (target.closest('button, input, a, select, .card-edit-panel')) return;
+        if (inline && task.parent_task_id) e.stopPropagation();
+        if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); }
     }
 
     let isMobile = $derived(false);
@@ -479,8 +506,9 @@
     class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id}
     data-task-id={task.id}
     draggable={!isMobile}
+    onmousedown={handleMouseDown}
     ondragstart={handleDragStart}
-    onclick={(e) => { if (inline && task.parent_task_id) e.stopPropagation(); if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); } }}
+    onclick={handleCardClick}
     onkeydown={handleCardKeydown}
     role="button"
     tabindex="0"
@@ -756,6 +784,9 @@
         position: relative;
         transition: border-color 0.15s ease;
         --depth: 0;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-user-drag: element;
     }
     .card.has-children:not(.is-subtask) {
         border-left: 3px solid var(--column-color, var(--color-border));

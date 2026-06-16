@@ -330,8 +330,9 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	return deepest[0].ID
 }
 
-// startSubtaskWithParent moves the parent and all sibling subtasks to in_progress,
-// then starts the executor for the specified subtask only.
+// StartSubtaskWithParent moves the parent to in_progress and starts the executor
+// for the specified subtask only. Siblings are NOT moved — that is handled by
+// HandleMove when a parent task (not an individual subtask) is moved.
 func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) error {
 	subtask, err := te.store.GetTaskByTaskID(subtaskID)
 	if err != nil {
@@ -352,23 +353,6 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 	parent.UpdatedAt = time.Now().UTC()
 	if err := te.store.UpdateTask(parent); err != nil {
 		return fmt.Errorf("update parent: %w", err)
-	}
-
-	// Move all sibling subtasks to in_progress (no auto-start)
-	siblings, err := te.store.GetChildren(parent.ID)
-	if err != nil {
-		return fmt.Errorf("get siblings: %w", err)
-	}
-	for _, sibling := range siblings {
-		if sibling.ID == subtaskID {
-			continue // the target subtask is handled below
-		}
-		sibling.Status = "in_progress"
-		sibling.StatusState = "idle"
-		sibling.UpdatedAt = time.Now().UTC()
-		if err := te.store.UpdateTask(&sibling); err != nil {
-			log.Printf("[start-subtask] failed to update sibling %s: %v", sibling.ID, err)
-		}
 	}
 
 	te.boardStreamMgr.Broadcast(projectID)

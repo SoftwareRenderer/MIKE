@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect }: {
+    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop }: {
         columnId: string;
         title: string;
         color: string;
@@ -18,29 +18,41 @@
         onClearAll?: () => void;
         onCreateChildTask?: (parentId: string) => void;
         onSelect?: (task: Task) => void;
+        canDrop?: (taskId: string, columnId: string) => boolean;
     } = $props();
 
     let isOver = $state(false);
+    let isDropRejected = $state(false);
 
     function handleDragOver(e: DragEvent) {
         e.preventDefault();
+        const taskId = e.dataTransfer?.getData('text/plain');
+        if (taskId && canDrop && !canDrop(taskId, columnId)) {
+            e.dataTransfer.dropEffect = 'none';
+            isDropRejected = true;
+            isOver = false;
+            return;
+        }
+        isDropRejected = false;
         isOver = true;
     }
 
     function handleDragLeave() {
         isOver = false;
+        isDropRejected = false;
     }
 
     function handleDrop(e: DragEvent) {
         isOver = false;
         const taskId = e.dataTransfer?.getData('text/plain');
         if (taskId) {
+            if (canDrop && !canDrop(taskId, columnId)) return;
             onDrop(taskId);
         }
     }
 </script>
 
-<div class={`column${isOver ? ' is-over' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={`${title} column`}>
+<div class={`column${isOver ? ' is-over' : ''}${isDropRejected ? ' is-drop-rejected' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={`${title} column`}>
     <div class="column-header" style="--col-color: {color}">
         <h3>
             {#if columnId === 'backlog'}
@@ -89,6 +101,11 @@
     }
     .column.is-over {
         background: var(--color-surface-2);
+    }
+    .column.is-drop-rejected {
+        outline: 2px dashed var(--color-status-red);
+        outline-offset: -2px;
+        cursor: no-drop;
     }
 
     @media (max-width: 768px) {
