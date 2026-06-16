@@ -867,12 +867,14 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 		// Task has subtasks — use LLM to pick the best one
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {
-			// All subtasks are done — mark parent as done
-			task.Status = "done"
-			task.StatusState = "completed"
-			task.UpdatedAt = time.Now().UTC()
-			_ = h.store.UpdateTask(task)
+			// All subtasks are done — start the parent's own execution
+			if err := h.executor.StartTask(projectID, taskID); err != nil {
+				log.Printf("[start-parent] task=%s all subtasks done, start failed: %v", taskID, err)
+				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			h.boardStreamMgr.Broadcast(projectID)
+			task, _ = h.store.GetTask(projectID, taskID)
 			httputil.JSONResponse(w, http.StatusOK, task)
 			return
 		}

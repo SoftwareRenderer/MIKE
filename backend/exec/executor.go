@@ -391,26 +391,39 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		}
 	}
 	if len(incomplete) == 0 {
-		// No incomplete siblings at this level
-		// Only recurse up if the finished task is "done" (not "review")
-		if finishedStatus != "done" {
-			return nil
+		// No incomplete siblings at this level.
+		// Only recurse up if ALL children are in Done (parent completes when all done).
+		allDone := true
+		for _, c := range children {
+			if c.Status != "done" {
+				allDone = false
+				break
+			}
 		}
-		// Recurse up to the grandparent level
-		if parent.ParentTaskID == "" {
-			return nil // root parent, no more levels
+		if !allDone {
+			// Some children still in review/in_progress — parent stays.
+			// But recurse up to check if the parent itself has incomplete siblings to start.
+			if parent.ParentTaskID == "" {
+				return nil // root parent, no more levels
+			}
+			grandparent, err := te.store.GetTaskByTaskID(parent.ParentTaskID)
+			if err != nil {
+				return nil
+			}
+			if grandparent.Status == "backlog" {
+				log.Printf("[auto-start] ancestor %s is in backlog, skipping auto-start", grandparent.ID)
+				return nil
+			}
+			log.Printf("[auto-start] task=%s no incomplete siblings, parent %s not all done, recursing up to %s", finishedTaskID, parent.ID, parent.ParentTaskID)
+			return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID, finishedStatus)
 		}
-		// Don't auto-start an ancestor that is in backlog — it is its own task
-		grandparent, err := te.store.GetTaskByTaskID(parent.ParentTaskID)
-		if err != nil {
-			return nil
+		// All children done — start the parent's own execution.
+		// When the parent was first started, only children ran. Now it gets its turn.
+		log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
+		if err := te.StartTask(projectID, parent.ID); err != nil {
+			log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
 		}
-		if grandparent.Status == "backlog" {
-			log.Printf("[auto-start] ancestor %s is in backlog, skipping auto-start", grandparent.ID)
-			return nil
-		}
-		log.Printf("[auto-start] task=%s all siblings done, recursing up to parent %s", finishedTaskID, parent.ParentTaskID)
-		return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID, "done")
+		return nil
 	}
 
 	// Select the deepest incomplete subtask

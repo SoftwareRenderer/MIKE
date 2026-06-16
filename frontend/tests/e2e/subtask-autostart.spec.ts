@@ -139,6 +139,40 @@ test.describe('Subtask Auto-Start', () => {
     await waitForTaskStatus(page, subDId, 'in_progress');
   });
 
+  test('nested subtask completion cascades up and starts remaining siblings', async ({ page }) => {
+    // Hierarchy: A -> B -> D, A -> C
+    // When D finishes (review), B stays in_progress (not all children done),
+    // but recursion finds C as incomplete sibling of B, so C auto-starts.
+    const parentId = await createTask(page, `cascade-parent-${Date.now()}`);
+    const subBId = await createTask(page, `cascade-subB-${Date.now()}`, parentId);
+    const subCId = await createTask(page, `cascade-subC-${Date.now()}`, parentId);
+    const subDId = await createTask(page, `add input validation`, subBId); // grandchild, text-only prompt
+
+    // Start parent
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: parentId });
+
+    // All should be in_progress
+    await waitForTaskStatus(page, parentId, 'in_progress');
+    await waitForTaskStatus(page, subBId, 'in_progress');
+    await waitForTaskStatus(page, subCId, 'in_progress');
+    await waitForTaskStatus(page, subDId, 'in_progress');
+
+    // D should finish (mock LLM returns text-only, transitions to review)
+    await waitForTaskStatus(page, subDId, 'review', 30000);
+
+    // B stays in_progress (child D is in review, not done)
+    let subB = await getTask(page, subBId);
+    expect(subB.status).toBe('in_progress');
+
+    // C should auto-start (found via recursion up from B)
+    await expect(async () => {
+      const subC = await getTask(page, subCId);
+      expect(subC.status).not.toBe('backlog');
+    }).toPass({ timeout: 15000, intervals: [200] });
+  });
+
   test('subtask moved to review auto-starts next sibling', async ({ page }) => {
     // Create parent with two subtasks
     const parentId = await createTask(page, `parent-review-${Date.now()}`);
@@ -211,7 +245,7 @@ test.describe('Subtask Auto-Start', () => {
     }).toPass({ timeout: 15000, intervals: [200] });
   });
 
-  test('parent is not auto-marked done when all subtasks complete', async ({ page }) => {
+  test('parent stays in_progress when subtask moves to review', async ({ page }) => {
     // Create parent with one subtask
     const parentId = await createTask(page, `parent-no-auto-${Date.now()}`);
     const sub1Id = await createTask(page, `no-auto-sub1-${Date.now()}`, parentId);
@@ -223,13 +257,31 @@ test.describe('Subtask Auto-Start', () => {
 
     await waitForTaskStatus(page, sub1Id, 'in_progress');
 
+    // Move subtask to review (not done)
+    await moveTask(page, sub1Id, 'review');
+
+    // Parent should stay in_progress (only moves when ALL children are done)
+    const parent = await getTask(page, parentId);
+    expect(parent.status).toBe('in_progress');
+  });
+
+  test('parent starts execution when all subtasks are done', async ({ page }) => {
+    // Create parent with one subtask
+    const parentId = await createTask(page, `parent-exec-${Date.now()}`);
+    const sub1Id = await createTask(page, `exec-sub1-${Date.now()}`, parentId);
+
+    // Start parent (starts subtask)
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: parentId });
+
+    await waitForTaskStatus(page, sub1Id, 'in_progress');
+
     // Move subtask to done
     await moveTask(page, sub1Id, 'done');
 
-    // Parent should NOT be auto-marked as done
-    const parent = await getTask(page, parentId);
-    expect(parent.status).not.toBe('done');
-    // Parent should still be in_progress
-    expect(parent.status).toBe('in_progress');
+    // Parent should start its own execution (not move to done)
+    await waitForTaskStatus(page, parentId, 'in_progress', 10000);
+    await waitForTaskState(page, parentId, 'running', 15000);
   });
 });
