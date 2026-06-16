@@ -1021,6 +1021,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				"prompt_ms": promptMs, "predicted_ms": predictedMs,
 				"model_name": activeModel, "duration": duration,
 			}})
+			// If this is a subtask, auto-start the next sibling
+			if task.ParentTaskID != "" {
+				_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
+			}
 		}
 
 		// Context compression: check if we're approaching the context window limit

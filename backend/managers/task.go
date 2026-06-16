@@ -292,17 +292,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
 			children, _ := h.store.GetChildren(taskID)
 			if len(children) > 0 {
-				// Move all incomplete children to in_progress
-				for i := range children {
-					if children[i].Status == "backlog" || (children[i].Status == "in_progress" && children[i].StatusState == "idle") {
-						children[i].Status = "in_progress"
-						children[i].StatusState = "idle"
-						children[i].UpdatedAt = time.Now().UTC()
-						if err := h.store.UpdateTask(&children[i]); err != nil {
-							log.Printf("[move] failed to update child %s: %v", children[i].ID, err)
-						}
-					}
-				}
+				// Move all incomplete descendants (children, grandchildren, etc.) to in_progress
+				h.moveAllDescendantsToInProgress(taskID)
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
@@ -338,6 +329,26 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 // autoStartNextSibling delegates to the executor's sibling auto-start logic.
 func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
 	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus)
+}
+
+// moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
+// to in_progress/idle. Only tasks in backlog or in_progress+idle are moved.
+func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
+	descendants, err := h.store.GetAllDescendants(taskID)
+	if err != nil {
+		log.Printf("[move-descendants] failed to get descendants of %s: %v", taskID, err)
+		return
+	}
+	for i := range descendants {
+		if descendants[i].Status == "backlog" || (descendants[i].Status == "in_progress" && descendants[i].StatusState == "idle") {
+			descendants[i].Status = "in_progress"
+			descendants[i].StatusState = "idle"
+			descendants[i].UpdatedAt = time.Now().UTC()
+			if err := h.store.UpdateTask(&descendants[i]); err != nil {
+				log.Printf("[move-descendants] failed to update descendant %s: %v", descendants[i].ID, err)
+			}
+		}
+	}
 }
 
 // checkAncestorInProgress walks up the ancestor chain and returns an error
@@ -846,17 +857,13 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 
 	if len(children) > 0 {
-		// Move all incomplete children to in_progress
-		for i := range children {
-			if children[i].Status == "backlog" || (children[i].Status == "in_progress" && children[i].StatusState == "idle") {
-				children[i].Status = "in_progress"
-				children[i].StatusState = "idle"
-				children[i].UpdatedAt = time.Now().UTC()
-				if err := h.store.UpdateTask(&children[i]); err != nil {
-					log.Printf("[start-parent] failed to update child %s: %v", children[i].ID, err)
-				}
-			}
-		}
+		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress
+		h.moveAllDescendantsToInProgress(taskID)
+		// Move the parent itself to in_progress
+		task.Status = "in_progress"
+		task.StatusState = "idle"
+		task.UpdatedAt = time.Now().UTC()
+		_ = h.store.UpdateTask(task)
 		// Task has subtasks — use LLM to pick the best one
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {
@@ -926,19 +933,30 @@ func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Reque
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStartSubtask explicitly starts a subtask, moving parent + siblings to in_progress.
+// HandleStartSubtask explicitly starts a single subtask without moving the parent.
 func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	task.Status = "in_progress"
+	task.UpdatedAt = time.Now().UTC()
+	if err := h.store.UpdateTask(task); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := h.executor.StartTask(projectID, taskID); err != nil {
 		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.boardStreamMgr.Broadcast(projectID)
-	task, _ := h.store.GetTask(projectID, taskID)
+	task, _ = h.store.GetTask(projectID, taskID)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 

@@ -107,6 +107,38 @@ test.describe('Subtask Auto-Start', () => {
     expect(runningSubtask.status_state).toBe('running');
   });
 
+  test('starting parent moves all nested subtasks to in_progress', async ({ page }) => {
+    // Create hierarchy: A -> B -> D, A -> C
+    // When A is started, ALL descendants (B, C, D) should be moved to in_progress
+    const parentId = await createTask(page, `nested-parent-${Date.now()}`);
+    const subBId = await createTask(page, `nested-subB-${Date.now()}`, parentId);
+    const subCId = await createTask(page, `nested-subC-${Date.now()}`, parentId);
+    const subDId = await createTask(page, `nested-subD-${Date.now()}`, subBId); // grandchild of A
+
+    // Verify initial state
+    let parent = await getTask(page, parentId);
+    expect(parent.status).toBe('backlog');
+    let subB = await getTask(page, subBId);
+    expect(subB.status).toBe('backlog');
+    let subC = await getTask(page, subCId);
+    expect(subC.status).toBe('backlog');
+    let subD = await getTask(page, subDId);
+    expect(subD.status).toBe('backlog');
+
+    // Start the parent task via API
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: parentId });
+
+    // Parent should be in_progress
+    await waitForTaskStatus(page, parentId, 'in_progress');
+
+    // All descendants (children AND grandchildren) should be moved to in_progress
+    await waitForTaskStatus(page, subBId, 'in_progress');
+    await waitForTaskStatus(page, subCId, 'in_progress');
+    await waitForTaskStatus(page, subDId, 'in_progress');
+  });
+
   test('subtask moved to review auto-starts next sibling', async ({ page }) => {
     // Create parent with two subtasks
     const parentId = await createTask(page, `parent-review-${Date.now()}`);
@@ -148,6 +180,35 @@ test.describe('Subtask Auto-Start', () => {
     // Second subtask should auto-start
     await waitForTaskStatus(page, sub2Id, 'in_progress');
     await waitForTaskState(page, sub2Id, 'running', 15000);
+  });
+
+  test('subtask natural review transition auto-starts next sibling', async ({ page }) => {
+    // When the LLM finishes without calling task_complete (natural completion),
+    // the subtask transitions to review and the next sibling should auto-start.
+    // Use a prompt that avoids tool-related keywords so mock returns text-only response.
+    const parentId = await createTask(page, `parent-natural-${Date.now()}`);
+    const sub1Id = await createTask(page, `add error handling to the module`, parentId);
+    const sub2Id = await createTask(page, `implement caching layer`, parentId);
+
+    // Start parent (starts first subtask)
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: parentId });
+
+    // Wait for a subtask to start running
+    await waitForTaskStatus(page, sub1Id, 'in_progress');
+
+    // Wait for the first subtask to transition to review (LLM finishes, no tool_complete)
+    // The mock LLM returns text-only for these prompts, triggering natural completion
+    await waitForTaskStatus(page, sub1Id, 'review', 30000);
+
+    // The remaining sibling should auto-start.
+    // With the fast mock LLM, sub2 may complete (review) before we check,
+    // so we verify it left backlog — it should be in_progress, running, or already review.
+    await expect(async () => {
+      const sub2 = await getTask(page, sub2Id);
+      expect(sub2.status).not.toBe('backlog');
+    }).toPass({ timeout: 15000, intervals: [200] });
   });
 
   test('parent is not auto-marked done when all subtasks complete', async ({ page }) => {
