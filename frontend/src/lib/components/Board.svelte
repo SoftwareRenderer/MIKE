@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
-    import { board as boardStore, showConfirm, showToast, expandedTasks as expandedTasksStore } from '$lib/store';
+    import { board as boardStore, showConfirm, showToast, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -27,7 +27,45 @@
     // All task IDs that are subtasks (have a parent)
     const subtaskIds = $derived(new Set(tasks.filter(t => t.parent_task_id).map(t => t.id)));
 
+    // Subtask IDs that should be consolidated (hidden) because any ancestor is in the same column
+    const consolidatedSubtaskIds = $derived.by(() => {
+        const consolidated = new Set<string>();
+        const taskMap = new Map<string, Task>();
+        for (const t of tasks) taskMap.set(t.id, t);
+
+        for (const t of tasks) {
+            if (!t.parent_task_id) continue;
+            // Walk up the ancestor chain
+            let parentId = t.parent_task_id;
+            while (parentId) {
+                const ancestor = taskMap.get(parentId);
+                if (!ancestor) break;
+                if (ancestor.status === t.status) {
+                    consolidated.add(t.id);
+                    break;
+                }
+                parentId = ancestor.parent_task_id ?? null;
+            }
+        }
+        return consolidated;
+    });
+
     let draggedTaskId: string | null = $state(null);
+
+    // IDs of tasks that have children (potential parents)
+    const parentTaskIds = $derived(new Set(tasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
+
+    // Initialize expanded tasks from localStorage (default: all expanded) — run once
+    let expandedInitialized = $state(false);
+    $effect(() => {
+        if (expandedInitialized) return;
+        if (parentTaskIds.size > 0) {
+            expandedInitialized = true;
+            const allIds = new Set(tasks.map(t => t.id));
+            cleanupCollapsedTasks(allIds);
+            expandedTasksStore.set(initExpandedTasks(parentTaskIds));
+        }
+    });
 
     // Track which task cards are expanded (shared store for Board + CardDetail sync)
     let expandedTasks = $derived($expandedTasksStore);
@@ -39,6 +77,10 @@
             next.add(taskId);
         }
         expandedTasksStore.set(next);
+        // Persist collapsed state and clean stale entries
+        const allIds = new Set(tasks.map(t => t.id));
+        persistCollapsedTasks(next, parentTaskIds);
+        cleanupCollapsedTasks(allIds);
     }
 
     const columns = [
@@ -51,11 +93,14 @@
     /**
      * Get root tasks for a column (tasks without a parent, or whose parent is not in this column).
      * Subtasks are shown inline when the parent card is expanded.
+     * Consolidated subtasks (parent + all siblings in same column) are hidden.
      */
     function getTasksForColumn(status: string): Task[] {
         return tasks
             .filter(t => {
                 if (t.status !== status) return false;
+                // Hide consolidated subtasks (shown via parent's progress bar)
+                if (consolidatedSubtaskIds.has(t.id)) return false;
                 // Show root tasks always, subtasks only in review/done columns
                 if (!subtaskIds.has(t.id)) return true;
                 return status === 'review' || status === 'done';

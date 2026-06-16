@@ -696,7 +696,6 @@
             aria-expanded={expanded}
         >
             <span class="subtask-progress-fill" style="width: {subtaskProgress.pct * 100}%"></span>
-            <span class="subtask-progress-pct">{Math.round(subtaskProgress.pct * 100)}%</span>
             <span class="subtask-progress-count">{subtaskProgress.total} subtask{subtaskProgress.total !== 1 ? 's' : ''}</span>
             <svg class="subtask-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -1206,7 +1205,7 @@
     .subtask-progress-bar.is-expanded .subtask-progress-fill {
         opacity: 0.5;
     }
-    .subtask-progress-pct {
+    .subtask-progress-count {
         position: absolute;
         left: 50%;
         top: 50%;
@@ -1217,32 +1216,10 @@
         font-family: inherit;
         font-variant-numeric: tabular-nums;
         color: #FAFAFA;
-        pointer-events: none;
-        transition: opacity 0.15s ease;
-    }
-    .subtask-progress-count {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 1;
-        font-size: 0.7rem;
-        font-weight: 500;
-        font-family: inherit;
-        font-variant-numeric: tabular-nums;
-        color: var(--color-text-secondary);
-        opacity: 0;
         white-space: nowrap;
         pointer-events: none;
-        transition: opacity 0.15s ease;
     }
-    .subtask-progress-bar:hover .subtask-progress-count {
-        opacity: 1;
-    }
-    .subtask-progress-bar:hover .subtask-progress-pct {
-        opacity: 0;
-    }
-    .subtask-progress-bar.is-expanded .subtask-progress-pct {
+    .subtask-progress-bar.is-expanded .subtask-progress-count {
         color: #FAFAFA;
     }
     .subtask-progress-bar.is-expanded .subtask-progress-count {

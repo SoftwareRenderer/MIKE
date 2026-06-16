@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -173,9 +173,47 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     });
     const subtaskIds = $derived(new Set(allTasks.filter(t => t.parent_task_id).map(t => t.id)));
 
+    // Subtask IDs that should be consolidated (hidden) because any ancestor is in the same column
+    const consolidatedSubtaskIds = $derived.by(() => {
+        const consolidated = new Set<string>();
+        const taskMap = new Map<string, Task>();
+        for (const t of allTasks) taskMap.set(t.id, t);
+
+        for (const t of allTasks) {
+            if (!t.parent_task_id) continue;
+            // Walk up the ancestor chain
+            let parentId = t.parent_task_id;
+            while (parentId) {
+                const ancestor = taskMap.get(parentId);
+                if (!ancestor) break;
+                if (ancestor.status === t.status) {
+                    consolidated.add(t.id);
+                    break;
+                }
+                parentId = ancestor.parent_task_id ?? null;
+            }
+        }
+        return consolidated;
+    });
+
+    // IDs of tasks that have children (potential parents)
+    const parentTaskIds = $derived(new Set(allTasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
+
+    // Initialize expanded tasks from localStorage (default: all expanded) — run once
+    let expandedInitialized = $state(false);
+    $effect(() => {
+        if (expandedInitialized) return;
+        if (parentTaskIds.size > 0) {
+            expandedInitialized = true;
+            const allIds = new Set(allTasks.map(t => t.id));
+            cleanupCollapsedTasks(allIds);
+            expandedTasksStore.set(initExpandedTasks(parentTaskIds));
+        }
+    });
+
     // Track expanded tasks (shared store for Board + CardDetail sync)
     let expandedTasks = $derived($expandedTasksStore);
-    
+
     // Auto-expand parent of currently selected task (only on task change, not on updates)
     let lastAutoExpandedParent: string | null = $state(null);
     $effect(() => {
@@ -190,7 +228,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             }
         }
     });
-    
+
     function toggleTaskExpanded(taskId: string) {
         const next = new Set($expandedTasksStore);
         if (next.has(taskId)) {
@@ -199,6 +237,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             next.add(taskId);
         }
         expandedTasksStore.set(next);
+        // Persist collapsed state and clean stale entries
+        const allIds = new Set(allTasks.map(t => t.id));
+        persistCollapsedTasks(next, parentTaskIds);
+        cleanupCollapsedTasks(allIds);
     }
 
     // Column resize
@@ -476,7 +518,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <div class="task-list">
                     {#each overviewSections as section}
-                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (!subtaskIds.has(t.id)) return true; return section.id === "review" || section.id === "done"; }).sort((a, b) => a.column_order - b.column_order)}
+                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return section.id === "review" || section.id === "done"; }).sort((a, b) => a.column_order - b.column_order)}
                         {#if sectionTasks.length > 0}
                             <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
                                 <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>

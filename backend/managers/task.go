@@ -303,8 +303,52 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// If a subtask moved to review/done, auto-start the next sibling
+	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
+	}
+
 	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// autoStartNextSibling finds the next incomplete sibling of the given task and starts it.
+// Only runs if the parent is in_progress and not paused.
+func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
+	parent, err := h.store.GetTask(projectID, parentTaskID)
+	if err != nil {
+		return fmt.Errorf("get parent task: %w", err)
+	}
+	// Only auto-start if parent is actively in progress (not paused, not done)
+	if parent.Status != "in_progress" || parent.StatusState == "paused" {
+		return nil
+	}
+
+	children, err := h.store.GetChildren(parentTaskID)
+	if err != nil {
+		return fmt.Errorf("get children: %w", err)
+	}
+
+	// Find incomplete siblings (excluding the task that just finished)
+	var incomplete []types.Task
+	for _, c := range children {
+		if c.ID != finishedTaskID && c.Status != "done" {
+			incomplete = append(incomplete, c)
+		}
+	}
+	if len(incomplete) == 0 {
+		return nil
+	}
+
+	// Select the deepest incomplete subtask
+	selectedID := h.SelectSubtaskToStart(parent, incomplete)
+	if selectedID == "" {
+		return nil
+	}
+
+	log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
+	return h.StartSubtaskWithParent(projectID, selectedID)
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
@@ -357,6 +401,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if err := h.store.UpdateTask(task); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// If a subtask was marked done, auto-start the next sibling
+	if task.ParentTaskID != "" {
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
 	h.boardStreamMgr.Broadcast(projectID)
@@ -831,26 +880,66 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request,
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// SelectSubtaskToStart uses the LLM to pick the best subtask to start first.
-// Returns the ID of the selected subtask, or the first incomplete subtask as fallback.
-func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
-	// Filter to incomplete subtasks only
+// findDeepestIncompleteSubtasks recursively finds all incomplete subtasks at the deepest level.
+// A subtask is at the deepest level if it is incomplete and has no incomplete children of its own.
+func (h *TaskHandler) findDeepestIncompleteSubtasks(projectID string, tasks []types.Task) []types.Task {
 	var incomplete []types.Task
-	for _, s := range subtasks {
-		if s.Status != "done" {
-			incomplete = append(incomplete, s)
+	for _, t := range tasks {
+		if t.Status != "done" {
+			incomplete = append(incomplete, t)
 		}
 	}
 	if len(incomplete) == 0 {
-		return ""
-	}
-	if len(incomplete) == 1 {
-		return incomplete[0].ID
+		return nil
 	}
 
-	// Build subtask list for LLM
+	// Check if any incomplete subtask has its own incomplete children
+	var hasNestedIncomplete []types.Task
+	for _, t := range incomplete {
+		children, err := h.store.GetChildren(t.ID)
+		if err != nil {
+			continue
+		}
+		var childIncomplete []types.Task
+		for _, c := range children {
+			if c.Status != "done" {
+				childIncomplete = append(childIncomplete, c)
+			}
+		}
+		if len(childIncomplete) > 0 {
+			hasNestedIncomplete = append(hasNestedIncomplete, t)
+		}
+	}
+
+	// If none have incomplete children, these are the deepest
+	if len(hasNestedIncomplete) == 0 {
+		return incomplete
+	}
+
+	// Otherwise, recurse into those that have incomplete children
+	var deepest []types.Task
+	for _, t := range hasNestedIncomplete {
+		children, _ := h.store.GetChildren(t.ID)
+		deepest = append(deepest, h.findDeepestIncompleteSubtasks(projectID, children)...)
+	}
+	return deepest
+}
+
+// SelectSubtaskToStart finds the deepest incomplete subtask(s) and uses the LLM to pick one if there are multiple.
+// Returns the ID of the selected subtask, or empty string if all are done.
+func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
+	// Find the deepest incomplete subtasks (those with no incomplete children)
+	deepest := h.findDeepestIncompleteSubtasks(parent.ProjectID, subtasks)
+	if len(deepest) == 0 {
+		return ""
+	}
+	if len(deepest) == 1 {
+		return deepest[0].ID
+	}
+
+	// Multiple deepest subtasks — use LLM to pick
 	var subtaskParts []string
-	for i, s := range incomplete {
+	for i, s := range deepest {
 		promptPreview := s.Prompt
 		if len(promptPreview) > 300 {
 			promptPreview = promptPreview[:300] + "..."
@@ -859,13 +948,13 @@ func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.
 			i+1, s.ID, s.Title, promptPreview))
 	}
 
-	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
+	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its deepest-level incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
 
 Parent task:
   Title: %s
   Description: %s
 
-Incomplete subtasks:
+Incomplete subtasks (deepest level):
 %s
 
 Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
@@ -875,7 +964,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	modelName := parent.ModelName
 	if serverURL == "" || modelName == "" {
 		log.Printf("[subtask-select] task=%s no LLM config, using fallback", parent.ID)
-		return incomplete[0].ID
+		return deepest[0].ID
 	}
 
 	client := llama.NewLlamaClient(serverURL, modelName, "off")
@@ -890,12 +979,12 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	_, response, err := client.ChatCompletion(ctx, messages)
 	if err != nil {
 		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
-		return incomplete[0].ID
+		return deepest[0].ID
 	}
 
 	selectedID := strings.TrimSpace(response)
-	// Validate the returned ID matches one of the incomplete subtasks
-	for _, s := range incomplete {
+	// Validate the returned ID matches one of the deepest subtasks
+	for _, s := range deepest {
 		if s.ID == selectedID {
 			log.Printf("[subtask-select] task=%s LLM selected subtask %s", parent.ID, selectedID)
 			return selectedID
@@ -903,7 +992,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	}
 
 	log.Printf("[subtask-select] task=%s LLM returned invalid ID %q, using fallback", parent.ID, selectedID)
-	return incomplete[0].ID
+	return deepest[0].ID
 }
 
 // StartSubtaskWithParent moves the parent and all sibling subtasks to in_progress,
