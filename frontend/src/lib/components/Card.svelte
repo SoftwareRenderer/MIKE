@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -53,8 +53,8 @@
 
     // Number of action icons in the title bar (for dynamic padding)
     let actionCount = $derived(
-        (hasChildren || !task.parent_task_id ? 1 : 0) // + subtask
-        + (inline && task.parent_task_id ? 0 : 1) // edit (hidden for inline subtasks)
+        (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // + subtask
+        + (!isDoneSubtask ? 1 : 0) // edit
         + (inline && task.parent_task_id ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks)
     );
 
@@ -467,6 +467,7 @@
     class:has-children={hasChildren}
     class:is-expanded={expanded}
     class:is-subtask={inline && !!task.parent_task_id}
+    class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id}
     data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
@@ -541,7 +542,7 @@
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
-                {#if !task.parent_task_id || hasChildren}
+                {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
                     <button
                         type="button"
                         class="action-icon"
@@ -552,13 +553,13 @@
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
-                {#if !isDoneSubtask && !(inline && task.parent_task_id)}
+                {#if !isDoneSubtask}
                 <button
                     type="button"
                     class="action-icon"
                     onclick={startEdit}
-                    aria-label="Edit task title"
-                    title="Edit title"
+                    aria-label="Edit task"
+                    title="Edit Task"
                 >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                 </button>
@@ -694,7 +695,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} />
             {/each}
         </div>
     {/if}
@@ -752,7 +753,28 @@
         border-left: 3px solid var(--column-color, var(--color-border));
     }
     .card.is-subtask {
+        border-top: 1px solid var(--color-border);
+        border-right: 1px solid var(--color-border);
+        border-bottom: 1px solid var(--color-border);
         border-left: 3px solid var(--status-color, var(--color-border));
+    }
+    .card.is-sidebar-subtask {
+        border-top: 1px solid var(--color-border);
+        border-right: 1px solid var(--color-border);
+        border-bottom: 1px solid var(--color-border);
+        border-left: 3px solid var(--status-color, var(--color-border));
+    }
+    .card.is-sidebar-subtask:hover {
+        border-top-color: var(--color-border-bright);
+        border-right-color: var(--color-border-bright);
+        border-bottom-color: var(--color-border-bright);
+        border-left-color: var(--status-color, var(--color-border));
+    }
+    .card.selected.is-sidebar-subtask {
+        border-top-color: var(--color-accent);
+        border-right-color: var(--color-accent);
+        border-bottom-color: var(--color-accent);
+        border-left-color: var(--status-color, var(--color-border));
     }
     .card:hover {
         border-color: var(--color-border-bright);
@@ -1242,9 +1264,6 @@
         background: var(--color-surface-1);
     }
 
-    /* Card with children */
-    .card.has-children {
-        border-left: 2px solid var(--color-accent);
-    }
+
     /* Expanded state indicated by progress bar, not border */
 </style>

@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -62,7 +62,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let addProjectError = $state('');
     let currentBranch = $state('');
     let selectedTaskVal: Task | null = $state(null);
-    let creatingChildOf: string | null = $state(null);
+    let creatingChildOfVal: string | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isMobile = $derived(false);
     let hasProviders = $derived(!!cfg?.providers?.length);
@@ -79,6 +79,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         const unsub = [
             sidebarCollapsed.subscribe(v => collapsed = v),
             showCreateTask.subscribe(v => showCreateTaskVal = v),
+            creatingChildOfStore.subscribe(v => creatingChildOfVal = v),
             showConfig.subscribe(v => showConfigVal = v),
             showTerminal.subscribe(v => showTerminalVal = v),
             showStats.subscribe(v => showStatsVal = v),
@@ -523,8 +524,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     <Board 
                         {tasks} 
                         projectId={currentProject.id}
-                        onAddTask={() => { creatingChildOf = null; showCreateTask.set(true); }}
-                        onCreateChildTask={(parentId: string) => { creatingChildOf = parentId; showCreateTask.set(true); }}
+                        onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
+                        onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
                     />
                 {/if}
             </section>
@@ -553,9 +554,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     {#if showCreateTaskVal}
         <CreateTaskModal
             projectId={currentProject?.id}
-            parentId={creatingChildOf ?? undefined}
-            onClose={() => { showCreateTask.set(false); creatingChildOf = null; }}
-            onTaskCreated={() => { creatingChildOf = null; }} // board stream pushes update
+            parentId={creatingChildOfVal ?? undefined}
+            onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
+            onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
         />
     {/if}
     {#if showConfigVal}

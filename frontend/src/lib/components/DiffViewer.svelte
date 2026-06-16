@@ -353,6 +353,7 @@
     }
     .diff-line-num {
         display: flex;
+        align-items: center;
         justify-content: flex-end;
         padding-right: 8px;
         user-select: none;
@@ -364,6 +365,7 @@
     }
     .diff-line-content {
         display: flex;
+        align-items: center;
         padding: 0 8px;
         white-space: pre;
         overflow-x: auto;

@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, expandedTasks as expandedTasksStore } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -176,10 +176,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Track expanded tasks (shared store for Board + CardDetail sync)
     let expandedTasks = $derived($expandedTasksStore);
     
-    // Auto-expand parent of currently selected task
+    // Auto-expand parent of currently selected task (only on task change, not on updates)
+    let lastAutoExpandedParent: string | null = $state(null);
     $effect(() => {
         const parentId = task.parent_task_id;
-        if (parentId) {
+        if (parentId && parentId !== lastAutoExpandedParent) {
+            lastAutoExpandedParent = parentId;
             const current = $expandedTasksStore;
             if (!current.has(parentId)) {
                 const next = new Set(current);
@@ -501,8 +503,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                             childrenMap={childrenMap}
                                             expandedTasks={expandedTasks}
                                             onToggleExpanded={toggleTaskExpanded}
+                                            onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
                                             columnColor={getSectionColor(section.id)}
                                             inline={false}
+                                            showSubtaskBorder={true}
                                             onSelect={(selected) => {
                                                 if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
                                             }}

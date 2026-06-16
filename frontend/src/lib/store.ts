@@ -8,6 +8,7 @@ export const board = writable<Board | null>(null);
 export const selectedTask = writable<Task | null>(null);
 export const config = writable<Config | null>(null);
 export const showCreateTask = writable(false);
+export const creatingChildOf = writable<string | null>(null);
 export const showConfig = writable(false);
 export const showTerminal = writable(false);
 export const showStats = writable(false);
