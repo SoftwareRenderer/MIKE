@@ -110,8 +110,8 @@ func TestMessageUpdate(t *testing.T) {
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	listRR := testResponse(t, s, listReq)
 	msgs := mustJSON[[]map[string]interface{}](t, listRR.Body)
-	if msgs[0]["content"] != "Updated content" {
-		t.Fatalf("expected updated content, got %s", msgs[0]["content"])
+	if msgs[len(msgs)-1]["content"] != "Updated content" {
+		t.Fatalf("expected updated content, got %s", msgs[len(msgs)-1]["content"])
 	}
 }
 

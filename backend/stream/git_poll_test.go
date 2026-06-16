@@ -39,7 +39,7 @@ func TestGitStatusPoll(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s)
+	cfgStore := config.NewConfigStore(s, dbPath)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
@@ -84,6 +84,7 @@ func TestGitStatusPoll(t *testing.T) {
 
 	// Create stream manager with poller tracking
 	sm := &StreamManager{
+		store:       s,
 		worktreeMgr: wm,
 		pollers:     make(map[string]context.CancelFunc),
 	}
@@ -93,8 +94,8 @@ func TestGitStatusPoll(t *testing.T) {
 	sm.pollers[taskID] = cancel
 	go sm.pollGitStatus(ctx, taskID, b)
 
-	// Wait for initial baseline to be established
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for initial baseline to be established (ticker fires at 2s)
+	time.Sleep(2500 * time.Millisecond)
 
 	// Check initial buffer count (baseline)
 	initialCount := b.bufferLength()

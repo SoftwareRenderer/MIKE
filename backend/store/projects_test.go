@@ -46,9 +46,9 @@ func TestListProjects(t *testing.T) {
 	if len(projects) != 3 {
 		t.Fatalf("expected 3 projects, got %d", len(projects))
 	}
-	// Should be sorted by name (case-insensitive)
+	// Should be sorted by creation time (insertion order)
 	names := []string{projects[0].Name, projects[1].Name, projects[2].Name}
-	expected := []string{"Alpha", "Bravo", "Charlie"}
+	expected := []string{"Charlie", "Alpha", "Bravo"}
 	if names[0] != expected[0] || names[1] != expected[1] || names[2] != expected[2] {
 		t.Fatalf("unexpected order: %v", names)
 	}
