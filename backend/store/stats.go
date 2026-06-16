@@ -12,8 +12,8 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 
 	stats := &types.ProjectStats{}
 
-	// Get total task count for the project (active tasks only)
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE project_id = ?`, projectID).Scan(&stats.TotalTasks)
+	// Get total task count for the project (tasks with LLM usage only, matching per-model task_count)
+	err := s.db.QueryRow(`SELECT COUNT(DISTINCT task_id) FROM project_token_tasks WHERE project_id = ?`, projectID).Scan(&stats.TotalTasks)
 	if err != nil {
 		return nil, err
 	}

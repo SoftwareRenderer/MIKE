@@ -229,6 +229,23 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     });
 
+    // Auto-expand parent cards when new subtasks appear
+    let lastExpandedParents = $state<Set<string>>(new Set());
+    $effect(() => {
+        const currentParents = new Set(childrenMap.keys());
+        for (const parentId of currentParents) {
+            if (!lastExpandedParents.has(parentId)) {
+                const current = $expandedTasksStore;
+                if (!current.has(parentId)) {
+                    const next = new Set(current);
+                    next.add(parentId);
+                    expandedTasksStore.set(next);
+                }
+                lastExpandedParents.add(parentId);
+            }
+        }
+    });
+
     function toggleTaskExpanded(taskId: string) {
         const next = new Set($expandedTasksStore);
         if (next.has(taskId)) {
@@ -518,7 +535,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <div class="task-list">
                     {#each overviewSections as section}
-                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return section.id === "review" || section.id === "done"; }).sort((a, b) => a.column_order - b.column_order)}
+                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }).sort((a, b) => a.column_order - b.column_order)}
                         {#if sectionTasks.length > 0}
                             <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
                                 <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>

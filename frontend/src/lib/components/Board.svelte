@@ -67,6 +67,23 @@
         }
     });
 
+    // Auto-expand parent cards when new subtasks appear
+    let lastExpandedParents = $state<Set<string>>(new Set());
+    $effect(() => {
+        const currentParents = new Set(childrenMap.keys());
+        for (const parentId of currentParents) {
+            if (!lastExpandedParents.has(parentId)) {
+                const current = $expandedTasksStore;
+                if (!current.has(parentId)) {
+                    const next = new Set(current);
+                    next.add(parentId);
+                    expandedTasksStore.set(next);
+                }
+                lastExpandedParents.add(parentId);
+            }
+        }
+    });
+
     // Track which task cards are expanded (shared store for Board + CardDetail sync)
     let expandedTasks = $derived($expandedTasksStore);
     function toggleTaskExpanded(taskId: string) {
@@ -112,9 +129,9 @@
                 if (t.status !== status) return false;
                 // Hide consolidated subtasks (shown via parent's progress bar)
                 if (consolidatedSubtaskIds.has(t.id)) return false;
-                // Show root tasks always, subtasks only in review/done columns
+                // Show root tasks always, subtasks only when not consolidated (parent in different column)
                 if (!subtaskIds.has(t.id)) return true;
-                return status === 'review' || status === 'done';
+                return true;
             })
             .sort((a, b) => a.column_order - b.column_order);
     }

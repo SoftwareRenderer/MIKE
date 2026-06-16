@@ -516,9 +516,9 @@ func TestStatsSurviveTaskDeletion(t *testing.T) {
 	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 1 {
 		t.Fatalf("expected task_count=1 after delete (cumulative), got %+v", stats.ByModel)
 	}
-	// TotalTasks should decrease (active tasks only)
-	if stats.TotalTasks != 0 {
-		t.Fatalf("expected 0 tasks after delete, got %d", stats.TotalTasks)
+	// TotalTasks is cumulative (matches per-model task_count), survives task deletion
+	if stats.TotalTasks != 1 {
+		t.Fatalf("expected 1 task (cumulative), got %d", stats.TotalTasks)
 	}
 }
 
@@ -574,8 +574,8 @@ func TestStatsCumulativeAcrossTasks(t *testing.T) {
 	if len(stats.ByModel) != 1 || stats.ByModel[0].TaskCount != 2 {
 		t.Fatalf("expected task_count=2 (cumulative after delete), got %+v", stats.ByModel)
 	}
-	if stats.TotalTasks != 1 {
-		t.Fatalf("expected 1 active task, got %d", stats.TotalTasks)
+	if stats.TotalTasks != 2 {
+		t.Fatalf("expected 2 tasks (cumulative after delete), got %d", stats.TotalTasks)
 	}
 }
 
@@ -693,5 +693,49 @@ func TestStatsBackfill(t *testing.T) {
 	}
 	if stats.ByModel[0].TaskCount != 1 {
 		t.Fatalf("expected task_count=1 from backfill, got %d", stats.ByModel[0].TaskCount)
+	}
+}
+
+func TestGetProjectStatsTotalTasksExcludesLLMFreeTasks(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create 3 tasks: 2 with LLM usage, 1 without
+	for _, taskID := range []string{"task-1", "task-2", "task-3"} {
+		task := newTask(taskID, "proj-1")
+		if err := s.CreateTask(task); err != nil {
+			t.Fatalf("create task %s: %v", taskID, err)
+		}
+	}
+
+	// Only task-1 and task-2 have LLM usage
+	for _, taskID := range []string{"task-1", "task-2"} {
+		msg := newMessage("m-"+taskID, taskID, "assistant", "response")
+		msg.PromptTokens = 100
+		msg.PredictedTokens = 50
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create message for %s: %v", taskID, err)
+		}
+	}
+
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+
+	// TotalTasks should only count tasks with LLM usage (2), not all tasks (3)
+	if stats.TotalTasks != 2 {
+		t.Fatalf("expected 2 tasks with LLM usage, got %d", stats.TotalTasks)
+	}
+	// Sum of per-model task_counts should also be 2
+	var sumTaskCount int
+	for _, m := range stats.ByModel {
+		sumTaskCount += m.TaskCount
+	}
+	if sumTaskCount != 2 {
+		t.Fatalf("expected sum of task_counts to be 2, got %d", sumTaskCount)
 	}
 }
