@@ -1745,7 +1745,8 @@
             display: none;
         }
         .default-model-badge {
-            display: none;
+            max-width: 80px;
+            font-size: 0.6875rem;
         }
         /* Icon-only buttons should not be stretched to 44px */
         button.btn-remove-provider,
