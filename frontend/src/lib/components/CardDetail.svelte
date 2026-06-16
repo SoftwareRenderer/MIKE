@@ -674,6 +674,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         overflow: hidden;
     }
     .column-context {
+        display: block;
+        overflow: auto;
         flex-shrink: 0;
         border-right: 1px solid var(--color-border);
         background: var(--color-surface-0);
