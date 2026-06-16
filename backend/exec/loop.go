@@ -868,9 +868,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
 					te.boardStreamMgr.Broadcast(projectID)
-					// Check if this is a subtask — if all siblings are done, complete the parent
-					if task.Status == "done" {
-						te.CheckAndCompleteParent(projectID, task.ID)
+					// If this is a subtask, auto-start the next sibling
+					if task.ParentTaskID != "" {
+						_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
 					}
 					return
 				}

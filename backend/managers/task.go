@@ -310,49 +310,16 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, req.Status)
 	}
 
 	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// autoStartNextSibling finds the next incomplete sibling of the given task and starts it.
-// Only runs if the parent is in_progress and not paused.
-func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
-	parent, err := h.store.GetTask(projectID, parentTaskID)
-	if err != nil {
-		return fmt.Errorf("get parent task: %w", err)
-	}
-	// Only auto-start if parent is actively in progress (not paused, not done)
-	if parent.Status != "in_progress" || parent.StatusState == "paused" {
-		return nil
-	}
-
-	children, err := h.store.GetChildren(parentTaskID)
-	if err != nil {
-		return fmt.Errorf("get children: %w", err)
-	}
-
-	// Find incomplete siblings (excluding the task that just finished)
-	var incomplete []types.Task
-	for _, c := range children {
-		if c.ID != finishedTaskID && c.Status != "done" {
-			incomplete = append(incomplete, c)
-		}
-	}
-	if len(incomplete) == 0 {
-		return nil
-	}
-
-	// Select the deepest incomplete subtask
-	selectedID := h.SelectSubtaskToStart(parent, incomplete)
-	if selectedID == "" {
-		return nil
-	}
-
-	log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
-	return h.StartSubtaskWithParent(projectID, selectedID)
+// autoStartNextSibling delegates to the executor's sibling auto-start logic.
+func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
+	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus)
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
@@ -409,7 +376,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	// If a subtask was marked done, auto-start the next sibling
 	if task.ParentTaskID != "" {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, "done")
 	}
 
 	h.boardStreamMgr.Broadcast(projectID)
@@ -912,165 +879,14 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request,
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// findDeepestIncompleteSubtasks recursively finds all incomplete subtasks at the deepest level.
-// A subtask is at the deepest level if it is incomplete and has no incomplete children of its own.
-func (h *TaskHandler) findDeepestIncompleteSubtasks(projectID string, tasks []types.Task) []types.Task {
-	var incomplete []types.Task
-	for _, t := range tasks {
-		if t.Status != "done" {
-			incomplete = append(incomplete, t)
-		}
-	}
-	if len(incomplete) == 0 {
-		return nil
-	}
-
-	// Check if any incomplete subtask has its own incomplete children
-	var hasNestedIncomplete []types.Task
-	for _, t := range incomplete {
-		children, err := h.store.GetChildren(t.ID)
-		if err != nil {
-			continue
-		}
-		var childIncomplete []types.Task
-		for _, c := range children {
-			if c.Status != "done" {
-				childIncomplete = append(childIncomplete, c)
-			}
-		}
-		if len(childIncomplete) > 0 {
-			hasNestedIncomplete = append(hasNestedIncomplete, t)
-		}
-	}
-
-	// If none have incomplete children, these are the deepest
-	if len(hasNestedIncomplete) == 0 {
-		return incomplete
-	}
-
-	// Otherwise, recurse into those that have incomplete children
-	var deepest []types.Task
-	for _, t := range hasNestedIncomplete {
-		children, _ := h.store.GetChildren(t.ID)
-		deepest = append(deepest, h.findDeepestIncompleteSubtasks(projectID, children)...)
-	}
-	return deepest
-}
-
-// SelectSubtaskToStart finds the deepest incomplete subtask(s) and uses the LLM to pick one if there are multiple.
-// Returns the ID of the selected subtask, or empty string if all are done.
+// SelectSubtaskToStart delegates to the executor's subtask selection logic.
 func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
-	// Find the deepest incomplete subtasks (those with no incomplete children)
-	deepest := h.findDeepestIncompleteSubtasks(parent.ProjectID, subtasks)
-	if len(deepest) == 0 {
-		return ""
-	}
-	if len(deepest) == 1 {
-		return deepest[0].ID
-	}
-
-	// Multiple deepest subtasks — use LLM to pick
-	var subtaskParts []string
-	for i, s := range deepest {
-		promptPreview := s.Prompt
-		if len(promptPreview) > 300 {
-			promptPreview = promptPreview[:300] + "..."
-		}
-		subtaskParts = append(subtaskParts, fmt.Sprintf("Subtask %d (ID: %s):\n  Title: %s\n  Description: %s",
-			i+1, s.ID, s.Title, promptPreview))
-	}
-
-	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its deepest-level incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
-
-Parent task:
-  Title: %s
-  Description: %s
-
-Incomplete subtasks (deepest level):
-%s
-
-Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
-		parent.Title, parent.Prompt[:minLen(len(parent.Prompt), 500)], strings.Join(subtaskParts, "\n\n"))
-
-	serverURL := parent.LlamaServerURL
-	modelName := parent.ModelName
-	if serverURL == "" || modelName == "" {
-		log.Printf("[subtask-select] task=%s no LLM config, using fallback", parent.ID)
-		return deepest[0].ID
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "You are a task scheduler. Return only a task ID."},
-		{Role: "user", Content: prompt},
-	}
-
-	_, response, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages)
-	if err != nil {
-		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
-		return deepest[0].ID
-	}
-
-	selectedID := strings.TrimSpace(response)
-	// Validate the returned ID matches one of the deepest subtasks
-	for _, s := range deepest {
-		if s.ID == selectedID {
-			log.Printf("[subtask-select] task=%s LLM selected subtask %s", parent.ID, selectedID)
-			return selectedID
-		}
-	}
-
-	log.Printf("[subtask-select] task=%s LLM returned invalid ID %q, using fallback", parent.ID, selectedID)
-	return deepest[0].ID
+	return h.executor.SelectSubtaskToStart(parent, subtasks)
 }
 
-// StartSubtaskWithParent moves the parent and all sibling subtasks to in_progress,
-// then starts the executor for the specified subtask only.
+// StartSubtaskWithParent delegates to the executor.
 func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string) error {
-	subtask, err := h.store.GetTask(projectID, subtaskID)
-	if err != nil {
-		return fmt.Errorf("get subtask: %w", err)
-	}
-	if subtask.ParentTaskID == "" {
-		return fmt.Errorf("task has no parent")
-	}
-
-	parent, err := h.store.GetTask(projectID, subtask.ParentTaskID)
-	if err != nil {
-		return fmt.Errorf("get parent: %w", err)
-	}
-
-	// Move parent to in_progress (no auto-start)
-	parent.Status = "in_progress"
-	parent.StatusState = "idle"
-	parent.UpdatedAt = time.Now().UTC()
-	if err := h.store.UpdateTask(parent); err != nil {
-		return fmt.Errorf("update parent: %w", err)
-	}
-
-	// Move all sibling subtasks to in_progress (no auto-start)
-	siblings, err := h.store.GetChildren(parent.ID)
-	if err != nil {
-		return fmt.Errorf("get siblings: %w", err)
-	}
-	for _, sibling := range siblings {
-		if sibling.ID == subtaskID {
-			continue // the target subtask is handled below
-		}
-		sibling.Status = "in_progress"
-		sibling.StatusState = "idle"
-		sibling.UpdatedAt = time.Now().UTC()
-		if err := h.store.UpdateTask(&sibling); err != nil {
-			log.Printf("[start-subtask] failed to update sibling %s: %v", sibling.ID, err)
-		}
-	}
-
-	h.boardStreamMgr.Broadcast(projectID)
-
-	// Start the subtask executor
-	return h.executor.StartTask(projectID, subtaskID)
+	return h.executor.StartSubtaskWithParent(projectID, subtaskID)
 }
 
 // StopTaskAndDescendants stops a task and all its running descendants.
@@ -1119,57 +935,4 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	return nil
 }
 
-// CheckParentCompletion checks if all subtasks of a task are done.
-// If so, moves the parent to done (recursively for nested parents).
-func (h *TaskHandler) CheckParentCompletion(projectID, taskID string) {
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil || task.ParentTaskID == "" {
-		return
-	}
 
-	parent, err := h.store.GetTask(projectID, task.ParentTaskID)
-	if err != nil {
-		return
-	}
-
-	children, err := h.store.GetChildren(parent.ID)
-	if err != nil {
-		return
-	}
-	if len(children) == 0 {
-		return
-	}
-
-	// Check if all children are done
-	allDone := true
-	for _, child := range children {
-		if child.Status != "done" {
-			allDone = false
-			break
-		}
-	}
-	if !allDone {
-		return
-	}
-
-	// All children done — move parent to done
-	parent.Status = "done"
-	parent.StatusState = "completed"
-	parent.UpdatedAt = time.Now().UTC()
-	if err := h.store.UpdateTask(parent); err != nil {
-		log.Printf("[parent-completion] failed to mark parent %s as done: %v", parent.ID, err)
-		return
-	}
-	log.Printf("[parent-completion] task=%s all subtasks done, marking parent %s as done", taskID, parent.ID)
-	h.boardStreamMgr.Broadcast(projectID)
-
-	// Recursively check grandparent
-	h.CheckParentCompletion(projectID, parent.ID)
-}
-
-func minLen(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -198,52 +198,249 @@ func (te *TaskExecutor) ResetForTest() {
 	te.streamMgr.ResetForTest()
 }
 
-// CheckAndCompleteParent checks if all subtasks of a task's parent are done.
-// If so, marks the parent as done (recursively for nested parents).
-// Called after a subtask completes (task_complete tool or commit-and-done).
-func (te *TaskExecutor) CheckAndCompleteParent(projectID, taskID string) {
-	te.checkParentCompletionRecursive(projectID, taskID)
-}
 
-func (te *TaskExecutor) checkParentCompletionRecursive(projectID, taskID string) {
-	task, err := te.store.GetTask(projectID, taskID)
-	if err != nil || task.ParentTaskID == "" {
-		return
+// -- Subtask auto-start methods --
+
+// findDeepestIncompleteSubtasks recursively finds all incomplete subtasks at the deepest level.
+// A subtask is at the deepest level if it is incomplete and has no incomplete children of its own.
+func (te *TaskExecutor) FindDeepestIncompleteSubtasks(tasks []types.Task) []types.Task {
+	var incomplete []types.Task
+	for _, t := range tasks {
+		if isIncompleteForStart(t) {
+			incomplete = append(incomplete, t)
+		}
+	}
+	if len(incomplete) == 0 {
+		return nil
 	}
 
-	parent, err := te.store.GetTask(projectID, task.ParentTaskID)
-	if err != nil {
-		return
-	}
-
-	children, err := te.store.GetChildren(parent.ID)
-	if err != nil || len(children) == 0 {
-		return
-	}
-
-	// Check if all children are done
-	for _, child := range children {
-		if child.Status != "done" {
-			return
+	// Check if any incomplete subtask has its own incomplete children
+	var hasNestedIncomplete []types.Task
+	for _, t := range incomplete {
+		children, err := te.store.GetChildren(t.ID)
+		if err != nil {
+			continue
+		}
+		var childIncomplete []types.Task
+		for _, c := range children {
+			if isIncompleteForStart(c) {
+				childIncomplete = append(childIncomplete, c)
+			}
+		}
+		if len(childIncomplete) > 0 {
+			hasNestedIncomplete = append(hasNestedIncomplete, t)
 		}
 	}
 
-	// All children done — mark parent as done
-	parent.Status = "done"
-	parent.StatusState = "completed"
+	// If none have incomplete children, these are the deepest
+	if len(hasNestedIncomplete) == 0 {
+		return incomplete
+	}
+
+	// Otherwise, recurse into those that have incomplete children
+	var deepest []types.Task
+	for _, t := range hasNestedIncomplete {
+		children, _ := te.store.GetChildren(t.ID)
+		deepest = append(deepest, te.FindDeepestIncompleteSubtasks(children)...)
+	}
+	return deepest
+}
+
+// isIncompleteForStart returns true if a task is a candidate for auto-start.
+// Only backlog or in_progress+idle tasks qualify.
+func isIncompleteForStart(t types.Task) bool {
+	if t.Status == "backlog" {
+		return true
+	}
+	if t.Status == "in_progress" && t.StatusState == "idle" {
+		return true
+	}
+	return false
+}
+
+// selectSubtaskToStart finds the deepest incomplete subtask(s) and uses the LLM to pick one if there are multiple.
+// Returns the ID of the selected subtask, or empty string if all are done.
+func (te *TaskExecutor) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
+	deepest := te.FindDeepestIncompleteSubtasks(subtasks)
+	if len(deepest) == 0 {
+		return ""
+	}
+	if len(deepest) == 1 {
+		return deepest[0].ID
+	}
+
+	// Multiple deepest subtasks — use LLM to pick
+	var subtaskParts []string
+	for i, s := range deepest {
+		promptPreview := s.Prompt
+		if len(promptPreview) > 300 {
+			promptPreview = promptPreview[:300] + "..."
+		}
+		subtaskParts = append(subtaskParts, fmt.Sprintf("Subtask %d (ID: %s):\n  Title: %s\n  Description: %s",
+			i+1, s.ID, s.Title, promptPreview))
+	}
+
+	promptPreview := parent.Prompt
+	if len(promptPreview) > 500 {
+		promptPreview = promptPreview[:500]
+	}
+	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its deepest-level incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
+
+Parent task:
+  Title: %s
+  Description: %s
+
+Incomplete subtasks (deepest level):
+%s
+
+Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
+		parent.Title, promptPreview, strings.Join(subtaskParts, "\n\n"))
+
+	serverURL := parent.LlamaServerURL
+	modelName := parent.ModelName
+	if serverURL == "" || modelName == "" {
+		log.Printf("[subtask-select] task=%s no LLM config, using fallback", parent.ID)
+		return deepest[0].ID
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "You are a task scheduler. Return only a task ID."},
+		{Role: "user", Content: prompt},
+	}
+
+	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages)
+	if err != nil {
+		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
+		return deepest[0].ID
+	}
+
+	selectedID := strings.TrimSpace(response)
+	// Validate the returned ID matches one of the deepest subtasks
+	for _, s := range deepest {
+		if s.ID == selectedID {
+			log.Printf("[subtask-select] task=%s LLM selected subtask %s", parent.ID, selectedID)
+			return selectedID
+		}
+	}
+
+	log.Printf("[subtask-select] task=%s LLM returned invalid ID %q, using fallback", parent.ID, selectedID)
+	return deepest[0].ID
+}
+
+// startSubtaskWithParent moves the parent and all sibling subtasks to in_progress,
+// then starts the executor for the specified subtask only.
+func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) error {
+	subtask, err := te.store.GetTaskByTaskID(subtaskID)
+	if err != nil {
+		return fmt.Errorf("get subtask: %w", err)
+	}
+	if subtask.ParentTaskID == "" {
+		return fmt.Errorf("task has no parent")
+	}
+
+	parent, err := te.store.GetTaskByTaskID(subtask.ParentTaskID)
+	if err != nil {
+		return fmt.Errorf("get parent: %w", err)
+	}
+
+	// Move parent to in_progress (no auto-start)
+	parent.Status = "in_progress"
+	parent.StatusState = "idle"
 	parent.UpdatedAt = time.Now().UTC()
 	if err := te.store.UpdateTask(parent); err != nil {
-		log.Printf("[parent-completion] failed to mark parent %s as done: %v", parent.ID, err)
-		return
+		return fmt.Errorf("update parent: %w", err)
 	}
-	log.Printf("[parent-completion] task=%s all subtasks done, marking parent %s as done", taskID, parent.ID)
+
+	// Move all sibling subtasks to in_progress (no auto-start)
+	siblings, err := te.store.GetChildren(parent.ID)
+	if err != nil {
+		return fmt.Errorf("get siblings: %w", err)
+	}
+	for _, sibling := range siblings {
+		if sibling.ID == subtaskID {
+			continue // the target subtask is handled below
+		}
+		sibling.Status = "in_progress"
+		sibling.StatusState = "idle"
+		sibling.UpdatedAt = time.Now().UTC()
+		if err := te.store.UpdateTask(&sibling); err != nil {
+			log.Printf("[start-subtask] failed to update sibling %s: %v", sibling.ID, err)
+		}
+	}
+
 	te.boardStreamMgr.Broadcast(projectID)
 
-	// Recursively check grandparent
-	te.checkParentCompletionRecursive(projectID, parent.ID)
+	// Start the subtask executor
+	return te.StartTask(projectID, subtaskID)
+}
+
+// autoStartNextSibling finds the next incomplete sibling of the given task and starts it.
+// Only runs if the parent is in_progress and not paused.
+// When all siblings are done and finishedStatus is "done", recurses up the ancestor chain.
+// Ancestors in "backlog" are never auto-started (they are their own tasks).
+func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
+	parent, err := te.store.GetTaskByTaskID(parentTaskID)
+	if err != nil {
+		return fmt.Errorf("get parent task: %w", err)
+	}
+	// Only auto-start if parent is actively in progress (not paused, not done)
+	if parent.Status != "in_progress" || parent.StatusState == "paused" {
+		return nil
+	}
+
+	children, err := te.store.GetChildren(parent.ID)
+	if err != nil {
+		return fmt.Errorf("get children: %w", err)
+	}
+
+	// Find incomplete siblings (excluding the task that just finished)
+	var incomplete []types.Task
+	for _, c := range children {
+		if c.ID == finishedTaskID {
+			continue
+		}
+		if isIncompleteForStart(c) {
+			incomplete = append(incomplete, c)
+		}
+	}
+	if len(incomplete) == 0 {
+		// No incomplete siblings at this level
+		// Only recurse up if the finished task is "done" (not "review")
+		if finishedStatus != "done" {
+			return nil
+		}
+		// Recurse up to the grandparent level
+		if parent.ParentTaskID == "" {
+			return nil // root parent, no more levels
+		}
+		// Don't auto-start an ancestor that is in backlog — it is its own task
+		grandparent, err := te.store.GetTaskByTaskID(parent.ParentTaskID)
+		if err != nil {
+			return nil
+		}
+		if grandparent.Status == "backlog" {
+			log.Printf("[auto-start] ancestor %s is in backlog, skipping auto-start", grandparent.ID)
+			return nil
+		}
+		log.Printf("[auto-start] task=%s all siblings done, recursing up to parent %s", finishedTaskID, parent.ParentTaskID)
+		return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID, "done")
+	}
+
+	// Select the deepest incomplete subtask
+	selectedID := te.SelectSubtaskToStart(parent, incomplete)
+	if selectedID == "" {
+		return nil
+	}
+
+	log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
+	return te.StartSubtaskWithParent(projectID, selectedID)
 }
 
 // StartTask begins AI execution for a task.
+
 func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
