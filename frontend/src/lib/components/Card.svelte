@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -22,7 +22,7 @@
     });
 
     // Whether this is a completed subtask (hide edit/move buttons)
-    let isDoneSubtask = $derived(task.parent_task_id && task.status === 'done');
+    let isDoneSubtask = $derived(inline && task.parent_task_id && task.status === 'done');
 
     // Status color for subtask indicator
     let statusColor = $derived.by(() => {
@@ -30,6 +30,7 @@
         if (state === 'running') return 'var(--color-status-blue)';
         if (state === 'failed') return 'var(--color-status-red)';
         if (state === 'stopped') return 'var(--color-status-yellow)';
+        if (task.status === 'review') return 'var(--color-column-review)';
         if (task.status === 'done') return 'var(--color-column-done)';
         return 'var(--color-text-tertiary)';
     });
@@ -53,9 +54,9 @@
 
     // Number of action icons in the title bar (for dynamic padding)
     let actionCount = $derived(
-        (hasChildren || !task.parent_task_id ? 1 : 0) // + subtask (always show for any task)
-        + 1 // edit
-        + 1 // move/pause/resume/idle
+        (hasChildren || !task.parent_task_id ? 1 : 0) // + subtask
+        + (inline && task.parent_task_id ? 0 : 1) // edit (hidden for inline subtasks)
+        + (inline && task.parent_task_id ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks)
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -451,11 +452,11 @@
     class:selected={isSelected}
     class:has-children={hasChildren}
     class:is-expanded={expanded}
-    class:is-subtask={!!task.parent_task_id}
+    class:is-subtask={inline && !!task.parent_task_id}
     data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
-    onclick={() => { selectedTask.set(task); showCardDetail.set(true); }}
+    onclick={(e) => { if (inline && task.parent_task_id) e.stopPropagation(); selectedTask.set(task); showCardDetail.set(true); }}
     onkeydown={handleCardKeydown}
     role="button"
     tabindex="0"
@@ -537,7 +538,7 @@
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 {/if}
-                {#if !isDoneSubtask}
+                {#if !isDoneSubtask && !(inline && task.parent_task_id)}
                 <button
                     type="button"
                     class="action-icon"
@@ -596,6 +597,8 @@
                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
+                {:else if inline && task.parent_task_id}
+                    <!-- no move button for inline subtasks -->
                 {:else}
                     <button
                         type="button"
@@ -677,7 +680,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} />
             {/each}
         </div>
     {/if}
@@ -1142,10 +1145,15 @@
         top: 0;
         left: 0;
         height: 100%;
-        background: hsl(calc(120 * var(--pct, 0) / 100) 65% 45%);
         opacity: 0.35;
-        transition: width 0.3s ease, background 0.3s ease;
+        transition: width 0.3s ease;
         pointer-events: none;
+        /* Theme colors: red(#F85149) -> orange(#D29922) -> green(#3FB950) */
+        background: hsl(
+            calc(4 + var(--pct, 0) * 1.36),
+            calc(93% - var(--pct, 0) * 0.66%),
+            calc(64% - var(--pct, 0) * 0.34%)
+        );
     }
     .subtask-progress-bar.is-expanded .subtask-progress-fill {
         opacity: 0.5;

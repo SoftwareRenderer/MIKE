@@ -70,7 +70,7 @@
             <button class="add-task-btn" onclick={onAddTask} title="Add a new task">+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} />
+            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} inline={false} />
         {/each}
     </div>
 </div>

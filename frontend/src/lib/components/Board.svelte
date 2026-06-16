@@ -54,7 +54,12 @@
      */
     function getTasksForColumn(status: string): Task[] {
         return tasks
-            .filter(t => t.status === status && !subtaskIds.has(t.id))
+            .filter(t => {
+                if (t.status !== status) return false;
+                // Show root tasks always, subtasks only in review/done columns
+                if (!subtaskIds.has(t.id)) return true;
+                return status === 'review' || status === 'done';
+            })
             .sort((a, b) => a.column_order - b.column_order);
     }
 
