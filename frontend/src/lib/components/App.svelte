@@ -28,10 +28,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     /**
      * Update the URL to reflect the current navigation state.
      * Sets project/task as provided, leaves other params (e.g., `thread`) untouched.
-     * Uses replaceState to avoid polluting browser history.
      * @param clearThread Also remove the `thread` param (use when leaving task detail).
+     * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
      */
-    function updateUrl(params: { project?: string | null; task?: string | null }, clearThread = false) {
+    function updateUrl(params: { project?: string | null; task?: string | null }, clearThread = false, push = false) {
         const url = new URL(location.href);
         url.searchParams.delete('project');
         url.searchParams.delete('task');
@@ -40,7 +40,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         if (params.task) url.searchParams.set('task', params.task);
         const newUrl = location.pathname + (url.search || '');
         if (location.pathname + location.search !== newUrl) {
-            history.replaceState(null, '', newUrl);
+            if (push) {
+                history.pushState(null, '', newUrl);
+            } else {
+                history.replaceState(null, '', newUrl);
+            }
         }
     }
 
@@ -88,7 +92,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             selectedTask.subscribe(t => {
                 selectedTaskVal = t;
                 if (t && currentProject) {
-                    updateUrl({ project: currentProject.id, task: t.id });
+                    // Skip URL update if task is already in the URL (set by pushState from user action)
+                    const urlTask = new URLSearchParams(location.search).get('task');
+                    if (urlTask !== t.id) {
+                        updateUrl({ project: currentProject.id, task: t.id });
+                    }
                 }
             }),
             taskDiffStatsStore.subscribe(v => taskDiffStats = v),
@@ -97,39 +105,50 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     });
 
     // Handle browser back/forward
-    $effect(() => {
-        function handlePopState() {
-            const params = new URLSearchParams(location.search);
-            const projectId = params.get('project');
-            const taskId = params.get('task');
+    function handlePopState() {
+        const params = new URLSearchParams(location.search);
+        const projectId = params.get('project');
+        const taskId = params.get('task');
 
-            // If URL specifies a different project, switch to it
-            if (projectId && currentProject && projectId !== currentProject.id) {
-                const targetProject = projects.find(p => p.id === projectId);
-                if (targetProject) {
-                    selectProject(targetProject);
-                    // After board loads, restoreTaskFromUrl will handle the task
-                    return;
-                }
-            }
-
-            if (taskId) {
-                const task = tasks.find(t => t.id === taskId);
-                if (task) {
-                    selectedTaskVal = task;
-                    showCardDetailVal = true;
-                    selectedTask.set(task);
-                    showCardDetail.set(true);
-                }
-            } else {
-                selectedTaskVal = null;
-                showCardDetailVal = false;
-                selectedTask.set(null);
-                showCardDetail.set(false);
-            }
-            // Notify child components (e.g., TaskChat) that the URL changed
+        // If URL has no project param, go back to project list
+        if (!projectId && currentProject) {
+            currentProject = null;
+            selectedProject.set(null);
+            tasks = [];
+            boardStore.set(null);
+            disconnectBoardStream();
+            selectedTask.set(null);
+            showCardDetail.set(false);
             window.dispatchEvent(new CustomEvent('urlchanged'));
+            return;
         }
+
+        // If URL specifies a different project, switch to it
+        if (projectId && currentProject && projectId !== currentProject.id) {
+            const targetProject = projects.find(p => p.id === projectId);
+            if (targetProject) {
+                selectProject(targetProject);
+                // After board loads, restoreTaskFromUrl will handle the task
+                window.dispatchEvent(new CustomEvent('urlchanged'));
+                return;
+            }
+        }
+
+        if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task) {
+                selectedTask.set(task);
+                showCardDetail.set(true);
+            }
+        } else {
+            selectedTask.set(null);
+            showCardDetail.set(false);
+        }
+        // Notify child components (e.g., TaskChat) that the URL changed
+        window.dispatchEvent(new CustomEvent('urlchanged'));
+    }
+
+    $effect(() => {
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
     });
@@ -212,11 +231,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
 
     function clearTaskDetail() {
+        // Push URL first so the subscription sees updated URL
+        updateUrl({ project: currentProject?.id }, true, true);
         selectedTaskVal = null;
         showCardDetailVal = false;
         selectedTask.set(null);
         showCardDetail.set(false);
-        updateUrl({ project: currentProject?.id }, true);
     }
 
     async function selectProject(p: Project) {
@@ -227,7 +247,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId });
+        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId }, false, true);
         try {
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
@@ -514,11 +534,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
-                        updateUrl({ project: currentProject?.id }, true);
+                        updateUrl({ project: currentProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
+                        // Push URL first so the subscription sees updated URL and skips replaceState
+                        updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         selectedTaskVal = t;
                         selectedTask.set(t);
-                        updateUrl({ project: currentProject?.id, task: t.id }, true);
                     }} />
                 {:else}
                     <Board 

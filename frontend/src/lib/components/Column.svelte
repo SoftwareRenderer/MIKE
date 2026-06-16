@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
+    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect }: {
         columnId: string;
         title: string;
         color: string;
@@ -17,6 +17,7 @@
         projectId?: string;
         onClearAll?: () => void;
         onCreateChildTask?: (parentId: string) => void;
+        onSelect?: (task: Task) => void;
     } = $props();
 
     let isOver = $state(false);
@@ -70,7 +71,7 @@
             <button class="add-task-btn" onclick={onAddTask} title="Add a new task">+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} inline={false} showSubtaskBorder={true} />
+            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} inline={false} showSubtaskBorder={true} onSelect={onSelect} />
         {/each}
     </div>
 </div>

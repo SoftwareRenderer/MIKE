@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
-    import { board as boardStore, showConfirm, showToast, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -81,6 +81,17 @@
         const allIds = new Set(tasks.map(t => t.id));
         persistCollapsedTasks(next, parentTaskIds);
         cleanupCollapsedTasks(allIds);
+    }
+
+    function handleSelectTask(t: Task) {
+        // Push state first so the URL is updated before the subscription fires
+        const url = new URL(location.href);
+        url.searchParams.set('task', t.id);
+        const newUrl = location.pathname + (url.search || '');
+        history.pushState(null, '', newUrl);
+        // Then set stores (subscription will see updated URL and skip updateUrl)
+        selectedTask.set(t);
+        showCardDetail.set(true);
     }
 
     const columns = [
@@ -164,6 +175,7 @@
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
             onCreateChildTask={onCreateChildTask}
             onClearAll={col.id === 'done' ? handleClearDone : undefined}
+            onSelect={handleSelectTask}
             {projectId}
         />
     {/each}

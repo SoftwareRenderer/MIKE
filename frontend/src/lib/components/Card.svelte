@@ -703,7 +703,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} />
             {/each}
         </div>
     {/if}
