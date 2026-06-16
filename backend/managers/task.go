@@ -105,13 +105,9 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		}
 		// Validate parent_task_id if provided
 		if task.ParentTaskID != "" {
-			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
+			_, err := h.store.GetTask(projectID, task.ParentTaskID)
 			if err != nil {
 				httputil.JSONError(w, http.StatusBadRequest, "parent task not found")
-				return
-			}
-			if parent.Status != "backlog" {
-				httputil.JSONError(w, http.StatusBadRequest, "parent task must be in backlog")
 				return
 			}
 			// Prevent self-reference (won't happen for new tasks, but guard anyway)
@@ -274,10 +270,33 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		task.StatusState = "idle"
 	}
 	if req.Status == "in_progress" && task.StatusState != "running" {
-		if err := h.executor.StartTask(projectID, taskID); err != nil {
-			log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
-			task.StatusState = "failed"
-			task.Output = err.Error()
+		// If this task is a subtask, use subtask-aware start (moves parent + siblings)
+		if task.ParentTaskID != "" {
+			if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
+				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
+				task.StatusState = "failed"
+				task.Output = err.Error()
+			}
+		} else {
+			// Check if task has subtasks — if so, use LLM to pick one
+			children, _ := h.store.GetChildren(taskID)
+			if len(children) > 0 {
+				selectedID := h.SelectSubtaskToStart(task, children)
+				if selectedID != "" {
+					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
+					if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
+						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
+						task.StatusState = "failed"
+						task.Output = err.Error()
+					}
+				}
+			} else {
+				if err := h.executor.StartTask(projectID, taskID); err != nil {
+					log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
+					task.StatusState = "failed"
+					task.Output = err.Error()
+				}
+			}
 		}
 	}
 	if err := h.store.UpdateTask(task); err != nil {
@@ -703,4 +722,334 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 	if broadcast {
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}
+}
+
+// HandleStartWithSubtasks is the HTTP handler for starting a task.
+// If the task has incomplete subtasks, it uses the LLM to pick one and starts it.
+// If the task has no subtasks, it starts normally.
+func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Check if task has children
+	children, err := h.store.GetChildren(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("get children: %v", err))
+		return
+	}
+
+	if len(children) > 0 {
+		// Task has subtasks — use LLM to pick the best one
+		selectedID := h.SelectSubtaskToStart(task, children)
+		if selectedID == "" {
+			// All subtasks are done — mark parent as done
+			task.Status = "done"
+			task.StatusState = "completed"
+			task.UpdatedAt = time.Now().UTC()
+			_ = h.store.UpdateTask(task)
+			h.boardStreamMgr.Broadcast(projectID)
+			httputil.JSONResponse(w, http.StatusOK, task)
+			return
+		}
+		log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
+		if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
+			log.Printf("[start-parent] task=%s error: %v", taskID, err)
+			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.boardStreamMgr.Broadcast(projectID)
+		startedTask, _ := h.store.GetTask(projectID, selectedID)
+		httputil.JSONResponse(w, http.StatusOK, startedTask)
+		return
+	}
+
+	// No subtasks — start normally
+	if err := h.executor.StartTask(projectID, taskID); err != nil {
+		log.Printf("[start] task=%s error: %v", taskID, err)
+		if strings.Contains(err.Error(), "already running") {
+			httputil.JSONError(w, http.StatusConflict, err.Error())
+		} else {
+			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	log.Printf("[start] task=%s started", taskID)
+	h.boardStreamMgr.Broadcast(projectID)
+	task, _ = h.store.GetTask(projectID, taskID)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// HandleStopWithCascade is the HTTP handler for stopping a task.
+// If the task has running descendants, it stops them all.
+func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if task has descendants
+	descendants, _ := h.store.GetAllDescendants(taskID)
+	hasDescendants := len(descendants) > 0
+
+	if hasDescendants {
+		if err := h.StopTaskAndDescendants(projectID, taskID); err != nil {
+			httputil.JSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+	} else {
+		if err := h.executor.StopTask(taskID); err != nil {
+			httputil.JSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+	}
+
+	h.boardStreamMgr.Broadcast(projectID)
+	task, _ := h.store.GetTask(projectID, taskID)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// HandleStartSubtask explicitly starts a subtask, moving parent + siblings to in_progress.
+func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
+		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.boardStreamMgr.Broadcast(projectID)
+	task, _ := h.store.GetTask(projectID, taskID)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// SelectSubtaskToStart uses the LLM to pick the best subtask to start first.
+// Returns the ID of the selected subtask, or the first incomplete subtask as fallback.
+func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
+	// Filter to incomplete subtasks only
+	var incomplete []types.Task
+	for _, s := range subtasks {
+		if s.Status != "done" {
+			incomplete = append(incomplete, s)
+		}
+	}
+	if len(incomplete) == 0 {
+		return ""
+	}
+	if len(incomplete) == 1 {
+		return incomplete[0].ID
+	}
+
+	// Build subtask list for LLM
+	var subtaskParts []string
+	for i, s := range incomplete {
+		promptPreview := s.Prompt
+		if len(promptPreview) > 300 {
+			promptPreview = promptPreview[:300] + "..."
+		}
+		subtaskParts = append(subtaskParts, fmt.Sprintf("Subtask %d (ID: %s):\n  Title: %s\n  Description: %s",
+			i+1, s.ID, s.Title, promptPreview))
+	}
+
+	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
+
+Parent task:
+  Title: %s
+  Description: %s
+
+Incomplete subtasks:
+%s
+
+Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
+		parent.Title, parent.Prompt[:minLen(len(parent.Prompt), 500)], strings.Join(subtaskParts, "\n\n"))
+
+	serverURL := parent.LlamaServerURL
+	modelName := parent.ModelName
+	if serverURL == "" || modelName == "" {
+		log.Printf("[subtask-select] task=%s no LLM config, using fallback", parent.ID)
+		return incomplete[0].ID
+	}
+
+	client := llama.NewLlamaClient(serverURL, modelName, "off")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "You are a task scheduler. Return only a task ID."},
+		{Role: "user", Content: prompt},
+	}
+
+	_, response, err := client.ChatCompletion(ctx, messages)
+	if err != nil {
+		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
+		return incomplete[0].ID
+	}
+
+	selectedID := strings.TrimSpace(response)
+	// Validate the returned ID matches one of the incomplete subtasks
+	for _, s := range incomplete {
+		if s.ID == selectedID {
+			log.Printf("[subtask-select] task=%s LLM selected subtask %s", parent.ID, selectedID)
+			return selectedID
+		}
+	}
+
+	log.Printf("[subtask-select] task=%s LLM returned invalid ID %q, using fallback", parent.ID, selectedID)
+	return incomplete[0].ID
+}
+
+// StartSubtaskWithParent moves the parent and all sibling subtasks to in_progress,
+// then starts the executor for the specified subtask only.
+func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string) error {
+	subtask, err := h.store.GetTask(projectID, subtaskID)
+	if err != nil {
+		return fmt.Errorf("get subtask: %w", err)
+	}
+	if subtask.ParentTaskID == "" {
+		return fmt.Errorf("task has no parent")
+	}
+
+	parent, err := h.store.GetTask(projectID, subtask.ParentTaskID)
+	if err != nil {
+		return fmt.Errorf("get parent: %w", err)
+	}
+
+	// Move parent to in_progress (no auto-start)
+	parent.Status = "in_progress"
+	parent.StatusState = "idle"
+	parent.UpdatedAt = time.Now().UTC()
+	if err := h.store.UpdateTask(parent); err != nil {
+		return fmt.Errorf("update parent: %w", err)
+	}
+
+	// Move all sibling subtasks to in_progress (no auto-start)
+	siblings, err := h.store.GetChildren(parent.ID)
+	if err != nil {
+		return fmt.Errorf("get siblings: %w", err)
+	}
+	for _, sibling := range siblings {
+		if sibling.ID == subtaskID {
+			continue // the target subtask is handled below
+		}
+		sibling.Status = "in_progress"
+		sibling.StatusState = "idle"
+		sibling.UpdatedAt = time.Now().UTC()
+		if err := h.store.UpdateTask(&sibling); err != nil {
+			log.Printf("[start-subtask] failed to update sibling %s: %v", sibling.ID, err)
+		}
+	}
+
+	h.boardStreamMgr.Broadcast(projectID)
+
+	// Start the subtask executor
+	return h.executor.StartTask(projectID, subtaskID)
+}
+
+// StopTaskAndDescendants stops a task and all its running descendants.
+func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
+	// Get all descendants
+	descendants, err := h.store.GetAllDescendants(taskID)
+	if err != nil {
+		log.Printf("[stop-cascade] failed to get descendants of %s: %v", taskID, err)
+	}
+
+	// Stop all running descendants (leaf-first order: reverse the list)
+	for i := len(descendants) - 1; i >= 0; i-- {
+		d := descendants[i]
+		if d.StatusState == "running" {
+			if err := h.executor.StopTask(d.ID); err != nil {
+				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
+			}
+			d.StatusState = "stopped"
+			d.Output = "Stopped by parent"
+			d.UpdatedAt = time.Now().UTC()
+			_ = h.store.UpdateTask(&d)
+		}
+	}
+
+	// Stop the task itself
+	if err := h.executor.StopTask(taskID); err != nil {
+		// Task might not be running (parent may be idle while subtask runs)
+		task, _ := h.store.GetTask(projectID, taskID)
+		if task != nil && task.StatusState == "running" {
+			task.StatusState = "stopped"
+			task.Output = "Stopped by user"
+			task.UpdatedAt = time.Now().UTC()
+			_ = h.store.UpdateTask(task)
+		}
+		return nil // executor not running is OK
+	}
+
+	task, _ := h.store.GetTask(projectID, taskID)
+	if task != nil {
+		task.StatusState = "stopped"
+		task.Output = "Stopped by user"
+		task.UpdatedAt = time.Now().UTC()
+		_ = h.store.UpdateTask(task)
+	}
+
+	return nil
+}
+
+// CheckParentCompletion checks if all subtasks of a task are done.
+// If so, moves the parent to done (recursively for nested parents).
+func (h *TaskHandler) CheckParentCompletion(projectID, taskID string) {
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil || task.ParentTaskID == "" {
+		return
+	}
+
+	parent, err := h.store.GetTask(projectID, task.ParentTaskID)
+	if err != nil {
+		return
+	}
+
+	children, err := h.store.GetChildren(parent.ID)
+	if err != nil {
+		return
+	}
+	if len(children) == 0 {
+		return
+	}
+
+	// Check if all children are done
+	allDone := true
+	for _, child := range children {
+		if child.Status != "done" {
+			allDone = false
+			break
+		}
+	}
+	if !allDone {
+		return
+	}
+
+	// All children done — move parent to done
+	parent.Status = "done"
+	parent.StatusState = "completed"
+	parent.UpdatedAt = time.Now().UTC()
+	if err := h.store.UpdateTask(parent); err != nil {
+		log.Printf("[parent-completion] failed to mark parent %s as done: %v", parent.ID, err)
+		return
+	}
+	log.Printf("[parent-completion] task=%s all subtasks done, marking parent %s as done", taskID, parent.ID)
+	h.boardStreamMgr.Broadcast(projectID)
+
+	// Recursively check grandparent
+	h.CheckParentCompletion(projectID, parent.ID)
+}
+
+func minLen(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

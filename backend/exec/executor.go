@@ -169,6 +169,51 @@ func (te *TaskExecutor) ResetForTest() {
 	te.streamMgr.ResetForTest()
 }
 
+// CheckAndCompleteParent checks if all subtasks of a task's parent are done.
+// If so, marks the parent as done (recursively for nested parents).
+// Called after a subtask completes (task_complete tool or commit-and-done).
+func (te *TaskExecutor) CheckAndCompleteParent(projectID, taskID string) {
+	te.checkParentCompletionRecursive(projectID, taskID)
+}
+
+func (te *TaskExecutor) checkParentCompletionRecursive(projectID, taskID string) {
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil || task.ParentTaskID == "" {
+		return
+	}
+
+	parent, err := te.store.GetTask(projectID, task.ParentTaskID)
+	if err != nil {
+		return
+	}
+
+	children, err := te.store.GetChildren(parent.ID)
+	if err != nil || len(children) == 0 {
+		return
+	}
+
+	// Check if all children are done
+	for _, child := range children {
+		if child.Status != "done" {
+			return
+		}
+	}
+
+	// All children done — mark parent as done
+	parent.Status = "done"
+	parent.StatusState = "completed"
+	parent.UpdatedAt = time.Now().UTC()
+	if err := te.store.UpdateTask(parent); err != nil {
+		log.Printf("[parent-completion] failed to mark parent %s as done: %v", parent.ID, err)
+		return
+	}
+	log.Printf("[parent-completion] task=%s all subtasks done, marking parent %s as done", taskID, parent.ID)
+	te.boardStreamMgr.Broadcast(projectID)
+
+	// Recursively check grandparent
+	te.checkParentCompletionRecursive(projectID, parent.ID)
+}
+
 // StartTask begins AI execution for a task.
 func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)

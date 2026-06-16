@@ -16,6 +16,7 @@ var (
 	reProjectTaskByID      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)$`)
 	reTaskMove             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/move$`)
 	reTaskStart            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/start$`)
+	reTaskStartSubtask     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/start-subtask$`)
 	reTaskStop             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stop$`)
 	reTaskRetry            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/retry$`)
 	reTaskResume           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
@@ -202,11 +203,15 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if m := reTaskStart.FindStringSubmatch(path); m != nil {
-		s.executor.HandleStart(w, r, m[1], m[2])
+		s.taskHandler.HandleStartWithSubtasks(w, r, m[1], m[2])
+		return
+	}
+	if m := reTaskStartSubtask.FindStringSubmatch(path); m != nil {
+		s.taskHandler.HandleStartSubtask(w, r, m[1], m[2])
 		return
 	}
 	if m := reTaskStop.FindStringSubmatch(path); m != nil {
-		s.executor.HandleStop(w, r, m[1], m[2])
+		s.taskHandler.HandleStopWithCascade(w, r, m[1], m[2])
 		return
 	}
 	if m := reTaskRetry.FindStringSubmatch(path); m != nil {

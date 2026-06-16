@@ -2,13 +2,45 @@
     import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, depth = 0, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; depth?: number; onCreateChildTask?: (parentId: string) => void } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void } = $props();
+
+    // Children of this task (from the map passed by Board)
+    let children = $derived(childrenMap?.get(task.id) ?? []);
+    let hasChildren = $derived(children.length > 0);
+
+    // Subtask progress: parent counts as 1 unit, pct = (doneChildren + parentDone) / (totalChildren + 1)
+    let subtaskProgress = $derived.by(() => {
+        if (!hasChildren) return null;
+        const totalChildren = children.length;
+        const doneChildren = children.filter(c => c.status === 'done').length;
+        const parentDone = task.status === 'done' ? 1 : 0;
+        const total = totalChildren + 1;
+        const done = doneChildren + parentDone;
+        return { done, total, pct: done / total };
+    });
+
+    // Expand/collapse state (managed by Board for stability)
+    let expanded = $derived(expandedTasks?.has(task.id) ?? false);
+
+    // Check if any descendant is running (for pause button on parent)
+    let hasRunningDescendant = $derived.by(() => {
+        if (!hasChildren) return task.status_state === 'running';
+        for (const child of children) {
+            if (child.status_state === 'running') return true;
+            // Recursively check (childrenMap has all tasks, not just same-column)
+            const grandChildren = childrenMap?.get(child.id) ?? [];
+            for (const gc of grandChildren) {
+                if (gc.status_state === 'running') return true;
+            }
+        }
+        return task.status_state === 'running';
+    });
 
     // Number of action icons in the title bar (for dynamic padding)
     let actionCount = $derived(
-        (columnId === 'backlog' && !task.parent_task_id ? 1 : 0) // + subtask
+        (hasChildren || !task.parent_task_id ? 1 : 0) // + subtask (always show for any task)
         + 1 // edit
         + 1 // move/pause/resume/idle
     );
@@ -60,17 +92,18 @@
     let modelBadge = $derived.by(() => {
         const cfg = $configStore;
         const providers = cfg?.providers || [];
-        if (providers.length === 0) return { text: null, color: '' };
+        if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
         // Use task model if set, otherwise fall back to default model
         const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
         const activeModel = task.model_name || (providers[0]?.default_model && providers[0]?.models.some(m => getModelName(m) === providers[0].default_model) ? providers[0].default_model : providers[0]?.models.length > 0 ? getModelName(providers[0].models[0]) : null);
-        if (!activeModel) return { text: null, color: '' };
+        if (!activeModel) return { text: null, provider: null, model: null, color: '' };
         // Find matching provider by URL
         const provider = providers.find(p => p.url === task.llama_server_url);
         // Auto: show provider name only when 2+ providers
         const showProvider = providers.length > 1;
-        const text = showProvider && provider ? `${provider.display_name} · ${activeModel}` : activeModel;
-        return { text, color: getModelColor(activeModel) };
+        const provName = showProvider && provider ? provider.display_name : null;
+        const text = provName ? `${provName} · ${activeModel}` : activeModel;
+        return { text, provider: provName, model: activeModel, color: getModelColor(activeModel) };
     });
 
     // Model picker dropdown - only in Backlog column (task not yet started)
@@ -291,9 +324,10 @@
         $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state
     );
 
-    let isPausable = $derived(columnId === 'in_progress' && liveStatusState !== 'idle' && !STOPPED_STATES.includes(liveStatusState));
+    // Pause/Resume: for parent tasks, show based on descendant state
+    let isPausable = $derived(columnId === 'in_progress' && hasRunningDescendant);
     let isResumable = $derived(columnId === 'in_progress' && STOPPED_STATES.includes(liveStatusState));
-    let isIdle = $derived(columnId === 'in_progress' && liveStatusState === 'idle');
+    let isIdle = $derived(columnId === 'in_progress' && liveStatusState === 'idle' && !hasRunningDescendant);
 
     async function handlePause(e: MouseEvent) {
         e.stopPropagation();
@@ -364,12 +398,46 @@
             onCreateChildTask(task.id);
         }
     }
+
+    async function handleStart(e: MouseEvent) {
+        e.stopPropagation();
+        if (!projectId) return;
+        try {
+            // If this is a subtask, use the start-subtask endpoint
+            if (task.parent_task_id) {
+                const { startSubtask } = await import('$lib/api');
+                const updated = await startSubtask(projectId, task.id);
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === updated.id ? updated : t) };
+                });
+            } else {
+                // Parent task or root task — use normal start (backend handles LLM subtask selection)
+                const updated = await startTask(projectId, task.id);
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === updated.id ? updated : t) };
+                });
+            }
+        } catch (err) {
+            console.error('Failed to start task:', err);
+            showToast('Failed to start task: ' + String(err), 'error');
+        }
+    }
+
+    function toggleExpanded(e: MouseEvent) {
+        e.stopPropagation();
+        if (onToggleExpanded) {
+            onToggleExpanded(task.id);
+        }
+    }
 </script>
 
 <div
     class="card"
     class:selected={isSelected}
-    class:indented={depth > 0}
+    class:has-children={hasChildren}
+    class:is-expanded={expanded}
     data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
@@ -379,7 +447,7 @@
     tabindex="0"
     aria-label={`Open task: ${task.title || '(untitled)'}`}
     aria-current={isSelected ? 'page' : undefined}
-    style={`--depth: ${depth}; --actions: ${actionCount}`}
+    style={`--actions: ${actionCount}`}
 >
     {#if editingTitle}
         <div class="card-edit-panel" onclick={(e) => e.stopPropagation()}>
@@ -444,7 +512,7 @@
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
-                {#if columnId === 'backlog' && !task.parent_task_id}
+                {#if !task.parent_task_id || hasChildren}
                     <button
                         type="button"
                         class="action-icon"
@@ -522,7 +590,7 @@
             </div>
         </div>
     {/if}
-    {#if statusBadge || modelBadge.text}
+    {#if statusBadge || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
                 <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
@@ -543,12 +611,12 @@
                         aria-expanded={modelPickerOpen}
                         title="Change model"
                     >
-                        {modelBadge.text}
+                        {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
                         <svg class="badge-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                 {:else}
                     <div class="badge model-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
-                        {modelBadge.text}
+                        {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
                     </div>
                 {/if}
             {/if}
@@ -560,6 +628,28 @@
                     {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
                 </span>
             {/if}
+        </div>
+    {/if}
+    {#if subtaskProgress}
+        <button
+            type="button"
+            class="subtask-progress-bar"
+            class:is-expanded={expanded}
+            style="--pct: {subtaskProgress.pct * 100}"
+            onclick={toggleExpanded}
+            aria-expanded={expanded}
+        >
+            <span class="subtask-progress-fill" style="width: {subtaskProgress.pct * 100}%"></span>
+            <span class="subtask-progress-pct">{Math.round(subtaskProgress.pct * 100)}%</span>
+            <span class="subtask-progress-count">{subtaskProgress.total - 1} subtask{subtaskProgress.total - 1 !== 1 ? 's' : ''}</span>
+            <svg class="subtask-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+    {/if}
+    {#if expanded && hasChildren}
+        <div class="subtask-list">
+            {#each children as child}
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} />
+            {/each}
         </div>
     {/if}
 </div>
@@ -611,20 +701,6 @@
         position: relative;
         transition: border-color 0.15s ease;
         --depth: 0;
-    }
-    .card.indented {
-        padding-left: calc(12px + var(--depth) * 1.25rem);
-        border-left: 2px solid var(--color-border);
-    }
-    .card.indented::before {
-        content: '';
-        position: absolute;
-        left: calc(var(--depth) * 1.25rem - 0.5px);
-        top: 0;
-        bottom: 0;
-        width: 1px;
-        background: var(--color-border);
-        pointer-events: none;
     }
     .card:hover {
         border-color: var(--color-border-bright);
@@ -723,20 +799,6 @@
         color: var(--color-text-tertiary);
         padding: 0 4px;
         pointer-events: none;
-    }
-    .card-title-input {
-        font-size: 0.875rem;
-        font-weight: 500;
-        margin-bottom: 6px;
-        width: 100%;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-accent);
-        border-radius: var(--radius-sm);
-        padding: 2px 6px;
-        padding-right: 64px;
-        color: var(--color-text-primary);
-        font-family: inherit;
-        outline: none;
     }
     .card-edit-panel {
         background: var(--color-surface-1);
@@ -910,6 +972,22 @@
         opacity: 0.5;
         transition: transform 0.15s ease;
     }
+    .model-badge {
+        max-width: 100%;
+        overflow: hidden;
+    }
+    .badge-provider {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+    }
+    .badge-model {
+        flex-shrink: 0;
+    }
+    .badge-sep {
+        flex-shrink: 0;
+    }
     .diff-stats {
         display: inline-flex;
         align-items: center;
@@ -996,5 +1074,116 @@
         .card-title-text {
             padding-right: calc(var(--actions) * 28px + 6px);
         }
+    }
+
+    /* Subtask progress bar (full-width) */
+    .subtask-progress-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        height: 22px;
+        margin-top: 8px;
+        padding: 0 6px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        transition: background 0.15s ease;
+    }
+    .subtask-progress-bar:hover {
+        background: var(--color-surface-4);
+    }
+    .subtask-progress-bar.is-expanded {
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-3));
+    }
+    .subtask-progress-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        background: hsl(calc(120 * var(--pct, 0) / 100) 65% 45%);
+        opacity: 0.35;
+        transition: width 0.3s ease, background 0.3s ease;
+        pointer-events: none;
+    }
+    .subtask-progress-bar.is-expanded .subtask-progress-fill {
+        opacity: 0.5;
+    }
+    .subtask-progress-pct {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1;
+        font-size: 0.75rem;
+        font-weight: 600;
+        font-family: inherit;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-text-secondary);
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+    .subtask-progress-count {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1;
+        font-size: 0.7rem;
+        font-weight: 500;
+        font-family: inherit;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-text-secondary);
+        opacity: 0;
+        white-space: nowrap;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+    .subtask-progress-bar:hover .subtask-progress-count {
+        opacity: 1;
+    }
+    .subtask-progress-bar:hover .subtask-progress-pct {
+        opacity: 0;
+    }
+    .subtask-progress-bar:hover .subtask-progress-pct {
+        color: var(--color-text-primary);
+    }
+    .subtask-progress-bar.is-expanded .subtask-progress-pct {
+        color: var(--color-accent);
+    }
+    .subtask-chevron {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1;
+        opacity: 0.5;
+        transition: transform 0.15s ease;
+        pointer-events: none;
+    }
+    .subtask-progress-bar.is-expanded .subtask-chevron {
+        transform: translateY(-50%) rotate(180deg);
+    }
+
+    /* Subtask list (expandable) */
+    .subtask-list {
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .subtask-list :global(.card) {
+        background: var(--color-surface-1);
+    }
+
+    /* Card with children */
+    .card.has-children {
+        border-left: 2px solid var(--color-accent);
+    }
+    .card.is-expanded {
+        border-color: var(--color-accent);
     }
 </style>

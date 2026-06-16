@@ -2,11 +2,14 @@
     import type { Task } from '$lib/types';
     import Card from './Card.svelte';
 
-    let { columnId, title, color, tasks, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
+    let { columnId, title, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask }: {
         columnId: string;
         title: string;
         color: string;
-        tasks: (Task & { depth?: number })[];
+        tasks: Task[];
+        childrenMap: Map<string, Task[]>;
+        expandedTasks: Set<string>;
+        onToggleExpanded: (taskId: string) => void;
         onDragStart: (taskId: string) => void;
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
@@ -66,9 +69,7 @@
             <button class="add-task-btn" onclick={onAddTask} title="Add a new task">+ Add Task</button>
         {/if}
         {#each tasks as task (task.id)}
-            {#key task.id + '-' + task.status_state}
-                <Card {task} {columnId} {projectId} depth={task.depth ?? 0} onCreateChildTask={onCreateChildTask} />
-            {/key}
+            <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} />
         {/each}
     </div>
 </div>

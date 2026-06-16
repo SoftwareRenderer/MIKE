@@ -6,7 +6,40 @@
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
+    // Build a lookup map for children of each task
+    const childrenMap = $derived.by(() => {
+        const map = new Map<string, Task[]>();
+        for (const t of tasks) {
+            if (t.parent_task_id) {
+                if (!map.has(t.parent_task_id)) {
+                    map.set(t.parent_task_id, []);
+                }
+                map.get(t.parent_task_id)!.push(t);
+            }
+        }
+        // Sort children by column_order
+        for (const [, children] of map) {
+            children.sort((a, b) => a.column_order - b.column_order);
+        }
+        return map;
+    });
+
+    // All task IDs that are subtasks (have a parent)
+    const subtaskIds = $derived(new Set(tasks.filter(t => t.parent_task_id).map(t => t.id)));
+
     let draggedTaskId: string | null = $state(null);
+
+    // Track which task cards are expanded (stable across re-renders)
+    let expandedTasks = $state<Set<string>>(new Set());
+    function toggleTaskExpanded(taskId: string) {
+        const next = new Set(expandedTasks);
+        if (next.has(taskId)) {
+            next.delete(taskId);
+        } else {
+            next.add(taskId);
+        }
+        expandedTasks = next;
+    }
 
     const columns = [
         { id: 'backlog', title: 'Backlog', color: 'var(--color-column-backlog)' },
@@ -16,49 +49,13 @@
     ];
 
     /**
-     * Get tasks for a column, ordered with parents first and children nested underneath.
-     * Returns tasks with a `depth` property for indentation.
+     * Get root tasks for a column (tasks without a parent, or whose parent is not in this column).
+     * Subtasks are shown inline when the parent card is expanded.
      */
-    function getTasksForColumn(status: string): (Task & { depth: number })[] {
-        const columnTasks = tasks.filter(t => t.status === status);
-        const taskMap = new Map<string, Task>();
-        for (const t of columnTasks) {
-            taskMap.set(t.id, t);
-        }
-
-        // Build children map
-        const childrenMap = new Map<string, Task[]>();
-        const rootTasks: Task[] = [];
-        for (const t of columnTasks) {
-            if (t.parent_task_id && taskMap.has(t.parent_task_id)) {
-                if (!childrenMap.has(t.parent_task_id)) {
-                    childrenMap.set(t.parent_task_id, []);
-                }
-                childrenMap.get(t.parent_task_id)!.push(t);
-            } else {
-                rootTasks.push(t);
-            }
-        }
-
-        // Sort root tasks by column_order
-        rootTasks.sort((a, b) => a.column_order - b.column_order);
-        // Sort children within each parent by column_order
-        for (const [, children] of childrenMap) {
-            children.sort((a, b) => a.column_order - b.column_order);
-        }
-
-        // Flatten: parent, then children (depth 1)
-        const result: (Task & { depth: number })[] = [];
-        for (const t of rootTasks) {
-            result.push({ ...t, depth: 0 });
-            const children = childrenMap.get(t.id);
-            if (children) {
-                for (const child of children) {
-                    result.push({ ...child, depth: 1 });
-                }
-            }
-        }
-        return result;
+    function getTasksForColumn(status: string): Task[] {
+        return tasks
+            .filter(t => t.status === status && !subtaskIds.has(t.id))
+            .sort((a, b) => a.column_order - b.column_order);
     }
 
     function handleDragStart(taskId: string) {
@@ -108,10 +105,13 @@
             title={col.title}
             color={col.color}
             tasks={getTasksForColumn(col.id)}
+            childrenMap={childrenMap}
+            expandedTasks={expandedTasks}
+            onToggleExpanded={toggleTaskExpanded}
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
-            onCreateChildTask={col.id === 'backlog' ? onCreateChildTask : undefined}
+            onCreateChildTask={onCreateChildTask}
             onClearAll={col.id === 'done' ? handleClearDone : undefined}
             {projectId}
         />

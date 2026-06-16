@@ -169,6 +169,70 @@ func (s *Store) ReorderTasks(projectID string, reorders []types.ReorderRequest) 
 	return tx.Commit()
 }
 
+// GetChildren returns all tasks whose parent_task_id matches the given taskID.
+func (s *Store) GetChildren(taskID string) ([]types.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, output, status_state, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_pr, plan_mode, parent_task_id, title_generating, current_thread_id, created_at, updated_at FROM tasks WHERE parent_task_id = ? ORDER BY column_order ASC`,
+		taskID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tasks := []types.Task{}
+	for rows.Next() {
+		var t types.Task
+		if err := scanTask(rows, &t); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// GetAllDescendants recursively returns all descendant tasks (children, grandchildren, etc.).
+func (s *Store) GetAllDescendants(taskID string) ([]types.Task, error) {
+	children, err := s.GetChildren(taskID)
+	if err != nil {
+		return nil, err
+	}
+	var descendants []types.Task
+	for _, child := range children {
+		descendants = append(descendants, child)
+		grandchildren, err := s.GetAllDescendants(child.ID)
+		if err != nil {
+			return nil, err
+		}
+		descendants = append(descendants, grandchildren...)
+	}
+	return descendants, nil
+}
+
+// GetAncestorChain walks up the parent_task_id chain and returns all ancestors (immediate parent first).
+func (s *Store) GetAncestorChain(taskID string) ([]types.Task, error) {
+	var chain []types.Task
+	currentID := taskID
+	for {
+		task, err := s.GetTaskByTaskID(currentID)
+		if err != nil {
+			return chain, nil // stop on missing ancestor
+		}
+		if task.ParentTaskID == "" {
+			break
+		}
+		// Get the parent
+		parent, err := s.GetTaskByTaskID(task.ParentTaskID)
+		if err != nil {
+			break
+		}
+		chain = append(chain, *parent)
+		currentID = parent.ID
+	}
+	return chain, nil
+}
+
 // ClearStaleTitleGenerating sets title_generating to false for all tasks.
 // Called on server startup to clear flags left by crashed/restarted title generation goroutines.
 func (s *Store) ClearStaleTitleGenerating() error {

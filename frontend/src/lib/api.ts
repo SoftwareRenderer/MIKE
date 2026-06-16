@@ -140,6 +140,12 @@ export async function startTask(projectId: string, taskId: string): Promise<Task
     return res.json();
 }
 
+export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start-subtask`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, 'Failed to start subtask');
+    return res.json();
+}
+
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
     const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to stop task');
