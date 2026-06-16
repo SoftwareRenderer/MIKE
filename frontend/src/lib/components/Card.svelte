@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -26,10 +26,9 @@
 
     // Status color for subtask indicator
     let statusColor = $derived.by(() => {
-        const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
-        if (state === 'running') return 'var(--color-status-blue)';
-        if (state === 'failed') return 'var(--color-status-red)';
-        if (state === 'stopped') return 'var(--color-status-yellow)';
+        // Use column color for subtask left border
+        if (task.status === 'backlog') return 'var(--color-column-backlog)';
+        if (task.status === 'in_progress') return 'var(--color-column-in-progress)';
         if (task.status === 'review') return 'var(--color-column-review)';
         if (task.status === 'done') return 'var(--color-column-done)';
         return 'var(--color-text-tertiary)';
@@ -214,6 +213,21 @@
     });
 
     let isSelected = $state(false);
+    // Don't show selected highlight on parent when any descendant is selected
+    let showSelected = $derived.by(() => {
+        if (!isSelected) return false;
+        const sel = $selectedTask;
+        if (!sel || !sel.parent_task_id) return true;
+        // Walk up the ancestor chain to see if this task is an ancestor of the selected task
+        let current = sel;
+        while (current) {
+            if (current.parent_task_id === task.id) return false;
+            // Find the parent task in the board store
+            const parent = $boardStore?.tasks.find(t => t.id === current.parent_task_id);
+            current = parent || null;
+        }
+        return true;
+    });
 
     $effect(() => {
         const unsub = selectedTask.subscribe(t => {
@@ -449,14 +463,14 @@
 
 <div
     class="card"
-    class:selected={isSelected}
+    class:selected={showSelected}
     class:has-children={hasChildren}
     class:is-expanded={expanded}
     class:is-subtask={inline && !!task.parent_task_id}
     data-task-id={task.id}
     draggable={!isMobile}
     ondragstart={handleDragStart}
-    onclick={(e) => { if (inline && task.parent_task_id) e.stopPropagation(); selectedTask.set(task); showCardDetail.set(true); }}
+    onclick={(e) => { if (inline && task.parent_task_id) e.stopPropagation(); if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); } }}
     onkeydown={handleCardKeydown}
     role="button"
     tabindex="0"
@@ -735,7 +749,7 @@
         --depth: 0;
     }
     .card.has-children:not(.is-subtask) {
-        border-color: var(--column-color, var(--color-border));
+        border-left: 3px solid var(--column-color, var(--color-border));
     }
     .card.is-subtask {
         border-left: 3px solid var(--status-color, var(--color-border));
@@ -743,13 +757,18 @@
     .card:hover {
         border-color: var(--color-border-bright);
     }
+    .card.has-children:not(.is-subtask):hover {
+        border-left-color: var(--column-color, var(--color-border));
+    }
     .card.is-subtask:hover {
         border-left-color: var(--status-color, var(--color-border));
     }
     .card.selected {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px var(--color-accent);
         background: var(--color-surface-3);
+    }
+    .card.selected.is-subtask {
+        border-left-color: var(--status-color, var(--color-border));
     }
     .card:active {
         cursor: grabbing;
@@ -1229,7 +1248,5 @@
     .card.has-children {
         border-left: 2px solid var(--color-accent);
     }
-    .card.is-expanded {
-        border-color: var(--color-accent);
-    }
+    /* Expanded state indicated by progress bar, not border */
 </style>

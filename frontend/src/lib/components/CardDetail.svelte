@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, expandedTasks as expandedTasksStore } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -13,6 +13,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
+    import Card from './Card.svelte';
 
     let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
 
@@ -153,6 +154,50 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
     let isMobile = $derived(false);
 
+
+    // Build children map for subtask hierarchy
+    const childrenMap = $derived.by(() => {
+        const map = new Map<string, Task[]>();
+        for (const t of allTasks) {
+            if (t.parent_task_id) {
+                if (!map.has(t.parent_task_id)) {
+                    map.set(t.parent_task_id, []);
+                }
+                map.get(t.parent_task_id)!.push(t);
+            }
+        }
+        for (const [, children] of map) {
+            children.sort((a, b) => a.column_order - b.column_order);
+        }
+        return map;
+    });
+    const subtaskIds = $derived(new Set(allTasks.filter(t => t.parent_task_id).map(t => t.id)));
+
+    // Track expanded tasks (shared store for Board + CardDetail sync)
+    let expandedTasks = $derived($expandedTasksStore);
+    
+    // Auto-expand parent of currently selected task
+    $effect(() => {
+        const parentId = task.parent_task_id;
+        if (parentId) {
+            const current = $expandedTasksStore;
+            if (!current.has(parentId)) {
+                const next = new Set(current);
+                next.add(parentId);
+                expandedTasksStore.set(next);
+            }
+        }
+    });
+    
+    function toggleTaskExpanded(taskId: string) {
+        const next = new Set($expandedTasksStore);
+        if (next.has(taskId)) {
+            next.delete(taskId);
+        } else {
+            next.add(taskId);
+        }
+        expandedTasksStore.set(next);
+    }
 
     // Column resize
     let columnsRef: HTMLDivElement | null = $state(null);
@@ -429,7 +474,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <div class="task-list">
                     {#each overviewSections as section}
-                        {@const sectionTasks = allTasks.filter(t => t.status === section.id).sort((a, b) => a.column_order - b.column_order)}
+                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (!subtaskIds.has(t.id)) return true; return section.id === "review" || section.id === "done"; }).sort((a, b) => a.column_order - b.column_order)}
                         {#if sectionTasks.length > 0}
                             <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
                                 <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
@@ -449,79 +494,19 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                 {#if !collapsedSections.has(section.id)}
                                 <div class="section-body">
                                     {#each sectionTasks as t (t.id)}
-                                    {#if editingTaskId === t.id}
-                                        <div class="task-item-editing-panel">
-                                            <div class="task-item-editing-header">
-                                                <span class="task-item-editing-title">Edit Task</span>
-                                                <button type="button" class="task-item-editing-close" onclick={cancelEditTask} aria-label="Close">✕</button>
-                                            </div>
-                                            <div class="task-item-editing-body">
-                                                <label class="task-item-editing-field">
-                                                    <span class="task-item-editing-label">Title</span>
-                                                    <input
-                                                        class="task-item-editing-input"
-                                                        type="text"
-                                                        bind:value={editingTitleDraft}
-                                                        onkeydown={(e) => { if (e.key === 'Enter') finishEditTask(); if (e.key === 'Escape') cancelEditTask(); e.stopPropagation(); }}
-                                                        bind:this={editingTitleInput}
-                                                        placeholder="Task title"
-                                                    />
-                                                </label>
-                                                {#if editingProviders.length > 0}
-                                                    <div class="task-item-editing-model-row">
-                                                        <span class="task-item-editing-label">Model</span>
-                                                        <ModelSelector
-                                                            providers={editingProviders}
-                                                            currentModel={editingModel}
-                                                            currentUrl={editingUrl}
-                                                            currentReasoningEffort={editingReasoningEffort}
-                                                            onSelect={handleEditModelSelect}
-                                                        />
-                                                    </div>
-                                                {/if}
-                                                <div class="task-item-editing-options">
-                                                    <label class="task-item-editing-checkbox">
-                                                        <input type="checkbox" bind:checked={editingPlanMode} />
-                                                        <span class="task-item-editing-option-text">
-                                                            <span class="task-item-editing-option-title">Plan mode</span>
-                                                            <span class="task-item-editing-option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
-                                                        </span>
-                                                    </label>
-                                                    <label class="task-item-editing-checkbox">
-                                                        <input type="checkbox" bind:checked={editingAutoCommit} />
-                                                        <span>Auto-commit on completion</span>
-                                                    </label>
-                                                    <label class="task-item-editing-checkbox" class:disabled={!editingAutoCommit}>
-                                                        <input type="checkbox" bind:checked={editingAutoPr} disabled={!editingAutoCommit} />
-                                                        <span>Auto-create PR branch</span>
-                                                    </label>
-                                                </div>
-                                            </div>
-                                            <div class="task-item-editing-footer">
-                                                <button type="button" class="task-item-editing-btn-cancel" onclick={cancelEditTask}>Cancel</button>
-                                                <button type="button" class="task-item-editing-btn-save" onclick={finishEditTask}>Save</button>
-                                            </div>
-                                        </div>
-                                    {:else}
-                                        <button
-                                            type="button"
-                                            class={`task-item${t.id === task.id ? ' selected' : ''}`}
-                                            onclick={() => { if (onSelectTask) onSelectTask(t); else selectedTask.set(t); activeTab = 'chat'; }}
-                                            aria-label={`Select task: ${t.title || '(untitled)'}`}
-                                            aria-current={t.id === task.id ? 'task' : undefined}
-                                            title={`Select task: ${t.title || '(untitled)'}`}
-                                        >
-                                            <span class="task-item-title">{t.title || '(untitled)'}</span>
-                                            <span class="task-item-edit-btn" onclick={(e) => startEditTaskTitle(t.id, t.title, e)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEditTaskTitle(t.id, t.title, e); } }} role="button" aria-label="Edit title" title="Edit title" tabindex="0">
-                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-                                            </span>
-                                            {#if getStatusBadge(t).text}
-                                                <span class="task-item-badge" style="color:{getStatusBadge(t).color}">
-                                                    {getStatusBadge(t).text}
-                                                </span>
-                                            {/if}
-                                        </button>
-                                    {/if}
+                                        <Card
+                                            task={t}
+                                            columnId={section.id}
+                                            projectId={task.project_id}
+                                            childrenMap={childrenMap}
+                                            expandedTasks={expandedTasks}
+                                            onToggleExpanded={toggleTaskExpanded}
+                                            columnColor={getSectionColor(section.id)}
+                                            inline={false}
+                                            onSelect={(selected) => {
+                                                if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
+                                            }}
+                                        />
                                     {/each}
                                     {#if section.id === 'backlog'}
                                         <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
@@ -760,10 +745,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         transform: rotate(-90deg);
     }
     .section-body {
-        padding: 4px 6px 6px 6px;
+        padding: 8px 6px 6px 6px;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 8px;
     }
     .task-item-add {
         width: 100%;

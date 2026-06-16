@@ -12,6 +12,7 @@ export const showConfig = writable(false);
 export const showTerminal = writable(false);
 export const showStats = writable(false);
 export const showCardDetail = writable(false);
+export const expandedTasks = writable<Set<string>>(new Set());
 
 // Task IDs that are actively streaming tokens (frontend-only, real-time)
 export const streamingTaskIds = writable<Set<string>>(new Set());

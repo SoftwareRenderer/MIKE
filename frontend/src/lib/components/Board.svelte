@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
-    import { board as boardStore, showConfirm, showToast } from '$lib/store';
+    import { board as boardStore, showConfirm, showToast, expandedTasks as expandedTasksStore } from '$lib/store';
 
     let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
 
@@ -29,16 +29,16 @@
 
     let draggedTaskId: string | null = $state(null);
 
-    // Track which task cards are expanded (stable across re-renders)
-    let expandedTasks = $state<Set<string>>(new Set());
+    // Track which task cards are expanded (shared store for Board + CardDetail sync)
+    let expandedTasks = $derived($expandedTasksStore);
     function toggleTaskExpanded(taskId: string) {
-        const next = new Set(expandedTasks);
+        const next = new Set($expandedTasksStore);
         if (next.has(taskId)) {
             next.delete(taskId);
         } else {
             next.add(taskId);
         }
-        expandedTasks = next;
+        expandedTasksStore.set(next);
     }
 
     const columns = [
