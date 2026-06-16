@@ -13,12 +13,20 @@
     // Subtask progress: parent counts as 1 unit, pct = (doneChildren + parentDone) / (totalChildren + 1)
     let subtaskProgress = $derived.by(() => {
         if (!hasChildren) return null;
-        const totalChildren = children.length;
-        const doneChildren = children.filter(c => c.status === 'done').length;
-        const parentDone = task.status === 'done' ? 1 : 0;
-        const total = totalChildren + 1;
-        const done = doneChildren + parentDone;
-        return { done, total, pct: done / total };
+        // Recursively count all nested descendants
+        const countDescendants = (taskId: string): { total: number; done: number } => {
+            const directChildren = childrenMap?.get(taskId) ?? [];
+            let total = directChildren.length;
+            let done = directChildren.filter(c => c.status === 'done').length;
+            for (const child of directChildren) {
+                const nested = countDescendants(child.id);
+                total += nested.total;
+                done += nested.done;
+            }
+            return { total, done };
+        };
+        const descendants = countDescendants(task.id);
+        return { done: descendants.done, total: descendants.total, pct: descendants.total > 0 ? descendants.done / descendants.total : 0 };
     });
 
     // Whether this is a completed subtask (hide edit/move buttons)
@@ -67,6 +75,7 @@
     };
 
     function handleDragStart(e: DragEvent) {
+        e.stopPropagation();
         e.dataTransfer?.setData('text/plain', task.id);
     }
 
@@ -688,7 +697,7 @@
         >
             <span class="subtask-progress-fill" style="width: {subtaskProgress.pct * 100}%"></span>
             <span class="subtask-progress-pct">{Math.round(subtaskProgress.pct * 100)}%</span>
-            <span class="subtask-progress-count">{subtaskProgress.total - 1} subtask{subtaskProgress.total - 1 !== 1 ? 's' : ''}</span>
+            <span class="subtask-progress-count">{subtaskProgress.total} subtask{subtaskProgress.total !== 1 ? 's' : ''}</span>
             <svg class="subtask-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
     {/if}
