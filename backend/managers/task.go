@@ -390,16 +390,12 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 
 	// Try to commit worktree changes (skip if worktree doesn't exist)
-	diffStat, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
+	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if worktreeExists {
 		// Worktree exists — stage and commit
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-		commitMsg := task.Title
-		if strings.TrimSpace(diffStat) != "" {
-			commitMsg += "\n\n" + strings.TrimSpace(diffStat)
-		}
-		_ = h.worktreeMgr.GitRunInWorktree(taskID, "commit", "-m", commitMsg, "--allow-empty")
+		_ = h.worktreeMgr.GitRunInWorktree(taskID, "commit", "-m", task.Title, "--allow-empty")
 	}
 
 	// Merge worktree into origin branch
