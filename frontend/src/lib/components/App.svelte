@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm, commitQueueStatus } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -290,6 +290,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     selectedTaskVal = updatedTask;
                     selectedTask.set(updatedTask);
                 }
+            }, (task_id: string, status: 'queued' | 'processing') => {
+                commitQueueStatus.update(map => ({ ...map, [p.id]: { taskID: task_id, status } }));
             });
         } catch (e) {
             console.error('Failed to load board:', e);

@@ -13,6 +13,9 @@ export const showConfig = writable(false);
 export const showTerminal = writable(false);
 export const showStats = writable(false);
 export const showCardDetail = writable(false);
+
+/** Tracks commit queue status per project: projectID → { taskID, status } */
+export const commitQueueStatus = writable<Record<string, { taskID: string; status: 'queued' | 'processing' }>>({});
 const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
 
 /** Load collapsed task IDs from localStorage. */

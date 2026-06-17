@@ -32,11 +32,12 @@ type TaskHandler struct {
 	terminalMgr    *term.TerminalManager
 	executor       *exec.TaskExecutor
 	worktreeMgr    *git.WorktreeManager
+	commitQueue    *CommitQueue
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager) *TaskHandler {
-	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr}
+func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *CommitQueue) *TaskHandler {
+	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
 }
 
 // EnrichWorktreeExists sets the WorktreeExists field on tasks based on filesystem state.
@@ -374,6 +375,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
+// Operations are serialized per project to prevent git race conditions.
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -388,6 +390,12 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
 		return
 	}
+
+	// Serialize commit-and-done per project to prevent git race conditions
+	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "queued")
+	release := h.commitQueue.Acquire(projectID)
+	defer release()
+	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
 
 	// Try to commit worktree changes (skip if worktree doesn't exist)
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")

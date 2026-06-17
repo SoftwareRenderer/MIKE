@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	bkg "kanban/backend"
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
@@ -68,7 +69,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, sandboxMgr)
-	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr)
+	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())

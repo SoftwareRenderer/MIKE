@@ -132,6 +132,27 @@ func (bsm *BoardStreamManager) BroadcastAll(msg []byte) {
 	bsm.writeMu.Unlock()
 }
 
+// BroadcastCommitStatus sends a commit_status event to all clients of a project.
+// Status values: "queued" (waiting in queue), "processing" (commit in progress).
+func (bsm *BoardStreamManager) BroadcastCommitStatus(projectID, taskID, status string) {
+	bsm.mu.RLock()
+	clients := bsm.clients[projectID]
+	bsm.mu.RUnlock()
+
+	msg, _ := json.Marshal(map[string]string{
+		"type":    "commit_status",
+		"task_id": taskID,
+		"status":  status,
+	})
+	bsm.writeMu.Lock()
+	for conn := range clients {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected, will be cleaned up on read loop exit
+		}
+	}
+	bsm.writeMu.Unlock()
+}
+
 // BroadcastBranch sends a project_branch event to all clients of a project.
 func (bsm *BoardStreamManager) BroadcastBranch(projectID, branch string) {
 	bsm.mu.RLock()

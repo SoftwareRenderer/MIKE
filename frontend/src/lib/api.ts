@@ -165,7 +165,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 }
 
 // Board stream - WebSocket for real-time board updates
-export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void, onDiffStats?: (task_id: string, short_stat: string, untracked_n: number, untracked_lines: number) => void, onBranch?: (branch: string) => void, onTaskUpdated?: (task: Task) => void): { ws: WebSocket; close: () => void } {
+export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void, onDiffStats?: (task_id: string, short_stat: string, untracked_n: number, untracked_lines: number) => void, onBranch?: (branch: string) => void, onTaskUpdated?: (task: Task) => void, onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void): { ws: WebSocket; close: () => void } {
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -183,6 +183,9 @@ export function createBoardStream(projectId: string, onRefresh: () => void, onPr
         }
         if (msg.type === 'task_updated' && onTaskUpdated) {
             onTaskUpdated(msg.task);
+        }
+        if (msg.type === 'commit_status' && onCommitStatus) {
+            onCommitStatus(msg.task_id, msg.status);
         }
     };
     ws.onclose = () => {

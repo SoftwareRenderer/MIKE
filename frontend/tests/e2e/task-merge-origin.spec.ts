@@ -272,4 +272,117 @@ test.describe.serial('Merge to origin branch', () => {
     const branchesAfterDelete = execSync(`git -C ${TEST_REPO} branch --list ${taskBranch}`).toString().trim();
     expect(branchesAfterDelete).not.toContain(taskBranch);
   });
+
+  test('should handle concurrent commit-and-done without errors', async ({ page }) => {
+    test.setTimeout(90000);
+    const projectId = await getGitProjectId(page);
+    const fileSuffix = Date.now();
+
+    // Create two tasks
+    const taskId1 = await createTaskViaApi(page, projectId, `concurrent-commit-1-${fileSuffix}`);
+    const taskId2 = await createTaskViaApi(page, projectId, `concurrent-commit-2-${fileSuffix}`);
+
+    // Start both tasks to create worktrees
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId1 });
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/start`, { method: 'POST' });
+    }, { pid: projectId, tid: taskId2 });
+
+    // Wait for worktrees to be created
+    await page.waitForTimeout(2000);
+
+    // Make changes in both worktrees with unique filenames
+    const worktreePath1 = `${TEST_WORKTREES}/${taskId1}`;
+    const worktreePath2 = `${TEST_WORKTREES}/${taskId2}`;
+    const fileName1 = `concurrent-test-${fileSuffix}-1.txt`;
+    const fileName2 = `concurrent-test-${fileSuffix}-2.txt`;
+
+    if (fs.existsSync(worktreePath1)) {
+      fs.writeFileSync(`${worktreePath1}/${fileName1}`, `Task 1 changes ${fileSuffix}\n`);
+      execSync(`git add ${fileName1}`, { cwd: worktreePath1, stdio: 'inherit' });
+      execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 1"`, { cwd: worktreePath1, stdio: 'inherit' });
+    }
+    if (fs.existsSync(worktreePath2)) {
+      fs.writeFileSync(`${worktreePath2}/${fileName2}`, `Task 2 changes ${fileSuffix}\n`);
+      execSync(`git add ${fileName2}`, { cwd: worktreePath2, stdio: 'inherit' });
+      execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 2"`, { cwd: worktreePath2, stdio: 'inherit' });
+    }
+
+    // Move both tasks to review
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'review' }),
+      });
+    }, { pid: projectId, tid: taskId1 });
+    await page.evaluate(async ({ pid, tid }) => {
+      await fetch(`/api/projects/${pid}/tasks/${tid}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'review' }),
+      });
+    }, { pid: projectId, tid: taskId2 });
+
+    // Get origin branch
+    const projectData = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects`);
+      const projects = await res.json();
+      return projects.find((p: any) => p.id === pid);
+    }, projectId);
+    const originBranch = projectData.origin_branch;
+
+    // Record commits before
+    const logBefore = execSync(`git -C ${TEST_REPO} log --format=%H ${originBranch}`).toString().trim();
+    const commitsBefore = logBefore ? logBefore.split('\n').length : 0;
+
+    // Open first task and click commit-and-done
+    await page.goto(`/?task=${taskId1}`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    const commitButton1 = page.locator('.btn-commit-done');
+    await expect(commitButton1).toBeVisible({ timeout: 5000 });
+
+    // Quickly open second task and click commit-and-done (simulating rapid clicks)
+    const page2 = await page.context().newPage();
+    await page2.goto(`/?task=${taskId2}`);
+    await expect(page2.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    const commitButton2 = page2.locator('.btn-commit-done');
+    await expect(commitButton2).toBeVisible({ timeout: 5000 });
+
+    // Click both buttons in quick succession
+    await commitButton1.click();
+    await commitButton2.click();
+
+    // Wait for both to complete
+    await expect(commitButton1).not.toBeVisible({ timeout: 30000 });
+    await expect(commitButton2).not.toBeVisible({ timeout: 30000 });
+
+    // Verify both tasks are done
+    const updatedTask1 = await page.evaluate(async ({ pid, tid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+      return res.json();
+    }, { pid: projectId, tid: taskId1 });
+    expect(updatedTask1.status).toBe('done');
+
+    const updatedTask2 = await page2.evaluate(async ({ pid, tid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+      return res.json();
+    }, { pid: projectId, tid: taskId2 });
+    expect(updatedTask2.status).toBe('done');
+
+    // Verify merge commits exist
+    const logAfter = execSync(`git -C ${TEST_REPO} log --format=%H ${originBranch}`).toString().trim();
+    const commitsAfter = logAfter ? logAfter.split('\n').length : 0;
+    expect(commitsAfter).toBeGreaterThan(commitsBefore);
+
+    // Verify both file changes are on the origin branch
+    const file1Content = execSync(`git -C ${TEST_REPO} show ${originBranch}:${fileName1}`).toString().trim();
+    expect(file1Content).toContain(`Task 1 changes ${fileSuffix}`);
+    const file2Content = execSync(`git -C ${TEST_REPO} show ${originBranch}:${fileName2}`).toString().trim();
+    expect(file2Content).toContain(`Task 2 changes ${fileSuffix}`);
+
+    await page2.close();
+  });
 });
