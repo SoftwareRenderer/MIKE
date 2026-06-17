@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	bkg "kanban/backend"
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
@@ -32,11 +33,11 @@ type TaskHandler struct {
 	terminalMgr    *term.TerminalManager
 	executor       *exec.TaskExecutor
 	worktreeMgr    *git.WorktreeManager
-	commitQueue    *CommitQueue
+	commitQueue    *bkg.CommitQueue
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *CommitQueue) *TaskHandler {
+func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *bkg.CommitQueue) *TaskHandler {
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
 }
 
