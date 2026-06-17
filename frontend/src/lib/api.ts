@@ -281,9 +281,19 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
     if (!res.ok) throw await apiError(res, 'Failed to update message');
 }
 
-export async function getTaskDiff(projectId: string, taskId: string): Promise<{ diff: string; untracked: Array<{ path: string; diff: string }>; short_stat: string }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`);
+export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }>; short_stat: string }> {
+    const params = new URLSearchParams();
+    if (options?.headRef) params.set('head', options.headRef);
+    if (options?.baseRef) params.set('base', options.baseRef);
+    const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
+    const res = await fetch(url);
     if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
+    return res.json();
+}
+
+export async function getTaskCommits(projectId: string, taskId: string): Promise<{ base_commit?: TaskCommit; commits: TaskCommit[] }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch commits');
     return res.json();
 }
 

@@ -825,7 +825,7 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 		forkBranch = thread.GitBranch
 	}
 	baseRef, _ := s.executor.WorktreeMgr().ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
-	taskDiff, err := s.executor.WorktreeMgr().GetTaskDiff(taskID, baseRef)
+	taskDiff, err := s.executor.WorktreeMgr().GetTaskDiff(taskID, baseRef, "")
 	if err != nil {
 		return
 	}

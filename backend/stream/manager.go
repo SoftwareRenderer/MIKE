@@ -107,7 +107,7 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 			if shortstat != lastShortstat {
 				log.Printf("[git poll] task=%s diff changed", taskID)
 				lastShortstat = shortstat
-				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID, baseRef)
+				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 				if err != nil {
 					log.Printf("[git poll] task=%s GetTaskDiff failed: %v", taskID, err)
 					continue

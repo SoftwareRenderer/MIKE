@@ -158,6 +158,14 @@ export interface GitCommit {
     date: string;
 }
 
+/** A commit from a task's worktree history. */
+export interface TaskCommit {
+    hash: string;
+    short: string;
+    subject: string;
+    date: string;
+}
+
 export interface GitBranch {
     name: string;
     hash: string;

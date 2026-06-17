@@ -55,7 +55,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -94,6 +94,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let pendingCheckpoints = $state(new Set<string>());
     // Completed checkpoint labels — message_id -> label
     let checkpointLabels = $state(new Map<string, string>());
+    // Completed checkpoint commit hashes — message_id -> commit_hash
+    let checkpointCommitHashes = $state(new Map<string, string>());
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -528,6 +530,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     labels.set(data.message_id, data.label);
                     checkpointLabels = labels;
                 }
+                if (data.commit_hash) {
+                    const hashes = new Map(checkpointCommitHashes);
+                    hashes.set(data.message_id, data.commit_hash);
+                    checkpointCommitHashes = hashes;
+                }
                 break;
             }
         }
@@ -717,8 +724,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     /** Get the checkpoint pending/label state for the checkpoint divider before a user message.
      * Looks at the last assistant entry (with tool calls) before the given entry index.
-     * Returns { isPending, commitLabel } or null if no checkpoint state to show. */
-    function getCheckpointEntryCheckpointState(entryIdx: number): { isPending: boolean; commitLabel?: string } | null {
+     * Returns { isPending, commitLabel, commitHash } or null if no checkpoint state to show. */
+    function getCheckpointEntryCheckpointState(entryIdx: number): { isPending: boolean; commitLabel?: string; commitHash?: string } | null {
         // Walk backward to find the last assistant entry with tool calls
         for (let i = entryIdx - 1; i >= 0; i--) {
             const prev = entries[i];
@@ -726,6 +733,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 return {
                     isPending: pendingCheckpoints.has(prev.id),
                     commitLabel: checkpointLabels.get(prev.id),
+                    commitHash: checkpointCommitHashes.get(prev.id),
                 };
             }
             if (prev.role === 'user') break; // stop at previous user message
@@ -1360,6 +1368,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             onSwitch={handleThreadSwitch}
                             isPending={getCheckpointEntryCheckpointState(entryIdx)?.isPending || false}
                             commitLabel={getCheckpointEntryCheckpointState(entryIdx)?.commitLabel || undefined}
+                            commitHash={getCheckpointEntryCheckpointState(entryIdx)?.commitHash || undefined}
+                            onViewChanges={onViewChanges}
                         />
                     {/if}
                 {/if}

@@ -1,10 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
-    import type { Task, Provider } from '$lib/types';
+    import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, updateTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -13,6 +13,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
+    import DiffSelect from './DiffSelect.svelte';
     import Card from './Card.svelte';
 
     let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
@@ -52,6 +53,94 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
     // Terminal - worktree_exists is populated by the server on task/board fetch
     let worktreeExists = $derived(task.worktree_exists ?? false);
+
+    // Commit history for diff comparison
+    let commits: TaskCommit[] = $state([]);
+    let baseCommit: TaskCommit | null = $state(null);
+    // Two-dropdown diff: '' means base ref (original branch), 'working' means working tree
+    let diffFrom = $state('');
+    let diffTo = $state('working');
+
+    function formatRelativeTime(isoStr: string): string {
+        if (!isoStr) return '';
+        const date = new Date(isoStr);
+        if (isNaN(date.getTime())) return '';
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 1) return 'just now';
+        if (diffMin < 60) return `${diffMin}m ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        if (diffHr < 24) return `${diffHr}h ago`;
+        const diffDay = Math.floor(diffHr / 24);
+        if (diffDay < 7) return `${diffDay}d ago`;
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    function getCommitSubject(commit: TaskCommit): string {
+        return commit.subject.split('\n')[0].trim();
+    }
+
+    function getBaseCommitLabel(): string {
+        if (!baseCommit) return 'Original branch';
+        const subject = getCommitSubject(baseCommit);
+        const truncated = subject.length > 20 ? subject.slice(0, 20) + '…' : subject;
+        return truncated;
+    }
+
+    // Options for the From dropdown
+    let fromOptions = $derived.by(() => {
+        const opts: { value: string; label: string; meta?: string }[] = [];
+        if (baseCommit) {
+            opts.push({
+                value: '',
+                label: getBaseCommitLabel(),
+                meta: `${baseCommit.short.slice(0, 7)} (Origin)`,
+            });
+        } else {
+            opts.push({ value: '', label: 'Original branch' });
+        }
+        for (const c of commits) {
+            opts.push({
+                value: c.hash,
+                label: getCommitSubject(c),
+                meta: `${c.short.slice(0, 7)} (${formatRelativeTime(c.date)})`,
+            });
+        }
+        return opts;
+    });
+
+    // Options for the To dropdown
+    let toOptions = $derived.by(() => {
+        const opts: { value: string; label: string; meta?: string }[] = [
+            { value: 'working', label: 'Working tree' },
+        ];
+        for (const c of commits) {
+            opts.push({
+                value: c.hash,
+                label: getCommitSubject(c),
+                meta: `${c.short.slice(0, 7)} (${formatRelativeTime(c.date)})`,
+            });
+        }
+        return opts;
+    });
+
+    function onDiffFromChange(value: string) {
+        diffFrom = value;
+        loadDiffForMode();
+    }
+
+    function onDiffToChange(value: string) {
+        diffTo = value;
+        loadDiffForMode();
+    }
+
+    /** Set diff to compare base ref vs a specific checkpoint commit. */
+    function setDiffToCommit(commitHash: string) {
+        diffFrom = '';
+        diffTo = commitHash;
+        loadDiffForMode();
+    }
 
     // Inline editing for task list items
     let editingTaskId = $state<string | null>(null);
@@ -441,8 +530,30 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     async function loadDiff() {
         if (!task || task.status === 'backlog') return;
+        await Promise.all([loadCommits(), loadDiffForMode()]);
+    }
+
+    async function loadCommits() {
+        if (!task || task.status === 'backlog') return;
         try {
-            const result = await getTaskDiff(task.project_id, task.id);
+            const result = await getTaskCommits(task.project_id, task.id);
+            commits = result.commits || [];
+            baseCommit = result.base_commit || null;
+        } catch (e) {
+            commits = [];
+            baseCommit = null;
+        }
+    }
+
+    async function loadDiffForMode() {
+        if (!task || task.status === 'backlog') return;
+        try {
+            // diffTo === 'working' means working tree (no headRef, includes untracked)
+            // diffTo === commit hash means commit-to-commit or base..commit diff
+            const headRef = diffTo === 'working' ? undefined : diffTo;
+            // diffFrom === '' means use resolved baseline, otherwise use specific commit
+            const baseRef = diffFrom || undefined;
+            const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef });
             updateDiff(result, true);
         } catch (e) {
             diffFiles = [];
@@ -605,6 +716,10 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                             onRefreshDiff={updateDiff}
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
+                            onViewChanges={(commitHash: string) => {
+                                setDiffToCommit(commitHash);
+                                if (isMobile) activeTab = 'diff';
+                            }}
                         />
                     {/key}
                 </div>
@@ -623,6 +738,13 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
+                    {#if worktreeExists || task.branch}
+                        <div class="diff-header">
+                            <DiffSelect options={fromOptions} value={diffFrom} onChange={onDiffFromChange} ariaLabel="From" />
+                            <span class="diff-arrow">→</span>
+                            <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
+                        </div>
+                    {/if}
                     <DiffViewer files={diffFiles} untracked={untrackedFiles} />
                 </div>
             </div>
@@ -1075,6 +1197,22 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         flex-direction: column;
         min-height: 0;
         overflow: hidden;
+    }
+    .diff-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        flex-shrink: 0;
+    }
+    .diff-arrow {
+        font-size: 0.875rem;
+        color: var(--color-text-tertiary);
+        padding: 0 2px;
+        user-select: none;
+        flex-shrink: 0;
     }
     .mobile-tab-bar {
         display: none;

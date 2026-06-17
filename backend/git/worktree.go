@@ -423,7 +423,9 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
-func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef string) (*TaskDiff, error) {
+// headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
+// When headRef is set, untracked files are omitted (commit-to-commit diff).
+func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDiff, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return nil, err
@@ -433,50 +435,68 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef string) (*TaskDiff, error
 		return nil, fmt.Errorf("worktree not found")
 	}
 
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-
-	// Get tracked file diff, filtering out large/binary files
-	diffOut, err := wm.gitRunOutput(worktreePath, "diff", target)
-	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
-	}
-	diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
-
-	// Get shortstat summary
-	shortStat, _ := wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
-
-	// Get untracked files from git status --porcelain (lines starting with "?? ")
-	statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
-	if err != nil {
-		return nil, fmt.Errorf("git status: %w", err)
-	}
-
+	var diffOut, shortStat string
 	var untracked []UntrackedFile
-	const maxDiffSize = 1 << 20 // 1MB
-	for _, line := range strings.Split(statusOut, "\n") {
-		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
-			path := strings.TrimSpace(line[3:])
-			if path == "" {
-				continue
+
+	if headRef != "" {
+		// Two-ref diff: compare baseRef..headRef (commit-to-commit)
+		target := baseRef
+		if target == "" {
+			target = "HEAD"
+		}
+		diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+		if err != nil {
+			return nil, fmt.Errorf("git diff: %w", err)
+		}
+		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..%s", target, headRef))
+		// No untracked files for commit-to-commit diff
+	} else {
+		// Single-ref diff: working tree vs baseRef
+		target := "HEAD"
+		if baseRef != "" {
+			target = baseRef
+		}
+
+		// Get tracked file diff, filtering out large/binary files
+		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
+		if err != nil {
+			return nil, fmt.Errorf("git diff: %w", err)
+		}
+		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+
+		// Get shortstat summary
+		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
+
+		// Get untracked files from git status --porcelain (lines starting with "?? ")
+		statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+		if err != nil {
+			return nil, fmt.Errorf("git status: %w", err)
+		}
+
+		const maxDiffSize = 1 << 20 // 1MB
+		for _, line := range strings.Split(statusOut, "\n") {
+			if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
+				path := strings.TrimSpace(line[3:])
+				if path == "" {
+					continue
+				}
+				fullPath := filepath.Join(worktreePath, path)
+				info, err := os.Stat(fullPath)
+				if err != nil || !info.Mode().IsRegular() {
+					continue
+				}
+				fileSize := info.Size()
+				// Skip diff for large files or binary files
+				if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
+					untracked = append(untracked, UntrackedFile{Path: path, FileSize: fileSize})
+					continue
+				}
+				// Generate unified diff for the untracked file (compare against empty)
+				// git diff --no-index returns exit code 1 when files differ, which is expected
+				fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", path)
+				untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff})
 			}
-			fullPath := filepath.Join(worktreePath, path)
-			info, err := os.Stat(fullPath)
-			if err != nil || !info.Mode().IsRegular() {
-				continue
-			}
-			fileSize := info.Size()
-			// Skip diff for large files or binary files
-			if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
-				untracked = append(untracked, UntrackedFile{Path: path, FileSize: fileSize})
-				continue
-			}
-			// Generate unified diff for the untracked file (compare against empty)
-			// git diff --no-index returns exit code 1 when files differ, which is expected
-			fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", path)
-			untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff})
 		}
 	}
 
@@ -672,6 +692,87 @@ func (wm *WorktreeManager) GitRunInProjectOutput(projectID string, args ...strin
 		return "", fmt.Errorf("get project: %w", err)
 	}
 	return wm.gitRunOutput(project.Path, args...)
+}
+
+// TaskCommit represents a single commit in the task's worktree history.
+type TaskCommit struct {
+	Hash    string `json:"hash"`
+	Short   string `json:"short"`
+	Subject string `json:"subject"`
+	Date    string `json:"date"`
+}
+
+// TaskCommitsResult holds the base commit info and list of task-specific commits.
+type TaskCommitsResult struct {
+	BaseCommit *TaskCommit    `json:"base_commit,omitempty"` // commit at the divergence point
+	Commits    []TaskCommit   `json:"commits"`
+}
+
+// GetTaskCommits returns the commit log for a task's worktree branch.
+// If baseRef is provided, only commits after the divergence from baseRef are returned (baseRef..HEAD).
+// Also returns the commit at baseRef as BaseCommit for display purposes.
+func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsResult, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("worktree not found")
+	}
+
+	result := &TaskCommitsResult{Commits: []TaskCommit{}}
+
+	// Get the base commit info (the commit at the divergence point)
+	if baseRef != "" {
+		baseOut, err := wm.gitRunOutput(worktreePath, "log", "--format=%H|%h|%s|%aI", "-1", baseRef)
+		if err == nil {
+			line := strings.TrimSpace(baseOut)
+			parts := strings.SplitN(line, "|", 4)
+			if len(parts) == 4 {
+				result.BaseCommit = &TaskCommit{
+					Hash:    parts[0],
+					Short:   parts[1],
+					Subject: parts[2],
+					Date:    parts[3],
+				}
+			}
+		}
+	}
+
+	// Format: hash|short|subject|date (ISO 8601)
+	// Use baseRef..HEAD to only show commits made since the original branch
+	ref := "HEAD"
+	if baseRef != "" {
+		ref = baseRef + "..HEAD"
+	}
+	out, err := wm.gitRunOutput(worktreePath, "log", "--format=%H|%h|%s|%aI", ref)
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w", err)
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		// Skip auto-generated bookkeeping commits (not meaningful task work)
+		subject := parts[2]
+		if subject == "Initial baseline snapshot" || subject == "Thread switch snapshot" || subject == "Fork snapshot" {
+			continue
+		}
+		result.Commits = append(result.Commits, TaskCommit{
+			Hash:    parts[0],
+			Short:   parts[1],
+			Subject: parts[2],
+			Date:    parts[3],
+		})
+	}
+	return result, nil
 }
 
 // ResolveDiffBaseline computes the effective git ref to diff against for a task.

@@ -9,9 +9,11 @@
         onSwitch?: (threadId: string) => void;
         isPending?: boolean;
         commitLabel?: string;
+        commitHash?: string;
+        onViewChanges?: (commitHash: string) => void;
     }
 
-    let { timestamp, threadId, threads, activeThreadId, onSwitch, isPending = false, commitLabel }: Props = $props();
+    let { timestamp, threadId, threads, activeThreadId, onSwitch, isPending = false, commitLabel, commitHash, onViewChanges }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint
     let relevantThreads = $derived(threads.filter(t => {
@@ -75,6 +77,12 @@
             {commitLabel || 'Checkpoint'}
         </span>
         <div class="divider-actions">
+            {#if commitHash && onViewChanges}
+                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash)} title="View changes for this checkpoint">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Changes
+                </button>
+            {/if}
             {#if relevantThreads.length > 1}
                 <button class="thread-btn" onclick={toggleMenu} aria-label="Switch thread" aria-expanded={showMenu} title="Switch thread">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -153,6 +161,26 @@
         display: flex;
         align-items: center;
         gap: 4px;
+    }
+    .view-changes-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 500;
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        border: 1px solid var(--color-border);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+    }
+    .view-changes-btn:hover {
+        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+        color: var(--color-accent);
+        border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
     }
     .thread-btn {
         display: inline-flex;

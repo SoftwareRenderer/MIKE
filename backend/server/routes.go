@@ -22,6 +22,7 @@ var (
 	reTaskResume           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
 	reTaskStream           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
+	reTaskCommits          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commits$`)
 	reTaskMessages         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
 	reTaskMessageByID      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/([^/]+)$`)
 	reTaskDeps             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
@@ -167,6 +168,10 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := reTaskDiff.FindStringSubmatch(path); m != nil {
 		s.gitHandler.HandleTaskDiff(w, r, m[1], m[2])
+		return
+	}
+	if m := reTaskCommits.FindStringSubmatch(path); m != nil {
+		s.gitHandler.HandleTaskCommits(w, r, m[1], m[2])
 		return
 	}
 
