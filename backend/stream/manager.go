@@ -77,14 +77,14 @@ func (sm *StreamManager) Get(taskID string) *Broadcaster {
 	return sm.broadcasts[taskID]
 }
 
-// pollGitStatus runs a polling loop that checks git diff --shortstat in the task's worktree.
+// pollGitStatus runs a polling loop that checks git diff --raw in the task's worktree.
 // Diffs are computed relative to the task's base_ref (or HEAD if not set).
-// When the shortstat output changes (line counts differ), it sends a diff_changed event to all connected clients.
-// Using --shortstat instead of status --porcelain ensures we detect content changes to the same file
-// (e.g., "+5" becoming "+10" additions), not just new/modified file states.
+// Uses --raw output (per-file blob hashes) for change detection — any content change
+// produces a new hash, even same-line same-character-count edits.
+// When a change is detected, it fetches the full diff and sends a diff_changed event.
 // If the worktree doesn't exist yet (task in backlog), polling is skipped until it appears.
 func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Broadcaster) {
-	var lastShortstat string
+	var lastRaw string
 	var baselineSet bool
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
@@ -95,20 +95,20 @@ func (sm *StreamManager) pollGitStatus(ctx context.Context, taskID string, b *Br
 			return
 		case <-tick.C:
 			baseRef := sm.getDiffBaseline(taskID)
-			shortstat, err := sm.worktreeMgr.GitShortstat(taskID, baseRef)
+			raw, err := sm.worktreeMgr.GitDiffRaw(taskID, baseRef)
 			if err != nil {
 				// Worktree may not exist yet (task still in backlog) — skip silently
 				continue
 			}
 			// First successful check — establish baseline, don't send event
 			if !baselineSet {
-				lastShortstat = shortstat
+				lastRaw = raw
 				baselineSet = true
 				continue
 			}
-			if shortstat != lastShortstat {
+			if raw != lastRaw {
 				log.Printf("[git poll] task=%s diff changed", taskID)
-				lastShortstat = shortstat
+				lastRaw = raw
 				taskDiff, err := sm.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 				if err != nil {
 					log.Printf("[git poll] task=%s GetTaskDiff failed: %v", taskID, err)

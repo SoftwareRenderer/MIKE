@@ -159,6 +159,48 @@ func TestGitStatusPoll(t *testing.T) {
 		t.Fatalf("expected diff_changed event for same-file mod, got type=%q", typ)
 	}
 
+	// --- Test: same-line same-character-count edit on a TRACKED file ---
+	// This verifies the fix for the bug where --shortstat misses changes that
+	// produce identical line/byte counts (e.g., "foo" -> "bar").
+	// git diff --raw uses blob hashes, so ANY content change is detected.
+	{
+		// Create and commit a tracked file
+		writeFile(t, worktreePath, "tracked.txt", "foo\n")
+		runGit(t, worktreePath, "add", "tracked.txt")
+		runGit(t, worktreePath, "config", "user.email", "test@test.com")
+		runGit(t, worktreePath, "config", "user.name", "Test")
+		runGit(t, worktreePath, "commit", "-m", "Add tracked file")
+
+		// Wait for poller to establish new baseline after commit
+		time.Sleep(2500 * time.Millisecond)
+		eventCountAfterCommit := b.bufferLength()
+
+		// Modify with same character count (3 chars -> 3 chars)
+		writeFile(t, worktreePath, "tracked.txt", "bar\n")
+
+		var sameCharDetected bool
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if b.bufferLength() > eventCountAfterCommit {
+				sameCharDetected = true
+				break
+			}
+		}
+
+		if !sameCharDetected {
+			t.Fatalf("poller did not detect same-char-count edit on tracked file within 5s; buffer length stayed at %d", eventCountAfterCommit)
+		}
+
+		lastMsg = b.getLastMessage()
+		if lastMsg == nil || lastMsg.Type != string(types.WSTypeDiffChanged) {
+			typ := "<nil>"
+			if lastMsg != nil {
+				typ = lastMsg.Type
+			}
+			t.Fatalf("expected diff_changed event for same-char edit, got type=%q", typ)
+		}
+	}
+
 	// Stop the poller
 	cancel()
 	time.Sleep(500 * time.Millisecond)

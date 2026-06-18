@@ -16,9 +16,10 @@ import (
 	"github.com/coder/websocket"
 )
 
-// diffSnapshot holds the last-known diff for a task, used to detect changes.
+// diffSnapshot holds the last-known git state for a task, used to detect changes.
+// Uses git diff --raw output (blob hashes) for reliable change detection.
 type diffSnapshot struct {
-	diff       string
+	raw        string // git diff --raw output + untracked snapshot
 	shortStat  string
 	untrackedN int
 }
@@ -281,27 +282,34 @@ func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, project
 					continue
 				}
 				baseRef := bsm.getDiffBaseline(task)
+				// Use --raw for cheap, reliable change detection (blob hashes)
+				raw, err := bsm.worktreeMgr.GitDiffRaw(task.ID, baseRef)
+				if err != nil {
+					continue
+				}
+				// Only generate full diff when a change is actually detected
+				prev, exists := snapshots[task.ID]
+				if exists && prev.raw == raw {
+					continue
+				}
+				// Change detected — fetch full diff for broadcast
 				diffResult, err := bsm.worktreeMgr.GetTaskDiff(task.ID, baseRef, "")
 				if err != nil {
 					continue
 				}
 				shortStat := diffResult.ShortStat
 				untrackedN := len(diffResult.Untracked)
-				current := diffSnapshot{diff: diffResult.Diff, shortStat: shortStat, untrackedN: untrackedN}
-				prev, exists := snapshots[task.ID]
-				if !exists || prev != current {
-					snapshots[task.ID] = current
-					untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
-					for i, u := range diffResult.Untracked {
-						untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
-					}
-					if diffResult.Diff != "" || untrackedN > 0 {
-						log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files)",
-							projectID, task.ID, shortStat, untrackedN)
-						bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, shortStat, untrackedN, untrackedMaps)
-					} else {
-						bsm.BroadcastDiff(projectID, task.ID, "", "", 0, nil)
-					}
+				snapshots[task.ID] = diffSnapshot{raw: raw, shortStat: shortStat, untrackedN: untrackedN}
+				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+				for i, u := range diffResult.Untracked {
+					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+				}
+				if diffResult.Diff != "" || untrackedN > 0 {
+					log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files)",
+						projectID, task.ID, shortStat, untrackedN)
+					bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, shortStat, untrackedN, untrackedMaps)
+				} else {
+					bsm.BroadcastDiff(projectID, task.ID, "", "", 0, nil)
 				}
 			}
 		}

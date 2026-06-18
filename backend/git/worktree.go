@@ -320,6 +320,59 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
+// GitDiffRaw returns a snapshot of the worktree's change state for polling.
+// Uses git diff --raw which outputs per-file blob hashes — any content change
+// (even same-line same-character-count edits) produces a new hash.
+// Appends untracked file paths + sizes with | separator.
+// Returns empty string when there are no changes at all.
+func (wm *WorktreeManager) GitDiffRaw(taskID, baseRef string) (string, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("worktree not found")
+	}
+
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+
+	// Tracked file changes: --raw outputs blob hashes, any content change = new hash.
+	// git diff exits 0 = no changes (empty output), 1 = changes (output on stdout).
+	trackedOut, trackedErr := wm.gitRunOutput(worktreePath, "diff", "--raw", target)
+	if trackedErr != nil {
+		// Exit code 1 means files differ — output is valid, ignore the error.
+		// Any other error (e.g., missing repo) is a real failure.
+		if exitErr, ok := trackedErr.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				// Changes exist, trackedOut has the raw output — continue
+			} else {
+				return "", fmt.Errorf("git diff --raw: %w", trackedErr)
+			}
+		} else {
+			return "", fmt.Errorf("git diff --raw: %w", trackedErr)
+		}
+	}
+	trackedOut = strings.TrimSpace(trackedOut)
+
+	// Untracked files
+	untrackedOut, err := wm.gitRunOutput(worktreePath, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return "", fmt.Errorf("git ls-files: %w", err)
+	}
+	untrackedSnap := wm.buildUntrackedSnapshot(worktreePath, untrackedOut)
+
+	// Combine: "raw_output|untracked_snapshot"
+	// Empty string when nothing changed (no tracked diffs, no untracked files).
+	if trackedOut == "" && untrackedSnap == "" {
+		return "", nil
+	}
+	return fmt.Sprintf("%s|%s", trackedOut, untrackedSnap), nil
+}
+
 // GitShortstat returns a snapshot of the worktree's change state for polling.
 // Combines tracked file changes (git diff <baseRef> --shortstat) with a hash of untracked
 // file paths + sizes. This detects both content changes to existing files AND
