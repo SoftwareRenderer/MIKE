@@ -13,6 +13,7 @@ type Task struct {
 	SessionID               string    `json:"session_id"`
 	Branch                  string    `json:"branch"`
 	BaseRef                 string    `json:"base_ref,omitempty"`
+	BranchTip               string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
 	Output                  string    `json:"output"`
 	StatusState             string    `json:"status_state"`
 	LlamaServerURL          string    `json:"llama_server_url"`

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -407,6 +408,17 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, "commit", "-m", task.Title, "--allow-empty")
 	}
 
+	// Capture branch tip before merge (for post-commit diff comparison)
+	if task.Branch != "" {
+		project, pErr := h.store.GetProject(projectID)
+		if pErr == nil {
+			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.Branch)
+			if out, err := c.CombinedOutput(); err == nil {
+				task.BranchTip = strings.TrimSpace(string(out))
+			}
+		}
+	}
+
 	// Merge worktree into origin branch
 	mergeErr := h.mergeWorktreeIntoOrigin(projectID, taskID, task)
 	if mergeErr != nil {
@@ -442,9 +454,29 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 // mergeWorktreeIntoOrigin merges the task's worktree branch into the project's current branch.
 // On merge conflict, it uses the LLM to resolve conflicts.
 func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *types.Task) error {
-	// Use the base ref captured at worktree creation time.
-	// Fall back to querying live HEAD for tasks created before this field was added.
-	originBranch := task.BaseRef
+	// BaseRef is a commit hash. Find which branch it belongs to.
+	originBranch := ""
+	if task.BaseRef != "" {
+		// Check if BaseRef is a commit hash (40 hex chars)
+		if len(task.BaseRef) == 40 && isHex(task.BaseRef) {
+			// Find the branch that points to this commit (or a descendant)
+			project, pErr := h.store.GetProject(projectID)
+			if pErr == nil {
+				// Try project's stored origin_branch first
+				if project.OriginBranch != "" {
+					originBranch = project.OriginBranch
+				}
+				// Verify: check if originBranch is a descendant of BaseRef
+				if originBranch != "" {
+					c := osexec.Command("git", "-C", project.Path, "merge-base", "--is-ancestor", task.BaseRef, originBranch)
+					if c.Run() != nil {
+						originBranch = "" // BaseRef is not an ancestor, don't use this branch
+					}
+				}
+			}
+		}
+	}
+	// Fall back to live HEAD
 	if originBranch == "" {
 		var err error
 		originBranch, err = h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
@@ -1021,6 +1053,16 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	}
 
 	return nil
+}
+
+// isHex checks if a string contains only hexadecimal characters.
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 

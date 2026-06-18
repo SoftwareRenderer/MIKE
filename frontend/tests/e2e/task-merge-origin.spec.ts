@@ -141,10 +141,9 @@ test.describe.serial('Merge to origin branch', () => {
     expect(originBranch).toMatch(/master|main/);
 
     // Create a second branch to switch to later
-    execSync(`git -C ${TEST_REPO} checkout -b test-develop-${Date.now()}`, { stdio: 'pipe' });
+    const devBranch = `test-develop-${Date.now()}`;
+    execSync(`git -C ${TEST_REPO} checkout -b ${devBranch}`, { stdio: 'pipe' });
     execSync(`git -C ${TEST_REPO} checkout ${originBranch}`, { stdio: 'pipe' });
-    const devBranch = execSync(`git -C ${TEST_REPO} branch --list | grep test-develop`).toString().trim();
-    expect(devBranch).toBeTruthy();
 
     // Create and start task (captures origin branch)
     const taskId = await createTaskViaApi(page, projectId, `merge-branch-switch-${Date.now()}`);
@@ -154,12 +153,17 @@ test.describe.serial('Merge to origin branch', () => {
     }, { pid: projectId, tid: taskId });
     await page.waitForTimeout(1000);
 
-    // Verify task.base_ref is set to the origin branch
+    // Verify task.base_ref is set (now a commit hash, not branch name)
     const taskData = await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
       return res.json();
     }, { pid: projectId, tid: taskId });
-    expect(taskData.base_ref).toBe(originBranch);
+    expect(taskData.base_ref).toBeTruthy();
+    // base_ref is a 40-char commit hash that is an ancestor of originBranch
+    expect(taskData.base_ref).toMatch(/^[0-9a-f]{40}$/);
+    // Verify it's an ancestor of the origin branch
+    const isAncestor = execSync(`git -C ${TEST_REPO} merge-base --is-ancestor ${taskData.base_ref} ${originBranch} && echo yes || echo no`).toString().trim();
+    expect(isAncestor).toBe('yes');
 
     // Make a change in the worktree
     const worktreePath = `${TEST_WORKTREES}/${taskId}`;

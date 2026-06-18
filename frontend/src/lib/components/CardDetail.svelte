@@ -88,9 +88,21 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         return truncated;
     }
 
-    // Options for the From dropdown
+    // Sorted commits: newest first
+    let sortedCommits = $derived(
+        [...commits].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    );
+
+    // Options for the From dropdown: commits newest→oldest, then Origin at bottom
     let fromOptions = $derived.by(() => {
         const opts: { value: string; label: string; meta?: string }[] = [];
+        for (const c of sortedCommits) {
+            opts.push({
+                value: c.hash,
+                label: getCommitSubject(c),
+                meta: `${c.short.slice(0, 7)} (${formatRelativeTime(c.date)})`,
+            });
+        }
         if (baseCommit) {
             opts.push({
                 value: '',
@@ -100,22 +112,15 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         } else {
             opts.push({ value: '', label: 'Original branch' });
         }
-        for (const c of commits) {
-            opts.push({
-                value: c.hash,
-                label: getCommitSubject(c),
-                meta: `${c.short.slice(0, 7)} (${formatRelativeTime(c.date)})`,
-            });
-        }
         return opts;
     });
 
-    // Options for the To dropdown
+    // Options for the To dropdown: Working tree at top, then commits newest→oldest
     let toOptions = $derived.by(() => {
         const opts: { value: string; label: string; meta?: string }[] = [
             { value: 'working', label: 'Working tree' },
         ];
-        for (const c of commits) {
+        for (const c of sortedCommits) {
             opts.push({
                 value: c.hash,
                 label: getCommitSubject(c),

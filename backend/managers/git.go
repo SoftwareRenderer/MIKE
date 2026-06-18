@@ -229,6 +229,7 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request, p
 }
 
 // getTaskCommitsFromProject runs git log from the project repo using the task's branch.
+// Uses BranchTip (captured at commit-and-done time) if available, otherwise falls back to Branch.
 func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Task, baseRef string) (*git.TaskCommitsResult, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -252,8 +253,12 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 		}
 	}
 
-	// Get commits on task branch since baseRef
-	ref := fmt.Sprintf("%s..%s", baseRef, task.Branch)
+	// Use branch tip captured at commit time, or fall back to branch name
+	target := task.BranchTip
+	if target == "" {
+		target = task.Branch
+	}
+	ref := fmt.Sprintf("%s..%s", baseRef, target)
 	out, err := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI", ref).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git log from project: %s: %w", string(out), err)
@@ -269,7 +274,7 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 			continue
 		}
 		subject := parts[2]
-		if subject == "Initial baseline snapshot" || subject == "Thread switch snapshot" || subject == "Fork snapshot" {
+		if subject == "Thread switch snapshot" || subject == "Fork snapshot" {
 			continue
 		}
 		result.Commits = append(result.Commits, git.TaskCommit{
@@ -332,6 +337,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 }
 
 // getTaskDiffFromProject runs git diff from the project repo using the task's branch.
+// Uses BranchTip (captured at commit-and-done time) if available, otherwise falls back to Branch.
 func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -343,8 +349,12 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 	if headRef != "" {
 		refSpec = fmt.Sprintf("%s..%s", baseRef, headRef)
 	} else {
-		// Diff baseRef against the task's branch HEAD
-		refSpec = fmt.Sprintf("%s..%s", baseRef, task.Branch)
+		// Use branch tip captured at commit time, or fall back to branch name
+		target := task.BranchTip
+		if target == "" {
+			target = task.Branch
+		}
+		refSpec = fmt.Sprintf("%s..%s", baseRef, target)
 	}
 
 	c := exec.Command("git", "-C", project.Path, "diff", refSpec)

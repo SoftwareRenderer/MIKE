@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     session_id                   TEXT,
     branch                       TEXT,
     base_ref                     TEXT DEFAULT NULL,
+    branch_tip                   TEXT DEFAULT NULL,
     output                       TEXT,
     status_state                 TEXT NOT NULL DEFAULT 'idle',
     llama_server_url             TEXT NOT NULL DEFAULT '',
@@ -242,6 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	// Cumulative token stats table (survives task deletion)
@@ -463,9 +465,9 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoPR, planMode, titleGenerating int
 	var createdAt, updatedAt string
-	var parentTaskID, currentThreadID, reasoningEffort, baseRef sql.NullString
+	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
-		&t.SessionID, &t.Branch, &baseRef, &t.Output, &t.StatusState,
+		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
 		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt)
 	if err != nil {
@@ -479,6 +481,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.CurrentThreadID = currentThreadID.String
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String
+	t.BranchTip = branchTip.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return nil

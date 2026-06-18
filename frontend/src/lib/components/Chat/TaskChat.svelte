@@ -1603,7 +1603,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         z-index: 5;
         display: flex;
         align-items: center;
-        padding: 8px 12px;
+        padding: 6px 12px;
+        min-height: 2.375rem;
         background: var(--color-surface-1);
         border-bottom: 1px solid var(--color-border);
         opacity: 0;

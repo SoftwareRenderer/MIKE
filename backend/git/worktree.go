@@ -162,12 +162,13 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 		return "", "", fmt.Errorf("create branch: %s: %w", out, err)
 	}
 
-	wm.gitRun(worktreePath, "add", "-A")
-	wm.gitRun(worktreePath, "commit", "-m", "Initial baseline snapshot", "--allow-empty")
-
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
-	return worktreePath, originalBranch, nil
+	// Resolve sourceRef to a commit hash so the base ref doesn't move after merges
+	baseCommit, _ := wm.gitRunOutput(worktreePath, "rev-parse", "--verify", sourceRef)
+	baseCommit = strings.TrimSpace(baseCommit)
+
+	return worktreePath, baseCommit, nil
 }
 
 // RemoveWorktree removes a task's worktree and its branch.
@@ -762,7 +763,7 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 		}
 		// Skip auto-generated bookkeeping commits (not meaningful task work)
 		subject := parts[2]
-		if subject == "Initial baseline snapshot" || subject == "Thread switch snapshot" || subject == "Fork snapshot" {
+		if subject == "Thread switch snapshot" || subject == "Fork snapshot" {
 			continue
 		}
 		result.Commits = append(result.Commits, TaskCommit{
