@@ -16,11 +16,11 @@ import (
 	"github.com/coder/websocket"
 )
 
-// diffSnapshot holds the last-known diff stats for a task, used to detect changes.
+// diffSnapshot holds the last-known diff for a task, used to detect changes.
 type diffSnapshot struct {
-	shortStat      string
-	untrackedN     int
-	untrackedLines int
+	diff       string
+	shortStat  string
+	untrackedN int
 }
 
 // branchSnapshot holds the last-known branch for a project.
@@ -172,18 +172,18 @@ func (bsm *BoardStreamManager) BroadcastBranch(projectID, branch string) {
 	bsm.writeMu.Unlock()
 }
 
-// BroadcastDiffStats sends a task_diff_stats event to all clients of a project.
-func (bsm *BoardStreamManager) BroadcastDiffStats(projectID, taskID, shortStat string, untrackedN, untrackedLines int) {
+// BroadcastDiff sends the full diff to all clients of a project.
+func (bsm *BoardStreamManager) BroadcastDiff(projectID, taskID, diff string, shortStat string, untrackedN int, untracked []map[string]interface{}) {
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
 	bsm.mu.RUnlock()
 
 	msg, _ := json.Marshal(map[string]interface{}{
-		"type":            "task_diff_stats",
-		"task_id":         taskID,
-		"short_stat":      shortStat,
-		"untracked_n":     untrackedN,
-		"untracked_lines": untrackedLines,
+		"type":       "task_diff",
+		"task_id":    taskID,
+		"diff":       diff,
+		"short_stat": shortStat,
+		"untracked":  untracked,
 	})
 	bsm.writeMu.Lock()
 	for conn := range clients {
@@ -235,7 +235,7 @@ func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, project
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 
-	// Track last-known stats per task to detect changes
+	// Track last-known diff per task to detect changes
 	snapshots := make(map[string]diffSnapshot)
 	var lastBranch string
 
@@ -262,21 +262,26 @@ func (bsm *BoardStreamManager) pollProjectDiffStats(ctx context.Context, project
 					continue
 				}
 				baseRef := bsm.getDiffBaseline(task)
-			shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID, baseRef)
+				diffResult, err := bsm.worktreeMgr.GetTaskDiff(task.ID, baseRef, "")
 				if err != nil {
 					continue
 				}
-				current := diffSnapshot{shortStat: shortStat, untrackedN: untrackedN, untrackedLines: untrackedLines}
+				shortStat := diffResult.ShortStat
+				untrackedN := len(diffResult.Untracked)
+				current := diffSnapshot{diff: diffResult.Diff, shortStat: shortStat, untrackedN: untrackedN}
 				prev, exists := snapshots[task.ID]
 				if !exists || prev != current {
 					snapshots[task.ID] = current
-					if shortStat != "" || untrackedN > 0 {
-						log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files, %d lines)",
-							projectID, task.ID, shortStat, untrackedN, untrackedLines)
-						bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+					untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+					for i, u := range diffResult.Untracked {
+						untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+					}
+					if diffResult.Diff != "" || untrackedN > 0 {
+						log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files)",
+							projectID, task.ID, shortStat, untrackedN)
+						bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, shortStat, untrackedN, untrackedMaps)
 					} else {
-						// No changes — clear the stats for this task
-						bsm.BroadcastDiffStats(projectID, task.ID, "", 0, 0)
+						bsm.BroadcastDiff(projectID, task.ID, "", "", 0, nil)
 					}
 				}
 			}
@@ -341,14 +346,18 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		bsm.startPoller(projectID)
 	}
 
-	// Send initial diff stats for all tasks in this project
+	// Send initial diff for all tasks in this project
 	if bsm.store != nil && bsm.worktreeMgr != nil {
 		tasks, err := bsm.store.GetTasksByProject(projectID)
 		if err == nil {
 			for _, task := range tasks {
 				baseRef := bsm.getDiffBaseline(task)
-			if shortStat, untrackedN, untrackedLines, err := bsm.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil && (shortStat != "" || untrackedN > 0) {
-					bsm.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+				if diffResult, err := bsm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+					untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+					for i, u := range diffResult.Untracked {
+						untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+					}
+					bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 				}
 			}
 		}

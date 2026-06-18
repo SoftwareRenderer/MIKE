@@ -864,10 +864,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
 					te.boardStreamMgr.Broadcast(projectID)
-					// Broadcast diff stats so the frontend updates the diff panel
+					// Broadcast diff so the frontend updates the diff panel
 					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-					if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil {
-						te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
+						untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+						for i, u := range diffResult.Untracked {
+							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+						}
+						te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
@@ -942,8 +946,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				forkBranch = thread.GitBranch
 			}
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
-			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil && (shortStat != "" || untrackedN > 0) {
-				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+				for i, u := range diffResult.Untracked {
+					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+				}
+				te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
@@ -1015,10 +1023,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.Broadcast(projectID)
-			// Broadcast diff stats so the frontend updates the diff panel
+			// Broadcast diff so the frontend updates the diff panel
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil {
-				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
+				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+				for i, u := range diffResult.Untracked {
+					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+				}
+				te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
 			b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 				"state": "idle", "summary": "Agent finished responding",

@@ -128,6 +128,7 @@ export const streamingTaskIds = writable<Set<string>>(new Set());
 
 // Diff stats per task ID (pushed via WebSocket)
 export const taskDiffStats = writable<Record<string, { files: number; additions: number; deletions: number }>>({});
+export const taskDiff = writable<Record<string, { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> }>>({});
 
 // Toast notification — empty string means no toast visible
 export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);

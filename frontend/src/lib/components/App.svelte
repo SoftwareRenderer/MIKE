@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, showConfirm, commitQueueStatus } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -278,6 +278,15 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         return map;
                     });
                 }
+            }, (task_id, diff, untracked) => {
+                taskDiffStore.update(map => {
+                    if (diff || untracked.length > 0) {
+                        map[task_id] = { diff, untracked };
+                    } else {
+                        delete map[task_id];
+                    }
+                    return map;
+                });
             }, (branch) => {
                 currentBranch = branch;
             }, (updatedTask: Task) => {

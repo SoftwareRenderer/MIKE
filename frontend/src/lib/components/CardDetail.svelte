@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats, taskDiff as taskDiffStore } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -516,15 +516,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
         loadDiff();
 
-        // Real-time diff update: refresh when board stream sends diff stats for this task
-        let prevDiffStatsKey = '';
-        const unsubDiffStats = taskDiffStats.subscribe(stats => {
-            const stat = stats[task.id];
-            const key = stat ? `${stat.files}-${stat.additions}-${stat.deletions}` : '';
-            if (key !== prevDiffStatsKey && activeTab === 'diff') {
-                loadDiffForMode();
+        // Real-time diff update: apply diff from board stream broadcast
+        const unsubDiff = taskDiffStore.subscribe(diffs => {
+            const diffData = diffs[task.id];
+            if (diffData) {
+                updateDiff({ diff: diffData.diff, untracked: diffData.untracked }, true);
             }
-            prevDiffStatsKey = key;
         });
 
         function handleKey(e: KeyboardEvent) {
@@ -539,7 +536,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         window.addEventListener('keydown', handleKey);
         return () => {
             unsubBoard();
-            unsubDiffStats();
+            unsubDiff();
             window.removeEventListener('keydown', handleKey);
         };
     });
