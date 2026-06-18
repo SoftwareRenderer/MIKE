@@ -349,6 +349,8 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 			descendants[i].UpdatedAt = time.Now().UTC()
 			if err := h.store.UpdateTask(&descendants[i]); err != nil {
 				log.Printf("[move-descendants] failed to update descendant %s: %v", descendants[i].ID, err)
+			} else {
+				h.boardStreamMgr.BroadcastTaskUpdated(descendants[i].ProjectID, &descendants[i])
 			}
 		}
 	}
@@ -912,6 +914,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 		task.StatusState = "idle"
 		task.UpdatedAt = time.Now().UTC()
 		_ = h.store.UpdateTask(task)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		// Task has subtasks — use LLM to pick the best one
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {
@@ -1002,6 +1005,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request,
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	if err := h.executor.StartTask(projectID, taskID); err != nil {
 		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
@@ -1041,6 +1045,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 			d.Output = "Stopped by parent"
 			d.UpdatedAt = time.Now().UTC()
 			_ = h.store.UpdateTask(&d)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, &d)
 		}
 	}
 

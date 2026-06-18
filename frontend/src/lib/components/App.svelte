@@ -293,6 +293,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 const idx = tasks.findIndex(t => t.id === updatedTask.id);
                 if (idx !== -1) {
                     tasks[idx] = updatedTask;
+                } else {
+                    tasks.push(updatedTask);
                 }
                 // Update board store so reactive effects in child components see the change
                 boardStore.update(b => b ? { ...b, tasks: [...b.tasks] } : b);

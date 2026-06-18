@@ -24,17 +24,19 @@ type StreamManager struct {
 	lazyStartHandler LazyStartHandler
 	lazyMu           sync.RWMutex
 	worktreeMgr      *git.WorktreeManager
+	boardStreamMgr   *BoardStreamManager
 	// pollers tracks the git status poller context per task (one poller per task, not per client)
 	pollersMu sync.Mutex
 	pollers   map[string]context.CancelFunc
 }
 
 // NewStreamManager creates a new StreamManager.
-func NewStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *StreamManager {
+func NewStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager, boardStreamMgr *BoardStreamManager) *StreamManager {
 	return &StreamManager{
-		broadcasts:  make(map[string]*Broadcaster),
-		store:       store,
-		worktreeMgr: worktreeMgr,
+		broadcasts:     make(map[string]*Broadcaster),
+		store:          store,
+		worktreeMgr:    worktreeMgr,
+		boardStreamMgr: boardStreamMgr,
 		pollers:     make(map[string]context.CancelFunc),
 	}
 }
@@ -242,6 +244,16 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 				threadID := ""
 				if task != nil {
 					threadID = task.CurrentThreadID
+					// Move task to in_progress if it's in review or done
+					if task.Status == "review" || task.Status == "done" {
+						task.Status = "in_progress"
+						task.StatusState = "idle"
+						task.UpdatedAt = time.Now().UTC()
+						_ = sm.store.UpdateTask(task)
+						if sm.boardStreamMgr != nil {
+							sm.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
+						}
+					}
 				}
 				// Check if the last user message in this thread already has the same content.
 				// This avoids duplicating the message when forking (the checkpoint was already

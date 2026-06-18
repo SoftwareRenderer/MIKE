@@ -51,8 +51,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
     let untrackedFiles: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
-    // Terminal - worktree_exists is populated by the server on task/board fetch
-    let worktreeExists = $derived(task.worktree_exists ?? false);
+    // Terminal - worktree exists when task has a branch (set on start, cleared on delete)
+    let worktreeExists = $derived(!!task.branch);
 
     // Commit history for diff comparison
     let commits: TaskCommit[] = $state([]);

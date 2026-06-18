@@ -73,7 +73,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardS
 		gate:           NewConcurrencyGate(),
 		tasks:          make(map[string]*executionState),
 	}
-	te.streamMgr = stream.NewStreamManager(store, te.worktreeMgr)
+	te.streamMgr = stream.NewStreamManager(store, te.worktreeMgr, te.boardStreamMgr)
 	te.streamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
@@ -425,6 +425,11 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
 		if err := te.StartTask(projectID, parent.ID); err != nil {
 			log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
+		} else {
+			started, _ := te.store.GetTaskByTaskID(parent.ID)
+			if started != nil {
+				te.boardStreamMgr.BroadcastTaskUpdated(projectID, started)
+			}
 		}
 		return nil
 	}
@@ -457,6 +462,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 			if err := te.store.UpdateTask(task); err != nil {
 				return fmt.Errorf("reset stale state: %w", err)
 			}
+			te.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 		} else {
 			return fmt.Errorf("task already running")
 		}
