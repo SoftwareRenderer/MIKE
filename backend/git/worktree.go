@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,8 @@ type WorktreeManager struct {
 	store        *store.Store
 	configStore  *config.ConfigStore
 	worktreeMu   sync.Map // per-project mutex for worktree creation
+	stashMu      sync.Map // per-project mutex for stash operations
+
 }
 
 // NewWorktreeManager creates a new WorktreeManager.
@@ -29,6 +33,13 @@ func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *Wo
 // getProjectWorktreeMu returns a per-project mutex for serializing worktree creation.
 func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
 	mu, _ := wm.worktreeMu.LoadOrStore(projectID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// GetProjectStashMu returns a per-project mutex for serializing stash operations.
+// Stash is repo-wide, so concurrent stash operations from different worktrees must be serialized.
+func (wm *WorktreeManager) GetProjectStashMu(projectID string) *sync.Mutex {
+	mu, _ := wm.stashMu.LoadOrStore(projectID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 
@@ -117,31 +128,28 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
 	if hasChanges {
-		if err := wm.gitRun(project.Path, "stash", "push", "-m", "kanban baseline stash"); err != nil {
-			return "", "", fmt.Errorf("stash changes: %w", err)
-		}
-		defer func() {
-			wm.gitRun(project.Path, "stash", "pop")
-		}()
-
+		// Create baseline branch from current HEAD
 		if err := wm.gitRun(project.Path, "branch", baselineBranch); err != nil {
 			return "", "", fmt.Errorf("create baseline branch: %w", err)
 		}
 		defer cleanup()
 
-		if err := wm.gitRun(project.Path, "checkout", baselineBranch); err != nil {
-			return "", "", fmt.Errorf("checkout baseline: %w", err)
-	}
-
-		if err := wm.gitRun(project.Path, "stash", "pop"); err != nil {
-			wm.gitRun(project.Path, "stash", "drop")
+		// Stash changes, checkout baseline, restore changes, commit
+		stashErr := wm.gitRun(project.Path, "stash", "push", "-u", "-m", "kanban baseline stash")
+		if stashErr != nil {
+			// Can't stash — create baseline from HEAD without working tree changes
+			log.Printf("[worktree] task=%s stash failed during baseline creation, using HEAD: %v", taskID, stashErr)
+		} else {
+			wm.gitRun(project.Path, "checkout", "-f", baselineBranch)
+			if err := wm.gitRun(project.Path, "stash", "pop"); err != nil {
+				wm.gitRun(project.Path, "stash", "drop")
+			}
+			wm.gitRun(project.Path, "add", "-A")
+			wm.gitRun(project.Path, "commit", "--allow-empty", "-m", fmt.Sprintf("Baseline for task %s", taskID))
 		}
 
-		wm.gitRun(project.Path, "add", "-A")
-		wm.gitRun(project.Path, "commit", "-m", fmt.Sprintf("Baseline for task %s", taskID))
-
 		if originalBranch != "" {
-			wm.gitRun(project.Path, "checkout", originalBranch)
+			wm.gitRun(project.Path, "checkout", "-f", originalBranch)
 		}
 	}
 
@@ -423,6 +431,53 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 }
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
+// DropStashEntriesForBranch removes stash entries that belong to the given branch.
+// Stash entries are labeled with the branch name (e.g., "On task/abc-def-ghi: label").
+func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+
+	// List stash entries with their subjects
+	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%s")
+	if err != nil {
+		return nil // no stash, nothing to clean
+	}
+
+	branchPrefix := "On " + branchName + ":"
+	// Find stash indices that belong to this branch (newest first)
+	var dropIndices []int
+	for _, line := range strings.Split(listOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x00", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		subject := parts[1]
+		if !strings.HasPrefix(subject, branchPrefix) {
+			continue
+		}
+		// Extract index from stash@{N}
+		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
+			if idx, err := strconv.Atoi(match[1]); err == nil {
+				dropIndices = append(dropIndices, idx)
+			}
+		}
+	}
+
+	// Drop from highest index to lowest (git renumbers after each drop)
+	for i := len(dropIndices) - 1; i >= 0; i-- {
+		_ = wm.gitRun(project.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
+	}
+
+	return nil
+}
+
+// GetTaskDiff returns the git diff for a task's worktree.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
 // headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
 // When headRef is set, untracked files are omitted (commit-to-commit diff).
@@ -453,9 +508,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..%s", target, headRef))
 		// No untracked files for commit-to-commit diff
 	} else {
-		// Single-ref diff: working tree vs baseRef
-		// After stash-based checkpoints, working tree is clean.
-		// Fall back to latest stash if working tree has no changes.
+		// Single-ref diff: working tree vs baseRef.
+		// Checkpoints use stash create+store, so changes stay visible in the working tree.
 		target := "HEAD"
 		if baseRef != "" {
 			target = baseRef
@@ -465,23 +519,6 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
-		}
-
-		// If working tree is clean (no diff), check for stash entries
-		if len(strings.TrimSpace(diffOut)) == 0 {
-			stashHash, stashErr := wm.gitRunOutput(worktreePath, "rev-parse", "stash@{0}")
-			if stashErr == nil && strings.TrimSpace(stashHash) != "" {
-				// Use latest stash as the head ref
-				stashHash = strings.TrimSpace(stashHash)
-				diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..%s", target, stashHash))
-				if err != nil {
-					return nil, fmt.Errorf("git diff stash: %w", err)
-				}
-				shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..%s", target, stashHash))
-				diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
-				// No untracked files for stash diff
-				return &TaskDiff{Diff: diffOut, ShortStat: shortStat, Untracked: []UntrackedFile{}}, nil
-			}
 		}
 
 		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
@@ -526,7 +563,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 
 // GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
-// When the working tree is clean but stash entries exist, falls back to the latest stash.
+// Checkpoints commit to the branch, so changes are always visible in the working tree.
 func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat string, untrackedN int, untrackedLines int, err error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
@@ -552,34 +589,6 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 					untrackedLines += strings.Count(string(data), "\n")
 				}
 			}
-		}
-	}
-	// If working tree is clean but stash entries exist, use latest stash for stats
-	if shortStat == "" && untrackedN == 0 {
-		stashList, _ := wm.gitRunOutput(worktreePath, "stash", "list")
-		if strings.TrimSpace(stashList) != "" {
-			stashPatch, _ := wm.gitRunOutput(worktreePath, "stash", "show", "-p", "stash@{0}")
-			added, removed, files := 0, 0, 0
-			for _, line := range strings.Split(stashPatch, "\n") {
-				if strings.HasPrefix(line, "diff --git") {
-					files++
-				} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-					added++
-				} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-					removed++
-				} else {
-				}
-			}
-			if files > 0 {
-				shortStat = fmt.Sprintf("%d file changed", files)
-				if added > 0 {
-					shortStat += fmt.Sprintf(", %d insertion(+)", added)
-				}
-				if removed > 0 {
-					shortStat += fmt.Sprintf(", %d deletion(-)", removed)
-				}
-			}
-			untrackedLines = added + removed
 		}
 	}
 	return shortStat, untrackedN, untrackedLines, nil
@@ -905,7 +914,13 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 	if err != nil {
 		return headRef, nil
 	}
-	branchPrefix := "On " + task.Branch + ":" // e.g. "On task/abc-def-ghi:"
+	// Stash entries from `git stash create` + `git stash store` have subject:
+	// "WIP on <branch>: <hash> <message>" (commit subject)
+	// Stash entries from `git stash push` have subject:
+	// "On <branch>: <message>" (stash message)
+	// Match either format.
+	wipPrefix := "WIP on " + task.Branch + ":"
+	onPrefix := "On " + task.Branch + ":"
 
 	// List stash entries with subject: newest first (stash@{0}, stash@{1}, ...)
 	listOut, err := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%gd%x00%H%x00%s")
@@ -914,7 +929,7 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 	}
 
 	// Parse stash list and find entries matching this branch.
-	// Use %%00 (null byte) as separator between gd, H, and subject.
+	// Use null byte as separator between gd, H, and subject.
 	var branchEntries []string // hashes belonging to this branch, newest first
 	for _, line := range strings.Split(listOut, "\n") {
 		line = strings.TrimSpace(line)
@@ -929,7 +944,7 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 		if len(parts) > 2 {
 			subject = parts[2]
 		}
-		if !strings.HasPrefix(subject, branchPrefix) {
+		if !strings.HasPrefix(subject, wipPrefix) && !strings.HasPrefix(subject, onPrefix) {
 			continue // skip entries from other branches
 		}
 		branchEntries = append(branchEntries, strings.TrimSpace(parts[1]))
@@ -952,3 +967,6 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 
 	return headRef, nil
 }
+
+var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
+

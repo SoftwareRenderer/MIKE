@@ -862,12 +862,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					te.store.UpdateTask(task)
 					b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 						"state": task.StatusState,
+						"assistant_message_id": assistantMsgID,
 						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
 						"prompt_ms": promptMs, "predicted_ms": predictedMs,
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
 					te.boardStreamMgr.Broadcast(projectID)
+					// Broadcast diff stats so the frontend updates the diff panel
+					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
+					if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil {
+						te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
 						_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
@@ -1014,6 +1020,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.Broadcast(projectID)
+			// Broadcast diff stats so the frontend updates the diff panel
+			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
+			if shortStat, untrackedN, untrackedLines, err := te.worktreeMgr.GetDiffStats(task.ID, baseRef); err == nil {
+				te.boardStreamMgr.BroadcastDiffStats(projectID, task.ID, shortStat, untrackedN, untrackedLines)
+			}
 			b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
@@ -1210,7 +1221,8 @@ func isSandboxableTool(name string) bool {
 }
 
 // createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.
-// The stash entry serves as a checkpoint — the working tree remains clean.
+// Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
+// from the working tree — files stay visible in the filesystem.
 // Runs the LLM labeler in a goroutine so it does not block the main execution loop.
 func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assistantMsgID string, b *stream.Broadcaster, sandboxEnabled bool) {
 	// Check for file changes
@@ -1230,26 +1242,57 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 			diffStat = "file changes"
 		}
 
-		// Generate commit label via LLM
-		label := te.generateCommitLabel(taskID, diffStat)
+		// Generate commit label via LLM (include branch prefix for stash list filtering)
+		taskForLabel, _ := te.store.GetTaskByTaskID(taskID)
+		branchPrefix := ""
+		if taskForLabel != nil && taskForLabel.Branch != "" {
+			branchPrefix = "On " + taskForLabel.Branch + ": "
+		}
+		label := branchPrefix + te.generateCommitLabel(taskID, diffStat)
 
-		// Create stash snapshot: add all changes, stash with label, keep in stash list
-		_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-		stashOutput, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "push", "-u", "-m", label)
-		if err != nil {
-			log.Printf("[checkpoint] task=%s stash failed: %v (%s)", taskID, err, stashOutput)
+		// Serialize stash operations per project (stash is repo-wide)
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		projectID := ""
+		if task != nil {
+			projectID = task.ProjectID
+		}
+		var stashHash string
+		var stashErr error
+		if projectID != "" {
+			mu := te.worktreeMgr.GetProjectStashMu(projectID)
+			mu.Lock()
+			// Stage changes, create stash commit (doesn't remove from working tree), store in stash list
+			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
+			stashCreateOut, createErr := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
+			if createErr == nil {
+				stashCreateHash := strings.TrimSpace(stashCreateOut)
+				_ = te.worktreeMgr.GitRunInWorktree(taskID, "stash", "store", "-m", label, stashCreateHash)
+				stashHash = stashCreateHash
+			} else {
+				stashErr = createErr
+			}
+			mu.Unlock()
+		} else {
+			// Fallback without locking (shouldn't happen)
+			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
+			stashCreateOut, createErr := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
+			if createErr == nil {
+				stashCreateHash := strings.TrimSpace(stashCreateOut)
+				_ = te.worktreeMgr.GitRunInWorktree(taskID, "stash", "store", "-m", label, stashCreateHash)
+				stashHash = stashCreateHash
+			} else {
+				stashErr = createErr
+			}
+		}
+
+		if stashErr != nil {
+			log.Printf("[checkpoint] task=%s stash failed: %v", taskID, stashErr)
 			b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
 				"label":       label,
 			}})
 			return
-		}
-
-		// Get the stash commit hash (stash@{0} is the most recent)
-		stashHash := ""
-		if hashOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}"); err == nil {
-			stashHash = strings.TrimSpace(hashOut)
 		}
 
 		// Store stash hash on the assistant message (reuses git_commit_hash field)

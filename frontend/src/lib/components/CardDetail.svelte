@@ -60,6 +60,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     // Checkpoint diff overlay
     let checkpointDiffOpen = $state(false);
+    let checkpointDiffHash = $state(''); // which checkpoint hash is currently shown
     let checkpointDiffFiles: DiffFile[] = $state([]);
     let checkpointDiffUntracked: { path: string; fileSize?: number; file: DiffFile }[] = $state([]);
     let checkpointDiffLoading = $state(false);
@@ -156,10 +157,17 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     /** Handle "View Changes" from a checkpoint divider — opens an overlay in the diff panel.
      * Shows changes between origin and the state RIGHT BEFORE the checkpoint.
-     * Backend resolves stash refs to their common ancestor with baseRef. */
+     * Backend resolves stash refs to their common ancestor with baseRef.
+     * Toggles closed if the same checkpoint is clicked again. */
     async function handleViewChanges(commitHash: string) {
         if (isMobile) activeTab = 'diff';
+        // Toggle: if same checkpoint is already open, close it
+        if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
+            closeCheckpointDiff();
+            return;
+        }
         checkpointDiffOpen = true;
+        checkpointDiffHash = commitHash;
         checkpointDiffLoading = true;
         checkpointDiffFiles = [];
         checkpointDiffUntracked = [];
@@ -182,6 +190,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     function closeCheckpointDiff() {
         checkpointDiffOpen = false;
+        checkpointDiffHash = '';
     }
 
     // Inline editing for task list items

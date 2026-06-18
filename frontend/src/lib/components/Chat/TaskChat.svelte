@@ -96,6 +96,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let checkpointLabels = $state(new Map<string, string>());
     // Completed checkpoint commit hashes — message_id -> commit_hash
     let checkpointCommitHashes = $state(new Map<string, string>());
+    let checkpointUiVersion = $state(0); // incremented when checkpoint state changes to force re-render
+    // Versioned entries: changes when entries or checkpoint state changes, forces {#each} re-render
+    let versionedEntries = $derived({ entries, v: checkpointUiVersion });
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -362,7 +365,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'complete': {
                 markNotStreaming();
-                const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
+                const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
+                // Update streaming assistant entry ID with the real backend ID (for checkpoint hash matching)
+                // Must happen BEFORE closeCurrentAssistant() which clears currentAssistantId
+                if (data.assistant_message_id && currentAssistantId) {
+                    const entry = entries.find(e => e.id === currentAssistantId);
+                    if (entry && entry.id !== data.assistant_message_id) {
+                        // Only update if no other entry already has this ID (avoids duplicate keys)
+                        if (!entries.some(e => e.id === data.assistant_message_id)) {
+                            entry.id = data.assistant_message_id;
+                            // Force re-render of checkpoint dividers now that entry IDs match hash keys
+                            checkpointUiVersion++;
+                        }
+                    }
+                }
                 closeCurrentAssistant();
                 // Store prompt tokens for next turn's context baseline
                 if (data.prompt_tokens !== undefined) {
@@ -518,6 +534,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const pending = new Set(pendingCheckpoints);
                 pending.add(data.message_id);
                 pendingCheckpoints = pending;
+                checkpointUiVersion++; // force re-render of checkpoint dividers
                 break;
             }
             case 'git_checkpoint_complete': {
@@ -535,6 +552,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     hashes.set(data.message_id, data.commit_hash);
                     checkpointCommitHashes = hashes;
                 }
+                checkpointUiVersion++; // force re-render of checkpoint dividers
                 break;
             }
         }
@@ -754,15 +772,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break; // found the turn's assistant entry, no checkpoint
             }
         }
-        // Fallback: walk backward to find the last assistant entry with tool calls
+        // Fallback: walk backward to find the last assistant entry with tool calls or a checkpoint hash
         for (let i = entryIdx - 1; i >= 0; i--) {
             const prev = entries[i];
-            if (prev.role === 'assistant' && prev.toolCalls && prev.toolCalls.length > 0) {
-                return {
-                    isPending: pendingCheckpoints.has(prev.id),
-                    commitLabel: checkpointLabels.get(prev.id),
-                    commitHash: checkpointCommitHashes.get(prev.id),
-                };
+            if (prev.role === 'assistant') {
+                const hasToolCalls = prev.toolCalls && prev.toolCalls.length > 0;
+                const hasHash = checkpointCommitHashes.has(prev.id);
+                if (hasToolCalls || hasHash) {
+                    return {
+                        isPending: pendingCheckpoints.has(prev.id),
+                        commitLabel: checkpointLabels.get(prev.id),
+                        commitHash: checkpointCommitHashes.get(prev.id) || undefined,
+                    };
+                }
             }
             if (prev.role === 'user') break; // stop at previous user message
         }
@@ -1106,6 +1128,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await loadHistory();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
+            // Notify parent to refresh diff panel for the new fork
+            onThreadSwitch?.();
             // Wait for existing WebSocket to be OPEN before sending the edited message.
             // sendWithModel silently drops messages when readyState !== OPEN.
             const wsReady = new Promise<void>((resolve, reject) => {
@@ -1403,7 +1427,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 <span class="hint">Send a message to start the conversation</span>
             </div>
         {:else}
-            {#each entries as entry, entryIdx (entry.id)}
+            {#each versionedEntries.entries as entry, entryIdx (entry.id)}
                 {#if entry.role === 'user' && threads.length > 0}
                     {#if getCheckpointThreads(entry, entryIdx === 0)}
                         {@const cpThread = getCheckpointThreads(entry, entryIdx === 0)!}

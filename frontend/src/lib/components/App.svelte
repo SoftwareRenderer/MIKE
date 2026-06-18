@@ -285,6 +285,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 if (idx !== -1) {
                     tasks[idx] = updatedTask;
                 }
+                // Update board store so reactive effects in child components see the change
+                boardStore.update(b => b ? { ...b, tasks: [...b.tasks] } : b);
                 // Update selected task if it's the one that changed
                 if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
                     selectedTaskVal = updatedTask;
