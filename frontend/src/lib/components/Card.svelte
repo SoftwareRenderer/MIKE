@@ -4,7 +4,7 @@
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -450,7 +450,8 @@
         if (!confirmed) return;
         try {
             await deleteTask(projectId, task.id);
-            // Board stream WebSocket will push the update
+            // Fallback refresh in case WebSocket is disconnected
+            onRefreshBoard?.();
         } catch (err) {
             showToast('Failed to delete task: ' + String(err), 'error');
         }
@@ -731,7 +732,7 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} />
+                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
             {/each}
         </div>
     {/if}

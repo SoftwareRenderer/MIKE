@@ -4,7 +4,7 @@
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
     import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
 
-    let { tasks, projectId, onAddTask, onCreateChildTask }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void } = $props();
+    let { tasks, projectId, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
 
     // Build a lookup map for children of each task
     const childrenMap = $derived.by(() => {
@@ -223,9 +223,10 @@
             }}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
             onCreateChildTask={onCreateChildTask}
-            onClearAll={col.id === 'done' ? handleClearDone : undefined}
+            onClearAll={col.id === 'done' ? () => { handleClearDone(); onRefreshBoard?.(); } : undefined}
             onSelect={handleSelectTask}
             {projectId}
+            onRefreshBoard={onRefreshBoard}
         />
     {/each}
 </div>

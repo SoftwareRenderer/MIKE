@@ -16,7 +16,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     import DiffSelect from './DiffSelect.svelte';
     import Card from './Card.svelte';
 
-    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void } = $props();
+    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -570,7 +570,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const taskId = task.id;
         try {
             await deleteTask(projectId, taskId);
-            // Board stream WebSocket will push the update
+            // Fallback refresh in case WebSocket is disconnected
+            onRefreshBoard?.();
             onClose();
         } catch (e) {
             showToast('Failed to delete task: ' + String(e), 'error');

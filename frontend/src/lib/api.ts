@@ -166,41 +166,68 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 
 // Board stream - WebSocket for real-time board updates
 export function createBoardStream(projectId: string, onRefresh: () => void, onProjectCounts?: (counts: Record<string, ProjectCounts>) => void, onDiffStats?: (task_id: string, short_stat: string, untracked_n: number, untracked_lines: number) => void, onDiff?: (task_id: string, diff: string, untracked: Array<{ path: string; diff: string; file_size?: number }>) => void, onBranch?: (branch: string) => void, onTaskUpdated?: (task: Task) => void, onTaskDeleted?: (task_id: string) => void, onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void): { ws: WebSocket; close: () => void } {
-    const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
-    ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'board_refresh') {
-            onRefresh();
-        }
-        if (msg.type === 'project_counts' && onProjectCounts) {
-            onProjectCounts(msg.data);
-        }
-        if (msg.type === 'task_diff_stats' && onDiffStats) {
-            onDiffStats(msg.task_id, msg.short_stat, msg.untracked_n, msg.untracked_lines);
-        }
-        if (msg.type === 'task_diff' && onDiff) {
-            onDiff(msg.task_id, msg.diff, msg.untracked || []);
-        }
-        if (msg.type === 'project_branch' && onBranch) {
-            onBranch(msg.branch);
-        }
-        if (msg.type === 'task_updated' && onTaskUpdated) {
-            onTaskUpdated(msg.task);
-        }
-        if (msg.type === 'task_deleted' && onTaskDeleted) {
-            onTaskDeleted(msg.task_id);
-        }
-        if (msg.type === 'commit_status' && onCommitStatus) {
-            onCommitStatus(msg.task_id, msg.status);
-        }
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    let isClosed = false;
+    const maxDelay = 30_000;
+
+    function connect() {
+        const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/board/stream`);
+
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'board_refresh') {
+                onRefresh();
+            }
+            if (msg.type === 'project_counts' && onProjectCounts) {
+                onProjectCounts(msg.data);
+            }
+            if (msg.type === 'task_diff_stats' && onDiffStats) {
+                onDiffStats(msg.task_id, msg.short_stat, msg.untracked_n, msg.untracked_lines);
+            }
+            if (msg.type === 'task_diff' && onDiff) {
+                onDiff(msg.task_id, msg.diff, msg.untracked || []);
+            }
+            if (msg.type === 'project_branch' && onBranch) {
+                onBranch(msg.branch);
+            }
+            if (msg.type === 'task_updated' && onTaskUpdated) {
+                onTaskUpdated(msg.task);
+            }
+            if (msg.type === 'task_deleted' && onTaskDeleted) {
+                onTaskDeleted(msg.task_id);
+            }
+            if (msg.type === 'commit_status' && onCommitStatus) {
+                onCommitStatus(msg.task_id, msg.status);
+            }
+        };
+
+        ws.onclose = () => {
+            if (isClosed) return; // Intentional close, don't reconnect
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
+            reconnectAttempts++;
+            reconnectTimer = setTimeout(() => connect(), delay);
+        };
+
+        ws.onerror = () => {
+            // Connection errors trigger onclose, which handles reconnect
+        };
+
+        return ws;
+    }
+
+    const ws = connect();
+    return {
+        ws,
+        close: () => {
+            isClosed = true;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            ws.close();
+        },
     };
-    ws.onclose = () => {
-        // Silent reconnect handled by caller
-    };
-    ws.onerror = () => {
-        // Connection errors are handled via onclose
-    };
-    return { ws, close: () => ws.close() };
 }
 
 export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void, syncBuffer = true): { ws: WebSocket; send: (msg: string) => void; sendWithModel: (msg: string, modelName: string, serverUrl: string) => void; close: () => void } {

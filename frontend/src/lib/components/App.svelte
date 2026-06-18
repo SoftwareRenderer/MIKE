@@ -296,8 +296,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 } else {
                     tasks.push(updatedTask);
                 }
-                // Update board store so reactive effects in child components see the change
-                boardStore.update(b => b ? { ...b, tasks: [...b.tasks] } : b);
+                // Update board store with the local tasks array reference
+                boardStore.update(b => b ? { ...b, tasks } : b);
                 // Update selected task if it's the one that changed
                 if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
                     selectedTaskVal = updatedTask;
@@ -308,7 +308,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 const idx = tasks.findIndex(t => t.id === task_id);
                 if (idx !== -1) {
                     tasks.splice(idx, 1);
-                    boardStore.update(b => b ? { ...b, tasks: [...b.tasks] } : b);
+                    boardStore.update(b => b ? { ...b, tasks } : b);
                 }
                 // Close task detail if it's the deleted task
                 if (selectedTaskVal && selectedTaskVal.id === task_id) {
@@ -566,13 +566,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         selectedTaskVal = t;
                         selectedTask.set(t);
-                    }} />
+                    }} onRefreshBoard={() => refreshBoard()} />
                 {:else}
                     <Board 
                         {tasks} 
                         projectId={currentProject.id}
                         onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
                         onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
+                        onRefreshBoard={() => refreshBoard()}
                     />
                 {/if}
             </section>
