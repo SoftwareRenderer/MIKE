@@ -553,6 +553,15 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	return nil
 }
 
+// StopSandbox removes the sandbox container for a task (called on task deletion).
+func (te *TaskExecutor) StopSandbox(taskID string) {
+	if te.sandboxMgr != nil {
+		if err := te.sandboxMgr.Stop(taskID); err != nil {
+			log.Printf("[sandbox] task=%s stop error: %v", taskID, err)
+		}
+	}
+}
+
 // RetryTask retries a failed task.
 func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)

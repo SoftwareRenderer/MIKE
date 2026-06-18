@@ -415,17 +415,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
-		// Clean up sandbox
-		if sandboxEnabled && te.sandboxMgr != nil {
-			if err := te.sandboxMgr.Stop(task.ID); err != nil {
-				log.Printf("[sandbox] task=%s cleanup error: %v", task.ID, err)
-			}
-		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
 		te.taskMu.Unlock()
 		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
 		// It's removed only when the task is deleted (via RemoveStream in cleanupTask).
+		// Sandbox container is also kept alive until task deletion.
 	}()
 
 	// Create sandbox if enabled

@@ -521,10 +521,19 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
 
-		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+		// If working tree is clean, fall back to committed changes (HEAD vs target)
+		// This handles forked threads where changes are committed as snapshots
+		if len(strings.TrimSpace(diffOut)) == 0 {
+			diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", target))
+			if err != nil {
+				return nil, fmt.Errorf("git diff: %w", err)
+			}
+			shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..HEAD", target))
+		} else {
+			shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
+		}
 
-		// Get shortstat summary
-		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
+		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 		// Get untracked files from git status --porcelain (lines starting with "?? ")
 		statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
@@ -577,6 +586,10 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 		target = baseRef
 	}
 	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
+	// If working tree is clean, fall back to committed changes
+	if shortStat == "" {
+		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..HEAD", target))
+	}
 	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
 	for _, line := range strings.Split(statusOut, "\n") {
 		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
@@ -836,11 +849,16 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 
 // ResolveDiffBaseline computes the effective git ref to diff against for a task.
 // For the original thread, returns baseRef (e.g., "master").
-// For a forked thread, returns the merge-base between forkBranch and taskBranch,
-// which is the divergence point (what the fork inherited from the parent).
+// For a forked thread, returns the merge-base between forkBranch and taskBranch.
+// If forkBranch == taskBranch (task branch was switched to thread branch),
+// returns baseRef (the original baseline) since all changes are on the thread branch.
 func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
 	if forkBranch == "" {
 		// Original thread — diff against base_ref
+		return baseRef, nil
+	}
+	if forkBranch == taskBranch {
+		// Task branch was switched to thread branch — diff against original baseline
 		return baseRef, nil
 	}
 	// Forked thread — find the divergence point via merge-base

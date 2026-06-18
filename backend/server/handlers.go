@@ -128,7 +128,8 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
 			s.resetWorktreeToCommit(taskID, lastCommit)
 			s.broadcastTaskDiff(taskID)
-			// Broadcast thread_switch event so frontend refreshes
+			// Broadcast updated task so frontend has new currentThreadID before diff loads
+			s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 			s.boardStreamMgr.Broadcast(projectID)
 			b := s.executor.GetOrCreateStream(taskID)
 			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
@@ -599,12 +600,13 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Thread switch snapshot", "--allow-empty")
 		}
-		// Checkout target thread's branch (or task's main branch if none)
+		// Checkout target thread's branch (or task's original branch if none)
 		targetBranch := thread.GitBranch
 		if targetBranch == "" {
-			targetBranch = task.Branch
+			targetBranch = fmt.Sprintf("task/%s", taskID)
 		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
+		task.Branch = targetBranch
 	}
 	// Set new active thread
 	if err := s.store.SetActiveThread(req.ThreadID); err != nil {
@@ -618,6 +620,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Broadcast updated task so frontend has new currentThreadID before diff loads
+	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	s.boardStreamMgr.Broadcast(projectID)
 	// Broadcast thread_switch event to WebSocket clients
 	b := s.executor.GetOrCreateStream(taskID)
@@ -736,6 +740,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Broadcast updated task so frontend has new currentThreadID before diff loads
+	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	s.boardStreamMgr.Broadcast(projectID)
 	// Broadcast thread_switch event
 	b := s.executor.GetOrCreateStream(taskID)

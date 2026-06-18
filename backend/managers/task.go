@@ -764,6 +764,7 @@ func (h *TaskHandler) cleanupTask(taskID string) {
 func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.executor != nil {
 		_ = h.executor.StopTask(taskID)
+		h.executor.StopSandbox(taskID)
 		h.executor.RemoveStream(taskID)
 	}
 	if h.worktreeMgr != nil {
