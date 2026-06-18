@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone } from '$lib/api';
+    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -576,6 +576,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function loadHistory(scrollAfter = false) {
         try {
             const messages = await getTaskMessages(projectId, taskId);
+            // Restore checkpoint commit hashes from persisted messages
+            const hashes = new Map<string, string>();
+            for (const m of messages) {
+                if (m.git_commit_hash) {
+                    hashes.set(m.id, m.git_commit_hash);
+                }
+            }
+            checkpointCommitHashes = hashes;
+
             // Filter out title generation messages (invisible, used for stats only)
             entries = messages.filter(m => m.role !== 'title').map(m => {
                 const base = { threadId: m.thread_id || undefined };
@@ -723,10 +732,29 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     /** Get the checkpoint pending/label state for the checkpoint divider before a user message.
-     * Looks at the last assistant entry (with tool calls) before the given entry index.
+     * Looks at the next assistant entry (with tool calls or hash) after the given entry index,
+     * since the checkpoint is created after tool calls in the same turn.
+     * Falls back to walking backward if no forward entry has a checkpoint.
      * Returns { isPending, commitLabel, commitHash } or null if no checkpoint state to show. */
     function getCheckpointEntryCheckpointState(entryIdx: number): { isPending: boolean; commitLabel?: string; commitHash?: string } | null {
-        // Walk backward to find the last assistant entry with tool calls
+        // First: look forward to find the next assistant entry with tool calls or a checkpoint hash
+        // (checkpoint is created after tool calls, so hash is on the assistant msg in the same turn)
+        for (let i = entryIdx + 1; i < entries.length; i++) {
+            const next = entries[i];
+            if (next.role === 'assistant') {
+                const hasToolCalls = next.toolCalls && next.toolCalls.length > 0;
+                const hasHash = checkpointCommitHashes.has(next.id);
+                if (hasToolCalls || hasHash) {
+                    return {
+                        isPending: pendingCheckpoints.has(next.id),
+                        commitLabel: checkpointLabels.get(next.id),
+                        commitHash: checkpointCommitHashes.get(next.id) || undefined,
+                    };
+                }
+                break; // found the turn's assistant entry, no checkpoint
+            }
+        }
+        // Fallback: walk backward to find the last assistant entry with tool calls
         for (let i = entryIdx - 1; i >= 0; i--) {
             const prev = entries[i];
             if (prev.role === 'assistant' && prev.toolCalls && prev.toolCalls.length > 0) {
@@ -740,6 +768,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
         return null;
     }
+
 
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
     function updateActiveThread(threadId: string) {
@@ -1024,6 +1053,23 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
             entries = entries.filter((_, i) => i < idx);
+
+            // Roll back worktree to the last checkpoint before the deleted messages
+            const lastCheckpointHash = (() => {
+                for (let i = entries.length - 1; i >= 0; i--) {
+                    const hash = checkpointCommitHashes.get(entries[i].id);
+                    if (hash) return hash;
+                }
+                return null;
+            })();
+            if (lastCheckpointHash) {
+                try {
+                    await resetWorktree(projectId, taskId, lastCheckpointHash);
+                } catch {
+                    // Best-effort: worktree may not exist if task is done
+                }
+            }
+
             // Refresh threads list and sync active thread after deletion
             threads = await getTaskThreads(projectId, taskId);
             const active = threads.find(t => t.is_active);
@@ -1360,15 +1406,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             {#each entries as entry, entryIdx (entry.id)}
                 {#if entry.role === 'user' && threads.length > 0}
                     {#if getCheckpointThreads(entry, entryIdx === 0)}
+                        {@const cpThread = getCheckpointThreads(entry, entryIdx === 0)!}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
                             threadId={entry.threadId || activeThreadId}
                             threads={threads}
-                            activeThreadId={getCheckpointThreads(entry, entryIdx === 0)!.id}
+                            activeThreadId={cpThread.id}
                             onSwitch={handleThreadSwitch}
                             isPending={getCheckpointEntryCheckpointState(entryIdx)?.isPending || false}
                             commitLabel={getCheckpointEntryCheckpointState(entryIdx)?.commitLabel || undefined}
-                            commitHash={getCheckpointEntryCheckpointState(entryIdx)?.commitHash || undefined}
+                            commitHash={getCheckpointEntryCheckpointState(entryIdx)?.commitHash || cpThread.checkpoint_commit_hash || undefined}
                             onViewChanges={onViewChanges}
                         />
                     {/if}

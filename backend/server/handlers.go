@@ -214,15 +214,24 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request, p
 	}
 	if r.Method == http.MethodPatch {
 		var req struct {
-			Content string `json:"content"`
+			Content       string `json:"content"`
+			CommitHash    string `json:"git_commit_hash"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
-			JSONError(w, http.StatusBadRequest, "content required")
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			JSONError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
-		if err := s.store.UpdateTaskMessage(messageID, req.Content); err != nil {
-			JSONError(w, http.StatusInternalServerError, err.Error())
-			return
+		if req.Content != "" {
+			if err := s.store.UpdateTaskMessage(messageID, req.Content); err != nil {
+				JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if req.CommitHash != "" {
+			if err := s.store.UpdateTaskMessageCommitHash(messageID, req.CommitHash); err != nil {
+				JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -656,20 +665,18 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	// Find the file state at the checkpoint: last commit BEFORE the checkpoint message.
 	// This is the state before its tool calls ran, so the fork starts from a clean slate.
 	checkpointCommit, _ := s.store.GetLastCommitHashBeforeMessage(req.FromMessageID, req.FromThreadID)
+	// Determine the branch point for the fork
+	branchPoint := checkpointCommit
+	if branchPoint == "" {
+		branchPoint = task.BaseRef
+	}
 	// Save current worktree state to the current branch before forking,
 	// so uncommitted changes aren't lost when we switch away.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Fork snapshot", "--allow-empty")
-		// Create new git branch from the checkpoint commit.
-		// If no commit found before the checkpoint, use the task's base_ref (e.g., "master").
-		branchPoint := checkpointCommit
-		if branchPoint == "" {
-			branchPoint = task.BaseRef
-		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
-		// Checkout the new branch (use plain checkout, not -B, since branch was just created)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)
 	}
 	// Look up the checkpoint message's created_at for frontend filtering
@@ -680,15 +687,16 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	// Create new thread
 	now := time.Now().UTC()
 	newThread := &types.TaskThread{
-		ID:                  newThreadID,
-		TaskID:              taskID,
-		ParentThreadID:      req.FromThreadID,
-		Name:                "",
-		IsActive:            true,
-		GitBranch:           newBranchName,
-		CheckpointMessageID: req.FromMessageID,
+		ID:                   newThreadID,
+		TaskID:               taskID,
+		ParentThreadID:       req.FromThreadID,
+		Name:                 "",
+		IsActive:             true,
+		GitBranch:            newBranchName,
+		CheckpointMessageID:  req.FromMessageID,
 		CheckpointMessageTime: checkpointMsgTime,
-		CreatedAt:           now,
+		CheckpointCommitHash: branchPoint,
+		CreatedAt:            now,
 	}
 	// Generate thread name from new_content if provided, otherwise use "Fork #N"
 	threads, _ := s.store.GetThreadsByTask(taskID)
@@ -790,12 +798,12 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", "-D", branchName)
 }
 
-// resetWorktreeToCommit resets the task's worktree to a specific commit.
+// resetWorktreeToCommit resets the task's worktree to a specific commit or stash hash.
 func (s *Server) resetWorktreeToCommit(taskID, commitHash string) {
 	if commitHash == "" {
 		return
 	}
-	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "reset", "--hard", commitHash)
+	_ = s.executor.WorktreeMgr().ResetWorktreeTo(taskID, commitHash)
 }
 
 // getLastCommitHashInThread finds the last commit hash in a thread's messages.

@@ -1209,14 +1209,10 @@ func isSandboxableTool(name string) bool {
 	}
 }
 
-// createCheckpoint checks for file changes after tool calls and creates a git commit.
+// createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.
+// The stash entry serves as a checkpoint — the working tree remains clean.
 // Runs the LLM labeler in a goroutine so it does not block the main execution loop.
 func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assistantMsgID string, b *stream.Broadcaster, sandboxEnabled bool) {
-	// Skip sandbox mode for now (handled separately)
-	if sandboxEnabled {
-		return
-	}
-
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
 	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {
@@ -1226,7 +1222,7 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 	// Send pending event to frontend
 	b.Send(types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
-	// Run commit + LLM labeler in background (non-blocking)
+	// Run stash + LLM labeler in background (non-blocking)
 	go func() {
 		// Get diff stat for the LLM labeler
 		diffStat, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
@@ -1237,11 +1233,11 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 		// Generate commit label via LLM
 		label := te.generateCommitLabel(taskID, diffStat)
 
-		// Create the commit
+		// Create stash snapshot: add all changes, stash with label, keep in stash list
 		_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-		commitOutput, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "commit", "-m", label)
+		stashOutput, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "push", "-u", "-m", label)
 		if err != nil {
-			log.Printf("[checkpoint] task=%s commit failed: %v (%s)", taskID, err, commitOutput)
+			log.Printf("[checkpoint] task=%s stash failed: %v (%s)", taskID, err, stashOutput)
 			b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
@@ -1250,30 +1246,21 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 			return
 		}
 
-		// Extract commit hash from output ("<branch> <hash> (X insertions...)")
-		commitHash := ""
-		for _, part := range strings.Fields(strings.TrimSpace(commitOutput)) {
-			if len(part) == 40 {
-				commitHash = part
-				break
-			}
-		}
-		// Fallback: get hash from git rev-parse
-		if commitHash == "" {
-			if hashOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "HEAD"); err == nil {
-				commitHash = strings.TrimSpace(hashOut)
-			}
+		// Get the stash commit hash (stash@{0} is the most recent)
+		stashHash := ""
+		if hashOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}"); err == nil {
+			stashHash = strings.TrimSpace(hashOut)
 		}
 
-		// Store commit hash on the assistant message
-		if commitHash != "" {
-			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, commitHash)
+		// Store stash hash on the assistant message (reuses git_commit_hash field)
+		if stashHash != "" {
+			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, stashHash)
 		}
 
 		// Send complete event to frontend
 		b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 			"message_id":  assistantMsgID,
-			"commit_hash": commitHash,
+			"commit_hash": stashHash,
 			"label":       label,
 		}})
 	}()

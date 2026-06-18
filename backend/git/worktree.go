@@ -454,6 +454,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		// No untracked files for commit-to-commit diff
 	} else {
 		// Single-ref diff: working tree vs baseRef
+		// After stash-based checkpoints, working tree is clean.
+		// Fall back to latest stash if working tree has no changes.
 		target := "HEAD"
 		if baseRef != "" {
 			target = baseRef
@@ -464,6 +466,24 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
+
+		// If working tree is clean (no diff), check for stash entries
+		if len(strings.TrimSpace(diffOut)) == 0 {
+			stashHash, stashErr := wm.gitRunOutput(worktreePath, "rev-parse", "stash@{0}")
+			if stashErr == nil && strings.TrimSpace(stashHash) != "" {
+				// Use latest stash as the head ref
+				stashHash = strings.TrimSpace(stashHash)
+				diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..%s", target, stashHash))
+				if err != nil {
+					return nil, fmt.Errorf("git diff stash: %w", err)
+				}
+				shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..%s", target, stashHash))
+				diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+				// No untracked files for stash diff
+				return &TaskDiff{Diff: diffOut, ShortStat: shortStat, Untracked: []UntrackedFile{}}, nil
+			}
+		}
+
 		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 		// Get shortstat summary
@@ -795,4 +815,111 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 		return baseRef, fmt.Errorf("git merge-base: %w", err)
 	}
 	return strings.TrimSpace(mb), nil
+}
+
+// ResetWorktreeTo resets the worktree to a specific commit or stash hash.
+// For branch commits, uses git reset --hard.
+// For stash hashes, cleans the working tree and applies the stash patch.
+func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return err
+	}
+
+	// Try regular reset first (works for branch commits)
+	if err := wm.gitRun(worktreePath, "reset", "--hard", hash); err == nil {
+		return nil
+	}
+
+	// Fall back to stash approach: clean working tree + apply stash patch
+	// Clean the working tree
+	_ = wm.gitRun(worktreePath, "checkout", "-f", "HEAD")
+	_ = wm.gitRun(worktreePath, "clean", "-fd")
+
+	// Apply the stash patch
+	stashPatch, err := wm.gitRunOutput(worktreePath, "stash", "show", "-p", hash)
+	if err != nil {
+		return fmt.Errorf("stash show failed: %w", err)
+	}
+	if len(strings.TrimSpace(stashPatch)) == 0 {
+		return nil // empty stash, nothing to apply
+	}
+
+	// Use stdin to pipe the patch into git apply
+	cmd := exec.Command("git", "apply")
+	cmd.Dir = worktreePath
+	cmd.Stdin = strings.NewReader(stashPatch)
+	_, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git apply stash failed: %w", err)
+	}
+	return nil
+}
+
+// ResolveStashParent finds the state BEFORE a stash checkpoint's changes.
+// Uses the previous stash entry (stash@{N+1} in list order) which contains
+// accumulated changes from all prior checkpoints. Falls back to stash^
+// (HEAD at stash time) if no previous entry exists.
+// Only considers stash entries belonging to the same branch (task).
+// Returns the original headRef if not found in stash list.
+func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (string, error) {
+	if headRef == "" {
+		return "", nil
+	}
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return headRef, err
+	}
+
+	// Get the task's branch name to filter stash entries
+	task, err := wm.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return headRef, nil
+	}
+	branchPrefix := "On " + task.Branch + ":" // e.g. "On task/abc-def-ghi:"
+
+	// List stash entries with subject: newest first (stash@{0}, stash@{1}, ...)
+	listOut, err := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%gd%x00%H%x00%s")
+	if err != nil {
+		return headRef, nil
+	}
+
+	// Parse stash list and find entries matching this branch.
+	// Use %%00 (null byte) as separator between gd, H, and subject.
+	var branchEntries []string // hashes belonging to this branch, newest first
+	for _, line := range strings.Split(listOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x00", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		subject := ""
+		if len(parts) > 2 {
+			subject = parts[2]
+		}
+		if !strings.HasPrefix(subject, branchPrefix) {
+			continue // skip entries from other branches
+		}
+		branchEntries = append(branchEntries, strings.TrimSpace(parts[1]))
+	}
+
+	// Find headRef in branch entries and return the next one (previous checkpoint)
+	for i, hash := range branchEntries {
+		if hash == headRef {
+			if i+1 < len(branchEntries) {
+				return branchEntries[i+1], nil
+			}
+			// No previous entry — fall back to HEAD at stash time
+			parent, err := wm.gitRunOutput(worktreePath, "rev-parse", headRef+"^")
+			if err == nil {
+				return strings.TrimSpace(parent), nil
+			}
+			break
+		}
+	}
+
+	return headRef, nil
 }

@@ -46,6 +46,7 @@ type TaskThread struct {
 	GitBranch             string     `json:"git_branch,omitempty"`
 	CheckpointMessageID   string     `json:"checkpoint_message_id,omitempty"`
 	CheckpointMessageTime *time.Time `json:"checkpoint_message_time,omitempty"`
+	CheckpointCommitHash  string     `json:"checkpoint_commit_hash,omitempty"` // git commit at fork point
 	CreatedAt             time.Time  `json:"created_at"`
 }
 

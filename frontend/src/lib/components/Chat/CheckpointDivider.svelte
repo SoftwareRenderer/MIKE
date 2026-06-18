@@ -77,8 +77,8 @@
             {commitLabel || 'Checkpoint'}
         </span>
         <div class="divider-actions">
-            {#if commitHash && onViewChanges}
-                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash)} title="View changes for this checkpoint">
+            {#if onViewChanges && commitHash}
+                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash || '')} title="View changes up to this checkpoint">
                     <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Changes
                 </button>

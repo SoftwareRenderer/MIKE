@@ -58,6 +58,7 @@ export interface Thread {
     git_branch?: string;
     checkpoint_message_id?: string;
     checkpoint_message_time?: string;
+    checkpoint_commit_hash?: string;
     created_at: string;
 }
 

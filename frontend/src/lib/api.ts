@@ -297,6 +297,16 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
     return res.json();
 }
 
+export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/reset-worktree`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commit_hash: commitHash }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to reset worktree');
+    return res.json();
+}
+
 // -- Prompt endpoints --
 export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
     const res = await fetch(`${API_BASE}/prompts/reload`, {

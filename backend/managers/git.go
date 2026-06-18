@@ -318,6 +318,14 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
 	}
 
+	// For stash refs, resolve to the common ancestor (state before stash changes)
+	if headRef != "" && baseRef != "" {
+		resolved, err := h.worktreeMgr.ResolveStashParent(taskID, baseRef, headRef)
+		if err == nil {
+			headRef = resolved
+		}
+	}
+
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
 	if err != nil {
 		// Worktree may not exist (e.g., after commit-and-done).
@@ -370,4 +378,40 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 		Untracked: []git.UntrackedFile{},
 		ShortStat: string(shortStatOut),
 	}, nil
+}
+
+// HandleResetWorktree resets the task's worktree to a specific commit.
+// Used when deleting messages after a checkpoint to roll back file changes.
+func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		CommitHash string `json:"commit_hash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CommitHash == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "commit_hash required")
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
+	}
+	// Only reset if worktree exists and task is active
+	if task.Status == "backlog" || task.Status == "done" {
+		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
+		return
+	}
+	// Reset worktree to the checkpoint (commit hash or stash hash)
+	if err := h.worktreeMgr.ResetWorktreeTo(taskID, req.CommitHash); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("reset failed: %v", err))
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "reset"})
 }
