@@ -428,11 +428,6 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		// Continue to move task to done even if merge fails
 	}
 
-	// Clean up worktree after merge attempt
-	if worktreeExists {
-		_ = h.worktreeMgr.RemoveWorktreeDir(projectID, taskID)
-	}
-
 	// Move task to Done
 	task.Status = "done"
 	task.StatusState = "completed"
