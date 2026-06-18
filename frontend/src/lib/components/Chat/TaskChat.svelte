@@ -96,9 +96,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let checkpointLabels = $state(new Map<string, string>());
     // Completed checkpoint commit hashes — message_id -> commit_hash
     let checkpointCommitHashes = $state(new Map<string, string>());
-    let checkpointUiVersion = $state(0); // incremented when checkpoint state changes to force re-render
-    // Versioned entries: changes when entries or checkpoint state changes, forces {#each} re-render
-    let versionedEntries = $derived({ entries, v: checkpointUiVersion });
+    let checkpointHashesVersion = $state(0); // incremented when hashes change for reactivity
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
@@ -374,8 +372,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         // Only update if no other entry already has this ID (avoids duplicate keys)
                         if (!entries.some(e => e.id === data.assistant_message_id)) {
                             entry.id = data.assistant_message_id;
-                            // Force re-render of checkpoint dividers now that entry IDs match hash keys
-                            checkpointUiVersion++;
                         }
                     }
                 }
@@ -534,7 +530,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const pending = new Set(pendingCheckpoints);
                 pending.add(data.message_id);
                 pendingCheckpoints = pending;
-                checkpointUiVersion++; // force re-render of checkpoint dividers
                 break;
             }
             case 'git_checkpoint_complete': {
@@ -550,9 +545,23 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (data.commit_hash) {
                     const hashes = new Map(checkpointCommitHashes);
                     hashes.set(data.message_id, data.commit_hash);
+                    // Also store by entry ID so lookup works regardless of timing
+                    // Use currentAssistantId if available, otherwise find last assistant entry with tool calls
+                    let entryId = currentAssistantId;
+                    if (!entryId) {
+                        for (let i = entries.length - 1; i >= 0; i--) {
+                            if (entries[i].role === 'assistant' && entries[i].toolCalls && entries[i].toolCalls.length > 0) {
+                                entryId = entries[i].id;
+                                break;
+                            }
+                        }
+                    }
+                    if (entryId) {
+                        hashes.set(entryId, data.commit_hash);
+                    }
                     checkpointCommitHashes = hashes;
+                    checkpointHashesVersion++; // trigger reactive update
                 }
-                checkpointUiVersion++; // force re-render of checkpoint dividers
                 break;
             }
         }
@@ -1427,19 +1436,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 <span class="hint">Send a message to start the conversation</span>
             </div>
         {:else}
-            {#each versionedEntries.entries as entry, entryIdx (entry.id)}
-                {#if entry.role === 'user' && threads.length > 0}
-                    {#if getCheckpointThreads(entry, entryIdx === 0)}
-                        {@const cpThread = getCheckpointThreads(entry, entryIdx === 0)!}
+            {#each entries as entry, entryIdx (entry.id)}
+                {#if entry.role === 'user'}
+                    {@const _hv = checkpointHashesVersion}
+                    {@const cpState = getCheckpointEntryCheckpointState(entryIdx)}
+                    {@const cpThread = threads.length > 0 ? getCheckpointThreads(entry, entryIdx === 0) : null}
+                    {#if cpThread || cpState}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
                             threadId={entry.threadId || activeThreadId}
                             threads={threads}
-                            activeThreadId={cpThread.id}
+                            activeThreadId={cpThread?.id || ''}
                             onSwitch={handleThreadSwitch}
-                            isPending={getCheckpointEntryCheckpointState(entryIdx)?.isPending || false}
-                            commitLabel={getCheckpointEntryCheckpointState(entryIdx)?.commitLabel || undefined}
-                            commitHash={getCheckpointEntryCheckpointState(entryIdx)?.commitHash || cpThread.checkpoint_commit_hash || undefined}
+                            isPending={cpState?.isPending || false}
+                            commitLabel={cpState?.commitLabel || undefined}
+                            commitHash={cpState?.commitHash || cpThread?.checkpoint_commit_hash || undefined}
                             onViewChanges={onViewChanges}
                         />
                     {/if}

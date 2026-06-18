@@ -134,7 +134,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 		// Create default thread for the task
-		defaultThreadID := GenerateTaskID()
+		defaultThreadID := GenerateThreadID()
 		if err := h.store.CreateThread(&types.TaskThread{
 			ID:        defaultThreadID,
 			TaskID:    task.ID,

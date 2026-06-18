@@ -164,7 +164,9 @@
     .view-changes-btn {
         display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 3px;
+        min-height: 1.375rem;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
         font-size: 0.75rem;
@@ -184,7 +186,9 @@
     .thread-btn {
         display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 4px;
+        min-height: 1.375rem;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
         font-size: 0.75rem;

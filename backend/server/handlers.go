@@ -664,8 +664,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	// Generate new thread ID and branch name
-	newThreadID := uuid.New().String()
-	newBranchName := fmt.Sprintf("thread/%s", newThreadID[:8])
+	newThreadID := managers.GenerateThreadID()
+	newBranchName := fmt.Sprintf("thread/%s", newThreadID)
 	// Find the file state at the checkpoint: last commit BEFORE the checkpoint message.
 	// This is the state before its tool calls ran, so the fork starts from a clean slate.
 	checkpointCommit, _ := s.store.GetLastCommitHashBeforeMessage(req.FromMessageID, req.FromThreadID)

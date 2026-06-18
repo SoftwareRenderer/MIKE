@@ -40,6 +40,14 @@ func GenerateTaskID() string {
 	return w1 + "-" + w2 + "-" + w3
 }
 
+// GenerateThreadID returns a human-readable thread ID (e.g., "voice-ash").
+func GenerateThreadID() string {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	w1 := taskWords[r.Intn(len(taskWords))]
+	w2 := taskWords[r.Intn(len(taskWords))]
+	return w1 + "-" + w2
+}
+
 // AutoGenerateTitle creates a short title from the first line of a prompt.
 func AutoGenerateTitle(prompt string) string {
 	line := strings.Split(prompt, "\n")[0]
