@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -507,6 +507,17 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
         loadDiff();
 
+        // Real-time diff update: refresh when board stream sends diff stats for this task
+        let prevDiffStatsKey = '';
+        const unsubDiffStats = taskDiffStats.subscribe(stats => {
+            const stat = stats[task.id];
+            const key = stat ? `${stat.files}-${stat.additions}-${stat.deletions}` : '';
+            if (key !== prevDiffStatsKey && activeTab === 'diff') {
+                loadDiffForMode();
+            }
+            prevDiffStatsKey = key;
+        });
+
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
                 if (checkpointDiffOpen) {
@@ -519,6 +530,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         window.addEventListener('keydown', handleKey);
         return () => {
             unsubBoard();
+            unsubDiffStats();
             window.removeEventListener('keydown', handleKey);
         };
     });
@@ -679,7 +691,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     onclick={() => activeTab = 'diff'}
                     title="Working changes"
                 >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Changes
                 </button>
             </div>

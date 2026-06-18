@@ -79,7 +79,7 @@
         <div class="divider-actions">
             {#if onViewChanges && commitHash}
                 <button class="view-changes-btn" onclick={() => onViewChanges(commitHash || '')} title="View changes up to this checkpoint">
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 2v12M12 2v12M4 6h3l-1 2 1 2H4M12 6H9l1 2-1 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Changes
                 </button>
             {/if}

@@ -526,6 +526,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 
 // GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
+// When the working tree is clean but stash entries exist, falls back to the latest stash.
 func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat string, untrackedN int, untrackedLines int, err error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
@@ -551,6 +552,34 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 					untrackedLines += strings.Count(string(data), "\n")
 				}
 			}
+		}
+	}
+	// If working tree is clean but stash entries exist, use latest stash for stats
+	if shortStat == "" && untrackedN == 0 {
+		stashList, _ := wm.gitRunOutput(worktreePath, "stash", "list")
+		if strings.TrimSpace(stashList) != "" {
+			stashPatch, _ := wm.gitRunOutput(worktreePath, "stash", "show", "-p", "stash@{0}")
+			added, removed, files := 0, 0, 0
+			for _, line := range strings.Split(stashPatch, "\n") {
+				if strings.HasPrefix(line, "diff --git") {
+					files++
+				} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+					added++
+				} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+					removed++
+				} else {
+				}
+			}
+			if files > 0 {
+				shortStat = fmt.Sprintf("%d file changed", files)
+				if added > 0 {
+					shortStat += fmt.Sprintf(", %d insertion(+)", added)
+				}
+				if removed > 0 {
+					shortStat += fmt.Sprintf(", %d deletion(-)", removed)
+				}
+			}
+			untrackedLines = added + removed
 		}
 	}
 	return shortStat, untrackedN, untrackedLines, nil
