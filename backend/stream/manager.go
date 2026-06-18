@@ -193,7 +193,7 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(27 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
