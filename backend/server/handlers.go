@@ -130,7 +130,6 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			s.broadcastTaskDiff(taskID)
 			// Broadcast updated task so frontend has new currentThreadID before diff loads
 			s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
-			s.boardStreamMgr.Broadcast(projectID)
 			b := s.executor.GetOrCreateStream(taskID)
 			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
 		} else {
@@ -553,7 +552,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		// Not active but still has a branch — clean it up
 		s.deleteThreadBranch(taskID, deletedBranch)
 	}
-	s.boardStreamMgr.Broadcast(projectID)
+	task, _ = s.store.GetTask(projectID, taskID)
+	if task != nil {
+		s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -622,7 +624,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
 	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
-	s.boardStreamMgr.Broadcast(projectID)
 	// Broadcast thread_switch event to WebSocket clients
 	b := s.executor.GetOrCreateStream(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
@@ -742,7 +743,6 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
 	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
-	s.boardStreamMgr.Broadcast(projectID)
 	// Broadcast thread_switch event
 	b := s.executor.GetOrCreateStream(taskID)
 	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})

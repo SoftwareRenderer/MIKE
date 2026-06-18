@@ -432,7 +432,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "failed"
 			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
 			return
 		}
@@ -440,7 +440,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "failed"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
 			return
 		}
@@ -551,7 +551,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
 			return
 		default:
@@ -635,7 +635,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, "Task stopped while waiting for LLM slot", "stopped")
 			return
 		}
@@ -704,7 +704,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			return
 		case <-streamDone:
 			// Stream completed normally (or all retries exhausted)
@@ -761,7 +761,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "failed"
 			task.Output = fmt.Sprintf("Connection failed: %v", streamErr)
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, streamErr.Error(), "connection_failed")
 			return
 		}
@@ -836,7 +836,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task.StatusState = "failed"
 						task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 						te.store.UpdateTask(task)
-						te.boardStreamMgr.Broadcast(projectID)
+						te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 						te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
 						return
 					}
@@ -863,7 +863,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"prompt_ms": promptMs, "predicted_ms": predictedMs,
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
-					te.boardStreamMgr.Broadcast(projectID)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 					// Broadcast diff so the frontend updates the diff panel
 					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
@@ -914,7 +914,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					task.StatusState = "failed"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.Broadcast(projectID)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
 					return
 				}
@@ -986,7 +986,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					task.StatusState = "failed"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.Broadcast(projectID)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
 					return
 				}
@@ -1022,7 +1022,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			// Broadcast diff so the frontend updates the diff panel
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
@@ -1077,7 +1077,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.Broadcast(projectID)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
 			return
 		case um := <-userMsgChan:

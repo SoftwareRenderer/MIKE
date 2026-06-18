@@ -167,7 +167,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		if task.TitleGenerating {
 			h.startTitleGeneration(projectID, task.ID, task.Prompt)
 		}
-		h.boardStreamMgr.Broadcast(projectID)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		httputil.JSONResponse(w, http.StatusCreated, task)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -209,7 +209,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, project
 				enrichTaskWorktree(task, cfg.WorkspaceDir)
 			}
 		}
-		h.boardStreamMgr.Broadcast(projectID)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodDelete:
 		if _, err := h.store.GetTask(projectID, taskID); err != nil {
@@ -217,7 +217,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 		h.cleanupTask(taskID)
-		h.boardStreamMgr.Broadcast(projectID)
+		h.broadcastTaskDeleted(projectID, taskID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -244,10 +244,10 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request, pr
 		}
 		taskID := task.ID
 		h.cleanupTask(taskID)
+		h.broadcastTaskDeleted(projectID, taskID)
 		deleted++
 	}
 
-	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, map[string]interface{}{"deleted": deleted})
 }
 
@@ -325,7 +325,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, req.Status)
 	}
 
-	h.boardStreamMgr.Broadcast(projectID)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -442,7 +442,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, "done")
 	}
 
-	h.boardStreamMgr.Broadcast(projectID)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -742,6 +742,19 @@ func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFile
 	}})
 }
 
+// broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
+func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string) {
+	if h.boardStreamMgr == nil {
+		return
+	}
+	// Collect all descendants first
+	descendants, _ := h.store.GetAllDescendants(taskID)
+	for _, d := range descendants {
+		h.boardStreamMgr.BroadcastTaskDeleted(projectID, d.ID)
+	}
+	h.boardStreamMgr.BroadcastTaskDeleted(projectID, taskID)
+}
+
 // cleanupTask performs all cleanup steps for a deleted task,
 // including recursively cleaning up all descendant subtasks.
 func (h *TaskHandler) cleanupTask(taskID string) {
@@ -908,8 +921,8 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			h.boardStreamMgr.Broadcast(projectID)
 			task, _ = h.store.GetTask(projectID, taskID)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			httputil.JSONResponse(w, http.StatusOK, task)
 			return
 		}
@@ -919,8 +932,10 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		h.boardStreamMgr.Broadcast(projectID)
 		startedTask, _ := h.store.GetTask(projectID, selectedID)
+		if startedTask != nil {
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
+		}
 		httputil.JSONResponse(w, http.StatusOK, startedTask)
 		return
 	}
@@ -936,8 +951,8 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 		return
 	}
 	log.Printf("[start] task=%s started", taskID)
-	h.boardStreamMgr.Broadcast(projectID)
 	task, _ = h.store.GetTask(projectID, taskID)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -965,8 +980,8 @@ func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	h.boardStreamMgr.Broadcast(projectID)
 	task, _ := h.store.GetTask(projectID, taskID)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -992,8 +1007,8 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request,
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.boardStreamMgr.Broadcast(projectID)
 	task, _ = h.store.GetTask(projectID, taskID)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 

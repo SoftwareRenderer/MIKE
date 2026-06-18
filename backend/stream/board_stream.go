@@ -213,6 +213,25 @@ func (bsm *BoardStreamManager) BroadcastTaskUpdated(projectID string, task inter
 	bsm.writeMu.Unlock()
 }
 
+// BroadcastTaskDeleted sends a task_deleted event with the task ID to all clients of a project.
+func (bsm *BoardStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
+	bsm.mu.RLock()
+	clients := bsm.clients[projectID]
+	bsm.mu.RUnlock()
+
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":    "task_deleted",
+		"task_id": taskID,
+	})
+	bsm.writeMu.Lock()
+	for conn := range clients {
+		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+			// Client disconnected, will be cleaned up on read loop exit
+		}
+	}
+	bsm.writeMu.Unlock()
+}
+
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
 func (bsm *BoardStreamManager) BroadcastProjectCounts() {
 	if bsm.store == nil {

@@ -301,6 +301,17 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     selectedTaskVal = updatedTask;
                     selectedTask.set(updatedTask);
                 }
+            }, (task_id: string) => {
+                // Task deleted - remove from list
+                const idx = tasks.findIndex(t => t.id === task_id);
+                if (idx !== -1) {
+                    tasks.splice(idx, 1);
+                    boardStore.update(b => b ? { ...b, tasks: [...b.tasks] } : b);
+                }
+                // Close task detail if it's the deleted task
+                if (selectedTaskVal && selectedTaskVal.id === task_id) {
+                    clearTaskDetail();
+                }
             }, (task_id: string, status: 'queued' | 'processing') => {
                 commitQueueStatus.update(map => ({ ...map, [p.id]: { taskID: task_id, status } }));
             });

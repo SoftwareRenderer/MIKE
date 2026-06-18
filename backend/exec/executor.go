@@ -95,8 +95,8 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	log.Printf("[start] task=%s started", taskID)
-	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -110,8 +110,8 @@ func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request, proje
 		httputil.JSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -125,8 +125,8 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request, proj
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	te.boardStreamMgr.Broadcast(projectID)
 	task, _ := te.store.GetTask(projectID, taskID)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -355,7 +355,10 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 		return fmt.Errorf("update parent: %w", err)
 	}
 
-	te.boardStreamMgr.Broadcast(projectID)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, parent)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, subtask)
+
+	// Start the subtask executor
 
 	// Start the subtask executor
 	return te.StartTask(projectID, subtaskID)
@@ -610,7 +613,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.StatusState = "failed"
 		task.Output = "LLM server URL not configured"
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.Broadcast(projectID)
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(b, task.ID, "LLM server URL not configured", "no_server_configured")
 		return
 	}
@@ -628,7 +631,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.StatusState = "failed"
 		task.Output = fmt.Sprintf("Failed to create worktree: %v", err)
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.Broadcast(projectID)
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Worktree creation failed: %v", err), "worktree_failed")
 		return
 	}
@@ -638,7 +641,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	task.Status = "in_progress"
 	task.BaseRef = baseRef
 	_ = te.store.UpdateTask(task)
-	te.boardStreamMgr.Broadcast(projectID)
+	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
@@ -664,7 +667,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.StatusState = "failed"
 		task.Output = fmt.Sprintf("Failed to load project: %v", projErr)
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.Broadcast(projectID)
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(b, task.ID, "Failed to load project", "project_not_found")
 		return
 	}
