@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
@@ -54,4 +55,5 @@ func main() {
 
 	<-sigCh
 	log.Println("Shutting down...")
+	srv.Shutdown(context.Background())
 }

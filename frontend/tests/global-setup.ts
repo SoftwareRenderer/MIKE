@@ -53,26 +53,14 @@ async function setup(): Promise<void> {
 
     // 4. Start fresh kanban server with test database
     console.log('[global-setup] Starting test kanban server...');
-    kanbanServer = spawn('node', ['-e', `
-        const { spawn } = require('child_process');
-        const child = spawn('${KANBAN_BIN}', ['-db-path', '${TEST_DB}'], {
-            cwd: '/home/mwren/projects/kanban',
-            env: { ...process.env, WORKTREES_DIR: '${TEST_WORKTREES}' },
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: false,
-        });
-        child.stdout.on('data', d => process.stderr.write('[kanban] ' + d));
-        child.stderr.on('data', d => process.stderr.write('[kanban] ' + d));
-        process.on('SIGTERM', () => child.kill('SIGTERM'));
-        process.on('SIGINT', () => child.kill('SIGINT'));
-        // Keep alive
-        setInterval(() => {}, 1000);
-    `], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
+    // Use setsid to start server in a new session (truly independent of this process)
+    kanbanServer = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB], {
+        cwd: '/home/mwren/projects/kanban',
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES },
+        stdio: 'ignore',
+        detached: true,
     });
-
-    kanbanServer.stderr.on('data', data => process.stderr.write(data.toString()));
+    kanbanServer.unref();
 
     // 5. Wait for server to be ready
     await waitForServer(KANBAN_PORT, 15000);
@@ -101,12 +89,12 @@ async function setup(): Promise<void> {
     // 7. Start mock LLM server BEFORE creating tasks (title-gen goroutine calls LLM immediately)
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
-        mockServer = spawn('node', ['tests/mock-llm.js', MOCK_PORT.toString()], {
+        mockServer = spawn('setsid', ['node', 'tests/mock-llm.js', MOCK_PORT.toString()], {
             cwd: '/home/mwren/projects/kanban/frontend',
-            stdio: ['ignore', 'pipe', 'pipe'],
+            stdio: 'ignore',
+            detached: true,
         });
-
-        mockServer.stderr.on('data', data => console.error('[mock]', data.toString().trim()));
+        mockServer.unref();
         await waitForServer(MOCK_PORT);
         console.log(`[global-setup] Mock LLM server ready on port ${MOCK_PORT}`);
     } else {
@@ -133,26 +121,13 @@ async function setup(): Promise<void> {
 
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');
-    kanbanServerIsolated = spawn('node', ['-e', `
-        const { spawn } = require('child_process');
-        const child = spawn('${KANBAN_BIN}', ['-db-path', '${TEST_DB_ISOLATED}'], {
-            cwd: '/home/mwren/projects/kanban',
-            env: { ...process.env, WORKTREES_DIR: '${TEST_WORKTREES}', PORT: '${KANBAN_PORT_ISOLATED}' },
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: false,
-        });
-        child.stdout.on('data', d => process.stderr.write('[kanban-isolated] ' + d));
-        child.stderr.on('data', d => process.stderr.write('[kanban-isolated] ' + d));
-        process.on('SIGTERM', () => child.kill('SIGTERM'));
-        process.on('SIGINT', () => child.kill('SIGINT'));
-        // Keep alive
-        setInterval(() => {}, 1000);
-    `], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
+    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB_ISOLATED], {
+        cwd: '/home/mwren/projects/kanban',
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED) },
+        stdio: 'ignore',
+        detached: true,
     });
-
-    kanbanServerIsolated.stderr.on('data', data => process.stderr.write(data.toString()));
+    kanbanServerIsolated.unref();
     await waitForServer(KANBAN_PORT_ISOLATED, 15000);
     console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
 
@@ -192,24 +167,29 @@ async function setup(): Promise<void> {
 
 async function teardown(): Promise<void> {
     // 1. Stop mock LLM server
-    if (mockServer) {
-        mockServer.kill('SIGTERM');
-        console.log('[global-teardown] Mock LLM server stopped');
-    }
+    try { execSync('lsof -ti:' + MOCK_PORT + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
+    console.log('[global-teardown] Mock LLM server stopped');
 
     // 2. Stop isolated kanban server
-    if (kanbanServerIsolated) {
-        kanbanServerIsolated.kill('SIGTERM');
-        console.log('[global-teardown] Isolated kanban server stopped');
-    }
+    try { execSync('lsof -ti:' + KANBAN_PORT_ISOLATED + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
+    console.log('[global-teardown] Isolated kanban server stopped');
 
     // 3. Stop test kanban server
-    if (kanbanServer) {
-        kanbanServer.kill('SIGTERM');
-        console.log('[global-teardown] Test kanban server stopped');
+    try { execSync('lsof -ti:' + KANBAN_PORT + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
+    console.log('[global-teardown] Test kanban server stopped');
+
+    // 4. Clean up orphaned sandbox containers
+    try {
+        const containers = execSync('sudo podman --runtime runsc ps --filter name=kanban-sandbox -q 2>/dev/null || true').toString().trim();
+        if (containers) {
+            execSync('sudo podman --runtime runsc rm -f ' + containers, { stdio: 'inherit' });
+            console.log('[global-teardown] Orphaned sandbox containers cleaned up');
+        }
+    } catch {
+        console.log('[global-teardown] Warning: failed to clean up sandbox containers');
     }
 
-    // 4. Delete test database
+    // 5. Delete test database
     try {
         fs.unlinkSync(TEST_DB);
         console.log('[global-teardown] Test database deleted');
@@ -217,7 +197,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test database already gone');
     }
 
-    // 5. Delete isolated test database
+    // 6. Delete isolated test database
     try {
         fs.unlinkSync(TEST_DB_ISOLATED);
         console.log('[global-teardown] Isolated test database deleted');
@@ -225,7 +205,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Isolated test database already gone');
     }
 
-    // 6. Delete test worktrees directory
+    // 7. Delete test worktrees directory
     try {
         fs.rmSync(TEST_WORKTREES, { recursive: true, force: true });
         console.log('[global-teardown] Test worktrees directory deleted');
@@ -233,7 +213,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test worktrees already gone');
     }
 
-    // 7. Remove lock file
+    // 8. Remove lock file
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
 }
 

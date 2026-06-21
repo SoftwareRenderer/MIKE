@@ -48,7 +48,7 @@ curl -s http://localhost:3000/api/config
 ## Development Workflow (TDD)
 
 ### Feature Development Process
-1. **Write tests first** — Create e2e tests that describe the expected behavior
+1. **Write tests first** — Create tests that describe the expected behavior
 2. **Run tests** — Confirm tests fail (red phase)
 3. **Implement feature** — Write minimal code to make tests pass
 4. **Run tests** — Confirm tests pass (green phase)
@@ -56,9 +56,10 @@ curl -s http://localhost:3000/api/config
 6. **Update documentation** — Update AGENTS.md if new patterns are introduced
 
 ### Test-First Guidelines
-- **Every new feature** must have corresponding e2e tests
-- **Tests go in** `frontend/tests/e2e/` with descriptive filenames
-- **Use `test.describe.serial()`** when tests share state (same task/messages)
+- **Every new feature** must have corresponding tests (Go unit + e2e)
+- **Go unit tests** go in `backend/` alongside the code they test
+- **E2E tests** go in `frontend/tests/e2e/` with descriptive filenames
+- **Use `test.describe.serial()`** when e2e tests share state (same task/messages)
 - **Use unique identifiers** (`Date.now()`) to avoid test interference
 - **Graceful failures** — Tests should pass even if LLM is slow/unavailable
 - **Test the UX** — Verify UI elements, not just API responses
@@ -81,7 +82,7 @@ test.describe.serial('Feature Name', () => {
 
 ### Running Tests
 ```bash
-# All tests (auto-starts test server + mock LLM)
+# All e2e tests (auto-starts test server + mock LLM)
 cd frontend && npx playwright test
 
 # Specific test file
@@ -93,22 +94,30 @@ npx playwright test --grep "should edit message"
 # With UI for debugging
 npx playwright test --ui
 
-# Use real LLM (Neptune) instead of mock
-USE_MOCK_LLM=0 npx playwright test
+# All Go unit tests (~33s, parallel)
+go test ./backend/... -count=1 -parallel 8
 ```
 
-**Before running**: If tests previously failed or were interrupted, clean up stale state:
+**Before running e2e tests**: If a prior run was interrupted, clean stale state:
 ```bash
-pkill -f "node -e.*kanban" 2>/dev/null; pkill -f "mock-llm" 2>/dev/null
-rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db
+lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
+rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test*.db
+rm -rf /tmp/kanban-test-worktrees
 ```
-Stale `node -e` wrapper processes from prior test runs accumulate and hold port 3000 open, causing `ERR_CONNECTION_REFUSED` on the next run. The lock file from an interrupted run also causes global-setup to execute teardown instead of setup.
+Stale processes from interrupted runs hold ports open, and a stale lock file causes global-setup to run teardown instead of setup.
 
 ### Test Server Lifecycle
-Tests run against a **dedicated test server** with an isolated database, fully managed by `global-setup.ts`:
+E2E tests run against **two dedicated test servers** with isolated databases, fully managed by `global-setup.ts`:
 
-1. **Setup** (before tests): Kills any server on `:3000`, starts fresh kanban server with test DB (`/tmp/kanban-test.db`), creates test project, starts mock LLM
-2. **Teardown** (after tests): Stops mock LLM, stops test server, deletes test DB + worktrees (`/tmp/kanban-test-worktrees/`)
+| Server | Port | DB | Purpose |
+|--------|------|----|----------|
+| Main | 3000 | `/tmp/kanban-test.db` | Default test server (chromium project) |
+| Isolated | 3001 | `/tmp/kanban-test-isolated.db` | Config-modifying tests (isolated project) |
+
+Both servers share a mock LLM on port 9999. Test worktrees: `/tmp/kanban-test-worktrees/`.
+
+1. **Setup** (before tests): Starts both kanban servers with test DBs, creates test projects + tasks, starts mock LLM
+2. **Teardown** (after tests): Stops all servers, deletes test DBs + worktrees
 
 **Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
@@ -116,34 +125,43 @@ cd /home/mwren/projects/kanban && ./kanban &
 ```
 
 ### Test Environment
-- **Test DB**: `/tmp/kanban-test.db` (deleted after each run)
+- **Test DBs**: `/tmp/kanban-test.db`, `/tmp/kanban-test-isolated.db` (deleted after each run)
 - **Test worktrees**: `/tmp/kanban-test-worktrees/` (deleted after each run)
 - **Test git repo**: `/tmp/kanban-test-repo/` (persistent, recreated if missing)
 - **Lock file**: `/tmp/kanban-test-setup.lock` (coordinates setup/teardown phases)
 
 ### Testing Rules
-- **Server is auto-managed** — global-setup starts/stops the test server
+- **Servers are auto-managed** — global-setup starts/stops test servers
 - **Mock LLM is enabled by default** — tests use pre-recorded responses, not real Neptune endpoint
 - **Tests must NOT depend on real LLM** — use mock fixtures for deterministic results
 - **Use timeouts** for async operations (LLM responses, network calls)
 - **Wait for selectors** instead of fixed delays where possible
-- **Full teardown/rebuild** — test DB is deleted and recreated each run
+- **Full teardown/rebuild** — test DBs are deleted and recreated each run
 - **Serial tests** when modifying shared state (messages, tasks)
+- **Config-modifying tests** (sandbox toggle, model selector, settings) run in the `isolated` project on port 3001 to avoid interfering with other tests
 
 ## Testing Workflow
 
-### E2E Tests
+### E2E Tests (Playwright)
 - Run: `cd frontend && npx playwright test`
 - Tests in `frontend/tests/e2e/` using Playwright with Chromium
-- Server must be running on `:3000` before tests
-- Config: `frontend/playwright.config.ts` (sequential, no retries, baseURL: localhost:3000)
-- Test suites:
-  - `task-basic.spec.ts` — board, task creation, navigation
-  - `task-chat.spec.ts` — chat UI, messaging, layout
-  - `task-actions.spec.ts` — start, delete, confirm dialogs
-  - `task-url.spec.ts` — URL navigation, `?task=` parameter
-  - `task-message-actions.spec.ts` — message actions, editing, stats
-  - `llm-connection.spec.ts` — LLM integration, tool calls
+- Servers auto-managed by `global-setup.ts` (ports 3000 + 3001, mock LLM on 9999)
+- Config: `frontend/playwright.config.ts` (parallel, 2 workers, 120s timeout)
+- **Two Playwright projects**:
+  - `chromium` (port 3000) — all tests except config-modifying suites
+  - `isolated` (port 3001, serialized) — config-modifying tests: `sandbox-toggle`, `sandbox-tool-calls`, `model-selector`, `settings-*`, `reasoning-effort`, `debug-cards`
+
+### Go Unit Tests
+- Run: `go test ./backend/... -count=1 -parallel 8` (~33s, ~196 tests)
+- Test packages:
+  - `backend/server/` — API handlers (102 tests)
+  - `backend/store/` — database operations (90+ tests)
+  - `backend/sandbox/` — gVisor sandboxing (6 tests)
+  - `backend/stream/` — git polling (1 test)
+  - `backend/exec/` — command execution (3 tests)
+- Use `testServer(t)` helper for isolated test server with temp DB
+- Use `t.TempDir()` for temporary files/directories (auto-cleaned)
+- Tests are deterministic — no external dependencies (LLM, network)
 
 ### Mock LLM Server
 - Tests rely on a **mock LLM server** (NOT the real Neptune endpoint) for deterministic, fast results
@@ -153,23 +171,13 @@ cd /home/mwren/projects/kanban && ./kanban &
 - Response routing: mock selects fixture based on request body (tools present + message keywords)
 - Disable mock: `USE_MOCK_LLM=0 npx playwright test` (uses real Neptune endpoint)
 
-#### Recording New Fixtures from Neptune
-When new LLM response types are needed or behavior changes:
-1. Set `USE_MOCK_LLM=0` to route through the real Neptune endpoint
-2. Run the specific test: `USE_MOCK_LLM=0 npx playwright test --grep "test name"`
-3. Capture the SSE stream from browser DevTools Network tab or server logs
-4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
-5. Update `mock-llm.js` routing if the new fixture needs keyword matching
-
 #### Recording New Fixtures
 When the LLM behavior changes or new response types are needed:
-1. Set `USE_MOCK_LLM=0` to use the real Neptune endpoint (`http://neptune:8010/v1`)
+1. Set `USE_MOCK_LLM=0` to use the real Neptune endpoint
 2. Run the relevant test(s) to capture real LLM responses
-3. Record the SSE stream output (use browser DevTools Network tab or add logging to `backend/llama.go`)
+3. Record the SSE stream output (use browser DevTools Network tab or server logs)
 4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
-5. Format: `{"choices": [{"delta": {"content": "..."}, "finish_reason": null}]}`
-6. Final frame includes `finish_reason: "stop"` and `usage` with token counts/timing
-7. Update `mock-llm.js` routing if new fixture needs keyword matching
+5. Update `mock-llm.js` routing if new fixture needs keyword matching
 
 #### Fixture Format
 Each fixture is a JSON array of SSE chunks matching the OpenAI streaming API:
@@ -185,10 +193,6 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 ```json
 {"choices": [{"delta": {"tool_calls": [{"id": "call_abc", "function": {"name": "read_file", "arguments": "{\"path\":\"README.md\"}"}, "type": "function"}]}, "finish_reason": "tool_calls"}]}
 ```
-
-### Backend Tests
-- Pre-existing: `go test ./...` (fails with "unable to open database file" — known issue)
-- Unit tests in `backend/store_test.go`
 
 ### Manual Testing
 1. Restart server: `pkill -f "./kanban" && ./kanban`
@@ -277,14 +281,22 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 1. Server running? `ps aux | grep kanban`
 2. Config correct? `curl /api/config`
 3. Worktrees dir exists? `ls .worktrees/`
-4. Frontend built? `npm run build`
+4. Frontend built? `cd frontend && npm run build`
 5. Browser cache cleared? Hard refresh
 6. Check logs: server stdout or `/tmp/kanban.log`
-7. Tests passing? `cd frontend && npx playwright test`
-8. Stale test state? `pkill -f "node -e.*kanban" && rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test.db`
+7. E2E tests passing? `cd frontend && npx playwright test`
+8. Go tests passing? `go test ./backend/... -count=1 -parallel 8`
+9. Stale test state? `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null && rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test*.db`
 
-### Test Failures
-- **`ERR_CONNECTION_REFUSED`**: Most commonly caused by stale `node -e` wrapper processes from prior test runs holding port 3000. Run the cleanup commands above. Otherwise check `lsof -i :3000` for conflicts.
+### E2E Test Failures
+- **`ERR_CONNECTION_REFUSED`**: Stale processes from interrupted test runs hold ports. Run cleanup above. Check `lsof -i :3000` for conflicts.
 - **`waiting for locator('.project-item')`**: Test project not created — check global-setup logs
 - **`waiting for locator('.card')`**: No tasks exist — test expects existing tasks
+- **`waiting for locator` (drag-and-drop)**: Headless mode can be slow — add `waitForTimeout` after drag, increase predicate timeout
 - **Mock LLM routing wrong**: Check `mock-llm.js` keyword matching and fixture files
+- **Sandbox toggle blocked by running task**: Test runs in parallel with other tests — move to `isolated` project in `playwright.config.ts`
+
+### Go Test Failures
+- **`unable to open database file`**: Use `testServer(t)` helper which creates temp DB
+- **`context deadline exceeded`**: Increase test timeout or optimize slow operations
+- **Sandbox tests fail**: Ensure gVisor is installed (`runsc --version`)

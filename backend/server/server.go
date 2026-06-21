@@ -33,6 +33,7 @@ type Server struct {
 	executor       *exec.TaskExecutor
 	homeAgentMgr   *managers.HomeAgentHandler
 	terminalMgr    *term.TerminalManager
+	sandboxMgr     *sandbox.SandboxManager
 	mux            *http.ServeMux
 	addr           string
 }
@@ -65,10 +66,10 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr, cfgStore)
-	sandboxMgr := sandbox.NewSandboxManager()
-	s.terminalMgr = term.NewTerminalManager(store, cfgStore, sandboxMgr)
+	s.sandboxMgr = sandbox.NewSandboxManager()
+	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, sandboxMgr)
+	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
@@ -107,5 +108,9 @@ func (s *Server) Serve() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Clean up all sandbox containers
+	if s.sandboxMgr != nil {
+		s.sandboxMgr.Cleanup()
+	}
 	return s.store.Close()
 }
