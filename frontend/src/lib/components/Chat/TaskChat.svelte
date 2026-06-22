@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
+    import { createTaskStream, sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -16,6 +16,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         reasoningContent?: string;
         isStreaming?: boolean;
         threadId?: string;
+        attachments?: Array<{ mimeType: string; data: string }>;
         toolCalls?: Array<{
             toolId: string;
             toolName: string;
@@ -344,7 +345,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'user_message': {
-                const data = event.data as { id?: string; role: string; content: string; thread_id?: string };
+                const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
                 // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
                 if (lastSentMessage === data.content) {
                     lastSentMessage = null;
@@ -355,6 +356,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             if (entries[i].role === 'user' && entries[i].content === data.content) {
                                 entries[i].id = data.id;
                                 if (data.thread_id) entries[i].threadId = data.thread_id;
+                                if (data.attachments) entries[i].attachments = data.attachments;
                                 break;
                             }
                         }
@@ -655,8 +657,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         }],
                     };
                 }
+                // Parse attachments if present
+                let parsedAttachments: Array<{ mimeType: string; data: string }> | undefined;
+                if (m.attachments) {
+                    try {
+                        const atts = typeof m.attachments === 'string' ? JSON.parse(m.attachments) : m.attachments;
+                        if (Array.isArray(atts)) parsedAttachments = atts;
+                    } catch { /* ignore parse errors */ }
+                }
                 return {
-                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, isStreaming: false, createdAt: m.created_at,
+                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
                     stats: m.model_name ? {
                         model_name: m.model_name,
                         prompt_tokens: m.prompt_tokens ?? 0,
@@ -888,8 +898,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         userInputPending = true;
     }
 
-    async function handleSend(msg: string) {
-        if (!msg || disabled) return;
+    async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
+        if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
         // If LLM is streaming, cancel the current response by clearing partial assistant entry.
         if (isLoading) {
             entries = entries.filter(e => !e.isStreaming);
@@ -915,15 +925,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Remove all error entries (cleared by next user action)
         entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
-        entries = [...entries, { id: genId(), role: 'user', content: msg, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() }];
+        entries = [...entries, { id: genId(), role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() }];
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         lastSentMessage = msg;
         // Send with model info for lazy-start
         awaitingResponse = true;
-        if (ws && ws.sendWithModel) {
-            ws.sendWithModel(msg, selectedModel, selectedUrl);
-        } else if (ws) {
-            ws.send(msg);
+        try {
+            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments);
+        } catch (e) {
+            // Send failed — show error, remove optimistic message
+            const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
+            entries = entries.filter(e => !(e.role === 'user' && e.content === msg));
+            entries = [...entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
+            awaitingResponse = false;
+            return;
         }
         scroll();
         chatFormComp?.focus();
@@ -968,7 +983,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         lastSentMessage = lastUser.content;
         isRegenerating = true;
         awaitingResponse = true;
-        if (ws) ws.send(lastUser.content);
+        try {
+            await sendTaskMessage(projectId, taskId, lastUser.content, selectedModel, selectedUrl);
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : 'Failed to regenerate';
+            showToast(errorMsg);
+            isRegenerating = false;
+            awaitingResponse = false;
+            return;
+        }
         scroll();
     }
 
@@ -1149,30 +1172,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             updateThreadUrl(forked.id);
             // Notify parent to refresh diff panel for the new fork
             onThreadSwitch?.();
-            // Wait for existing WebSocket to be OPEN before sending the edited message.
-            // sendWithModel silently drops messages when readyState !== OPEN.
-            const wsReady = new Promise<void>((resolve, reject) => {
-                const maxWait = 5000;
-                const start = Date.now();
-                const poll = () => {
-                    if (ws && ws.ws.readyState === WebSocket.OPEN) {
-                        resolve();
-                    } else if (Date.now() - start > maxWait) {
-                        reject(new Error('WebSocket connection timeout'));
-                    } else {
-                        setTimeout(poll, 50);
-                    }
-                };
-                poll();
-            });
-            await wsReady;
             lastSentMessage = newContent;
             awaitingResponse = true;
-            if (ws && ws.sendWithModel) {
-                ws.sendWithModel(newContent, selectedModel, selectedUrl);
-            } else if (ws) {
-                ws.send(newContent);
-            }
+            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl);
         } catch (e) {
             showToast(String(e));
         }
@@ -1216,14 +1218,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Add to UI
         entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         // Don't pre-create — let the first token/tool_call event create the assistant entry
-        // Send via WebSocket to trigger lazy-start executor
+        // Send via HTTP POST to trigger executor
         lastSentMessage = newContent;
         awaitingResponse = true;
-        if (ws && ws.sendWithModel) {
-            ws.sendWithModel(newContent, selectedModel, selectedUrl);
-        } else if (ws) {
-            ws.send(newContent);
-        }
+        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl);
         scroll();
     }
 
@@ -1244,15 +1242,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 // First connection — just remove any connection errors
                 firstConnectDone = true;
                 entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-            } else {
+            } else if (!awaitingResponse) {
                 // Reconnect — reload history from DB to discard any stale
                 // unpersisted entries (e.g., partial assistant message from
-                // a disconnected stream) that would appear as duplicates
+                // a disconnected stream) that would appear as duplicates.
+                // Skip if awaiting response — the sync buffer will deliver
+                // the streaming tokens and we don't want to overwrite them.
                 loadHistory();
             }
         };
         ws.ws.onclose = (event: CloseEvent) => {
             const wasConnected = connected;
+            const wasAwaiting = awaitingResponse;
             markNotStreaming();
             awaitingResponse = false;
             connected = false;
@@ -1261,6 +1262,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             lastSentMessage = null;
             isRegenerating = false;
             ws = null;
+            // Preserve awaiting state so reconnect doesn't wipe streaming entries
+            if (wasAwaiting) {
+                awaitingResponse = true;
+            }
             // Show connection lost error if this was an unexpected disconnect
             if (!event.wasClean && (wasConnected || connecting) && !destroyed) {
                 const entry: ChatEntry = {
@@ -1528,7 +1533,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
             {/each}
         {/if}
@@ -1641,7 +1646,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             selectedReasoningEffort={selectedReasoningEffort}
             contextUsed={contextState.used}
             contextLimit={contextState.limit}
-            onSubmit={(msg) => handleSend(msg)}
+            onSubmit={(msg, atts) => handleSend(msg, atts)}
             onStop={handleStop}
             onModelSelect={handleModelSelect}
         />

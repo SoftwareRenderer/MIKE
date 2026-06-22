@@ -178,6 +178,7 @@ type TaskMessage struct {
 	ReasoningContent string    `json:"reasoning_content,omitempty"`
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
+	Attachments      string    `json:"attachments,omitempty"` // JSON array of {mimeType, data} for images
 	ModelName        string    `json:"model_name,omitempty"`
 	ProviderName     string    `json:"provider_name,omitempty"`
 	PromptTokens     int       `json:"prompt_tokens,omitempty"`

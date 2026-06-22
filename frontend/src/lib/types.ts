@@ -144,6 +144,7 @@ export interface TaskMessage {
     reasoning_content?: string;
     tool_calls?: string;
     tool_result?: string;
+    attachments?: string | Array<{ mimeType: string; data: string }>;
     model_name?: string;
     prompt_tokens?: number;
     predicted_tokens?: number;

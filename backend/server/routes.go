@@ -20,6 +20,7 @@ var (
 	reTaskStop             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stop$`)
 	reTaskRetry            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/retry$`)
 	reTaskResume           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
+	reTaskSend             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/send$`)
 	reTaskStream           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
 	reTaskCommits          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commits$`)
@@ -163,6 +164,10 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if m := reTaskSend.FindStringSubmatch(path); m != nil {
+		s.executor.HandleSend(w, r, m[1], m[2])
+		return
+	}
 	if m := reTaskStream.FindStringSubmatch(path); m != nil {
 		s.executor.HandleStream(w, r, m[1], m[2])
 		return

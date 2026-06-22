@@ -230,7 +230,7 @@ export function createBoardStream(projectId: string, onRefresh: () => void, onPr
     };
 }
 
-export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void, syncBuffer = true): { ws: WebSocket; send: (msg: string) => void; sendWithModel: (msg: string, modelName: string, serverUrl: string) => void; close: () => void } {
+export function createTaskStream(projectId: string, taskId: string, onEvent: (event: StreamEvent) => void, syncBuffer = true): { ws: WebSocket; close: () => void } {
     const syncParam = syncBuffer ? '?sync=1' : '';
     const ws = new WebSocket(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/stream${syncParam}`);
     ws.onmessage = (e) => {
@@ -243,21 +243,32 @@ export function createTaskStream(projectId: string, taskId: string, onEvent: (ev
     ws.onclose = () => onEvent({ type: 'status', data: { state: 'disconnected', activity: 'Stream closed' } });
     return {
         ws,
-        send: (msg: string) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'user_message', data: { content: msg } }));
-            }
-        },
-        sendWithModel: (msg: string, modelName: string, serverUrl: string) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                const data: Record<string, string> = { content: msg };
-                if (modelName) data.model_name = modelName;
-                if (serverUrl) data.llama_server_url = serverUrl;
-                ws.send(JSON.stringify({ type: 'user_message', data }));
-            }
-        },
         close: () => ws.close()
     };
+}
+
+/** Send a user message via HTTP POST. Triggers executor and returns the created message. */
+export async function sendTaskMessage(
+    projectId: string,
+    taskId: string,
+    content: string,
+    modelName?: string,
+    serverUrl?: string,
+    attachments?: Array<{ mimeType: string; data: string }>
+): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
+    const body: Record<string, any> = { content };
+    if (modelName) body.model_name = modelName;
+    if (serverUrl) body.llama_server_url = serverUrl;
+    if (attachments && attachments.length > 0) {
+        body.attachments = JSON.stringify(attachments);
+    }
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to send message');
+    return res.json();
 }
 
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {

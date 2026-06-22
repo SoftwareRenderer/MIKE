@@ -13,7 +13,6 @@ import (
 	"kanban/backend/types"
 
 	"github.com/coder/websocket"
-	"github.com/google/uuid"
 )
 
 // StreamManager manages broadcasters for all active tasks.
@@ -155,6 +154,7 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		return
 	}
 	defer conn.CloseNow()
+	log.Printf("[stream] task=%s WS connection accepted", taskID)
 
 	b := sm.GetOrCreate(taskID)
 
@@ -218,105 +218,12 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		}
 	}
 
-	// Keep reading to detect client close and handle user messages
+	// Keep reading to detect client close.
+	// User messages are now sent via POST /send endpoint.
 	for {
-		_, data, err := conn.Read(context.Background())
+		_, _, err := conn.Read(context.Background())
 		if err != nil {
 			break
-		}
-		var msg struct {
-			Type string          `json:"type"`
-			Data json.RawMessage `json:"data"`
-		}
-		if err := json.Unmarshal(data, &msg); err != nil {
-			continue
-		}
-		if msg.Type == "user_message" {
-			var payload struct {
-				Content        string `json:"content"`
-				ModelName      string `json:"model_name"`
-				LlamaServerURL string `json:"llama_server_url"`
-			}
-			if err := json.Unmarshal(msg.Data, &payload); err == nil && payload.Content != "" {
-				log.Printf("[stream] task=%s user_message received (model=%s, url=%s)", taskID, payload.ModelName, payload.LlamaServerURL)
-				// Get the task to find its current thread
-				task, _ := sm.store.GetTaskByTaskID(taskID)
-				threadID := ""
-				if task != nil {
-					threadID = task.CurrentThreadID
-					// Move task to in_progress if it's in review or done
-					if task.Status == "review" || task.Status == "done" {
-						task.Status = "in_progress"
-						task.StatusState = "idle"
-						task.UpdatedAt = time.Now().UTC()
-						_ = sm.store.UpdateTask(task)
-						if sm.boardStreamMgr != nil {
-							sm.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
-						}
-					}
-				}
-				// Check if the last user message in this thread already has the same content.
-				// This avoids duplicating the message when forking (the checkpoint was already
-				// updated to the new content by the fork handler).
-				msgID := uuid.New().String()
-				existingID, lookupErr := sm.store.GetLastUserMessageInThread(threadID)
-				isDuplicate := false
-				if lookupErr == nil && existingID != "" {
-					existingMsgs, _ := sm.store.GetTaskMessages(taskID, threadID)
-					for i := len(existingMsgs) - 1; i >= 0; i-- {
-						if existingMsgs[i].ID == existingID {
-							if existingMsgs[i].Content == payload.Content {
-								isDuplicate = true
-								msgID = existingID
-							}
-							break
-						}
-					}
-				}
-				if !isDuplicate {
-					sm.store.CreateTaskMessage(&types.TaskMessage{
-						ID:        msgID,
-						TaskID:    taskID,
-						ThreadID:  threadID,
-						Role:      "user",
-						Content:   payload.Content,
-						CreatedAt: time.Now().UTC(),
-					})
-				}
-				// Broadcast back to all clients (include backend-generated id + thread_id)
-				echoData := map[string]interface{}{"id": msgID, "role": "user", "content": payload.Content}
-				if threadID != "" {
-					echoData["thread_id"] = threadID
-				}
-				b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
-				// If executor is running, forward to it (with model info)
-				handler := b.getUserMessageHandler()
-				if handler != nil {
-					log.Printf("[stream] task=%s forwarding to executor", taskID)
-					handler(UserMessage{
-						Content:   payload.Content,
-						ModelName: payload.ModelName,
-						ServerURL: payload.LlamaServerURL,
-					})
-				} else {
-					// No executor running — lazy-start one
-					log.Printf("[stream] task=%s no executor, trying lazy-start", taskID)
-					sm.lazyMu.RLock()
-					lazyHandler := sm.lazyStartHandler
-					sm.lazyMu.RUnlock()
-					if lazyHandler != nil {
-						task, err := sm.store.GetTaskByTaskID(taskID)
-						var projectID string
-						if err == nil && task != nil {
-							projectID = task.ProjectID
-						}
-						log.Printf("[stream] task=%s project=%s calling lazy-start (model=%s, url=%s)", taskID, projectID, payload.ModelName, payload.LlamaServerURL)
-						go lazyHandler(projectID, taskID, payload.Content, payload.ModelName, payload.LlamaServerURL)
-					} else {
-						log.Printf("[stream] task=%s no lazy-start handler registered", taskID)
-					}
-				}
-			}
 		}
 	}
 }

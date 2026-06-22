@@ -167,14 +167,18 @@ CREATE TABLE IF NOT EXISTS task_messages (
     role               TEXT NOT NULL,
     content            TEXT NOT NULL,
     reasoning_content  TEXT DEFAULT NULL,
+    tool_calls         TEXT DEFAULT NULL,
+    tool_result        TEXT DEFAULT NULL,
+    attachments        TEXT DEFAULT NULL,
     model_name         TEXT DEFAULT NULL,
+    provider_name      TEXT DEFAULT NULL,
     prompt_tokens      INTEGER DEFAULT 0,
     predicted_tokens   INTEGER DEFAULT 0,
     cache_tokens       INTEGER DEFAULT 0,
-    provider_name      TEXT DEFAULT NULL,
     prompt_ms          INTEGER DEFAULT 0,
     predicted_ms       INTEGER DEFAULT 0,
     duration           INTEGER DEFAULT 0,
+    git_commit_hash    TEXT DEFAULT NULL,
     created_at         TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
@@ -249,6 +253,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (

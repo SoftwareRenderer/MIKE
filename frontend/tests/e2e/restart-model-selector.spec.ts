@@ -36,17 +36,19 @@ test.describe('Restart button model selector', () => {
       await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
     });
 
-    // Close the WebSocket to simulate a stalled/disconnected state
+    // Send a message to trigger task execution, then disconnect WS to simulate stalled state
     await page.evaluate(async ({ pid, tid }) => {
-      const ws = new WebSocket(`${window.location.origin}/api/projects/${pid}/tasks/${tid}/stream`);
+      // Send via POST (triggers executor)
+      await fetch(`/api/projects/${pid}/tasks/${tid}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'stall-test' }),
+      });
+      // Close WS immediately so streaming tokens are lost (simulates disconnect)
       return new Promise<void>((resolve) => {
-        ws.onopen = () => {
-          // Send a message to trigger the stalled state (user message with no LLM response)
-          ws.send(JSON.stringify({ type: 'user_message', data: { content: 'stall-test' } }));
-          // Close immediately so no streaming starts
-          setTimeout(() => { ws.close(); resolve(); }, 200);
-        };
-        ws.onerror = () => { ws.close(); resolve(); };
+        const ws = new WebSocket(`${window.location.origin}/api/projects/${pid}/tasks/${tid}/stream`);
+        ws.onopen = () => { ws.close(); resolve(); };
+        ws.onerror = () => resolve();
         setTimeout(() => { ws.close(); resolve(); }, 5000);
       });
     }, { pid: projectId, tid: taskId });

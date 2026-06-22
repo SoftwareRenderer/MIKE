@@ -154,6 +154,111 @@ func (te *TaskExecutor) GetOrCreateStream(taskID string) *stream.Broadcaster {
 	return te.streamMgr.GetOrCreate(taskID)
 }
 
+// HandleSend accepts a user message via HTTP POST and triggers task execution.
+// Returns the created message on success.
+func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Content        string `json:"content"`
+		ModelName      string `json:"model_name"`
+		LlamaServerURL string `json:"llama_server_url"`
+		Attachments    string `json:"attachments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	threadID := task.CurrentThreadID
+
+	// Move task to in_progress if it's in review or done
+	if task.Status == "review" || task.Status == "done" {
+		task.Status = "in_progress"
+		task.StatusState = "idle"
+		task.UpdatedAt = time.Now().UTC()
+		_ = te.store.UpdateTask(task)
+		te.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
+	}
+
+	// Check for duplicate (same content as last user message in thread)
+	msgID := uuid.New().String()
+	existingID, lookupErr := te.store.GetLastUserMessageInThread(threadID)
+	isDuplicate := false
+	if lookupErr == nil && existingID != "" {
+		existingMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
+		for i := len(existingMsgs) - 1; i >= 0; i-- {
+			if existingMsgs[i].ID == existingID {
+				if existingMsgs[i].Content == req.Content {
+					isDuplicate = true
+					msgID = existingID
+				}
+				break
+			}
+		}
+	}
+
+	if !isDuplicate {
+		tm := &types.TaskMessage{
+			ID:        msgID,
+			TaskID:    taskID,
+			ThreadID:  threadID,
+			Role:      "user",
+			Content:   req.Content,
+			CreatedAt: time.Now().UTC(),
+		}
+		if req.Attachments != "" {
+			tm.Attachments = req.Attachments
+		}
+		te.store.CreateTaskMessage(tm)
+	}
+
+	// Broadcast echo to WS clients
+	echoData := map[string]interface{}{"id": msgID, "role": "user", "content": req.Content}
+	if threadID != "" {
+		echoData["thread_id"] = threadID
+	}
+	if req.Attachments != "" {
+		var atts []interface{}
+		if err := json.Unmarshal([]byte(req.Attachments), &atts); err == nil && len(atts) > 0 {
+			echoData["attachments"] = atts
+		}
+	}
+	b := te.streamMgr.GetOrCreate(taskID)
+	b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
+
+	// Forward to executor or lazy-start
+	handler := b.GetUserMessageHandler()
+	if handler != nil {
+		handler(stream.UserMessage{
+			Content:     req.Content,
+			ModelName:   req.ModelName,
+			ServerURL:   req.LlamaServerURL,
+			Attachments: req.Attachments,
+		})
+	} else {
+		go te.handleLazyStart(projectID, taskID, req.Content, req.ModelName, req.LlamaServerURL)
+	}
+
+	// Return the message
+	result := map[string]interface{}{
+		"id":      msgID,
+		"role":    "user",
+		"content": req.Content,
+	}
+	if threadID != "" {
+		result["thread_id"] = threadID
+	}
+	httputil.JSONResponse(w, http.StatusCreated, result)
+}
+
 // WorktreeMgr returns the WorktreeManager. Used by server wiring.
 func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 	return te.worktreeMgr

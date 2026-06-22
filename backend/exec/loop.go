@@ -494,6 +494,39 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	for _, m := range taskMsgs {
 		switch m.Role {
 		case "user":
+			// Check for image attachments and build multi-modal content
+			if m.Attachments != "" {
+				var atts []struct {
+					MimeType string `json:"mimeType"`
+					Data     string `json:"data"`
+				}
+				if err := json.Unmarshal([]byte(m.Attachments), &atts); err == nil {
+					parts := []types.ContentPart{{Type: "text", Text: m.Content}}
+					for _, att := range atts {
+						if att.Data != "" {
+							mediaType := att.MimeType
+							if mediaType == "" {
+								mediaType = "image/png"
+							}
+							base64Data := att.Data
+							// Strip data: prefix if present
+							if idx := strings.Index(base64Data, ","); idx >= 0 {
+								base64Data = base64Data[idx+1:]
+							}
+							parts = append(parts, types.ContentPart{
+								Type: "image",
+								ImageSource: &struct {
+									Type      string `json:"type"`
+									MediaType string `json:"media_type"`
+									Data      string `json:"data"`
+								}{Type: "base64", MediaType: mediaType, Data: base64Data},
+							})
+						}
+					}
+					messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
+					continue
+				}
+			}
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
 		case "assistant":
 			// Merge reasoning_content into content so all models see the full assistant message
@@ -702,8 +735,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		select {
 		case <-ctx.Done():
 			callCancel()
-			<-streamDone
-			te.gate.Release(serverURL)
+			te.gate.Release(serverURL) // Release gate immediately so other tasks can proceed
+			<-streamDone // Then wait for goroutine to finish
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -744,6 +777,38 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 			// Add queued messages to conversation history.
 			for _, qm := range queuedMsgs {
+				// Check for image attachments
+				if qm.Attachments != "" {
+					var atts []struct {
+						MimeType string `json:"mimeType"`
+						Data     string `json:"data"`
+					}
+					if err := json.Unmarshal([]byte(qm.Attachments), &atts); err == nil {
+						parts := []types.ContentPart{{Type: "text", Text: qm.Content}}
+						for _, att := range atts {
+							if att.Data != "" {
+								mediaType := att.MimeType
+								if mediaType == "" {
+									mediaType = "image/png"
+								}
+								base64Data := att.Data
+								if idx := strings.Index(base64Data, ","); idx >= 0 {
+									base64Data = base64Data[idx+1:]
+								}
+								parts = append(parts, types.ContentPart{
+									Type: "image",
+									ImageSource: &struct {
+										Type      string `json:"type"`
+										MediaType string `json:"media_type"`
+										Data      string `json:"data"`
+									}{Type: "base64", MediaType: mediaType, Data: base64Data},
+								})
+							}
+						}
+						messages = append(messages, types.ChatMessage{Role: "user", ContentParts: parts})
+						continue
+					}
+				}
 				messages = append(messages, types.ChatMessage{Role: "user", Content: qm.Content})
 				if qm.ModelName != "" {
 					mc.set(qm.ServerURL, qm.ModelName)

@@ -256,28 +256,18 @@ export async function createTaskViaApi(page: Page, projectId: string, prompt: st
   }, { pid: projectId, prompt });
 }
 
-// Helper: send a message via WebSocket to trigger lazy-start
+// Helper: send a message via HTTP POST to trigger lazy-start.
 // This bypasses the "Start Task" button and avoids the first executor.
 export async function sendViaWebSocket(page: Page, projectId: string, taskId: string, message: string): Promise<void> {
   return await page.evaluate(async ({ pid, tid, msg }) => {
-    const ws = new WebSocket(`${window.location.origin}/api/projects/${pid}/tasks/${tid}/stream`);
-    return new Promise<void>((resolve, reject) => {
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'user_message', data: { content: msg } }));
-      };
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'user_message') {
-          // Server echoed the message back — lazy-start should be triggered
-          ws.close();
-          resolve();
-        }
-      };
-      ws.onerror = () => {
-        ws.close();
-        reject(new Error('WebSocket error'));
-      };
-      setTimeout(() => { ws.close(); reject(new Error('WebSocket timeout')); }, 10000);
+    const res = await fetch(`/api/projects/${pid}/tasks/${tid}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: msg }),
     });
+    if (!res.ok) {
+      throw new Error(`Send failed: ${res.status}`);
+    }
+    await res.json();
   }, { pid: projectId, tid: taskId, msg: message });
 }

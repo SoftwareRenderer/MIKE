@@ -54,6 +54,58 @@ func (c *LlamaClient) setAuthHeader(req *http.Request) {
 	}
 }
 
+// toAPIMessage converts a ChatMessage to the format expected by the LLM API.
+// If ContentParts is set, content is serialized as an array of parts (multi-modal).
+// Uses standard OpenAI format: {type: "image_url", image_url: {url: "data:..."}}
+func toAPIMessage(m types.ChatMessage) map[string]interface{} {
+	result := map[string]interface{}{
+		"role": m.Role,
+	}
+	if len(m.ContentParts) > 0 {
+		// Multi-modal: serialize as array of parts
+		parts := make([]interface{}, len(m.ContentParts))
+		for i, p := range m.ContentParts {
+			if p.Type == "text" {
+				parts[i] = map[string]interface{}{"type": "text", "text": p.Text}
+			} else if p.ImageSource != nil {
+				// Convert internal format to OpenAI data: URI
+				dataURL := "data:" + p.ImageSource.MediaType + ";base64," + p.ImageSource.Data
+				parts[i] = map[string]interface{}{
+					"type":      "image_url",
+					"image_url": map[string]interface{}{"url": dataURL},
+				}
+			} else if p.ImageURL != nil {
+				parts[i] = map[string]interface{}{
+					"type":      "image_url",
+					"image_url": map[string]interface{}{"url": p.ImageURL.URL},
+				}
+			}
+		}
+		result["content"] = parts
+	} else {
+		result["content"] = m.Content
+	}
+	if len(m.ToolCalls) > 0 {
+		result["tool_calls"] = m.ToolCalls
+	}
+	if m.ToolCallID != "" {
+		result["tool_call_id"] = m.ToolCallID
+	}
+	if m.ReasoningContent != "" {
+		result["reasoning_content"] = m.ReasoningContent
+	}
+	return result
+}
+
+// toAPIMessages converts a slice of ChatMessages to the API format.
+func toAPIMessages(messages []types.ChatMessage) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(messages))
+	for i, m := range messages {
+		result[i] = toAPIMessage(m)
+	}
+	return result
+}
+
 // ChatStream sends a chat completion request with streaming.
 func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback) (*types.ChatUsage, error) {
 	if c.baseURL == "" {
@@ -62,14 +114,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 	url := c.baseURL + "/chat/completions"
 
-	toolChoice := map[string]interface{}{"type": "auto"}
-	if len(tools) == 0 {
-		toolChoice = map[string]interface{}{"type": "none"}
-	}
-
 	reqBody := map[string]interface{}{
 		"model":            c.modelName,
-		"messages":         messages,
+		"messages":         toAPIMessages(messages),
 		"stream":           true,
 		"temperature":      0.7,
 		"max_tokens":       8192,
@@ -77,7 +124,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
-		reqBody["tool_choice"] = toolChoice
+		reqBody["tool_choice"] = "auto"
+	} else {
+		reqBody["tool_choice"] = "none"
 	}
 
 	if c.reasoningEffort != "off" {
@@ -200,11 +249,11 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 
 	reqBody := map[string]interface{}{
 		"model":            c.modelName,
-		"messages":         messages,
+		"messages":         toAPIMessages(messages),
 		"stream":           false,
 		"temperature":      0.3,
 		"max_tokens":       128,
-		"tool_choice":      map[string]interface{}{"type": "none"},
+		"tool_choice":      "none",
 		"reasoning_format": "auto",
 	}
 	if c.reasoningEffort != "off" {

@@ -1,9 +1,25 @@
 package types
 
+// ContentPart represents a part of a multi-modal message (text or image).
+type ContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL *struct {
+		URL string `json:"url"`
+	} `json:"image_url,omitempty"`
+	// llama.cpp server format: type="image" with source object
+	ImageSource *struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	} `json:"source,omitempty"`
+}
+
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
 	Role             string      `json:"role"`
 	Content          string      `json:"content"`
+	ContentParts     []ContentPart // multi-modal content parts; when set, overrides Content in LLM API
 	ReasoningContent string      `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCallMsg `json:"tool_calls,omitempty"` // assistant's tool calls (for message history)
 	ToolCallID       string      `json:"tool_call_id,omitempty"` // tool result's reference to assistant's call

@@ -12,8 +12,8 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), m.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), m.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return err
@@ -51,13 +51,13 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	var err error
 	if threadID != "" {
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
 			taskID, threadID,
 		)
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 			taskID,
 		)
 	}
@@ -69,8 +69,8 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	for rows.Next() {
 		var m types.TaskMessage
 		var createdAt string
-		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &createdAt); err != nil {
+		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &createdAt); err != nil {
 			return nil, err
 		}
 		if threadID.Valid {
@@ -93,6 +93,9 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		}
 		if gitCommitHash.Valid {
 			m.GitCommitHash = gitCommitHash.String
+		}
+		if attachments.Valid {
+			m.Attachments = attachments.String
 		}
 		m.CreatedAt = scanTime(createdAt)
 		messages = append(messages, m)

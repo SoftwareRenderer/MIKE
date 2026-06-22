@@ -13,9 +13,10 @@ import (
 
 // UserMessage carries a user message with optional model override.
 type UserMessage struct {
-	Content   string
-	ModelName string
-	ServerURL string
+	Content     string
+	ModelName   string
+	ServerURL   string
+	Attachments string // JSON array of {mimeType, data} for images
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
@@ -65,8 +66,8 @@ func (b *Broadcaster) SetUserMessageHandler(h func(UserMessage)) {
 	b.userMsgHandler = h
 }
 
-// getUserMessageHandler returns the current user message handler.
-func (b *Broadcaster) getUserMessageHandler() func(UserMessage) {
+// GetUserMessageHandler returns the current user message handler.
+func (b *Broadcaster) GetUserMessageHandler() func(UserMessage) {
 	b.handlerMu.RLock()
 	defer b.handlerMu.RUnlock()
 	return b.userMsgHandler

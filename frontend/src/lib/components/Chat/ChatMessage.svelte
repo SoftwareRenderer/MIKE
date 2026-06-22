@@ -30,6 +30,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         isStreaming?: boolean;
         timestamp?: string;
         messageId?: string;
+        attachments?: Array<{ mimeType: string; data: string }>;
         stats?: { model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         toolCalls?: ToolCallInfo[];
         formatToolArgs?: (toolName: string, args: Record<string, unknown>) => string;
@@ -43,7 +44,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         taskStatus?: string;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog' }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog' }: Props = $props();
 
     let reasoningUserToggled = $state(false);
     let reasoningUserValue = $state(false); // user's explicit choice after toggling
@@ -310,6 +311,13 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                     </div>
                 </div>
             {:else}
+                {#if attachments && attachments.length > 0}
+                    <div class="message-images">
+                        {#each attachments as att}
+                            <img src="data:{att.mimeType};base64,{att.data}" alt="Attached image" class="message-image" />
+                        {/each}
+                    </div>
+                {/if}
                 <div class="message-bubble">
                     <div class="message-text">{@html userHtml}</div>
                 </div>
@@ -491,6 +499,20 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     }
     .user-wrapper {
         align-items: flex-end;
+    }
+    .message-images {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        max-width: 80%;
+    }
+    .message-image {
+        max-width: 160px;
+        max-height: 160px;
+        border-radius: 8px;
+        object-fit: cover;
+        border: 1px solid var(--color-border);
     }
     .assistant-wrapper {
         align-items: flex-start;
