@@ -30,12 +30,16 @@ type TestConnectionResponse struct {
 func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionResponse {
 	url := strings.TrimRight(req.LlamaServerURL, "/") + "/chat/completions"
 
-	body := map[string]interface{}{
-		"model":      "test",
+	model := req.ModelName
+	if model == "" {
+		model = "test"
+	}
+	reqBody := map[string]interface{}{
+		"model":      model,
 		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
 		"max_tokens": 1,
 	}
-	payload, err := json.Marshal(body)
+	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Failed to build request: %v", err)}
 	}
@@ -54,10 +58,23 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: %v", err)}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body) // drain body
+	body, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return TestConnectionResponse{Success: true, Message: "Connection successful!"}
+	}
+	// Parse error response for better feedback
+	if len(body) > 0 {
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    int    `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
+			return TestConnectionResponse{Success: false, Message: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, errResp.Error.Message)}
+		}
 	}
 	return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: HTTP %d", resp.StatusCode)}
 }
