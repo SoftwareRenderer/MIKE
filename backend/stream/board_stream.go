@@ -195,7 +195,8 @@ func (bsm *BoardStreamManager) BroadcastDiff(projectID, taskID, diff string, sho
 	bsm.writeMu.Unlock()
 }
 
-// BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project.
+// BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project,
+// and a project_counts event to ALL connected clients across all projects.
 func (bsm *BoardStreamManager) BroadcastTaskUpdated(projectID string, task interface{}) {
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
@@ -212,9 +213,12 @@ func (bsm *BoardStreamManager) BroadcastTaskUpdated(projectID string, task inter
 		}
 	}
 	bsm.writeMu.Unlock()
+
+	bsm.BroadcastProjectCounts()
 }
 
-// BroadcastTaskDeleted sends a task_deleted event with the task ID to all clients of a project.
+// BroadcastTaskDeleted sends a task_deleted event with the task ID to all clients of a project,
+// and a project_counts event to ALL connected clients across all projects.
 func (bsm *BoardStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	bsm.mu.RLock()
 	clients := bsm.clients[projectID]
@@ -231,6 +235,8 @@ func (bsm *BoardStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 		}
 	}
 	bsm.writeMu.Unlock()
+
+	bsm.BroadcastProjectCounts()
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.

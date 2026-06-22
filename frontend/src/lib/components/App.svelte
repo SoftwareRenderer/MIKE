@@ -25,6 +25,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         return name.slice(0, 2).toUpperCase();
     }
 
+    function computePageTitle(): string {
+        const name = currentProject?.name;
+        if (!name) return 'Kanban Board';
+        const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
+        return reviewCount > 0 ? `${name} 🟡 ${reviewCount}` : name;
+    }
+
     /**
      * Update the URL to reflect the current navigation state.
      * Sets project/task as provided, leaves other params (e.g., `thread`) untouched.
@@ -70,6 +77,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let mobileMenuOpen = $state(false);
     let isMobile = $derived(false);
     let hasProviders = $derived(!!cfg?.providers?.length);
+    let pageTitle = $derived(computePageTitle());
 
     $effect(() => {
         const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
@@ -443,7 +451,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         </div>
         <nav class="project-list" aria-label="Projects">
             {#each projects as p (p.id)}
-                <div class="project-item-wrapper" class:active={currentProject?.id === p.id}>
+                <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
                     <button
                         class="project-item"
                         onclick={() => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
@@ -637,7 +645,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 </div>
 
 <svelte:head>
-    <title>Kanban Board</title>
+    <title>{pageTitle}</title>
 </svelte:head>
 
 <style>
@@ -764,6 +772,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
     .collapsed .project-item {
         padding: 8px 4px;
+    }
+    .collapsed .project-item-wrapper.has-review .project-item {
+        border-left: 3px solid var(--color-column-review);
+        border-radius: 0 var(--radius-md) var(--radius-md) 0;
     }
     .project-name {
         flex: 1 1 0;
