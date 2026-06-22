@@ -894,11 +894,6 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 		if len(parts) != 4 {
 			continue
 		}
-		// Skip auto-generated bookkeeping commits (not meaningful task work)
-		subject := parts[2]
-		if subject == "Thread switch snapshot" || subject == "Fork snapshot" {
-			continue
-		}
 		result.Commits = append(result.Commits, TaskCommit{
 			Hash:    parts[0],
 			Short:   parts[1],

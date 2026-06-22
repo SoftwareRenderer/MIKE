@@ -560,6 +560,10 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	}
 	state.cancel()
 	delete(te.tasks, taskID)
+	// Clear the user message handler so the next message triggers lazy-start
+	// instead of being silently dropped by a stale handler.
+	b := te.streamMgr.GetOrCreate(taskID)
+	b.SetUserMessageHandler(nil)
 	return nil
 }
 

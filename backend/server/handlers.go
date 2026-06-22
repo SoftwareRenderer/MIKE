@@ -588,19 +588,18 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 	if task.StatusState == "running" {
 		_ = s.executor.StopTask(taskID)
 	}
-	// Commit current worktree state to old thread's branch, checkout new thread's branch
+	// Stash current worktree state before switching threads.
+	// Uses stash (not commit) to avoid polluting the git log.
 	if task.Branch != "" {
 		oldThreadID := task.CurrentThreadID
 		if oldThreadID != "" && oldThreadID != req.ThreadID {
-			// Commit current state to old thread's branch
 			oldThread, _ := s.store.GetThread(oldThreadID)
 			oldBranch := oldThread.GitBranch
 			if oldBranch == "" {
 				oldBranch = task.Branch
 			}
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Thread switch snapshot", "--allow-empty")
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("switch-%s", taskID))
 		}
 		// Checkout target thread's branch (or task's original branch if none)
 		targetBranch := thread.GitBranch
@@ -675,14 +674,15 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 	if branchPoint == "" {
 		branchPoint = task.BaseRef
 	}
-	// Save current worktree state to the current branch before forking,
-	// so uncommitted changes aren't lost when we switch away.
+	// Save current worktree state before forking, so uncommitted changes
+	// aren't lost when we switch to the fork branch. Uses stash (not commit)
+	// to avoid polluting the git log with internal snapshot commits.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
-		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "add", "-A")
-		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "commit", "-m", "Fork snapshot", "--allow-empty")
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("fork-%s", taskID))
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)
+		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "pop", "--index")
 	}
 	// Look up the checkpoint message's created_at for frontend filtering
 	var checkpointMsgTime *time.Time

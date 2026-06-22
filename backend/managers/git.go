@@ -273,10 +273,6 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 		if len(parts) != 4 {
 			continue
 		}
-		subject := parts[2]
-		if subject == "Thread switch snapshot" || subject == "Fork snapshot" {
-			continue
-		}
 		result.Commits = append(result.Commits, git.TaskCommit{
 			Hash:    parts[0],
 			Short:   parts[1],
