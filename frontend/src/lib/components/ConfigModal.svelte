@@ -606,7 +606,7 @@
                                     </div>
                                     <div class="models-section">
                                         <div class="models-header">
-                                            <span class="models-label">Default Model</span>
+                                            <span class="models-label">MODELS</span>
                                             <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)} title="Add a model manually">
                                                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                                                     <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
