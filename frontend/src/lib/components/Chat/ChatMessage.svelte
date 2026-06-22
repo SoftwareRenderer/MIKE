@@ -50,7 +50,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     let reasoningExpanded = $derived(
         reasoningUserToggled
             ? reasoningUserValue
-            : (!reasoningContent || (reasoningContent.length <= 200 && !content) || (toolCalls && toolCalls.length > 0) || isStreaming)
+            : (!reasoningContent || (reasoningContent.length <= 200 && !content) || (toolCalls && toolCalls.length > 0 && !content) || (isStreaming && !(toolCalls && toolCalls.length > 0)))
     );
 
     function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
@@ -70,13 +70,9 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                 const edits = args.edits as Array<{ oldText: string; newText: string }>;
                 const editCount = edits ? edits.length : 0;
                 const pathDisplay = p.startsWith('./') ? p : `./${p}`;
-                if (editCount === 1 && edits) {
-                    const oldPreview = edits[0].oldText.split('\n').length > 2
-                        ? edits[0].oldText.split('\n').slice(0, 2).join('\n') + '\n...'
-                        : edits[0].oldText.replace(/\n/g, '\\n');
-                    return `${pathDisplay} (${editCount} edit) — "${oldPreview}" → ...`;
-                }
-                return `${pathDisplay} (${editCount} edit${editCount > 1 ? 's' : ''})`;
+                if (editCount <= 0) return pathDisplay;
+                const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
+                return `${pathDisplay} (${suffix})`;
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
@@ -98,10 +94,39 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     }
 
     const ARGS_MAX_LEN = 50;
+    const EDIT_DIFF_MAX_LINES = 20;
 
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
         return { text: display.slice(0, ARGS_MAX_LEN) + ' \u2026', truncated: true };
+    }
+
+    interface EditDiffLine {
+        type: 'removed' | 'added';
+        text: string;
+    }
+    interface EditDiffBlock {
+        edits: EditDiffLine[];
+        separator: boolean;
+    }
+
+    function formatEditDiff(edits: Array<{ oldText: string; newText: string }> | undefined): EditDiffBlock[] {
+        if (!edits || edits.length === 0) return [];
+        return edits.map((edit, i) => {
+            const lines: EditDiffLine[] = [];
+            const oldLines = edit.oldText.split('\n');
+            const newLines = edit.newText.split('\n');
+            const maxLines = EDIT_DIFF_MAX_LINES;
+            for (const line of oldLines) {
+                if (lines.length >= maxLines) break;
+                lines.push({ type: 'removed', text: line });
+            }
+            for (const line of newLines) {
+                if (lines.length >= maxLines) break;
+                lines.push({ type: 'added', text: line });
+            }
+            return { edits: lines, separator: i < edits.length - 1 };
+        });
     }
 
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
@@ -379,8 +404,25 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                                     <span class="tool-status error">Failed</span>
                                 {/if}
                             </div>
-                            {#if tc.result && tc.result.trim()}
-                                <pre class="tool-result">{tc.result}</pre>
+                            {#if tc.toolName === 'edit_file' && tc.args.edits}
+                                <div class="edit-diff">
+                                    {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
+                                        {#each block.edits as line}
+                                            <div class="edit-diff-line {line.type === 'removed' ? 'edit-removed' : 'edit-added'}">
+                                                <span class="edit-diff-sign">{line.type === 'removed' ? '-' : '+'}</span>
+                                                <span class="edit-diff-text">{line.text}</span>
+                                            </div>
+                                        {/each}
+                                        {#if block.separator}
+                                            <div class="edit-separator"></div>
+                                        {/if}
+                                    {/each}
+                                </div>
+                                {#if !tc.success && tc.result && tc.result.trim()}
+                                    <pre class="tool-result tool-result-error">{tc.result}</pre>
+                                {/if}
+                            {:else if tc.result && tc.result.trim()}
+                                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
                             {/if}
                             {#if tc.duration !== undefined}
                                 <span class="tool-duration">{tc.duration}ms</span>
@@ -825,6 +867,44 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     .tool-args-expanded:hover {
         color: var(--color-text-primary);
     }
+    .edit-diff {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        line-height: 1.4;
+        overflow-x: auto;
+    }
+    .edit-diff-line {
+        display: flex;
+        gap: 0;
+        padding: 0 8px;
+        border-radius: 2px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .edit-removed {
+        background: rgba(248,81,73,0.12);
+        color: var(--color-text-secondary);
+    }
+    .edit-added {
+        background: rgba(63,185,80,0.12);
+        color: var(--color-text-secondary);
+    }
+    .edit-diff-sign {
+        flex-shrink: 0;
+        width: 1em;
+        user-select: none;
+        font-weight: 600;
+    }
+    .edit-removed .edit-diff-sign { color: rgba(248,81,73,0.8); }
+    .edit-added .edit-diff-sign { color: rgba(63,185,80,0.8); }
+    .edit-diff-text {
+        flex: 1;
+        min-width: 0;
+    }
+    .edit-separator {
+        border-top: 1px dashed var(--color-border);
+        margin: 4px 8px;
+    }
     .tool-result {
         background: var(--color-surface-0);
         padding: 6px 8px;
@@ -837,5 +917,9 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         overflow-y: auto;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+    .tool-result-error {
+        background: rgba(248,81,73,0.08);
+        color: var(--color-status-red);
     }
 </style>

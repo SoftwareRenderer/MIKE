@@ -201,6 +201,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const prefixed = path.startsWith('./') ? path : `./${path}`;
                 return `${prefixed} (${lines} lines)`;
             }
+            case 'edit_file': {
+                const path = args.path as string;
+                const edits = args.edits as Array<{ oldText: string; newText: string }>;
+                const editCount = edits ? edits.length : 0;
+                const pathDisplay = path.startsWith('./') ? path : `./${path}`;
+                if (editCount <= 0) return pathDisplay;
+                const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
+                return `${pathDisplay} (${suffix})`;
+            }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
             default:
