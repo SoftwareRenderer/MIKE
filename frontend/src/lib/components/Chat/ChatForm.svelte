@@ -80,7 +80,6 @@
         value = '';
         resetHeight();
         onSubmit?.(msg);
-        setTimeout(() => focus(), 10);
     }
 
     function handleStop() {

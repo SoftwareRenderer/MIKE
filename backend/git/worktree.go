@@ -1049,6 +1049,12 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 		}
 	}
 
+	// Stash not found in list (e.g., dropped after commit-and-done).
+	// Fall back to HEAD at stash time (first parent of the stash commit).
+	parent, err := wm.gitRunOutput(worktreePath, "rev-parse", headRef+"^")
+	if err == nil {
+		return strings.TrimSpace(parent), nil
+	}
 	return headRef, nil
 }
 

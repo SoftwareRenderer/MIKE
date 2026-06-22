@@ -917,6 +917,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             ws.send(msg);
         }
         scroll();
+        chatFormComp?.focus();
     }
 
     async function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
@@ -1296,6 +1297,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
     let chatFormRef: HTMLElement | null = $state(null);
+    let chatFormComp: { focus: () => void } | null = null;
 
     function setupViewportListener() {
         const vv = window.visualViewport;
@@ -1524,13 +1526,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {#if awaitingResponse && connected && isLoading}
             <div class="awaiting-llm">
                 <span class="spinner"></span>
-                <span>Awaiting LLM provider...</span>
-            </div>
-        {/if}
-        {#if queuePosition > 0}
-            <div class="awaiting-llm">
-                <span class="spinner"></span>
-                <span>Waiting in queue — position {queuePosition}, ~{queueEstimatedWait}s</span>
+                <span>{queuePosition > 0 ? `Awaiting LLM provider — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : 'Awaiting LLM provider...'}</span>
             </div>
         {/if}
         </div>
@@ -1625,6 +1621,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {/if}
         {#if !showRestartButton}
         <ChatForm
+            bind:this={chatFormComp}
             bind:value={inputValue}
             disabled={disabled}
             isLoading={isLoading}

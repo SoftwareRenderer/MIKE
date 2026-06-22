@@ -318,7 +318,9 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
 	}
 
-	// For stash refs, resolve to the common ancestor (state before stash changes)
+	// For stash refs, resolve to the common ancestor (state before stash changes).
+	// This shows changes accumulated UP TO (but not including) the checkpoint.
+	// Falls back to headRef^ (HEAD at stash time) if the stash is not in the list.
 	if headRef != "" && baseRef != "" {
 		resolved, err := h.worktreeMgr.ResolveStashParent(taskID, baseRef, headRef)
 		if err == nil {

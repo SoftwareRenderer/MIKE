@@ -2,6 +2,7 @@ package exec
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"kanban/backend/sandbox"
@@ -490,5 +491,169 @@ func TestPromptPath_SandboxDisabled(t *testing.T) {
 
 	if promptPath != worktreePath {
 		t.Errorf("sandbox disabled: promptPath = %q, want %q", promptPath, worktreePath)
+	}
+}
+
+// --- extractLastTurns Tests ---
+
+func TestExtractLastTurns_Empty(t *testing.T) {
+	result := extractLastTurns(nil, 3)
+	if len(result) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(result))
+	}
+}
+
+func TestExtractLastTurns_SystemOnly(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "You are a helpful assistant"},
+	}
+	result := extractLastTurns(messages, 3)
+	if len(result) != 0 {
+		t.Errorf("expected 0 messages (system skipped), got %d", len(result))
+	}
+}
+
+func TestExtractLastTurns_SingleTurn(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there"},
+	}
+	result := extractLastTurns(messages, 3)
+	if len(result) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(result))
+	}
+	if result[0].Role != "user" || result[1].Role != "assistant" {
+		t.Errorf("expected user+assistant, got %s+%s", result[0].Role, result[1].Role)
+	}
+}
+
+func TestExtractLastTurns_ThreeTurns(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Turn 1 user"},
+		{Role: "assistant", Content: "Turn 1 assistant"},
+		{Role: "user", Content: "Turn 2 user"},
+		{Role: "assistant", Content: "Turn 2 assistant"},
+		{Role: "user", Content: "Turn 3 user"},
+		{Role: "assistant", Content: "Turn 3 assistant"},
+	}
+	result := extractLastTurns(messages, 3)
+	if len(result) != 6 {
+		t.Errorf("expected 6 messages (3 turns), got %d", len(result))
+	}
+	// All 3 turns fit, so should start with turn 1
+	if result[0].Content != "Turn 1 user" {
+		t.Errorf("expected first msg to be 'Turn 1 user', got %q", result[0].Content)
+	}
+}
+
+func TestExtractLastTurns_MoreThanThreeTurns(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Turn 1"},
+		{Role: "assistant", Content: "A1"},
+		{Role: "user", Content: "Turn 2"},
+		{Role: "assistant", Content: "A2"},
+		{Role: "user", Content: "Turn 3"},
+		{Role: "assistant", Content: "A3"},
+		{Role: "user", Content: "Turn 4"},
+		{Role: "assistant", Content: "A4"},
+		{Role: "user", Content: "Turn 5"},
+		{Role: "assistant", Content: "A5"},
+	}
+	result := extractLastTurns(messages, 3)
+	if len(result) != 6 {
+		t.Errorf("expected 6 messages (last 3 turns), got %d", len(result))
+	}
+	// Should be turns 3, 4, 5
+	if result[0].Content != "Turn 3" {
+		t.Errorf("expected first msg to be 'Turn 3', got %q", result[0].Content)
+	}
+	if result[5].Content != "A5" {
+		t.Errorf("expected last msg to be 'A5', got %q", result[5].Content)
+	}
+}
+
+func TestExtractLastTurns_WithToolCalls(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Read a file"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
+		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
+		{Role: "assistant", Content: "Here is the content"},
+		{Role: "user", Content: "Thanks"},
+		{Role: "assistant", Content: "You're welcome"},
+	}
+	result := extractLastTurns(messages, 3)
+	// Should have 2 turns (turn 1 with tool calls, turn 2)
+	if len(result) < 4 {
+		t.Errorf("expected at least 4 messages, got %d", len(result))
+	}
+}
+
+func TestExtractLastTurns_IncompleteTurn(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Turn 1"},
+		{Role: "assistant", Content: "A1"},
+		{Role: "user", Content: "Turn 2 (no response yet)"},
+	}
+	result := extractLastTurns(messages, 3)
+	// Should include the incomplete turn
+	if len(result) != 3 {
+		t.Errorf("expected 3 messages (1 full turn + 1 incomplete), got %d", len(result))
+	}
+}
+
+// --- formatConversationTurns Tests ---
+
+func TestFormatConversationTurns_Basic(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there"},
+	}
+	result := formatConversationTurns(messages)
+	if result != "User: Hello\n\nAssistant: Hi there\n\n" {
+		t.Errorf("unexpected output: %q", result)
+	}
+}
+
+func TestFormatConversationTurns_WithToolResult(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
+		{Role: "tool", Content: "file contents"},
+	}
+	result := formatConversationTurns(messages)
+	if result == "" {
+		t.Error("expected non-empty output")
+	}
+	if !strings.Contains(result, "[tool: read_file") {
+		t.Error("expected tool call in output")
+	}
+	if !strings.Contains(result, "[Tool result]") {
+		t.Error("expected tool result in output")
+	}
+}
+
+func TestFormatConversationTurns_TruncatesLongToolResults(t *testing.T) {
+	longContent := strings.Repeat("x", 600)
+	messages := []types.ChatMessage{
+		{Role: "tool", Content: longContent},
+	}
+	result := formatConversationTurns(messages)
+	// Output should be: "[Tool result]" + 500 chars + "..." + "\n\n" = ~511 chars
+	// Full content would be: "[Tool result]" + 600 chars + "\n\n" = ~613 chars
+	if len(result) > 520 {
+		t.Errorf("expected truncated output (~511 chars), got %d chars", len(result))
+	}
+	if !strings.Contains(result, "...") {
+		t.Error("expected truncation marker '...' in output")
 	}
 }
