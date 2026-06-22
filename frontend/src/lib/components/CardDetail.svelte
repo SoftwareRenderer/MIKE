@@ -40,6 +40,81 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         collapsedSections = next;
     }
 
+    // --- Drag-and-drop for board overview ---
+    let draggedTaskId: string | null = $state(null);
+    let sectionDragState = $state<Map<string, { isOver: boolean; isRejected: boolean }>>(new Map());
+
+    function handleDragStart(taskId: string) {
+        draggedTaskId = taskId;
+    }
+
+    /** Walk up the ancestor chain to check if any ancestor is In Progress. */
+    function hasAncestorInProgress(task: Task): boolean {
+        const taskMap = new Map(allTasks.map(t => [t.id, t]));
+        let current = task;
+        while (current.parent_task_id) {
+            const parent = taskMap.get(current.parent_task_id);
+            if (!parent) break;
+            if (parent.status === 'in_progress') return true;
+            current = parent;
+        }
+        return false;
+    }
+
+    function canDrop(taskId: string, targetStatus: string): boolean {
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task) return false;
+        // Block subtasks from moving to Backlog when an ancestor is In Progress
+        if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) return false;
+        return true;
+    }
+
+    function handleSectionDragOver(e: DragEvent, sectionId: string) {
+        e.preventDefault();
+        const taskId = e.dataTransfer?.getData('text/plain');
+        const state = sectionDragState.get(sectionId) || { isOver: false, isRejected: false };
+        if (taskId && !canDrop(taskId, sectionId)) {
+            e.dataTransfer.dropEffect = 'none';
+            sectionDragState = new Map(sectionDragState).set(sectionId, { isRejected: true, isOver: false });
+        } else {
+            sectionDragState = new Map(sectionDragState).set(sectionId, { isRejected: false, isOver: true });
+        }
+    }
+
+    function handleSectionDragLeave(sectionId: string) {
+        sectionDragState = new Map(sectionDragState).set(sectionId, { isOver: false, isRejected: false });
+    }
+
+    async function handleSectionDrop(e: DragEvent, targetStatus: string) {
+        const sectionId = targetStatus;
+        sectionDragState = new Map(sectionDragState).set(sectionId, { isOver: false, isRejected: false });
+        const taskId = e.dataTransfer?.getData('text/plain');
+        if (!taskId) return;
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task || task.status === targetStatus) return;
+        if (!canDrop(taskId, targetStatus)) {
+            showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+            draggedTaskId = null;
+            return;
+        }
+        try {
+            const updated = await moveTask(task.project_id, taskId, targetStatus);
+            // Skip optimistic update if this subtask will be consolidated into its parent.
+            const willConsolidate = task.parent_task_id &&
+                allTasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
+            if (!willConsolidate) {
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                });
+            }
+        } catch (err) {
+            console.error('Failed to move task:', err);
+            showToast('Failed to move task: ' + String(err), 'error');
+        }
+        draggedTaskId = null;
+    }
+
     function getSectionColor(id: string): string {
         const colors: Record<string, string> = {
             backlog: 'var(--color-column-backlog)',
@@ -713,7 +788,16 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 <div class="task-list">
                     {#each overviewSections as section}
                         {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }).sort((a, b) => a.column_order - b.column_order)}
-                        <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
+                        {@const sectionState = sectionDragState.get(section.id) || { isOver: false, isRejected: false }}
+                        <div
+                            class="section-group"
+                            class:is-over={sectionState.isOver}
+                            class:is-drop-rejected={sectionState.isRejected}
+                            style="--col-color: {getSectionColor(section.id)}"
+                            ondragover={(e) => handleSectionDragOver(e, section.id)}
+                            ondragleave={() => handleSectionDragLeave(section.id)}
+                            ondrop={(e) => handleSectionDrop(e, section.id)}
+                        >
                             <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
                                 <span class="section-title">
                                     {#if section.id === 'backlog'}
@@ -747,6 +831,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                         onSelect={(selected) => {
                                             if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
                                         }}
+                                        onRefreshBoard={onRefreshBoard}
                                     />
                                 {/each}
                                 {#if section.id === 'backlog'}
@@ -969,6 +1054,15 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
         overflow: hidden;
+        transition: background 0.15s ease;
+    }
+    .section-group.is-over {
+        background: var(--color-surface-2);
+    }
+    .section-group.is-drop-rejected {
+        outline: 2px dashed var(--color-status-red);
+        outline-offset: -2px;
+        cursor: no-drop;
     }
     .section-header {
         display: flex;
