@@ -45,10 +45,7 @@ async function setup(): Promise<void> {
     // 1. Ensure test git repo exists
     ensureTestRepo();
 
-    // 2. Clean up any stale state
-    cleanupStaleState();
-
-    // 3. Kill any existing kanban server on port 3000
+    // 2. Kill any existing kanban server on port 3000
     await killKanbanServer();
 
     // 4. Start fresh kanban server with test database
@@ -399,6 +396,11 @@ function deleteRequest(url: string): Promise<any> {
 }
 
 export default async function main(): Promise<void> {
+    // Always clean stale state first (from interrupted runs)
+    // This must run BEFORE the lock file check, otherwise a stale lock
+    // file causes teardown to run, which kills servers but doesn't restart them.
+    cleanupStaleState();
+
     // If lock file exists, we're in teardown phase (setup already ran)
     // Otherwise, we're in setup phase
     const isTeardown = fs.existsSync(LOCK_FILE);

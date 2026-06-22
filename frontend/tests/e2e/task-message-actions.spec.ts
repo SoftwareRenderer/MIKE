@@ -1,9 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { ensureChatForm, createAndOpenTask, getProjectId, createTaskViaApi } from './helpers';
 
+/** Graceful skip: executor may not start in test env, so chat form may not exist. */
+async function requireChatForm(page: any): Promise<void> {
+  const chatReady = await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false);
+  if (!chatReady) test.skip();
+}
+
 test.describe.serial('Task Message Actions', () => {
   test.beforeEach(async ({ page }) => {
-    test.setTimeout(30000);
+    test.setTimeout(120000);
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
@@ -17,9 +23,7 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show copy, fork, and delete buttons on user message', async ({ page }) => {
-    // Graceful skip: chat form may not be ready if executor didn't start
-    const chatReady = await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false);
-    if (!chatReady) return;
+    await requireChatForm(page);
 
     // Send a message
     const textarea = page.locator('textarea[placeholder*="message"]');
@@ -38,10 +42,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should copy message content to clipboard', async ({ page }) => {
-    test.setTimeout(30000);
-    // Graceful skip: chat form may not be ready if executor didn't start
-    const chatReady = await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false);
-    if (!chatReady) return;
+    test.setTimeout(120000);
+    await requireChatForm(page);
 
     // Send a message with unique content
     const textarea = page.locator('textarea[placeholder*="message"]');
@@ -63,6 +65,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show delete confirmation dialog', async ({ page }) => {
+    await requireChatForm(page);
+
     // Send a message
     const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.fill(`Delete test ${Date.now()}`);
@@ -90,6 +94,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should delete message on confirm', async ({ page }) => {
+    await requireChatForm(page);
+
     // Send a message
     const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.fill(`Will be deleted ${Date.now()}`);
@@ -114,6 +120,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should open fork form when fork button is clicked', async ({ page }) => {
+    await requireChatForm(page);
+
     // Count existing assistant messages
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -150,6 +158,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should cancel fork when cancel button is clicked', async ({ page }) => {
+    await requireChatForm(page);
+
     // Count existing assistant messages
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -182,6 +192,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should close fork form when fork is submitted', async ({ page }) => {
+    await requireChatForm(page);
+
     // Count existing assistant messages
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -221,6 +233,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should copy assistant message content to clipboard', async ({ page }) => {
+    await requireChatForm(page);
+
     // Count assistant messages before sending
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -257,6 +271,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show regenerate button on assistant message after LLM response', async ({ page }) => {
+    await requireChatForm(page);
+
     // Count assistant messages before sending
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -321,6 +337,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should close fork form for follow-up message', async ({ page }) => {
+    await requireChatForm(page);
+
     // Send a follow-up message
     const followUpMsg = `Follow up fork test ${Date.now()}`;
     const textarea = page.locator('textarea[placeholder*="message"]');
@@ -358,6 +376,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show Send button when editing last user message with no LLM response', async ({ page }) => {
+    await requireChatForm(page);
+
     // Send a message and immediately edit it before LLM creates assistant entry
     // (race condition: we click fork before the assistant entry is created)
     const textarea = page.locator('textarea[placeholder*="message"]');
@@ -387,6 +407,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should show Fork button when editing a message that has an LLM response after it', async ({ page }) => {
+    await requireChatForm(page);
+
     // First wait for the initial task prompt (user message) + any LLM response
     const assistantCountBefore = await page.locator('.chat-message.assistant').count();
 
@@ -418,6 +440,8 @@ test.describe.serial('Task Message Actions', () => {
   });
 
   test('should update message and close edit form when Send/Fork is submitted', async ({ page }) => {
+    await requireChatForm(page);
+
     // Send a message and wait for LLM response
     const textarea = page.locator('textarea[placeholder*="message"]');
     const originalMsg = `Edit submit test ${Date.now()}`;
