@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 
+	"kanban/backend/crypto"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -25,6 +27,7 @@ func NewConfigStore(store *store.Store, dbPath string) *ConfigStore {
 }
 
 // GetConfig retrieves the full server configuration.
+// API keys are decrypted from the DB before returning.
 func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	workspaceDir, err := cs.store.GetConfigValue("workspace_dir")
 	if err != nil {
@@ -44,6 +47,18 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if providersRaw != "" {
 		if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
 			return nil, err
+		}
+	}
+	// Decrypt API keys
+	for i := range providers {
+		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
+			decrypted, err := crypto.Decrypt(*providers[i].APIKey)
+			if err != nil {
+				// If decryption fails, leave the value as-is (may be plain text from before encryption was added)
+				providers[i].APIKey = &decrypted
+			} else {
+				providers[i].APIKey = &decrypted
+			}
 		}
 	}
 
@@ -78,11 +93,19 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 }
 
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
+// API keys are encrypted before DB storage.
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
-	// Enforce minimum concurrency of 1 for all providers
+	// Enforce minimum concurrency of 1 and encrypt API keys for all providers
 	for i := range c.Providers {
 		if c.Providers[i].Concurrency < 1 {
 			c.Providers[i].Concurrency = 1
+		}
+		if c.Providers[i].APIKey != nil && *c.Providers[i].APIKey != "" {
+			encrypted, err := crypto.Encrypt(*c.Providers[i].APIKey)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt API key for provider %q: %w", c.Providers[i].Name, err)
+			}
+			c.Providers[i].APIKey = &encrypted
 		}
 	}
 	providersJSON, err := json.Marshal(c.Providers)
@@ -121,6 +144,31 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	return nil
 }
 
+// configResponse wraps Config with additional metadata for API responses.
+type configResponse struct {
+	WorkspaceDir        string     `json:"workspace_dir"`
+	DatabasePath        string     `json:"database_path"`
+	Providers           []types.Provider `json:"providers"`
+	DefaultProvider     string     `json:"default_provider"`
+	DefaultAutoCommit   *bool      `json:"default_auto_commit,omitempty"`
+	DefaultPlanMode     *bool      `json:"default_plan_mode,omitempty"`
+	DefaultMaxFailedTurns *int     `json:"default_max_failed_turns,omitempty"`
+	DefaultSandboxImage string     `json:"default_sandbox_image,omitempty"`
+	EncryptionEnabled   bool       `json:"encryption_enabled"`
+}
+
+// maskAPIKeys replaces non-empty API keys with a masked placeholder.
+const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
+
+func maskAPIKeys(providers []types.Provider) {
+	for i := range providers {
+		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
+			masked := maskedAPIKey
+			providers[i].APIKey = &masked
+		}
+	}
+}
+
 // HandleConfig handles GET and PUT /api/config.
 func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -130,7 +178,20 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get config")
 			return
 		}
-		httputil.JSONResponse(w, http.StatusOK, cfg)
+		// Mask API keys before sending to client
+		maskAPIKeys(cfg.Providers)
+		resp := configResponse{
+			WorkspaceDir:        cfg.WorkspaceDir,
+			DatabasePath:        cfg.DatabasePath,
+			Providers:           cfg.Providers,
+			DefaultProvider:     cfg.DefaultProvider,
+			DefaultAutoCommit:   cfg.DefaultAutoCommit,
+			DefaultPlanMode:     cfg.DefaultPlanMode,
+			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
+			DefaultSandboxImage: cfg.DefaultSandboxImage,
+			EncryptionEnabled:   crypto.IsEnabled(),
+		}
+		httputil.JSONResponse(w, http.StatusOK, resp)
 	case http.MethodPut:
 		// Partial update: only update fields that are provided
 		var updates map[string]interface{}
@@ -149,9 +210,23 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)
-				var p []types.Provider
-				if err := json.Unmarshal(providersJSON, &p); err == nil {
-					current.Providers = p
+				var incoming []types.Provider
+				if err := json.Unmarshal(providersJSON, &incoming); err == nil {
+					// Merge: preserve API keys from existing providers when not provided in update
+					// nil = not provided (preserve), "" = explicitly clear, non-empty = new value.
+					existingByKey := make(map[string]string)
+					for _, p := range current.Providers {
+						if p.APIKey != nil {
+							existingByKey[p.Name] = *p.APIKey
+						}
+					}
+					for i := range incoming {
+						if incoming[i].APIKey == nil && existingByKey[incoming[i].Name] != "" {
+							key := existingByKey[incoming[i].Name]
+							incoming[i].APIKey = &key
+						}
+					}
+					current.Providers = incoming
 				}
 			}
 		}
@@ -183,7 +258,20 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
 			return
 		}
-		httputil.JSONResponse(w, http.StatusOK, current)
+		// Mask API keys before sending response
+		maskAPIKeys(current.Providers)
+		resp := configResponse{
+			WorkspaceDir:        current.WorkspaceDir,
+			DatabasePath:        current.DatabasePath,
+			Providers:           current.Providers,
+			DefaultProvider:     current.DefaultProvider,
+			DefaultAutoCommit:   current.DefaultAutoCommit,
+			DefaultPlanMode:     current.DefaultPlanMode,
+			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
+			DefaultSandboxImage: current.DefaultSandboxImage,
+			EncryptionEnabled:   crypto.IsEnabled(),
+		}
+		httputil.JSONResponse(w, http.StatusOK, resp)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -211,6 +299,22 @@ func parseIntPtr(s string) (*int, error) {
 		return nil, err
 	}
 	return &v, nil
+}
+
+// GetProviderAPIKey looks up and returns the decrypted API key for a provider by URL.
+// Returns empty string if no matching provider is found or no key is set.
+func (cs *ConfigStore) GetProviderAPIKey(serverURL string) string {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return ""
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") == serverURL {
+			return provider.APIKeyValue()
+		}
+	}
+	return ""
 }
 
 // SaveModelContextWindow persists a discovered context window for a model in the config.

@@ -64,6 +64,7 @@
         name: string;
         display_name: string;
         url: string;
+        api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
         models: ModelEntry[];
         concurrency: number;
         default_model: string; // per-provider default model
@@ -115,12 +116,14 @@
     }
 
     let providers = $state<ProviderDraft[]>([]);
+    let encryptionEnabled = $state(false);
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
         const oldGlobalDefault = cfg?.default_model || '';
         return (cfg?.providers || []).map(p => {
             const draft: ProviderDraft = {
                 ...p,
+                api_key: p.api_key || '',
                 concurrency: p.concurrency || 1,
                 default_model: p.default_model || '',
                 input_price: p.input_price || 0,
@@ -156,6 +159,7 @@
         defaultPlanMode = config?.default_plan_mode ?? false;
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         defaultSandboxImage = config?.default_sandbox_image || '';
+        encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
     });
 
@@ -177,7 +181,9 @@
         p.testResult = null;
         try {
             const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');
-            const result = await testConnectionApi(p.url.trim(), defaultModelName);
+            // Send the raw value — masked keys won't match the pattern so backend ignores them
+            const apiKey = p.api_key || '';
+            const result = await testConnectionApi(p.url.trim(), defaultModelName, apiKey);
             p.testResult = {
                 success: result.success,
                 message: result.message,
@@ -194,6 +200,7 @@
             name: '',
             display_name: '',
             url: '',
+            api_key: '',
             models: [],
             concurrency: 1,
             default_model: '',
@@ -303,7 +310,8 @@
         p.fetchingModels = true;
         p.fetchError = '';
         try {
-            const result = await fetchModelsApi(p.url.trim());
+            const apiKey = p.api_key || '';
+            const result = await fetchModelsApi(p.url.trim(), apiKey);
             if (result.error) {
                 p.fetchError = result.error;
             } else {
@@ -375,7 +383,10 @@
                 .filter(p => p.url.trim())
                 .map(p => {
                     syncProviderMeta(p);
-                    return {
+                    const trimmedKey = p.api_key?.trim() || '';
+                    // Masked keys are all bullets — don't send them. Only send real values.
+                    const isMasked = trimmedKey && trimmedKey.replace(/•/g, '').length === 0;
+                    const base: Provider = {
                         name: p.name.trim(),
                         display_name: p.display_name.trim(),
                         url: p.url.trim(),
@@ -390,6 +401,10 @@
                         cache_read_price: p.cache_read_price,
                         cache_write_price: p.cache_write_price,
                     };
+                    if (!isMasked) {
+                        base.api_key = trimmedKey;
+                    }
+                    return base;
                 });
             const cfg = await updateConfig({
                 workspace_dir: workspaceDir.trim(),
@@ -495,10 +510,31 @@
                             <!-- Expanded details -->
                             {#if p.expanded}
                                 <div class="provider-details">
-                                    <div class="url-field">
-                                        <label class="url-label">Provider URL</label>
-                                        <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                    <div class="url-and-key-row">
+                                        <div class="url-field">
+                                            <label class="url-label">Provider URL</label>
+                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                        </div>
+                                        <div class="api-key-field">
+                                            <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
+                                            <input
+                                                type="password"
+                                                bind:value={p.api_key}
+                                                placeholder="********"
+                                                class="api-key-input"
+                                                onclick={(e) => e.stopPropagation()}
+                                            />
+                                        </div>
                                     </div>
+                                    {#if !encryptionEnabled && p.api_key && p.api_key.trim() !== ''}
+                                        <div class="encryption-warning">
+                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                                                <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                                            </svg>
+                                            API key will be stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to enable encryption.
+                                        </div>
+                                    {/if}
                                     <div class="details-actions">
                                         <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}
@@ -1094,12 +1130,17 @@
         padding: 2px 6px;
         border-radius: 3px;
     }
-    /* URL field in expanded details */
+    /* URL + API key row (side by side) */
+    .url-and-key-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
     .url-field {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        margin-bottom: 10px;
     }
     .url-label {
         font-size: 0.8125rem;
@@ -1123,6 +1164,65 @@
     }
     .url-input::placeholder {
         color: var(--color-text-tertiary);
+    }
+
+    /* API Key field */
+    .api-key-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .api-key-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+    }
+    .optional-text {
+        font-weight: 400;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+    }
+    .api-key-input {
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        width: 100%;
+        min-width: 0;
+        font-family: var(--font-mono, monospace);
+    }
+    .api-key-input:focus {
+        border-color: var(--color-accent);
+        outline: none;
+    }
+    .api-key-input::placeholder {
+        color: var(--color-text-tertiary);
+    }
+    .encryption-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        background: rgba(248, 81, 73, 0.08);
+        border: 1px solid rgba(248, 81, 73, 0.2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        color: #f85149;
+        line-height: 1.4;
+    }
+    .encryption-warning svg {
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+    .encryption-warning code {
+        background: rgba(248, 81, 73, 0.15);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-family: var(--font-mono, monospace);
+        font-size: 0.75rem;
     }
 
     /* Provider actions (right side of header) */
@@ -1675,6 +1775,9 @@
     }
 
     @media (max-width: 768px) {
+        .url-and-key-row {
+            grid-template-columns: 1fr;
+        }
         .modal {
             width: 100vw;
             max-width: none;

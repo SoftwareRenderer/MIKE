@@ -473,7 +473,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	if reasoningEffort == "" {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
 	}
-	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort)
+	apiKey := te.configStore.GetProviderAPIKey(serverURL)
+	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	tools := llama.GetToolDefinitions()
 	// In sandbox mode, use the container mount path so the LLM sees
 	// the actual working directory inside the sandbox.
@@ -574,7 +575,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if newReasoningEffort == "" {
 					newReasoningEffort = te.configStore.GetModelReasoningEffort(newModel)
 				}
-				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort)
+				newAPIKey := te.configStore.GetProviderAPIKey(newURL)
+				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort, newAPIKey)
 				providerName = te.configStore.GetProviderNameByURL(newURL)
 				contextWindow = te.configStore.GetModelContextWindow(newModel, newURL)
 				if contextWindow == nil {
@@ -596,7 +598,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if um.ModelName != "" {
 				mc.set(um.ServerURL, um.ModelName)
 				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
-				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
+				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
 			}
 		default:
@@ -745,7 +748,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if qm.ModelName != "" {
 					mc.set(qm.ServerURL, qm.ModelName)
 					newReasoningEffort := te.configStore.GetModelReasoningEffort(qm.ModelName)
-					client = llama.NewLlamaClient(qm.ServerURL, qm.ModelName, newReasoningEffort)
+					newAPIKey := te.configStore.GetProviderAPIKey(qm.ServerURL)
+					client = llama.NewLlamaClient(qm.ServerURL, qm.ModelName, newReasoningEffort, newAPIKey)
 					providerName = te.configStore.GetProviderNameByURL(qm.ServerURL)
 				}
 			}
@@ -1010,7 +1014,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if um.ModelName != "" {
 					mc.set(um.ServerURL, um.ModelName)
 					newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
-					client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+					newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
+					client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 					providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
 				}
 				task.StatusState = "running"
@@ -1087,7 +1092,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if um.ModelName != "" {
 				mc.set(um.ServerURL, um.ModelName)
 				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
-				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort)
+				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
+				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
 			}
 			task.StatusState = "running"

@@ -71,16 +71,25 @@ type ModelConfig struct {
 
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
-	Name           string        `json:"name"`
-	DisplayName    string        `json:"display_name"`
-	URL            string        `json:"url"`
-	Models         []ModelConfig `json:"models"`
-	Concurrency    int           `json:"concurrency"`
-	DefaultModel   string        `json:"default_model"`
-	InputPrice     float64       `json:"input_price"`      // USD per 1M input (non-cached) tokens
-	OutputPrice    float64       `json:"output_price"`     // USD per 1M output tokens
-	CacheReadPrice float64       `json:"cache_read_price"` // USD per 1M cache-read tokens
-	CacheWritePrice float64      `json:"cache_write_price"` // USD per 1M cache-write tokens (overrides input_price when set)
+	Name            string        `json:"name"`
+	DisplayName     string        `json:"display_name"`
+	URL             string        `json:"url"`
+	APIKey          *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
+	Models          []ModelConfig `json:"models"`
+	Concurrency     int           `json:"concurrency"`
+	DefaultModel    string        `json:"default_model"`
+	InputPrice      float64       `json:"input_price"`      // USD per 1M input (non-cached) tokens
+	OutputPrice     float64       `json:"output_price"`     // USD per 1M output tokens
+	CacheReadPrice  float64       `json:"cache_read_price"` // USD per 1M cache-read tokens
+	CacheWritePrice float64       `json:"cache_write_price"` // USD per 1M cache-write tokens (overrides input_price when set)
+}
+
+// APIKeyValue returns the API key as a string (empty if nil).
+func (p *Provider) APIKeyValue() string {
+	if p.APIKey == nil {
+		return ""
+	}
+	return *p.APIKey
 }
 
 // Project represents a workspace project.

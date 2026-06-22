@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 type TestConnectionRequest struct {
 	LlamaServerURL string `json:"llama_server_url"`
 	ModelName      string `json:"model_name"`
+	APIKey         string `json:"api_key"`
 }
 
 // TestConnectionResponse is the result of a connection test.
@@ -39,7 +41,15 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(url, "application/json", strings.NewReader(string(payload)))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Failed to build request: %v", err)}
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: %v", err)}
 	}
@@ -77,6 +87,7 @@ func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Reque
 // FetchModelsRequest is the body for POST /api/config/fetch-models.
 type FetchModelsRequest struct {
 	LlamaServerURL string `json:"llama_server_url"`
+	APIKey         string `json:"api_key"`
 }
 
 // FetchedModel represents a model returned from the LLM's /models endpoint.
@@ -92,11 +103,18 @@ type FetchModelsResponse struct {
 }
 
 // FetchModels calls GET {url}/v1/models on an OpenAI-compatible endpoint and returns model metadata.
-func (cs *ConfigStore) FetchModels(url string) FetchModelsResponse {
-	url = strings.TrimRight(url, "/") + "/models"
+func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
+	url := strings.TrimRight(req.LlamaServerURL, "/") + "/models"
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(url)
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Failed to build request: %v", err)}
+	}
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Connection failed: %v", err)}
 	}
@@ -236,7 +254,7 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result := cs.FetchModels(req.LlamaServerURL)
+	result := cs.FetchModels(req)
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 

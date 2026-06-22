@@ -366,21 +366,21 @@ export async function updateConfig(config: Config): Promise<Config> {
     return res.json();
 }
 
-export async function testConnection(llamaServerUrl: string, modelName: string): Promise<{ success: boolean; message: string }> {
+export async function testConnection(llamaServerUrl: string, modelName: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/config/test-connection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ llama_server_url: llamaServerUrl, model_name: modelName }),
+        body: JSON.stringify({ llama_server_url: llamaServerUrl, model_name: modelName, api_key: apiKey }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to test connection');
     return res.json();
 }
 
-export async function fetchModels(llamaServerUrl: string): Promise<{ models: Array<{ name: string; context_window?: number }>; error?: string }> {
+export async function fetchModels(llamaServerUrl: string, apiKey?: string): Promise<{ models: Array<{ name: string; context_window?: number }>; error?: string }> {
     const res = await fetch(`${API_BASE}/config/fetch-models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ llama_server_url: llamaServerUrl }),
+        body: JSON.stringify({ llama_server_url: llamaServerUrl, api_key: apiKey }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to fetch models');
     return res.json();

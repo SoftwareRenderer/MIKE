@@ -176,7 +176,8 @@ func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn fu
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 // The caller passes messages and gets a result — queue management is fully transparent.
 func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage) (*types.ChatUsage, string, error) {
-	client := llama.NewLlamaClient(serverURL, modelName, "off")
+	apiKey := te.configStore.GetProviderAPIKey(serverURL)
+	client := llama.NewLlamaClient(serverURL, modelName, "off", apiKey)
 	var usage *types.ChatUsage
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {

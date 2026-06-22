@@ -29,11 +29,12 @@ type LlamaClient struct {
 	baseURL         string
 	modelName       string
 	reasoningEffort string
+	apiKey          string
 	httpClient      *http.Client
 }
 
 // NewLlamaClient creates a new LlamaClient.
-func NewLlamaClient(baseURL, modelName, reasoningEffort string) *LlamaClient {
+func NewLlamaClient(baseURL, modelName, reasoningEffort, apiKey string) *LlamaClient {
 	if reasoningEffort == "" {
 		reasoningEffort = types.DefaultReasoningEffort
 	}
@@ -41,7 +42,15 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort string) *LlamaClient {
 		baseURL:         strings.TrimRight(baseURL, "/"),
 		modelName:       modelName,
 		reasoningEffort: reasoningEffort,
+		apiKey:          apiKey,
 		httpClient:      &http.Client{Timeout: 0},
+	}
+}
+
+// setAuthHeader sets the Authorization header on a request if an API key is configured.
+func (c *LlamaClient) setAuthHeader(req *http.Request) {
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 }
 
@@ -96,6 +105,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -222,6 +232,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -288,8 +299,15 @@ func (c *LlamaClient) HealthCheck() error {
 	}
 	data, _ := json.Marshal(reqBody)
 
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(req)
+
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

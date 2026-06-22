@@ -75,6 +75,7 @@ export interface Config {
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
     default_sandbox_image?: string;
+    encryption_enabled?: boolean;
 }
 
 export interface ProviderModel {
@@ -96,6 +97,7 @@ export interface Provider {
     name: string;
     display_name: string;
     url: string;
+    api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
     models: ProviderModel[];
     concurrency: number;
     default_model?: string;
