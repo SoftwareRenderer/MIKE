@@ -105,6 +105,10 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
 
 	if _, err := os.Stat(worktreePath); err == nil {
+		// Sanitize: reject git error messages as branch names
+		if strings.HasPrefix(originalBranch, "fatal:") {
+			originalBranch = ""
+		}
 		return worktreePath, originalBranch, nil
 	}
 
@@ -544,6 +548,11 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		return nil, fmt.Errorf("worktree not found")
 	}
 
+	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
+	if strings.HasPrefix(baseRef, "fatal:") {
+		baseRef = ""
+	}
+
 	var diffOut, shortStat string
 	var untracked []UntrackedFile
 
@@ -906,6 +915,10 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 // If forkBranch == taskBranch (task branch was switched to thread branch),
 // returns baseRef (the original baseline) since all changes are on the thread branch.
 func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
+	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
+	if strings.HasPrefix(baseRef, "fatal:") {
+		baseRef = ""
+	}
 	if forkBranch == "" {
 		// Original thread — diff against base_ref
 		return baseRef, nil
