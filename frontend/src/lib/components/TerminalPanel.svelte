@@ -44,6 +44,7 @@
         trap = null;
         showTerminal.set(false);
         if (ws) ws.close();
+        ws = null;
         setTimeout(() => triggerEl?.focus(), 50);
     }
 
@@ -93,10 +94,10 @@
         const proj = get(selectedProject);
         const task = get(selectedTask);
         if (proj && task) {
-            ws = createTerminal(proj.id, task.id, term);
+            ws = createTerminal(proj.id, task.id, term, close);
             ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
         } else if (proj) {
-            ws = createProjectTerminal(proj.id, term);
+            ws = createProjectTerminal(proj.id, term, close);
             ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
         } else {
             term.writeln('No project selected');

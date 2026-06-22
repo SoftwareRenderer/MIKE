@@ -136,10 +136,8 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	if c.DefaultSandboxImage != "" {
-		if err := cs.store.SetConfigValue("default_sandbox_image", c.DefaultSandboxImage); err != nil {
-			return err
-		}
+	if err := cs.store.SetConfigValue("default_sandbox_image", c.DefaultSandboxImage); err != nil {
+		return err
 	}
 	return nil
 }

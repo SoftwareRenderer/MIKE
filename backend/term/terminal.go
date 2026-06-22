@@ -36,6 +36,7 @@ type taskTerminal struct {
 	conns       map[*websocket.Conn]bool
 	buf         [][]byte
 	lastActive  time.Time
+	onExit      func() // called when shell process exits, to remove session from manager
 }
 
 // TerminalManager manages per-task persistent terminal sessions.
@@ -142,6 +143,12 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 	}
 
+	sess.onExit = func() {
+		tm.mu.Lock()
+		delete(tm.sessions, sessionKey)
+		tm.mu.Unlock()
+		log.Printf("[terminal] removed session %s after shell exit", sessionKey)
+	}
 	tm.sessions[sessionKey] = sess
 	go sess.readLoop()
 
@@ -161,11 +168,31 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 }
 
 // readLoop reads from the PTY, buffers all output, and broadcasts to connected clients.
+// When the shell process exits, it sends a "closed" message to all clients and cleans up.
 func (t *taskTerminal) readLoop() {
 	buf := make([]byte, 32768)
 	for {
 		n, err := t.ptmx.Read(buf)
 		if err != nil {
+			// Shell process exited — notify all connected clients and clean up
+			closedMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+			t.mu.Lock()
+			conns := make([]*websocket.Conn, 0, len(t.conns))
+			for c := range t.conns {
+				conns = append(conns, c)
+			}
+			t.conns = nil
+			t.mu.Unlock()
+
+			ctx := context.Background()
+			for _, c := range conns {
+				_ = c.Write(ctx, websocket.MessageText, closedMsg)
+				c.Close(websocket.StatusNormalClosure, "shell exited")
+			}
+			log.Printf("[terminal] shell exited, notified %d client(s)", len(conns))
+			if t.onExit != nil {
+				t.onExit()
+			}
 			return
 		}
 		data := types.TerminalMessage{Type: "output", Data: string(buf[:n])}

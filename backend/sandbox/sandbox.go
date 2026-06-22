@@ -164,7 +164,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string) error {
 	}
 
 	sm.active[taskID] = containerName
-	log.Printf("[sandbox] task=%s created container %s", taskID, containerName)
+	log.Printf("[sandbox] task=%s created container %s image=%s", taskID, containerName, image)
 	return nil
 }
 
@@ -265,6 +265,12 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		sm.mu.Unlock()
 	}
 
+	// Prefer bash if available in the image, fall back to sh
+	shell := "sh"
+	if _, err := sm.podmanExec("exec", containerName, "test", "-e", "/bin/bash"); err == nil {
+		shell = "bash"
+	}
+
 	// Start podman exec with PTY
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
@@ -272,7 +278,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		"sudo", "podman", "exec", "-it",
 		"-w", SandboxMountPath,
 		containerName,
-		"sh",
+		shell,
 	)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 

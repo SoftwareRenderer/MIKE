@@ -492,13 +492,13 @@ export async function deleteTaskThread(projectId: string, taskId: string, thread
 }
 
 // -- Terminal --
-export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term);
+export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term, onClosed);
 }
 
 // -- Project Terminal (shell in project root) --
-export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term);
+export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term, onClosed);
 }
 
 // Filter xterm.js init queries that the PTY echoes back as visible garbage.
@@ -520,7 +520,8 @@ function isTerminalQuery(data: string): boolean {
 }
 
 // Shared WebSocket setup for terminal connections
-function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): WebSocket {
+// Returns the WebSocket and sets ws.onClose handler to call onClosed callback.
+function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
     const ws = new WebSocket(url);
     term.onData((data) => {
         // Filter out xterm.js init queries that the PTY echoes back as garbage text.
@@ -539,6 +540,10 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal): W
         const msg = JSON.parse(e.data);
         if (msg.type === 'output') term.write(msg.data);
         if (msg.type === 'title') term.title = msg.data;
+        if (msg.type === 'closed' && onClosed) onClosed();
+    };
+    ws.onclose = () => {
+        if (onClosed) onClosed();
     };
     return ws;
 }
