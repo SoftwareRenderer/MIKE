@@ -8,7 +8,8 @@ import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import type { Project, Task, Config } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
-    import TerminalPanel from './TerminalPanel.svelte';
+    let TerminalPanelComponent = $state(null);
+    let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
     import ConfigModal from './ConfigModal.svelte';
     import StatsModal from './StatsModal.svelte';
@@ -16,6 +17,15 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
+
+    function loadTerminalPanel(): void {
+        if (TerminalPanelComponent || terminalLoading) return;
+        terminalLoading = true;
+        import('./TerminalPanel.svelte').then((mod) => {
+            TerminalPanelComponent = mod.default;
+            terminalLoading = false;
+        });
+    }
 
     function getProjectAbbr(name: string): string {
         const words = name.split(/[-_\s]+/).filter(Boolean);
@@ -541,7 +551,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 {/if}
                 <span class="project-title">{getHomeRelativePath(currentProject.path)}{currentBranch ? ` (${currentBranch})` : ''}</span>
                 <div class="actions">
-                    <button class="icon-btn" onclick={() => showTerminal.set(true)} aria-label="Open terminal" title="Open terminal">
+                    <button class="icon-btn" onclick={() => { loadTerminalPanel(); showTerminal.set(true); }} aria-label="Open terminal" title="Open terminal">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                             <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                             <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -623,7 +633,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         />
     {/if}
     {#if showTerminalVal}
-        <TerminalPanel />
+        <svelte:component this={TerminalPanelComponent} />
     {/if}
     {#if showStatsVal}
         <StatsModal
