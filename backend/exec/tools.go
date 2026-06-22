@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,7 +42,28 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
-		return string(data), true
+		content := string(data)
+		// Apply offset/limit if provided
+		if offset, ok := args["offset"].(float64); ok && int(offset) > 0 {
+			lines := strings.Split(content, "\n")
+			offsetIdx := int(offset) - 1 // 1-indexed to 0-indexed
+			if offsetIdx >= len(lines) {
+				return "(empty — offset past end of file)", true
+			}
+			lines = lines[offsetIdx:]
+			if limit, ok := args["limit"].(float64); ok && int(limit) > 0 && int(limit) < len(lines) {
+				lines = lines[:int(limit)]
+			}
+			content = strings.Join(lines, "\n")
+		} else if limit, ok := args["limit"].(float64); ok && int(limit) > 0 {
+			// limit without offset: take first N lines
+			lines := strings.Split(content, "\n")
+			if int(limit) < len(lines) {
+				lines = lines[:int(limit)]
+			}
+			content = strings.Join(lines, "\n")
+		}
+		return content, true
 	case "write_file":
 		path, _ := args["path"].(string)
 		content, _ := args["content"].(string)
@@ -60,6 +82,102 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return fmt.Sprintf("Wrote %d bytes", len(content)), true
+	case "edit_file":
+		path, _ := args["path"].(string)
+		fullPath := validateWorktreePath(worktreePath, path)
+		if fullPath == "" {
+			return "Error: path escape", false
+		}
+		editsRaw, ok := args["edits"].(json.RawMessage)
+		if !ok {
+			// Try to marshal from the interface{}
+			editsRaw, _ = json.Marshal(args["edits"])
+		}
+		var edits []struct {
+			OldText string `json:"oldText"`
+			NewText string `json:"newText"`
+		}
+		if err := json.Unmarshal(editsRaw, &edits); err != nil {
+			return fmt.Sprintf("Error: failed to parse edits: %v", err), false
+		}
+		if len(edits) == 0 {
+			return "Error: no edits provided", false
+		}
+
+		// Read current file content
+		var fileContent string
+		if readFn != nil {
+			data, err := readFn(path)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err), false
+			}
+			fileContent = string(data)
+		} else {
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err), false
+			}
+			fileContent = string(data)
+		}
+
+		// Find all oldText positions in the original content
+		type editPos struct {
+			index   int
+			start   int
+			end     int
+			newText string
+		}
+		var positions []editPos
+		for i, e := range edits {
+			if e.OldText == "" {
+				return fmt.Sprintf("Error: edits[%d].oldText is empty", i), false
+			}
+			idx := strings.Index(fileContent, e.OldText)
+			if idx == -1 {
+				// Show context around where it might be expected
+				return fmt.Sprintf("Error: edits[%d].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got %d lines in file.", i, len(strings.Split(fileContent, "\n"))), false
+			}
+			// Check for duplicate matches (oldText must be unique)
+			secondIdx := strings.Index(fileContent[idx+1:], e.OldText)
+			if secondIdx != -1 {
+				return fmt.Sprintf("Error: edits[%d].oldText appears multiple times in file. Make it more specific by including surrounding context.", i), false
+			}
+			positions = append(positions, editPos{index: i, start: idx, end: idx + len(e.OldText), newText: e.NewText})
+		}
+
+		// Sort positions by start index for overlap check
+		sort.Slice(positions, func(i, j int) bool {
+			return positions[i].start < positions[j].start
+		})
+
+		// Check for overlapping edits
+		for i := 0; i < len(positions)-1; i++ {
+			if positions[i].end > positions[i+1].start {
+				return fmt.Sprintf("Error: edits[%d] and edits[%d] overlap. Merge them into a single edit or ensure they don't overlap.", positions[i].index, positions[i+1].index), false
+			}
+		}
+
+		// Apply edits in reverse order to preserve positions
+		result := fileContent
+		for i := len(positions) - 1; i >= 0; i-- {
+			p := positions[i]
+			result = result[:p.start] + p.newText + result[p.end:]
+		}
+
+		// Write the result
+		if writeFn != nil {
+			err := writeFn(path, result)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err), false
+			}
+		} else {
+			os.MkdirAll(filepath.Dir(fullPath), 0o755)
+			err := os.WriteFile(fullPath, []byte(result), 0o644)
+			if err != nil {
+				return fmt.Sprintf("Error: %v", err), false
+			}
+		}
+		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
 	case "execute_command":
 		cmd, _ := args["command"].(string)
 		if isDangerousCommand(cmd) {

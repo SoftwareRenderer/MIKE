@@ -8,7 +8,7 @@ import fileTextIcon from '$lib/assets/icons/file-text.svg';
 import editIcon from '$lib/assets/icons/edit.svg';
 import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
 
-    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'execute_command'];
+    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'edit_file', 'execute_command'];
 
     interface ToolCallInfo {
         toolId: string;
@@ -64,6 +64,19 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
             case 'write_file': {
                 const p = args.path as string;
                 return p.startsWith('./') ? p : `./${p}`;
+            }
+            case 'edit_file': {
+                const p = args.path as string;
+                const edits = args.edits as Array<{ oldText: string; newText: string }>;
+                const editCount = edits ? edits.length : 0;
+                const pathDisplay = p.startsWith('./') ? p : `./${p}`;
+                if (editCount === 1 && edits) {
+                    const oldPreview = edits[0].oldText.split('\n').length > 2
+                        ? edits[0].oldText.split('\n').slice(0, 2).join('\n') + '\n...'
+                        : edits[0].oldText.replace(/\n/g, '\\n');
+                    return `${pathDisplay} (${editCount} edit) — "${oldPreview}" → ...`;
+                }
+                return `${pathDisplay} (${editCount} edit${editCount > 1 ? 's' : ''})`;
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
@@ -342,7 +355,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                                 {/if}
                                 <img class="tool-icon" width="14" height="14" alt="" src={
                                     tc.toolName === 'read_file' ? fileTextIcon :
-                                    tc.toolName === 'write_file' ? editIcon :
+                                    tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
                                     tc.toolName === 'task_complete' ? checkCircleIcon :
                                     zapIcon
                                 } />

@@ -4,6 +4,7 @@
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
     read_file: 'Read',
     write_file: 'Write',
+    edit_file: 'Edit',
     execute_command: 'Execute',
     task_complete: 'Done',
 };

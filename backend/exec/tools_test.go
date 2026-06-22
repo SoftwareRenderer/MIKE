@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/backend/types"
@@ -60,6 +62,7 @@ func TestIsSandboxableTool(t *testing.T) {
 	}{
 		{"read_file", true},
 		{"write_file", true},
+		{"edit_file", true},
 		{"execute_command", true},
 		{"task_complete", false},
 		{"unknown_tool", false},
@@ -287,6 +290,425 @@ func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
 	}
 	if result != "Error: file not found in sandbox" {
 		t.Errorf("unexpected error: %q", result)
+	}
+}
+
+// --- read_file with offset/limit Tests ---
+
+func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
+	dir := t.TempDir()
+	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:    "no offset/limit returns full file",
+			args:    map[string]interface{}{"path": "test.txt"},
+			want:    content,
+			wantErr: false,
+		},
+		{
+			name:    "offset 1 returns full file",
+			args:    map[string]interface{}{"path": "test.txt", "offset": float64(1)},
+			want:    content,
+			wantErr: false,
+		},
+		{
+			name:    "offset 4 returns lines 4-10",
+			args:    map[string]interface{}{"path": "test.txt", "offset": float64(4)},
+			want:    "line4\nline5\nline6\nline7\nline8\nline9\nline10",
+			wantErr: false,
+		},
+		{
+			name:    "offset 4 limit 3 returns lines 4-6",
+			args:    map[string]interface{}{"path": "test.txt", "offset": float64(4), "limit": float64(3)},
+			want:    "line4\nline5\nline6",
+			wantErr: false,
+		},
+		{
+			name:    "limit 3 returns first 3 lines",
+			args:    map[string]interface{}{"path": "test.txt", "limit": float64(3)},
+			want:    "line1\nline2\nline3",
+			wantErr: false,
+		},
+		{
+			name:    "offset past end returns empty message",
+			args:    map[string]interface{}{"path": "test.txt", "offset": float64(100)},
+			want:    "(empty — offset past end of file)",
+			wantErr: false,
+		},
+		{
+			name:    "limit larger than file returns full file",
+			args:    map[string]interface{}{"path": "test.txt", "limit": float64(100)},
+			want:    content,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, ok := te.executeTool("read_file", tt.args, dir, &types.Task{}, nil, nil, nil)
+			if tt.wantErr {
+				if ok {
+					t.Fatalf("expected failure, got success: %s", result)
+				}
+			} else {
+				if !ok {
+					t.Fatalf("expected success, got failure: %s", result)
+				}
+				if result != tt.want {
+					t.Errorf("got %q, want %q", result, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// --- edit_file Tests ---
+
+func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
+	dir := t.TempDir()
+	content := "hello world\nfoo bar\nbaz qux"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "hello world", "newText": "goodbye world"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	want := "goodbye world\nfoo bar\nbaz qux"
+	if string(data) != want {
+		t.Errorf("got %q, want %q", string(data), want)
+	}
+}
+
+func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
+	dir := t.TempDir()
+	content := "alpha\nbeta\ngamma\ndelta"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "alpha", "newText": "ALPHA"},
+		{"oldText": "gamma", "newText": "GAMMA"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	want := "ALPHA\nbeta\nGAMMA\ndelta"
+	if string(data) != want {
+		t.Errorf("got %q, want %q", string(data), want)
+	}
+}
+
+func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
+	dir := t.TempDir()
+	content := "hello world"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "not here", "newText": "replacement"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure, got success: %s", result)
+	}
+	if !strings.Contains(result, "not found") {
+		t.Errorf("expected 'not found' error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
+	dir := t.TempDir()
+	content := "foo\nbar\nfoo\nbaz"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "foo", "newText": "BAR"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for duplicate oldText, got success: %s", result)
+	}
+	if !strings.Contains(result, "multiple times") {
+		t.Errorf("expected 'multiple times' error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
+	dir := t.TempDir()
+	content := "abcdefgh"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "abcd", "newText": "ABCD"},
+		{"oldText": "cdef", "newText": "CDEF"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for overlapping edits, got success: %s", result)
+	}
+	if !strings.Contains(result, "overlap") {
+		t.Errorf("expected 'overlap' error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "x", "newText": "y"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "../etc/passwd",
+		"edits": json.RawMessage(editsJSON),
+	}, "/tmp/worktree", &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for path escape, got success: %s", result)
+	}
+	if result != "Error: path escape" {
+		t.Errorf("expected 'Error: path escape', got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "", "newText": "replacement"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for empty oldText, got success: %s", result)
+	}
+	if !strings.Contains(result, "empty") {
+		t.Errorf("expected 'empty' error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for empty edits, got success: %s", result)
+	}
+	if !strings.Contains(result, "no edits") {
+		t.Errorf("expected 'no edits' error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
+	dir := t.TempDir()
+	content := "original content"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	te := &TaskExecutor{}
+	var writtenPath, writtenContent string
+
+	readFn := func(path string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+	writeFn := func(path, c string) error {
+		writtenPath = path
+		writtenContent = c
+		fullPath := filepath.Join(dir, path)
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		return os.WriteFile(fullPath, []byte(c), 0644)
+	}
+
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "original", "newText": "modified"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, nil, readFn, writeFn)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+	if writtenPath != "test.txt" {
+		t.Errorf("expected path 'test.txt', got %q", writtenPath)
+	}
+	if writtenContent != "modified content" {
+		t.Errorf("expected content 'modified content', got %q", writtenContent)
+	}
+
+	// Verify file was actually written
+	data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "modified content" {
+		t.Errorf("file content = %q, want 'modified content'", string(data))
+	}
+}
+
+func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]interface{}{
+		{"oldText": "x", "newText": "y"},
+	})
+
+	result, ok := te.executeTool("edit_file", map[string]interface{}{
+		"path":  "nonexistent.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, "/tmp/worktree", &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for missing file, got success: %s", result)
+	}
+	if !strings.Contains(result, "Error:") {
+		t.Errorf("expected error, got %q", result)
+	}
+}
+
+// --- executeCommand Tests ---
+
+func TestExecuteTool_ExecuteCommand_Direct(t *testing.T) {
+	dir := t.TempDir()
+	te := &TaskExecutor{}
+
+	result, ok := te.executeTool("execute_command", map[string]interface{}{
+		"command": "echo hello",
+		"timeout": float64(5),
+	}, dir, &types.Task{}, nil, nil, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+	if !strings.Contains(result, "hello") {
+		t.Errorf("expected 'hello' in output, got %q", result)
+	}
+}
+
+func TestExecuteTool_ExecuteCommand_Dangerous(t *testing.T) {
+	te := &TaskExecutor{}
+
+	result, ok := te.executeTool("execute_command", map[string]interface{}{
+		"command": "sudo rm -rf /",
+		"timeout": float64(5),
+	}, "/tmp/worktree", &types.Task{}, nil, nil, nil)
+	if ok {
+		t.Fatalf("expected failure for dangerous command, got success: %s", result)
+	}
+	if result != "Error: command blocked" {
+		t.Errorf("expected 'Error: command blocked', got %q", result)
+	}
+}
+
+// --- isDangerousCommand Tests ---
+
+func TestIsDangerousCommand(t *testing.T) {
+	dangerous := []string{
+		"sudo rm -rf /",
+		"mkfs.ext4 /dev/sda",
+		"dd if=/dev/zero of=/dev/sda",
+		":(){ :|: };:",
+		"chmod -R 777 /",
+		"rm -rf /",
+		"rm -rf /*",
+	}
+	for _, cmd := range dangerous {
+		if !isDangerousCommand(cmd) {
+			t.Errorf("expected %q to be dangerous", cmd)
+		}
+	}
+
+	safe := []string{
+		"ls -la",
+		"cat file.txt",
+		"git status",
+		"echo hello",
+		"rm -rf ./mydir",
+	}
+	for _, cmd := range safe {
+		if isDangerousCommand(cmd) {
+			t.Errorf("expected %q to be safe", cmd)
+		}
 	}
 }
 

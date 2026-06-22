@@ -128,7 +128,7 @@ func (d *loopDetector) phraseDetected() bool {
 // extractTarget extracts the primary file/target from a tool call.
 func extractTarget(toolName, rawArgs string) string {
 	switch toolName {
-	case "read_file", "write_file":
+	case "read_file", "write_file", "edit_file":
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if p, ok := args["path"].(string); ok {
@@ -313,7 +313,7 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
 	case "read_file":
 		return true
-	case "write_file":
+	case "write_file", "edit_file":
 		return false
 	case "task_complete":
 		return false
@@ -1244,7 +1244,7 @@ func shellQuote(s string) string {
 // isSandboxableTool returns true if the tool can run inside a sandbox.
 func isSandboxableTool(name string) bool {
 	switch name {
-	case "read_file", "write_file", "execute_command":
+	case "read_file", "write_file", "edit_file", "execute_command":
 		return true
 	default:
 		return false
