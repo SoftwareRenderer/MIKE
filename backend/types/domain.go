@@ -26,6 +26,7 @@ type Task struct {
 	ParentTaskID            string    `json:"parent_task_id,omitempty"`
 	TitleGenerating         bool      `json:"title_generating"`
 	CurrentThreadID         string    `json:"current_thread_id,omitempty"`
+	ChangeSummary           string    `json:"change_summary,omitempty"` // LLM-generated summary of changes
 	WorktreeExists          bool      `json:"worktree_exists"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`

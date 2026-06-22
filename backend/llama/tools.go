@@ -76,8 +76,10 @@ func GetToolDefinitions() []types.ChatTool {
 				Description: "Signal that the task is complete",
 				Parameters: map[string]interface{}{
 					"type": "object",
-					"properties": map[string]interface{}{},
-					"required": []string{},
+					"properties": map[string]interface{}{
+						"summary": map[string]interface{}{"type": "string", "description": "Brief summary of the changes made (files created/modified, key decisions, issues encountered)"},
+					},
+					"required": []string{"summary"},
 				},
 			},
 		},

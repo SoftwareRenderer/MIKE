@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     auto_pr                      INTEGER NOT NULL DEFAULT 0,
     plan_mode                    INTEGER NOT NULL DEFAULT 0,
     parent_task_id               TEXT NULL,
+    change_summary               TEXT DEFAULT NULL,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -245,6 +246,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	// Cumulative token stats table (survives task deletion)
@@ -466,11 +468,11 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoPR, planMode, titleGenerating int
 	var createdAt, updatedAt string
-	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip sql.NullString
+	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt)
+		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
@@ -483,6 +485,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String
 	t.BranchTip = branchTip.String
+	t.ChangeSummary = changeSummary.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
 	return nil
