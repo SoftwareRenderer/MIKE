@@ -62,22 +62,15 @@ func toAPIMessage(m types.ChatMessage) map[string]interface{} {
 		"role": m.Role,
 	}
 	if len(m.ContentParts) > 0 {
-		// Multi-modal: serialize as array of parts
 		parts := make([]interface{}, len(m.ContentParts))
 		for i, p := range m.ContentParts {
 			if p.Type == "text" {
 				parts[i] = map[string]interface{}{"type": "text", "text": p.Text}
 			} else if p.ImageSource != nil {
-				// Convert internal format to OpenAI data: URI
 				dataURL := "data:" + p.ImageSource.MediaType + ";base64," + p.ImageSource.Data
 				parts[i] = map[string]interface{}{
 					"type":      "image_url",
 					"image_url": map[string]interface{}{"url": dataURL},
-				}
-			} else if p.ImageURL != nil {
-				parts[i] = map[string]interface{}{
-					"type":      "image_url",
-					"image_url": map[string]interface{}{"url": p.ImageURL.URL},
 				}
 			}
 		}

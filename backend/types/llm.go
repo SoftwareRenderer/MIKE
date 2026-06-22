@@ -1,13 +1,11 @@
 package types
 
 // ContentPart represents a part of a multi-modal message (text or image).
+// Internal format: ImageSource holds base64 data, serialized to OpenAI image_url format for the LLM API.
 type ContentPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL *struct {
-		URL string `json:"url"`
-	} `json:"image_url,omitempty"`
-	// llama.cpp server format: type="image" with source object
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// Internal: base64 image data. Serialized to {type:"image_url", image_url:{url:"data:..."}} for LLM.
 	ImageSource *struct {
 		Type      string `json:"type"`
 		MediaType string `json:"media_type"`

@@ -16,6 +16,28 @@
     let loading = $state(false);
     let error = $state('');
     let parentTitle = $state('');
+    let attachments = $state<Array<{ mimeType: string; data: string }>>([]);
+    let fileInput: HTMLInputElement | null = $state(null);
+
+    function handleFileSelect(e: Event) {
+        const files = (e.target as HTMLInputElement).files;
+        if (!files || files.length === 0) return;
+        const remaining = 4 - attachments.length;
+        for (let i = 0; i < Math.min(remaining, files.length); i++) {
+            const file = files[i];
+            if (file.size > 4 * 1024 * 1024) continue;
+            const reader = new FileReader();
+            reader.onload = () => {
+                attachments = [...attachments, { mimeType: file.type, data: reader.result as string }];
+            };
+            reader.readAsDataURL(file);
+        }
+        if (fileInput) fileInput.value = '';
+    }
+
+    function removeAttachment(index: number) {
+        attachments = attachments.filter((_, i) => i !== index);
+    }
 
     // Model selection state
     let providers: Provider[] = $state([]);
@@ -81,6 +103,9 @@
                 auto_pr: autoPr,
                 plan_mode: planMode,
             };
+            if (attachments.length > 0) {
+                taskData.attachments = JSON.stringify(attachments);
+            }
             if (selectedModel) taskData.model_name = selectedModel;
             if (selectedUrl) taskData.llama_server_url = selectedUrl;
             if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
@@ -120,9 +145,27 @@
                 <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
             {/if}
             <label for="task-description">
-                Description
+                <span class="label-row">
+                    Description
+                    <button type="button" class="btn-attach" onclick={() => fileInput?.click()} aria-label="Attach image" title="Attach image">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </button>
+                </span>
+                {#if attachments.length > 0}
+                    <div class="task-attachments">
+                        {#each attachments as att, i}
+                            <div class="task-attachment-chip">
+                                <img src={att.data} alt="Attachment" />
+                                <button class="remove-attachment" onclick={() => removeAttachment(i)} title="Remove">&times;</button>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
                 <textarea id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined}></textarea>
             </label>
+            <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
             {#if hasProviders}
                 <div class="model-select-row">
                     <span id="model-label" class="model-label" style="margin:0">Model</span>
@@ -229,6 +272,60 @@
     textarea {
         resize: vertical;
         min-height: 80px;
+    }
+    .task-attachments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+    }
+    .task-attachment-chip {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        border: 1px solid var(--color-border);
+    }
+    .task-attachment-chip img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .task-attachment-chip .remove-attachment {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.7);
+        color: white;
+        border: none;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+    }
+    .label-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .btn-attach {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px;
+        color: var(--color-text-tertiary);
+        display: flex;
+        align-items: center;
+    }
+    .btn-attach:hover {
+        color: var(--color-text-primary);
     }
     .parent-label {
         font-size: 0.8125rem;

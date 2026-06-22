@@ -1147,7 +1147,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    async function handleEditFork(entryId: string, _originalContent: string, newContent: string) {
+    async function handleEditFork(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
         const entry = entries.find(e => e.id === entryId);
         if (!entry) return;
         // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
@@ -1159,28 +1159,23 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             return;
         }
         if (isLoading || disabled) return;
-        // Fork the conversation from this message. The edited content is sent
-        // via WebSocket after the fork — it becomes the first new message in the fork.
         try {
             const fromThreadId = entry.threadId || activeThreadId;
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
-            // Refresh threads list from server to ensure consistency
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
             await loadHistory();
-            // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
-            // Notify parent to refresh diff panel for the new fork
             onThreadSwitch?.();
             lastSentMessage = newContent;
             awaitingResponse = true;
-            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl);
+            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments);
         } catch (e) {
             showToast(String(e));
         }
     }
 
-    async function handleEditSend(entryId: string, _originalContent: string, newContent: string) {
+    async function handleEditSend(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
 
@@ -1192,17 +1187,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             return;
         }
 
-        // Idle/started: delete the old message and create a new one with edited content,
-        // then send via WebSocket to trigger a fresh LLM response.
-        // This avoids the backend's duplicate detection which would reuse the existing ID.
         if (isLoading || disabled) return;
-        // Remove the old entry and any trailing assistant entries from UI
         entries = entries.slice(0, idx);
         closeCurrentAssistant();
-        // Delete old message from DB (and any messages after it)
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
-            // Sync active thread after deletion
             threads = await getTaskThreads(projectId, taskId);
             const active = threads.find(t => t.is_active);
             if (active) {
@@ -1213,15 +1202,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             showToast(String(e));
             return;
         }
-        // Create new message in DB
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
-        // Add to UI
-        entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        // Don't pre-create — let the first token/tool_call event create the assistant entry
-        // Send via HTTP POST to trigger executor
+        entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         lastSentMessage = newContent;
         awaitingResponse = true;
-        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl);
+        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments);
         scroll();
     }
 
@@ -1533,7 +1518,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent) => handleEditFork(msgId, origContent, newContent)} onSend={(msgId, origContent, newContent) => handleEditSend(msgId, origContent, newContent)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
                 {/if}
             {/each}
         {/if}

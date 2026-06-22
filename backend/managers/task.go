@@ -77,6 +77,14 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 	case http.MethodPost:
 		body, _ := io.ReadAll(r.Body)
 		var task types.Task
+		var attachments string
+		// Parse attachments separately (not a field on Task type)
+		var rawBody map[string]interface{}
+		if err := json.Unmarshal(body, &rawBody); err == nil {
+			if att, ok := rawBody["attachments"]; ok {
+				attachments = att.(string)
+			}
+		}
 		if err := json.Unmarshal(body, &task); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
@@ -153,14 +161,18 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		}
 		// Store the task prompt as the first user message in the conversation
 		if task.Prompt != "" {
-			_ = h.store.CreateTaskMessage(&types.TaskMessage{
+			tm := &types.TaskMessage{
 				ID:        uuid.New().String(),
 				TaskID:    task.ID,
 				ThreadID:  defaultThreadID,
 				Role:      "user",
 				Content:   task.Prompt,
 				CreatedAt: now,
-			})
+			}
+			if attachments != "" {
+				tm.Attachments = attachments
+			}
+			_ = h.store.CreateTaskMessage(tm)
 		}
 		// Spawn async goroutine to generate a better title via LLM
 		// (skip if first line was already a short, good-enough title)

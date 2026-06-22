@@ -36,8 +36,8 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         formatToolArgs?: (toolName: string, args: Record<string, unknown>) => string;
         onCopy?: () => void;
         onDelete?: () => void;
-        onFork?: (messageId: string, originalContent: string, newContent: string) => void;
-        onSend?: (messageId: string, originalContent: string, newContent: string) => void;
+        onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
+        onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
@@ -171,11 +171,34 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     let isEditing = $state(false);
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
+    let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
+    let editFileInput: HTMLInputElement | null = $state(null);
 
     $effect(() => {
         editContent = content;
     });
     let copied = $state(false);
+
+    function handleEditFileSelect(e: Event) {
+        const files = (e.target as HTMLInputElement).files;
+        if (!files || files.length === 0) return;
+        const remaining = 4 - editAttachments.length;
+        for (let i = 0; i < Math.min(remaining, files.length); i++) {
+            const file = files[i];
+            if (file.size > 4 * 1024 * 1024) continue;
+            const reader = new FileReader();
+            reader.onload = () => {
+                editAttachments = [...editAttachments, { mimeType: file.type, data: reader.result as string }];
+            };
+            reader.readAsDataURL(file);
+        }
+        // Reset input so the same file can be selected again
+        if (editFileInput) editFileInput.value = '';
+    }
+
+    function removeEditAttachment(index: number) {
+        editAttachments = editAttachments.filter((_, i) => i !== index);
+    }
 
     // Generated token count for stats display
     let genTokens = $derived(stats?.predicted_tokens ?? 0);
@@ -223,6 +246,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
 
     function startEdit() {
         editContent = content;
+        editAttachments = attachments ? [...attachments] : [];
         isEditing = true;
         setTimeout(() => {
             if (textareaEl) {
@@ -235,16 +259,17 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     function cancelEdit() {
         isEditing = false;
         editContent = content;
+        editAttachments = [];
     }
 
     function submitEdit() {
         if (editContent.trim() && messageId) {
             if (isFirstUserMessage) {
-                onFork?.(messageId, content, editContent.trim());
+                onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
             } else if (isLastUserMessage && onSend) {
-                onSend(messageId, content, editContent.trim());
+                onSend(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
             } else {
-                onFork?.(messageId, content, editContent.trim());
+                onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
             }
             isEditing = false;
         }
@@ -272,6 +297,16 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         <div class="message-wrapper user-wrapper">
             {#if isEditing}
                 <div class="edit-form">
+                    {#if editAttachments.length > 0}
+                        <div class="edit-attachments">
+                            {#each editAttachments as att, i}
+                                <div class="edit-attachment-chip">
+                                    <img src={att.data} alt="Attachment" />
+                                    <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title="Remove">&times;</button>
+                                </div>
+                            {/each}
+                        </div>
+                    {/if}
                     <textarea
                         bind:this={textareaEl}
                         bind:value={editContent}
@@ -279,6 +314,12 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                         rows="3"
                     ></textarea>
                     <div class="edit-actions">
+                        <input type="file" accept="image/*" multiple bind:this={editFileInput} onchange={handleEditFileSelect} style="display:none" />
+                        <button class="btn-edit-attach" onclick={() => editFileInput?.click()} title="Attach image">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                            </svg>
+                        </button>
                         <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
                         <button class="btn-edit-submit" onclick={submitEdit} title="{isFirstUserMessage && taskStatus === 'backlog' ? 'Save changes' : 'Send'}">
                             {#if isFirstUserMessage && taskStatus === 'backlog'}
@@ -314,7 +355,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                 {#if attachments && attachments.length > 0}
                     <div class="message-images">
                         {#each attachments as att}
-                            <img src="data:{att.mimeType};base64,{att.data}" alt="Attached image" class="message-image" />
+                            <img src={att.data} alt="Attached image" class="message-image" />
                         {/each}
                     </div>
                 {/if}
@@ -801,6 +842,57 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         display: flex;
         gap: 6px;
         justify-content: flex-end;
+        align-items: center;
+    }
+    .edit-attachments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .edit-attachment-chip {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        border: 1px solid var(--color-border);
+    }
+    .edit-attachment-chip img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .edit-attachment-chip .remove-attachment {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.7);
+        color: white;
+        border: none;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+    }
+    .btn-edit-attach {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: var(--color-text-secondary);
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+    }
+    .btn-edit-attach:hover {
+        opacity: 1;
+        color: var(--color-text-primary);
     }
     .btn-edit-cancel {
         display: inline-flex;
