@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"kanban/backend/types"
+
+	"github.com/google/uuid"
 )
 
 // execFunc is a function that executes a command, either in a sandbox or directly.
@@ -213,6 +215,8 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		return out, true
 	case "task_complete":
 		return "Task complete", true
+	case "create_task":
+		return te.handleCreateTask(args, task), true
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), false
 	}
@@ -285,4 +289,101 @@ func validateWorktreePath(worktreePath, path string) string {
 		return ""
 	}
 	return fullPath
+}
+
+// handleCreateTask creates a new task on the board, used by the LLM in plan mode
+// to decompose work into subtasks. The new task inherits settings from the parent.
+func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *types.Task) string {
+	title, _ := args["title"].(string)
+	prompt, _ := args["prompt"].(string)
+	parentTaskID, _ := args["parent_task_id"].(string)
+
+	if title == "" || prompt == "" {
+		return "Error: title and prompt are required"
+	}
+
+	// Determine the actual parent: if parent_task_id is provided, use it (nested subtask).
+	// Otherwise, nest under the current executing task.
+	actualParentID := parentTaskID
+	if actualParentID == "" {
+		actualParentID = parent.ID
+	}
+
+	// Validate that the parent exists and is in backlog (can accept subtasks)
+	parentTask, err := te.store.GetTaskByTaskID(actualParentID)
+	if err != nil {
+		return fmt.Sprintf("Error: parent task %s not found", actualParentID)
+	}
+	if parentTask.Status != "backlog" && parentTask.Status != "in_progress" {
+		return fmt.Sprintf("Error: parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
+	}
+
+	// Create the new task
+	now := time.Now().UTC()
+	newTaskID := types.GenerateTaskID()
+	// Ensure uniqueness (unlikely collision, but guard against it)
+	for {
+		if _, err := te.store.GetTaskByTaskID(newTaskID); err != nil {
+			break // unique
+		}
+		newTaskID = types.GenerateTaskID()
+	}
+
+	newTask := &types.Task{
+		ID:                      newTaskID,
+		ProjectID:               parent.ProjectID,
+		Title:                   title,
+		Prompt:                  prompt,
+		Status:                  "backlog",
+		StatusState:             "idle",
+		LlamaServerURL:          parent.LlamaServerURL,
+		ModelName:               parent.ModelName,
+		ReasoningEffort:         parent.ReasoningEffort,
+		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
+		AutoCommit:              parent.AutoCommit,
+		AutoPR:                  parent.AutoPR,
+		PlanMode:                parent.PlanMode,
+		ParentTaskID:            actualParentID,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+
+	if err := te.store.CreateTask(newTask); err != nil {
+		return fmt.Sprintf("Error: failed to create task: %v", err)
+	}
+
+	// Create default "Main" thread for the new task
+	defaultThreadID := types.GenerateThreadID()
+	if err := te.store.CreateThread(&types.TaskThread{
+		ID:        defaultThreadID,
+		TaskID:    newTaskID,
+		Name:      "Main",
+		IsActive:  true,
+		CreatedAt: now,
+	}); err != nil {
+		return fmt.Sprintf("Error: failed to create thread: %v", err)
+	}
+	newTask.CurrentThreadID = defaultThreadID
+	_ = te.store.UpdateTask(newTask)
+
+	// Store the prompt as the first user message
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        uuid.New().String(),
+		TaskID:    newTaskID,
+		ThreadID:  defaultThreadID,
+		Role:      "user",
+		Content:   prompt,
+		CreatedAt: now,
+	}); err != nil {
+		log.Printf("[create_task] task=%s failed to store prompt message: %v", newTaskID, err)
+	}
+
+	// Broadcast the new task to the frontend
+	te.boardStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
+
+	log.Printf("[create_task] task=%s created subtask %s (parent=%s): %q", parent.ID, newTaskID, actualParentID, title)
+
+	// Return JSON with task_id so the LLM can reference it for nested subtasks
+	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})
+	return string(result)
 }

@@ -1,0 +1,45 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "id": "call_create1",
+              "function": {
+                "name": "create_task",
+                "arguments": "{\"title\":\"Add authentication module\",\"prompt\":\"Create a new authentication module with login and logout endpoints. Use JWT tokens for session management.\"}"
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 80,
+      "completion_tokens": 25,
+      "total_tokens": 105,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 500,
+      "predicted_ms": 300,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]

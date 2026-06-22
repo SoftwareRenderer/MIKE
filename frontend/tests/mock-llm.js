@@ -40,6 +40,7 @@ const toolCallLoop = loadFixture('tool_call_loop');
 const toolCallTaskComplete = loadFixture('tool_call_task_complete');
 const textLoop = loadFixture('text_loop');
 const phraseRepeat = loadFixture('phrase_repeat');
+const toolCallCreateTask = loadFixture('tool_call_create_task');
 
 let requestCount = 0;
 let loopToolCount = 0;  // per-scenario counter for tool loop test
@@ -117,6 +118,18 @@ function selectResponse(parsed) {
         .filter(m => m.role === 'user')
         .map(m => (m.content || '').toLowerCase());
     const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : '';
+
+    // Plan mode: LLM creates subtasks via create_task tool, then calls task_complete.
+    // First call (no tool results yet): return create_task tool call.
+    // After create_task result: return task_complete to end planning.
+    const isPlanMode = messages.some(m => m.role === 'system' && /PLAN MODE/i.test(m.content || ''));
+    if (isPlanMode && hasTools) {
+        if (hasToolResults) {
+            // After create_task tool result, signal plan complete
+            return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+        }
+        return { chunks: toolCallCreateTask, chunkDelay: 1 };
+    }
 
     // Loop detection tests: return repeated responses to trigger loop detection.
     // Tool loop: return same tool call (head /tmp/test_file.txt) 2x, then task_complete.

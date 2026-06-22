@@ -475,7 +475,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
-	tools := llama.GetToolDefinitions()
+	// In plan mode, restrict tools to read-only + create_task + task_complete
+	var tools []types.ChatTool
+	if task.PlanMode {
+		tools = llama.GetPlanModeToolDefinitions()
+	} else {
+		tools = llama.GetToolDefinitions()
+	}
 	// In sandbox mode, use the container mount path so the LLM sees
 	// the actual working directory inside the sandbox.
 	promptPath := worktreePath

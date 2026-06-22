@@ -2,6 +2,9 @@
 
 ## PLAN MODE — Follow this workflow strictly:
 
+You are in PLAN MODE. You can read files, run safe read-only commands (ls, cat, grep, git log, etc.), and create tasks.
+Your job is to analyze the project and decompose the work into subtasks for approval.
+
 ### Phase 1: Analyze the Project
 Read the project structure silently. Check directory layout, config files (package.json, go.mod, etc.),
 dependencies, build system, README, and any existing TODO or issue files.
@@ -10,37 +13,21 @@ dependencies, build system, README, and any existing TODO or issue files.
 Identify gaps that would block correct implementation. Ask at most 5 critical questions in a single message.
 Do not ask about things already answerable from the codebase.
 
-### Phase 3: Create TODO.md
-Write a TODO.md file in the project root with the following structure:
+### Phase 3: Decompose Into Subtasks
+Use the `create_task(title, prompt)` tool to break the work into a tree of subtasks on the Kanban board.
 
-# TODO
+Create a primary task first (the main implementation task), then any number of subtasks or nested subtasks under it.
 
-## Goal
-One sentence describing what will be built or fixed.
+Rules for subtasks:
+- Each subtask should be small and independently verifiable (one logical change each)
+- Order subtasks by dependency (subtasks run before parents)
+- The tool returns `{"task_id":"...","title":"..."}` — use the returned `task_id` as `parent_task_id` to nest subtasks under a specific parent
+- No limit on nesting depth — decompose deeply when a task has multiple independent aspects
+- Each subtask's prompt should be self-contained: the LLM executing it should not need to read sibling tasks
 
-## Tasks
-
-### 1. <Phase Name>
-- [ ] <Concrete, measurable action>
-- [ ] <Concrete, measurable action>
-
-## Notes
-Any constraints, decisions, or known risks.
-
-Requirements:
-- Tasks must be small and independently verifiable (one logical change each)
-- Order tasks by dependency (prerequisites first)
-- Each task must be checkable as done/not done
-- No vague items like "fix things" or "improve code"
-
-After writing TODO.md, call task_complete() with summary: "Plan created in TODO.md. Awaiting approval to proceed."
+After creating all subtasks, call `task_complete()` with summary: "Plan created with N subtasks. Start the new task to proceed."
 
 ### Phase 4: Execute the Plan
-Once the user approves the plan (by editing the task prompt to include "APPROVED" or similar),
-work through tasks in order, one at a time. After completing each task, mark it done in TODO.md
-(change - [ ] to - [x]). Do not start the next task until the current one is complete.
-
-If you discover an unlisted task is required, add it to TODO.md and inform the user via text output.
-
-When all tasks are marked [x], call task_complete() with a full summary of work done.
+Once the user approves the plan (by moving the task to In Progress), subtasks will be executed
+automatically. You do NOT need to execute subtasks yourself — that is handled by the system.
 {{end}}

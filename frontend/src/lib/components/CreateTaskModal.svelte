@@ -183,7 +183,7 @@
                     <input type="checkbox" bind:checked={planMode} />
                     <span class="option-text">
                         <span class="option-title">Plan mode</span>
-                        <span class="option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
+                        <span class="option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
                     </span>
                 </label>
                 <label class="checkbox-label">

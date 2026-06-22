@@ -76,6 +76,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let selectedModel = $state('');
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
+    let planMode = $state(false);
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
@@ -165,6 +166,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             if (boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
             if (boardTask.model_name) selectedModel = boardTask.model_name;
             if (boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
+            planMode = boardTask.plan_mode ?? false;
         }
     });
 
@@ -961,6 +963,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
+    async function handlePlanModeToggle(newPlanMode: boolean) {
+        planMode = newPlanMode;
+        try {
+            await updateTask(projectId, taskId, { plan_mode: newPlanMode });
+        } catch (e) {
+            console.error('Failed to update plan mode:', e);
+            planMode = !newPlanMode; // revert on error
+        }
+    }
+
     async function handleRegenerate(entryId: string) {
         if (isLoading || disabled) return;
         const idx = entries.findIndex(e => e.id === entryId);
@@ -1631,9 +1643,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             selectedReasoningEffort={selectedReasoningEffort}
             contextUsed={contextState.used}
             contextLimit={contextState.limit}
+            planMode={planMode}
             onSubmit={(msg, atts) => handleSend(msg, atts)}
             onStop={handleStop}
             onModelSelect={handleModelSelect}
+            onPlanModeToggle={handlePlanModeToggle}
         />
         {/if}
         </div>

@@ -775,7 +775,7 @@
                 <div class="toggle-field">
                     <div class="toggle-label-group">
                         <span id="toggle-planmode" class="toggle-label">Plan mode</span>
-                        <span class="help-icon" title="Task describes its plan before making changes">
+                        <span class="help-icon" title="AI decomposes work into subtasks on the board before executing">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>

@@ -553,7 +553,7 @@
                         <input type="checkbox" bind:checked={editPlanMode} />
                         <span class="card-edit-option-text">
                             <span class="card-edit-option-title">Plan mode</span>
-                            <span class="card-edit-option-desc">AI creates a TODO.md plan first, then executes tasks after approval</span>
+                            <span class="card-edit-option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
                         </span>
                     </label>
                     <label class="card-edit-checkbox">

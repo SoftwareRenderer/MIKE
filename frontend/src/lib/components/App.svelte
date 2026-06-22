@@ -39,7 +39,18 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         const name = currentProject?.name;
         if (!name) return 'Kanban Board';
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
-        return reviewCount > 0 ? `${name} 🟡 ${reviewCount}` : name;
+        // If current project has reviews, show it with count
+        if (reviewCount > 0) {
+            return `🟡 ${name} - ${reviewCount} task${reviewCount === 1 ? '' : 's'} awaiting review`;
+        }
+        // Check if any other project has reviews
+        for (const [pid, counts] of Object.entries(projectCounts)) {
+            if (pid === currentProject.id || !counts.review) continue;
+            const project = projects.find(p => p.id === pid);
+            const pName = project?.name || pid;
+            return `${name} | 🟡 ${pName}`;
+        }
+        return name;
     }
 
     /**
