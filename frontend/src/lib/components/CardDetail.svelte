@@ -24,6 +24,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         { id: 'backlog', title: 'Backlog' },
         { id: 'in_progress', title: 'In Progress' },
         { id: 'review', title: 'Review' },
+        { id: 'done', title: 'Done' },
     ];
 
     // Collapsible sections
@@ -44,6 +45,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             backlog: 'var(--color-column-backlog)',
             in_progress: 'var(--color-column-in-progress)',
             review: 'var(--color-column-review)',
+            done: 'var(--color-column-done)',
         };
         return colors[id] || 'var(--color-border)';
     }
@@ -711,48 +713,48 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 <div class="task-list">
                     {#each overviewSections as section}
                         {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }).sort((a, b) => a.column_order - b.column_order)}
-                        {#if sectionTasks.length > 0}
-                            <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
-                                <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
-                                    <span class="section-title">
-                                        {#if section.id === 'backlog'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-                                        {:else if section.id === 'in_progress'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                                        {:else if section.id === 'review'}
-                                            <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                                        {/if}
-                                        {section.title}
-                                    </span>
-                                    <span class="section-count">{sectionTasks.length}</span>
-                                    <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                </button>
-                                {#if !collapsedSections.has(section.id)}
-                                <div class="section-body">
-                                    {#each sectionTasks as t (t.id)}
-                                        <Card
-                                            task={t}
-                                            columnId={section.id}
-                                            projectId={task.project_id}
-                                            childrenMap={childrenMap}
-                                            expandedTasks={expandedTasks}
-                                            onToggleExpanded={toggleTaskExpanded}
-                                            onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
-                                            columnColor={getSectionColor(section.id)}
-                                            inline={false}
-                                            showSubtaskBorder={true}
-                                            onSelect={(selected) => {
-                                                if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
-                                            }}
-                                        />
-                                    {/each}
+                        <div class="section-group" style="--col-color: {getSectionColor(section.id)}">
+                            <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
+                                <span class="section-title">
                                     {#if section.id === 'backlog'}
-                                        <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
+                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                                    {:else if section.id === 'in_progress'}
+                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                                    {:else if section.id === 'review'}
+                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                                    {:else if section.id === 'done'}
+                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                                     {/if}
-                                </div>
+                                    {section.title}
+                                </span>
+                                <span class="section-count">{sectionTasks.length}</span>
+                                <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                            {#if !collapsedSections.has(section.id)}
+                            <div class="section-body">
+                                {#each sectionTasks as t (t.id)}
+                                    <Card
+                                        task={t}
+                                        columnId={section.id}
+                                        projectId={task.project_id}
+                                        childrenMap={childrenMap}
+                                        expandedTasks={expandedTasks}
+                                        onToggleExpanded={toggleTaskExpanded}
+                                        onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
+                                        columnColor={getSectionColor(section.id)}
+                                        inline={false}
+                                        showSubtaskBorder={true}
+                                        onSelect={(selected) => {
+                                            if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
+                                        }}
+                                    />
+                                {/each}
+                                {#if section.id === 'backlog'}
+                                    <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
                                 {/if}
                             </div>
-                        {/if}
+                            {/if}
+                        </div>
                     {/each}
                 </div>
             </div>
