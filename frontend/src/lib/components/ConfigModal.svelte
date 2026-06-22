@@ -531,7 +531,7 @@
                                                 <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                                                 <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                                             </svg>
-                                            API key will be stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to enable encryption.
+                                            API key stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to encrypt with AES-256-GCM.
                                         </div>
                                     {/if}
                                     <div class="details-actions">
