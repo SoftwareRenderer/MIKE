@@ -513,15 +513,14 @@
                                     <div class="url-and-key-row">
                                         <div class="url-field">
                                             <label class="url-label">Provider URL</label>
-                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" class="url-input" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
                                         </div>
                                         <div class="api-key-field">
                                             <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
                                             <input
                                                 type="password"
                                                 bind:value={p.api_key}
-                                                placeholder="********"
-                                                class="api-key-input"
+                                                placeholder="API key..."
                                                 onclick={(e) => e.stopPropagation()}
                                             />
                                         </div>
@@ -1009,7 +1008,7 @@
     }
 
     /* Inputs */
-    input[type="text"], input[type="number"], select {
+    input[type="text"], input[type="password"], input[type="number"], select {
         background: var(--color-surface-2);
         border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-md);
@@ -1137,41 +1136,13 @@
         gap: 10px;
         margin-bottom: 10px;
     }
-    .url-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .url-label {
-        font-size: 0.8125rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-    }
-    .url-input {
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        padding: 6px 10px;
-        border-radius: var(--radius-sm);
-        width: 100%;
-        min-width: 0;
-        font-family: var(--font-mono, monospace);
-    }
-    .url-input:focus {
-        border-color: var(--color-accent);
-        outline: none;
-    }
-    .url-input::placeholder {
-        color: var(--color-text-tertiary);
-    }
-
-    /* API Key field */
+    .url-field,
     .api-key-field {
         display: flex;
         flex-direction: column;
         gap: 4px;
     }
+    .url-label,
     .api-key-label {
         font-size: 0.8125rem;
         font-weight: 500;
@@ -1182,23 +1153,11 @@
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
     }
-    .api-key-input {
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        padding: 6px 10px;
-        border-radius: var(--radius-sm);
+    /* Ensure inputs fill grid cells */
+    .url-field input,
+    .api-key-field input {
         width: 100%;
         min-width: 0;
-        font-family: var(--font-mono, monospace);
-    }
-    .api-key-input:focus {
-        border-color: var(--color-accent);
-        outline: none;
-    }
-    .api-key-input::placeholder {
-        color: var(--color-text-tertiary);
     }
     .encryption-warning {
         display: flex;
