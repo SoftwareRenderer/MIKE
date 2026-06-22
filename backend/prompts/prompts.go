@@ -12,6 +12,7 @@ type PromptData struct {
 	WorktreePath string
 	PlanMode     bool
 	Tools        []ToolInfo
+	AgentsMd     string // contents of AGENTS.md from worktree root, empty if not found
 }
 
 // ToolInfo holds the name and description of a tool for rendering in prompts.

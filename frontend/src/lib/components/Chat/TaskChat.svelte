@@ -188,7 +188,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function formatToolArgs(toolName: string, args: Record<string, unknown>): string {
         switch (toolName) {
-            case 'execute_command':
+            case 'bash':
                 return `$ ${args.command as string}`;
             case 'read_file': {
                 const path = args.path as string;

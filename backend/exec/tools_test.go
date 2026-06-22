@@ -63,7 +63,7 @@ func TestIsSandboxableTool(t *testing.T) {
 		{"read_file", true},
 		{"write_file", true},
 		{"edit_file", true},
-		{"execute_command", true},
+		{"bash", true},
 		{"task_complete", false},
 		{"unknown_tool", false},
 		{"", false},
@@ -647,13 +647,13 @@ func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
 	}
 }
 
-// --- executeCommand Tests ---
+// --- bash Tests ---
 
-func TestExecuteTool_ExecuteCommand_Direct(t *testing.T) {
+func TestExecuteTool_Bash_Direct(t *testing.T) {
 	dir := t.TempDir()
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool("execute_command", map[string]interface{}{
+	result, ok := te.executeTool("bash", map[string]interface{}{
 		"command": "echo hello",
 		"timeout": float64(5),
 	}, dir, &types.Task{}, nil, nil, nil)
@@ -665,10 +665,10 @@ func TestExecuteTool_ExecuteCommand_Direct(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_ExecuteCommand_Dangerous(t *testing.T) {
+func TestExecuteTool_Bash_Dangerous(t *testing.T) {
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool("execute_command", map[string]interface{}{
+	result, ok := te.executeTool("bash", map[string]interface{}{
 		"command": "sudo rm -rf /",
 		"timeout": float64(5),
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil)

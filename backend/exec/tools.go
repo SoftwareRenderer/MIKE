@@ -178,7 +178,7 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 			}
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
-	case "execute_command":
+	case "bash":
 		cmd, _ := args["command"].(string)
 		if isDangerousCommand(cmd) {
 			return "Error: command blocked", false

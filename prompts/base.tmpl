@@ -7,4 +7,11 @@ You have access to the following tools via function calling:
 When the task is complete, call task_complete() with a summary including:
 - Files created or modified
 - Any issues encountered
+{{if .AgentsMd}}
+
+## Project Instructions (AGENTS.md)
+
+The following instructions are from the project's AGENTS.md file. Follow them carefully.
+
+{{.AgentsMd}}{{end}}
 {{if .PlanMode}}{{template "plan-mode" .}}{{end}}

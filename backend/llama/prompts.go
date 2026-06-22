@@ -2,6 +2,9 @@ package llama
 
 import (
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"kanban/backend/prompts"
 	"kanban/backend/types"
@@ -27,10 +30,24 @@ func buildSystemPrompt(worktreePath string, planMode bool) string {
 		}
 	}
 
+	// Read AGENTS.md from worktree root if it exists
+	var agentsMd string
+	if data, err := os.ReadFile(filepath.Join(worktreePath, "AGENTS.md")); err == nil {
+		// Truncate to 8000 lines max to avoid blowing out context
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 8000 {
+			lines = lines[:8000]
+			agentsMd = strings.Join(lines, "\n") + "\n\n... (truncated)"
+		} else {
+			agentsMd = string(data)
+		}
+	}
+
 	data := prompts.PromptData{
 		WorktreePath: worktreePath,
 		PlanMode:     planMode,
 		Tools:        toolInfos,
+		AgentsMd:     agentsMd,
 	}
 
 	result, err := prompts.RenderSystemPrompt(data)

@@ -8,7 +8,7 @@ import fileTextIcon from '$lib/assets/icons/file-text.svg';
 import editIcon from '$lib/assets/icons/edit.svg';
 import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
 
-    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'edit_file', 'execute_command'];
+    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'edit_file', 'bash'];
 
     interface ToolCallInfo {
         toolId: string;
@@ -55,7 +55,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
 
     function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
         switch (toolName) {
-            case 'execute_command':
+            case 'bash':
                 return `$ ${args.command as string}`;
             case 'read_file': {
                 const p = args.path as string;

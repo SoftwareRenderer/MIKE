@@ -135,7 +135,7 @@ func extractTarget(toolName, rawArgs string) string {
 				return normalizeTarget(p)
 			}
 		}
-	case "execute_command":
+	case "bash":
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {
@@ -317,7 +317,7 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 		return false
 	case "task_complete":
 		return false
-	case "execute_command":
+	case "bash":
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {
@@ -1244,7 +1244,7 @@ func shellQuote(s string) string {
 // isSandboxableTool returns true if the tool can run inside a sandbox.
 func isSandboxableTool(name string) bool {
 	switch name {
-	case "read_file", "write_file", "edit_file", "execute_command":
+	case "read_file", "write_file", "edit_file", "bash":
 		return true
 	default:
 		return false

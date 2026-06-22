@@ -7,7 +7,7 @@ var toolDisplayNames = map[string]string{
 	"read_file":        "Read",
 	"write_file":       "Write",
 	"edit_file":        "Edit",
-	"execute_command":  "Execute",
+	"bash":             "Execute",
 	"task_complete":    "Done",
 }
 
@@ -84,7 +84,7 @@ func GetToolDefinitions() []types.ChatTool {
 		{
 			Type: "function",
 			Function: &types.ToolDef{
-				Name:        "execute_command",
+				Name:        "bash",
 				DisplayName: "Execute",
 				Description: "Execute a shell command in the worktree directory. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
 				Parameters: map[string]interface{}{
