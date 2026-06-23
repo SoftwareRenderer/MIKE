@@ -42,9 +42,10 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
         taskStatus?: string;
+        onNavigateTask?: (taskId: string) => void;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog' }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask }: Props = $props();
 
     let reasoningUserToggled = $state(false);
     let reasoningUserValue = $state(false); // user's explicit choice after toggling
@@ -77,6 +78,10 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
+            case 'create_task': {
+                const title = args.title as string;
+                return title || '(create task)';
+            }
             default:
                 return JSON.stringify(args, null, 2);
         }
@@ -427,24 +432,35 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                                 {:else if SANDBOXABLE_TOOLS.includes(tc.toolName)}
                                     <img class="tool-sandbox-icon" src={shieldOffIcon} width="14" height="14" alt="" title="Not sandboxed" />
                                 {/if}
-                                <img class="tool-icon" width="14" height="14" alt="" src={
-                                    tc.toolName === 'read_file' ? fileTextIcon :
-                                    tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
-                                    tc.toolName === 'task_complete' ? checkCircleIcon :
-                                    zapIcon
-                                } />
-                                <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
-                                {#if expandedArgs.has(tc.toolId)}
-                                    <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Collapse arguments">
-                                        <pre class="tool-args tool-args-expanded">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
-                                    </button>
+                                {#if tc.toolName === 'create_task'}
+                                    <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <rect x="2" y="2" width="12" height="12" rx="2"/>
+                                        <path d="M5 5h1M5 7.5h1M5 10h1"/>
+                                        <path d="M8 7.5l1 1 2-2"/>
+                                        <path d="M8 11l1 1 2-2"/>
+                                    </svg>
                                 {:else}
-                                    {#if truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).truncated}
-                                        <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Expand arguments">
-                                            <pre class="tool-args tool-args-collapsed">{truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).text}</pre>
+                                    <img class="tool-icon" width="14" height="14" alt="" src={
+                                        tc.toolName === 'read_file' ? fileTextIcon :
+                                        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
+                                        tc.toolName === 'task_complete' ? checkCircleIcon :
+                                        zapIcon
+                                    } />
+                                {/if}
+                                <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
+                                {#if tc.toolName !== 'create_task' && tc.toolName !== 'task_complete'}
+                                    {#if expandedArgs.has(tc.toolId)}
+                                        <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Collapse arguments">
+                                            <pre class="tool-args tool-args-expanded">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
                                         </button>
                                     {:else}
-                                        <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                                        {#if truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).truncated}
+                                            <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Expand arguments">
+                                                <pre class="tool-args tool-args-collapsed">{truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).text}</pre>
+                                            </button>
+                                        {:else}
+                                            <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
+                                        {/if}
                                     {/if}
                                 {/if}
                                 {#if tc.isPending}
@@ -470,6 +486,20 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
                                 {#if !tc.success && tc.result && tc.result.trim()}
                                     <pre class="tool-result tool-result-error">{tc.result}</pre>
                                 {/if}
+                            {:else if tc.toolName === 'create_task' && tc.result && tc.success}
+                                {@const createResult = (() => { try { const r = JSON.parse(tc.result); return r; } catch { return null; } })()}
+                                {#if createResult && createResult.task_id}
+                                    <div class="tool-result tool-create-task">
+                                        <span class="create-task-text">Created task</span>
+                                        <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title="Open task">
+                                            {createResult.title as string}
+                                        </button>
+                                    </div>
+                                {:else}
+                                    <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+                                {/if}
+                            {:else if tc.toolName === 'task_complete' && tc.args.summary}
+                                <pre class="tool-result tool-result-summary">{tc.args.summary as string}</pre>
                             {:else if tc.result && tc.result.trim()}
                                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
                             {/if}
@@ -1031,6 +1061,45 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         overflow-y: auto;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+    .tool-result-summary {
+        font-family: inherit;
+        color: var(--color-text-secondary);
+        font-style: italic;
+    }
+    .tool-create-task {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .create-task-text {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+    }
+    .btn-open-task {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: var(--radius-md);
+        font-size: 0.75rem;
+        font-weight: 500;
+        background: var(--color-surface-2);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-column-backlog);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+        max-width: 280px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: inherit;
+    }
+    .btn-open-task:hover {
+        border-color: var(--color-border-bright);
+        border-left-color: var(--color-column-backlog);
+        background: var(--color-surface-3);
     }
     .tool-result-error {
         background: rgba(248,81,73,0.08);

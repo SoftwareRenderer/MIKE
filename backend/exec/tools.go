@@ -214,6 +214,13 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		}
 		return out, true
 	case "task_complete":
+		// In plan mode, require at least one subtask before allowing completion
+		if task.PlanMode {
+			children, err := te.store.GetChildren(task.ID)
+			if err == nil && len(children) == 0 {
+				return "Error: Cannot complete planning without creating subtasks. Use create_task() to add at least one subtask first.", false
+			}
+		}
 		return "Task complete", true
 	case "create_task":
 		return te.handleCreateTask(args, task), true
@@ -303,19 +310,18 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 	}
 
 	// Determine the actual parent: if parent_task_id is provided, use it (nested subtask).
-	// Otherwise, nest under the current executing task.
+	// Otherwise, create as an independent task (no parent).
 	actualParentID := parentTaskID
-	if actualParentID == "" {
-		actualParentID = parent.ID
-	}
-
-	// Validate that the parent exists and is in backlog (can accept subtasks)
-	parentTask, err := te.store.GetTaskByTaskID(actualParentID)
-	if err != nil {
-		return fmt.Sprintf("Error: parent task %s not found", actualParentID)
-	}
-	if parentTask.Status != "backlog" && parentTask.Status != "in_progress" {
-		return fmt.Sprintf("Error: parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
+	var parentTask *types.Task
+	if actualParentID != "" {
+		var err error
+		parentTask, err = te.store.GetTaskByTaskID(actualParentID)
+		if err != nil {
+			return fmt.Sprintf("Error: parent task %s not found", actualParentID)
+		}
+		if parentTask.Status != "backlog" && parentTask.Status != "in_progress" {
+			return fmt.Sprintf("Error: parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
+		}
 	}
 
 	// Create the new task
@@ -381,7 +387,11 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 	// Broadcast the new task to the frontend
 	te.boardStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
 
-	log.Printf("[create_task] task=%s created subtask %s (parent=%s): %q", parent.ID, newTaskID, actualParentID, title)
+	if actualParentID != "" {
+		log.Printf("[create_task] task=%s created subtask %s (parent=%s): %q", parent.ID, newTaskID, actualParentID, title)
+	} else {
+		log.Printf("[create_task] task=%s created task %s: %q", parent.ID, newTaskID, title)
+	}
 
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
 	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})

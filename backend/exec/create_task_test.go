@@ -86,8 +86,9 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-1", "proj-1", "backlog")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Implement the child feature",
+		"title":          "Child Task",
+		"prompt":         "Implement the child feature",
+		"parent_task_id": "parent-task-1",
 	}, parent)
 
 	// Should return JSON with task_id
@@ -130,8 +131,9 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-2", "proj-1", "backlog")
 
 	te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Test prompt",
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-task-2",
 	}, parent)
 
 	// Get the child task
@@ -160,10 +162,11 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
 
-	// Create first child
+	// Create first child under parent
 	result1 := te.handleCreateTask(map[string]interface{}{
-		"title":  "Level 1 Task",
-		"prompt": "Level 1 prompt",
+		"title":          "Level 1 Task",
+		"prompt":         "Level 1 prompt",
+		"parent_task_id": "parent-task-3",
 	}, parent)
 
 	var resp1 map[string]string
@@ -200,8 +203,9 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Test prompt",
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-task-4",
 	}, parent)
 
 	var resp map[string]string
@@ -229,8 +233,9 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Implement feature X",
+		"title":          "Child Task",
+		"prompt":         "Implement feature X",
+		"parent_task_id": "parent-task-5",
 	}, parent)
 
 	var resp map[string]string
@@ -300,8 +305,9 @@ func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-9", "proj-1", "done")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Test prompt",
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-task-9",
 	}, parent)
 
 	if !strings.Contains(result, "not in backlog") {
@@ -314,8 +320,9 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  "Child Task",
-		"prompt": "Test prompt",
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-task-10",
 	}, parent)
 
 	// Should succeed (in_progress parents can accept subtasks during planning)
@@ -332,11 +339,12 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-11", "proj-1", "backlog")
 
-	// Create multiple subtasks
+	// Create multiple subtasks under parent
 	for i := 1; i <= 3; i++ {
 		result := te.handleCreateTask(map[string]interface{}{
-			"title":  "Task " + string(rune('A'+i-1)),
-			"prompt": "Prompt for task " + string(rune('A'+i-1)),
+			"title":          "Task " + string(rune('A'+i-1)),
+			"prompt":         "Prompt for task " + string(rune('A'+i-1)),
+			"parent_task_id": "parent-task-11",
 		}, parent)
 
 		var resp map[string]string
@@ -363,8 +371,9 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-12", "proj-1", "backlog")
 
 	result := te.handleCreateTask(map[string]interface{}{
-		"title":  `Task with "quotes" and \backslash`,
-		"prompt": "Test prompt",
+		"title":          `Task with "quotes" and \backslash`,
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-task-12",
 	}, parent)
 
 	// Should return valid JSON even with special characters
@@ -378,3 +387,84 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 }
 
 
+
+func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
+	te := newTestExecutor(t)
+	parent := createParentTask(t, te.store, "plan-task-1", "proj-1", "backlog")
+
+	// Try to complete without subtasks
+	result, ok := te.executeTool("task_complete", map[string]interface{}{
+		"summary": "Plan complete",
+	}, "", parent, nil, nil, nil)
+
+	if ok {
+		t.Error("expected task_complete to fail in plan mode without subtasks")
+	}
+	if !strings.Contains(result, "Cannot complete planning without creating subtasks") {
+		t.Errorf("unexpected error message: %s", result)
+	}
+}
+
+func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
+	te := newTestExecutor(t)
+	parent := createParentTask(t, te.store, "plan-parent-1", "proj-1", "backlog")
+
+	// Create a subtask via handleCreateTask
+	result := te.handleCreateTask(map[string]interface{}{
+		"title":          "Child Task",
+		"prompt":         "Implement the child feature",
+		"parent_task_id": "plan-parent-1",
+	}, parent)
+
+	// Verify subtask was created
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("failed to parse create_task result: %v", err)
+	}
+	if resp["task_id"] == "" {
+		t.Fatalf("expected task_id in result, got: %s", result)
+	}
+
+	// Reload parent
+	parent, _ = te.store.GetTask("proj-1", "plan-parent-1")
+
+	// Try to complete with subtask
+	result2, ok := te.executeTool("task_complete", map[string]interface{}{
+		"summary": "Plan complete",
+	}, "", parent, nil, nil, nil)
+
+	if !ok {
+		t.Errorf("expected task_complete to succeed with subtasks, got: %s", result2)
+	}
+}
+
+func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
+	te := newTestExecutor(t)
+	createProject(t, te.store, "proj-1", "proj-1")
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:             "standard-task-1",
+		ProjectID:      "proj-1",
+		Title:          "Standard Task",
+		Prompt:         "Standard prompt",
+		Status:         "in_progress",
+		StatusState:    "running",
+		LlamaServerURL: "http://test:8080",
+		ModelName:      "test-model",
+		PlanMode:       false,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := te.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Try to complete without subtasks (should succeed)
+	result, ok := te.executeTool("task_complete", map[string]interface{}{
+		"summary": "Task complete",
+	}, "", task, nil, nil, nil)
+
+	if !ok {
+		t.Errorf("expected task_complete to succeed in standard mode, got: %s", result)
+	}
+}

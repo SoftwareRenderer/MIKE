@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
     import { createTaskStream, sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus } from '$lib/store';
+import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask } from '$lib/store';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
@@ -215,6 +215,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'task_complete':
                 return args.summary as string || '(task complete)';
+            case 'create_task': {
+                const title = args.title as string;
+                return title || '(create task)';
+            }
             default:
                 return JSON.stringify(args, null, 2);
         }
@@ -1530,7 +1534,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} />
                 {/if}
             {/each}
         {/if}

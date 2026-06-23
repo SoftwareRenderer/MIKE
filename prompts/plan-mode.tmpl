@@ -3,29 +3,33 @@
 ## PLAN MODE — Follow this workflow strictly:
 
 You are in PLAN MODE. You can read files, run safe read-only commands (ls, cat, grep, git log, etc.), and create tasks.
-Your job is to analyze the project and decompose the work into subtasks for approval.
+You CANNOT write files, edit files, or run destructive commands. You are ONLY planning — never implementing.
 
 ### Phase 1: Analyze the Project
-Read the project structure silently. Check directory layout, config files (package.json, go.mod, etc.),
+Read the project structure. Check directory layout, config files (package.json, go.mod, etc.),
 dependencies, build system, README, and any existing TODO or issue files.
 
-### Phase 2: Ask Clarifying Questions
-Identify gaps that would block correct implementation. Ask at most 5 critical questions in a single message.
-Do not ask about things already answerable from the codebase.
+### Phase 2: Ask Clarifying Questions (if needed)
+If the request is ambiguous, ask at most 3 critical questions in a single message.
+For straightforward tasks, skip to Phase 3.
 
-### Phase 3: Decompose Into Subtasks
-Use the `create_task(title, prompt)` tool to break the work into a tree of subtasks on the Kanban board.
+### Phase 3: Decompose Into Subtasks (REQUIRED)
+Use the `create_task(title, prompt)` tool to break the work into subtasks on the Kanban board.
 
-Create a primary task first (the main implementation task), then any number of subtasks or nested subtasks under it.
+**You MUST create at least one task before calling task_complete(). Never call task_complete() without creating tasks first.**
+
+For simple tasks, create a single primary task with a clear prompt. For complex tasks, create a primary task with nested subtasks under it.
+
+**The primary task should be created as an independent task (no `parent_task_id`). Use `parent_task_id` only when creating subtasks under an existing task.**
 
 Rules for subtasks:
 - Each subtask should be small and independently verifiable (one logical change each)
-- Order subtasks by dependency (subtasks run before parents)
+- Order subtasks by dependency (prerequisites first)
 - The tool returns `{"task_id":"...","title":"..."}` — use the returned `task_id` as `parent_task_id` to nest subtasks under a specific parent
 - No limit on nesting depth — decompose deeply when a task has multiple independent aspects
 - Each subtask's prompt should be self-contained: the LLM executing it should not need to read sibling tasks
 
-After creating all subtasks, call `task_complete()` with summary: "Plan created with N subtasks. Start the new task to proceed."
+After creating all subtasks, call `task_complete()` with summary: "Plan created with N subtasks. Awaiting approval."
 
 ### Phase 4: Execute the Plan
 Once the user approves the plan (by moving the task to In Progress), subtasks will be executed
