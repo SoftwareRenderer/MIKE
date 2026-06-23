@@ -1,14 +1,6 @@
 <script lang="ts">
     import { marked } from 'marked';
-import { getToolDisplayName } from '$lib/types';
-import shieldGreenIcon from '$lib/assets/icons/shield-green.svg';
-import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
-import zapIcon from '$lib/assets/icons/zap.svg';
-import fileTextIcon from '$lib/assets/icons/file-text.svg';
-import editIcon from '$lib/assets/icons/edit.svg';
-import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
-
-    const SANDBOXABLE_TOOLS = ['read_file', 'write_file', 'edit_file', 'bash'];
+    import ToolCall from './ToolCall.svelte';
 
     interface ToolCallInfo {
         toolId: string;
@@ -45,47 +37,15 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         onNavigateTask?: (taskId: string) => void;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], formatToolArgs: formatArgs, onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask }: Props = $props();
 
     let reasoningUserToggled = $state(false);
-    let reasoningUserValue = $state(false); // user's explicit choice after toggling
+    let reasoningUserValue = $state(false);
     let reasoningExpanded = $derived(
         reasoningUserToggled
             ? reasoningUserValue
             : (!reasoningContent || (reasoningContent.length <= 200 && !content) || (toolCalls && toolCalls.length > 0 && !content) || (isStreaming && !(toolCalls && toolCalls.length > 0)))
     );
-
-    function defaultFormatArgs(toolName: string, args: Record<string, unknown>): string {
-        switch (toolName) {
-            case 'bash':
-                return `$ ${args.command as string}`;
-            case 'read_file': {
-                const p = args.path as string;
-                return p.startsWith('./') ? p : `./${p}`;
-            }
-            case 'write_file': {
-                const p = args.path as string;
-                return p.startsWith('./') ? p : `./${p}`;
-            }
-            case 'edit_file': {
-                const p = args.path as string;
-                const edits = args.edits as Array<{ oldText: string; newText: string }>;
-                const editCount = edits ? edits.length : 0;
-                const pathDisplay = p.startsWith('./') ? p : `./${p}`;
-                if (editCount <= 0) return pathDisplay;
-                const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
-                return `${pathDisplay} (${suffix})`;
-            }
-            case 'task_complete':
-                return args.summary as string || '(task complete)';
-            case 'create_task': {
-                const title = args.title as string;
-                return title || '(create task)';
-            }
-            default:
-                return JSON.stringify(args, null, 2);
-        }
-    }
 
     let expandedArgs = $state<Set<string>>(new Set());
 
@@ -97,42 +57,6 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
             next.add(toolId);
         }
         expandedArgs = next;
-    }
-
-    const ARGS_MAX_LEN = 50;
-    const EDIT_DIFF_MAX_LINES = 20;
-
-    function truncateArgs(display: string): { text: string; truncated: boolean } {
-        if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
-        return { text: display.slice(0, ARGS_MAX_LEN) + ' \u2026', truncated: true };
-    }
-
-    interface EditDiffLine {
-        type: 'removed' | 'added';
-        text: string;
-    }
-    interface EditDiffBlock {
-        edits: EditDiffLine[];
-        separator: boolean;
-    }
-
-    function formatEditDiff(edits: Array<{ oldText: string; newText: string }> | undefined): EditDiffBlock[] {
-        if (!edits || edits.length === 0) return [];
-        return edits.map((edit, i) => {
-            const lines: EditDiffLine[] = [];
-            const oldLines = edit.oldText.split('\n');
-            const newLines = edit.newText.split('\n');
-            const maxLines = EDIT_DIFF_MAX_LINES;
-            for (const line of oldLines) {
-                if (lines.length >= maxLines) break;
-                lines.push({ type: 'removed', text: line });
-            }
-            for (const line of newLines) {
-                if (lines.length >= maxLines) break;
-                lines.push({ type: 'added', text: line });
-            }
-            return { edits: lines, separator: i < edits.length - 1 };
-        });
     }
 
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
@@ -424,90 +348,7 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
             {/if}
             {#if toolCalls && toolCalls.length > 0}
                 {#each toolCalls as tc (tc.toolId)}
-                    <div class="tool-call-entry">
-                        <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
-                            <div class="tool-call-header">
-                                {#if tc.sandbox}
-                                    <img class="tool-sandbox-icon" src={shieldGreenIcon} width="14" height="14" alt="" title="Sandboxed" />
-                                {:else if SANDBOXABLE_TOOLS.includes(tc.toolName)}
-                                    <img class="tool-sandbox-icon" src={shieldOffIcon} width="14" height="14" alt="" title="Not sandboxed" />
-                                {/if}
-                                {#if tc.toolName === 'create_task'}
-                                    <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <rect x="2" y="2" width="12" height="12" rx="2"/>
-                                        <path d="M5 5h1M5 7.5h1M5 10h1"/>
-                                        <path d="M8 7.5l1 1 2-2"/>
-                                        <path d="M8 11l1 1 2-2"/>
-                                    </svg>
-                                {:else}
-                                    <img class="tool-icon" width="14" height="14" alt="" src={
-                                        tc.toolName === 'read_file' ? fileTextIcon :
-                                        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
-                                        tc.toolName === 'task_complete' ? checkCircleIcon :
-                                        zapIcon
-                                    } />
-                                {/if}
-                                <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
-                                {#if tc.toolName !== 'create_task' && tc.toolName !== 'task_complete'}
-                                    {#if expandedArgs.has(tc.toolId)}
-                                        <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Collapse arguments">
-                                            <pre class="tool-args tool-args-expanded">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
-                                        </button>
-                                    {:else}
-                                        {#if truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).truncated}
-                                            <button class="tool-args-link" onclick={() => toggleArgs(tc.toolId)} aria-label="Expand arguments">
-                                                <pre class="tool-args tool-args-collapsed">{truncateArgs((formatArgs || defaultFormatArgs)(tc.toolName, tc.args)).text}</pre>
-                                            </button>
-                                        {:else}
-                                            <pre class="tool-args">{(formatArgs || defaultFormatArgs)(tc.toolName, tc.args)}</pre>
-                                        {/if}
-                                    {/if}
-                                {/if}
-                                {#if tc.isPending}
-                                    <span class="tool-status pending"><span class="spinner"></span> Running...</span>
-                                {:else if !tc.success}
-                                    <span class="tool-status error">Failed</span>
-                                {/if}
-                            </div>
-                            {#if tc.toolName === 'edit_file' && tc.args.edits}
-                                <div class="edit-diff">
-                                    {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
-                                        {#each block.edits as line}
-                                            <div class="edit-diff-line {line.type === 'removed' ? 'edit-removed' : 'edit-added'}">
-                                                <span class="edit-diff-sign">{line.type === 'removed' ? '-' : '+'}</span>
-                                                <span class="edit-diff-text">{line.text}</span>
-                                            </div>
-                                        {/each}
-                                        {#if block.separator}
-                                            <div class="edit-separator"></div>
-                                        {/if}
-                                    {/each}
-                                </div>
-                                {#if !tc.success && tc.result && tc.result.trim()}
-                                    <pre class="tool-result tool-result-error">{tc.result}</pre>
-                                {/if}
-                            {:else if tc.toolName === 'create_task' && tc.result && tc.success}
-                                {@const createResult = (() => { try { const r = JSON.parse(tc.result); return r; } catch { return null; } })()}
-                                {#if createResult && createResult.task_id}
-                                    <div class="tool-result tool-create-task">
-                                        <span class="create-task-text">Created task</span>
-                                        <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title="Open task">
-                                            {createResult.title as string}
-                                        </button>
-                                    </div>
-                                {:else}
-                                    <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
-                                {/if}
-                            {:else if tc.toolName === 'task_complete' && tc.args.summary}
-                                <pre class="tool-result tool-result-summary">{tc.args.summary as string}</pre>
-                            {:else if tc.result && tc.result.trim()}
-                                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
-                            {/if}
-                            {#if tc.duration !== undefined}
-                                <span class="tool-duration">{tc.duration}ms</span>
-                            {/if}
-                        </div>
-                    </div>
+                    <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} />
                 {/each}
             {/if}
             {#if stats}
@@ -966,141 +807,6 @@ import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
         50% { opacity: 0; }
     }
 
-    /* Tool call entries */
-    .tool-call-entry { padding: 4px 0; }
-    .tool-call-card {
-        background: var(--color-surface-2);
-        border-radius: var(--radius-md);
-        border-left: 3px solid;
-        padding: 8px 12px;
-        display: flex;
-        flex-direction: column;
-    }
-    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .tool-name { font-weight: 600; font-size: 0.75rem; color: var(--color-text-primary); }
-    .tool-sandbox-icon { flex-shrink: 0; cursor: help; }
-    .tool-icon { flex-shrink: 0; }
-    .tool-status { font-size: 0.75rem; font-weight: 500; }
-    .tool-status.pending { color: var(--color-status-yellow); }
-    .tool-status.error { color: var(--color-status-red); }
-    .tool-duration { font-size: 0.75rem; color: var(--color-text-tertiary); align-self: flex-start; padding-top: 4px; }
-    .tool-args {
-        display: inline;
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        margin: 0 6px;
-        color: var(--color-text-secondary);
-        white-space: pre;
-    }
-    .tool-args-link {
-        display: contents;
-        background: none;
-        border: none;
-        padding: 0;
-        margin: 0;
-        cursor: pointer;
-    }
-    .tool-args-collapsed:hover {
-        color: var(--color-text-primary);
-    }
-    .tool-args-expanded {
-        text-decoration: underline;
-        text-decoration-color: var(--color-text-tertiary);
-        text-underline-offset: 2px;
-    }
-    .tool-args-expanded:hover {
-        color: var(--color-text-primary);
-    }
-    .edit-diff {
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-        line-height: 1.4;
-        overflow-x: auto;
-    }
-    .edit-diff-line {
-        display: flex;
-        gap: 0;
-        padding: 0 8px;
-        border-radius: 2px;
-        white-space: pre-wrap;
-        word-break: break-word;
-    }
-    .edit-removed {
-        background: rgba(248,81,73,0.12);
-        color: var(--color-text-secondary);
-    }
-    .edit-added {
-        background: rgba(63,185,80,0.12);
-        color: var(--color-text-secondary);
-    }
-    .edit-diff-sign {
-        flex-shrink: 0;
-        width: 1em;
-        user-select: none;
-        font-weight: 600;
-    }
-    .edit-removed .edit-diff-sign { color: rgba(248,81,73,0.8); }
-    .edit-added .edit-diff-sign { color: rgba(63,185,80,0.8); }
-    .edit-diff-text {
-        flex: 1;
-        min-width: 0;
-    }
-    .edit-separator {
-        border-top: 1px dashed var(--color-border);
-        margin: 4px 8px;
-    }
-    .tool-result {
-        background: var(--color-surface-0);
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        overflow-x: auto;
-        margin: 4px 0 0;
-        max-height: 120px;
-        overflow-y: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-    }
-    .tool-result-summary {
-        font-family: inherit;
-        color: var(--color-text-secondary);
-        font-style: italic;
-    }
-    .tool-create-task {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .create-task-text {
-        color: var(--color-text-secondary);
-        font-size: 0.75rem;
-    }
-    .btn-open-task {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        border-radius: var(--radius-md);
-        font-size: 0.75rem;
-        font-weight: 500;
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
-        border: 1px solid var(--color-border);
-        border-left: 3px solid var(--color-column-backlog);
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-        max-width: 280px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-family: inherit;
-    }
-    .btn-open-task:hover {
-        border-color: var(--color-border-bright);
-        border-left-color: var(--color-column-backlog);
-        background: var(--color-surface-3);
-    }
     .tool-result-error {
         background: rgba(248,81,73,0.08);
         color: var(--color-status-red);

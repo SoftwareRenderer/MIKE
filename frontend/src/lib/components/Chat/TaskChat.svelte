@@ -4,6 +4,7 @@
     import type { StreamEvent, Provider, Thread } from '$lib/types';
     import { createTaskStream, sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask } from '$lib/store';
+    import { formatToolArgs } from '$lib/utils/toolArgs';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
@@ -187,41 +188,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         const url = new URL(location.href);
         url.searchParams.delete('thread');
         history.pushState({ task: taskId }, '', url.toString());
-    }
-
-    function formatToolArgs(toolName: string, args: Record<string, unknown>): string {
-        switch (toolName) {
-            case 'bash':
-                return `$ ${args.command as string}`;
-            case 'read_file': {
-                const path = args.path as string;
-                return path.startsWith('./') ? path : `./${path}`;
-            }
-            case 'write_file': {
-                const path = args.path as string;
-                const content = args.content as string;
-                const lines = content ? content.split('\n').length : 0;
-                const prefixed = path.startsWith('./') ? path : `./${path}`;
-                return `${prefixed} (${lines} lines)`;
-            }
-            case 'edit_file': {
-                const path = args.path as string;
-                const edits = args.edits as Array<{ oldText: string; newText: string }>;
-                const editCount = edits ? edits.length : 0;
-                const pathDisplay = path.startsWith('./') ? path : `./${path}`;
-                if (editCount <= 0) return pathDisplay;
-                const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
-                return `${pathDisplay} (${suffix})`;
-            }
-            case 'task_complete':
-                return args.summary as string || '(task complete)';
-            case 'create_task': {
-                const title = args.title as string;
-                return title || '(create task)';
-            }
-            default:
-                return JSON.stringify(args, null, 2);
-        }
     }
 
     function ensureAssistantEntry(): ChatEntry {
