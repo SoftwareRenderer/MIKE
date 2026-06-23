@@ -74,7 +74,7 @@ func testRequest(method, path string, body interface{}) *http.Request {
 func testResponse(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	handler := CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))
+	handler := CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
 }
@@ -92,20 +92,39 @@ func loginTest(t *testing.T, s *Server) string {
 	return rr.Header().Get("Set-Cookie")
 }
 
+// loginTestCSRF logs in and returns the session cookie and CSRF token.
+func loginTestCSRF(t *testing.T, s *Server) (cookie, csrfToken string) {
+	t.Helper()
+	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
+		"password": testPassword,
+	})
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
+	}
+	return rr.Header().Get("Set-Cookie"), rr.Header().Get("X-CSRF-Token")
+}
+
 // withAuth adds the session cookie to a request.
 func withAuth(req *http.Request, cookie string) {
 	parts := strings.Split(cookie, ";")[0]
 	req.Header.Set("Cookie", strings.TrimSpace(parts))
 }
 
+// withAuthCSRF adds the session cookie and CSRF token to a request.
+func withAuthCSRF(req *http.Request, cookie, csrfToken string) {
+	withAuth(req, cookie)
+	req.Header.Set("X-CSRF-Token", csrfToken)
+}
+
 // testResponseAuth logs in and runs a request against the server with auth.
-// Uses the full middleware chain (CORS + Session + Compress).
+// Uses the full middleware chain (CORS + Session + CSRF + Compress).
 func testResponseAuth(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
-	cookie := loginTest(t, s)
-	withAuth(req, cookie)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	withAuthCSRF(req, cookie, csrfToken)
 	rr := httptest.NewRecorder()
-	handler := CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))
+	handler := CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
 }
@@ -127,13 +146,13 @@ func createTestProject(t *testing.T, s *Server) string {
 	t.Helper()
 	dir := t.TempDir()
 	initGitRepo(t, dir)
-	cookie := loginTest(t, s)
+	cookie, csrfToken := loginTestCSRF(t, s)
 	proj := map[string]interface{}{
 		"name": "test-project",
 		"path": dir,
 	}
 	req := testRequest("POST", "/api/projects", proj)
-	withAuth(req, cookie)
+	withAuthCSRF(req, cookie, csrfToken)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
@@ -168,12 +187,12 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 // createTestTask creates a task via the API and returns its ID.
 func createTestTask(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()
-	cookie := loginTest(t, s)
+	cookie, csrfToken := loginTestCSRF(t, s)
 	task := map[string]interface{}{
 		"prompt": prompt,
 	}
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
-	withAuth(req, cookie)
+	withAuthCSRF(req, cookie, csrfToken)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())

@@ -1,13 +1,54 @@
 const API_BASE = '/api';
 
-/** Wrapper around fetch that includes credentials (cookies) on every request. */
+/** CSRF token, set on login or session check. Held in memory only. */
+let csrfToken: string = '';
+
+/** Set the CSRF token (called after login or session check). */
+export function setCsrfToken(token: string): void {
+    csrfToken = token;
+}
+
+/** Clear the CSRF token (called on logout). */
+export function clearCsrfToken(): void {
+    csrfToken = '';
+}
+
+/** Lazily fetch CSRF token from session endpoint (for E2E test auth). */
+export async function ensureCsrfToken(): Promise<string> {
+    // Check module-level token first, then window.__csrfToken (set by E2E tests)
+    if (csrfToken) return csrfToken;
+    if (typeof window !== 'undefined' && (window as any).__csrfToken) return (window as any).__csrfToken;
+    // Auto-fetch from session endpoint (public, no CSRF needed)
+    try {
+        const res = await fetch('/api/auth/session', { credentials: 'include' });
+        const data = await res.json();
+        if (data.authenticated && data.csrf_token) {
+            csrfToken = data.csrf_token;
+            return csrfToken;
+        }
+    } catch { /* ignore */ }
+    return '';
+}
+
+/** Wrapper around fetch that includes credentials (cookies) and CSRF token on every request. */
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-    return fetch(url, { ...init, credentials: 'include' });
+    const headers = new Headers(init?.headers);
+    // Skip CSRF for login endpoint (public)
+    if (!url.includes('/api/auth/login')) {
+        const token = await ensureCsrfToken();
+        if (token) headers.set('X-CSRF-Token', token);
+    }
+    return fetch(url, { ...init, credentials: 'include', headers });
 }
 
 /** Returns true if the response is a 401 Unauthorized. */
 export function isUnauthorized(res: Response): boolean {
     return res.status === 401;
+}
+
+/** Returns true if the response is a 403 Forbidden (e.g., invalid CSRF token). */
+export function isForbidden(res: Response): boolean {
+    return res.status === 403;
 }
 
 /** Extract error message from a failed API response, falling back to a default. */

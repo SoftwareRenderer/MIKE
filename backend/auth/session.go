@@ -14,6 +14,7 @@ import (
 
 const (
 	sessionTokenBytes = 32
+	csrfTokenBytes    = 16
 	sessionDuration   = 30 * 24 * time.Hour // 30 days
 	passwordEnv       = "KANBAN_PASSWORD"
 )
@@ -49,45 +50,51 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 }
 
 // Login validates the password and creates a new session.
-// Returns the session id and token on success.
-func (m *SessionManager) Login(password string) (id, token string, err error) {
+// Returns the session id, session token, and CSRF token on success.
+func (m *SessionManager) Login(password string) (id, token, csrfToken string, err error) {
 	if password != m.password {
-		return "", "", ErrInvalidPassword
+		return "", "", "", ErrInvalidPassword
 	}
 
 	tokenBytes := make([]byte, sessionTokenBytes)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		return "", "", fmt.Errorf("generate token: %w", err)
+		return "", "", "", fmt.Errorf("generate token: %w", err)
 	}
 	token = hex.EncodeToString(tokenBytes)
+
+	csrfBytes := make([]byte, csrfTokenBytes)
+	if _, err := rand.Read(csrfBytes); err != nil {
+		return "", "", "", fmt.Errorf("generate csrf token: %w", err)
+	}
+	csrfToken = hex.EncodeToString(csrfBytes)
 
 	id = hex.EncodeToString(tokenBytes[:8]) // short id from first 8 bytes
 	expiresAt := time.Now().Add(sessionDuration)
 
-	if err := m.store.CreateSession(context.Background(), id, token, expiresAt); err != nil {
-		return "", "", fmt.Errorf("create session: %w", err)
+	if err := m.store.CreateSession(context.Background(), id, token, csrfToken, expiresAt); err != nil {
+		return "", "", "", fmt.Errorf("create session: %w", err)
 	}
-	return id, token, nil
+	return id, token, csrfToken, nil
 }
 
-// Validate checks a session token and returns the session id if valid.
-func (m *SessionManager) Validate(token string) (string, error) {
+// Validate checks a session token and returns the session id and CSRF token if valid.
+func (m *SessionManager) Validate(token string) (id, csrfToken string, err error) {
 	if token == "" {
-		return "", ErrInvalidToken
+		return "", "", ErrInvalidToken
 	}
 
-	id, expiresAt, err := m.store.GetSessionByToken(context.Background(), token)
+	id, csrfToken, expiresAt, err := m.store.GetSessionByToken(context.Background(), token)
 	if err != nil {
-		return "", ErrInvalidToken
+		return "", "", ErrInvalidToken
 	}
 
 	if time.Now().After(expiresAt) {
 		// Session expired — clean up
 		_ = m.store.DeleteSession(context.Background(), token)
-		return "", ErrExpiredToken
+		return "", "", ErrExpiredToken
 	}
 
-	return id, nil
+	return id, csrfToken, nil
 }
 
 // Logout deletes a session by token.

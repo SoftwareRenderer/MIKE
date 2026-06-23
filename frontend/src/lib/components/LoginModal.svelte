@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { setCsrfToken } from '$lib/api';
+
     let { onClose }: { onClose: () => void | Promise<void> } = $props();
     let password = $state('');
     let error = $state('');
@@ -22,6 +24,9 @@
                 error = body.error || 'Login failed';
                 return;
             }
+            // Extract CSRF token from response header
+            const token = res.headers.get('X-CSRF-Token');
+            if (token) setCsrfToken(token);
             await onClose();
         } catch (e) {
             error = 'Network error';

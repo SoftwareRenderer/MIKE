@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createBoardStream, getProjectCounts } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createBoardStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -216,6 +216,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             const authData = await authRes.json();
             isAuthenticated = authData.authenticated;
             if (isAuthenticated) {
+                // Extract CSRF token from session response
+                if (authData.csrf_token) setCsrfToken(authData.csrf_token);
                 await loadAppData();
             }
         } catch (e) {
@@ -372,20 +374,26 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         addProjectError = '';
     }
 
+    async function handleLogout() {
+        const csrfToken = await ensureCsrfToken();
+        await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+            headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
+        });
+        clearCsrfToken();
+        isAuthenticated = false;
+    }
+
     async function handleSelectProjectPath(path: string, sandboxEnabled: boolean) {
         showFileBrowserVal = false;
         addProjectError = '';
         try {
-            const p = await fetch('/api/projects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path, sandbox_enabled: sandboxEnabled }),
-            });
-            if (!p.ok) {
-                const err = await p.json();
-                throw new Error(err.error || 'Failed to create project');
+            const proj = await createProject(path);
+            // Update sandbox_enabled if different from default
+            if (proj.sandbox_enabled !== sandboxEnabled) {
+                await updateProject(proj.id, { sandbox_enabled: sandboxEnabled });
             }
-            const proj = await p.json();
             projects.push(proj);
             projectsStore.set(projects);
             clearTaskDetail();
@@ -606,7 +614,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
                         </svg>
                     </button>
-                    <button class="icon-btn" onclick={() => { fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); isAuthenticated = false; }} aria-label="Sign out" title="Sign out">
+                    <button class="icon-btn" onclick={handleLogout} aria-label="Sign out" title="Sign out">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
                             <polyline points="16 17 21 12 16 7"/>

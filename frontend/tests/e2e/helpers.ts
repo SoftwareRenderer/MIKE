@@ -1,12 +1,30 @@
 import { test as base, expect, Page, Locator } from '@playwright/test';
 import http from 'node:http';
 
+const TEST_PASSWORD = 'test-password-1234';
+
 // Custom fixture that provides helper methods
 export const test = base.extend<{
+  login: () => Promise<void>;
   waitForAppLoaded: () => Promise<void>;
   openFirstTask: () => Promise<void>;
   getTaskIdFromApi: () => Promise<string | null>;
 }>({
+  login: async ({ page, context }, use) => {
+    use(async () => {
+      const origin = await page.evaluate(() => window.location.origin);
+      // Login via Playwright's request API (shares cookies with browser context)
+      const response = await context.request.post(`${origin}/api/auth/login`, {
+        data: { password: TEST_PASSWORD },
+      });
+      const csrfToken = response.headers()['x-csrf-token'] || '';
+      // Inject CSRF token into page's JS context (read by api.ts apiFetch)
+      await page.evaluate((token) => {
+        (window as any).__csrfToken = token;
+      }, csrfToken);
+    });
+  },
+
   waitForAppLoaded: async ({ page }, use) => {
     use(async () => {
       await page.waitForSelector('.project-item, .card', { timeout: 10000 });
@@ -34,6 +52,19 @@ export const test = base.extend<{
     });
   },
 });
+
+// Auto-login hook: call this in test.beforeEach to authenticate before each test.
+// Usage: test.beforeEach(async ({ page, login }) => { await login(); });
+export async function autoLogin(page: Page, context: any): Promise<void> {
+  const origin = await page.evaluate(() => window.location.origin);
+  const response = await context.request.post(`${origin}/api/auth/login`, {
+    data: { password: TEST_PASSWORD },
+  });
+  const csrfToken = response.headers()['x-csrf-token'] || '';
+  await page.evaluate((token) => {
+    (window as any).__csrfToken = token;
+  }, csrfToken);
+}
 
 export { expect } from '@playwright/test';
 

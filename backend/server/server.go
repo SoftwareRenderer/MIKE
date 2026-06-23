@@ -112,7 +112,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           PanicRecoveryMiddleware(CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))),
+		Handler:           PanicRecoveryMiddleware(CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

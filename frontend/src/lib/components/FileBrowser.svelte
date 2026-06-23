@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
+    import { ensureCsrfToken } from '$lib/api';
     import homeIcon from '$lib/assets/icons/home.svg';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
@@ -65,10 +66,12 @@
         initGitLoading = true;
         error = '';
         try {
+            const csrfToken = await ensureCsrfToken();
             const res = await fetch('/api/fs/init-git', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
                 body: JSON.stringify({ path: currentPath }),
+                credentials: 'include',
             });
             if (!res.ok) {
                 const err = await res.json();
@@ -98,10 +101,12 @@
         error = '';
         try {
             const newPath = currentPath.endsWith('/') ? currentPath + name : currentPath + '/' + name;
+            const csrfToken = await ensureCsrfToken();
             const res = await fetch('/api/fs/mkdir', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
                 body: JSON.stringify({ path: newPath }),
+                credentials: 'include',
             });
             if (!res.ok) {
                 const err = await res.json();

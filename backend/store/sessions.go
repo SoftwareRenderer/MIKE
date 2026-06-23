@@ -10,27 +10,34 @@ const sessionTable = `
 CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     token      TEXT NOT NULL UNIQUE,
+    csrf_token TEXT,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
 );
 `
 
-// initSessions creates the sessions table if it does not exist.
+// initSessions creates the sessions table if it does not exist,
+// and migrates existing tables to add the csrf_token column.
 func (s *Store) initSessions() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(sessionTable)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add csrf_token column if it doesn't exist (migration for existing DBs)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN csrf_token TEXT`)
+	return nil
 }
 
 // CreateSession inserts a new session row and returns its id.
-func (s *Store) CreateSession(ctx context.Context, id, token string, expiresAt time.Time) error {
+func (s *Store) CreateSession(ctx context.Context, id, token, csrfToken string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, token, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-		id, token, time.Now().Unix(), expiresAt.Unix(),
+		`INSERT INTO sessions (id, token, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		id, token, csrfToken, time.Now().Unix(), expiresAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
@@ -38,18 +45,18 @@ func (s *Store) CreateSession(ctx context.Context, id, token string, expiresAt t
 	return nil
 }
 
-// GetSessionByToken returns the session id and expiry time for a given token,
+// GetSessionByToken returns the session id, CSRF token, and expiry time for a given token,
 // or sql.ErrNoRows if the token does not exist.
-func (s *Store) GetSessionByToken(ctx context.Context, token string) (id string, expiresAt time.Time, err error) {
+func (s *Store) GetSessionByToken(ctx context.Context, token string) (id, csrfToken string, expiresAt time.Time, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var createdAt, expiresAtUnix int64
-	err = s.db.QueryRowContext(ctx, `SELECT id, created_at, expires_at FROM sessions WHERE token = ?`, token).
-		Scan(&id, &createdAt, &expiresAtUnix)
+	err = s.db.QueryRowContext(ctx, `SELECT id, csrf_token, created_at, expires_at FROM sessions WHERE token = ?`, token).
+		Scan(&id, &csrfToken, &createdAt, &expiresAtUnix)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
-	return id, time.Unix(expiresAtUnix, 0), nil
+	return id, csrfToken, time.Unix(expiresAtUnix, 0), nil
 }
 
 // DeleteSession removes a session by token.

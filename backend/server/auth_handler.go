@@ -2,8 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
+
+	"kanban/backend/auth"
 )
 
 const (
@@ -31,13 +34,18 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, token, err := s.sessionMgr.Login(req.Password)
+	_, token, csrfToken, err := s.sessionMgr.Login(req.Password)
 	if err != nil {
-		JSONError(w, http.StatusUnauthorized, "invalid password")
+		if errors.Is(err, auth.ErrInvalidPassword) {
+			JSONError(w, http.StatusUnauthorized, "invalid password")
+		} else {
+			JSONError(w, http.StatusInternalServerError, "internal error")
+		}
 		return
 	}
 
 	setSessionCookie(w, token, sessionMaxAge)
+	w.Header().Set("X-CSRF-Token", csrfToken)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -55,7 +63,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.sessionMgr.Validate(cookie.Value); err != nil {
+	if _, _, err := s.sessionMgr.Validate(cookie.Value); err != nil {
 		JSONError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
@@ -75,8 +83,8 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && s.sessionMgr != nil {
-		if _, err := s.sessionMgr.Validate(cookie.Value); err == nil {
-			JSONResponse(w, http.StatusOK, map[string]bool{"authenticated": true})
+		if _, csrfToken, err := s.sessionMgr.Validate(cookie.Value); err == nil {
+			JSONResponse(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrfToken})
 			return
 		}
 	}

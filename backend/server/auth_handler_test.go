@@ -25,14 +25,23 @@ func TestAuthLoginValidPassword(t *testing.T) {
 
 	// Check that a session cookie was set
 	header := rr.Header().Get("Set-Cookie")
-	if !strings.Contains(header, "SESSION=") {
-		t.Error("expected SESSION cookie in Set-Cookie header")
+	if !strings.Contains(header, "PHPSESSID=") {
+		t.Error("expected PHPSESSID cookie in Set-Cookie header")
 	}
 	if !strings.Contains(header, "HttpOnly") {
-		t.Error("expected HttpOnly flag on SESSION cookie")
+		t.Error("expected HttpOnly flag on PHPSESSID cookie")
 	}
 	if !strings.Contains(header, "SameSite=Lax") {
-		t.Error("expected SameSite=Lax flag on SESSION cookie")
+		t.Error("expected SameSite=Lax flag on PHPSESSID cookie")
+	}
+
+	// Check that CSRF token is in response header
+	csrfToken := rr.Header().Get("X-CSRF-Token")
+	if csrfToken == "" {
+		t.Error("expected X-CSRF-Token header in login response")
+	}
+	if len(csrfToken) != 32 {
+		t.Errorf("X-CSRF-Token length = %d; want 32", len(csrfToken))
 	}
 }
 
@@ -103,13 +112,11 @@ func TestAuthSessionAuthenticated(t *testing.T) {
 	// Extract session cookie
 	sessionCookie := loginRR.Header().Get("Set-Cookie")
 	if sessionCookie == "" {
-		t.Fatal("expected SESSION cookie after login")
+		t.Fatal("expected PHPSESSID cookie after login")
 	}
 
 	// Check session with cookie
 	sessionReq := testRequest(http.MethodGet, "/api/auth/session", nil)
-	sessionReq.Header.Set("Cookie", extractCookieValue(sessionCookie, "SESSION")+"="+extractCookieValue(sessionCookie, "SESSION"))
-	// Build proper cookie header
 	parts := strings.Split(sessionCookie, ";")[0]
 	sessionReq.Header.Set("Cookie", strings.TrimSpace(parts))
 
@@ -118,9 +125,13 @@ func TestAuthSessionAuthenticated(t *testing.T) {
 		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
 	}
 
-	body := mustJSON[map[string]bool](t, rr.Body)
-	if !body["authenticated"] {
+	body := mustJSON[map[string]any](t, rr.Body)
+	if body["authenticated"] != true {
 		t.Error("expected authenticated = true after login")
+	}
+	// CSRF token should be present in session response
+	if body["csrf_token"] == nil || body["csrf_token"] == "" {
+		t.Error("expected csrf_token in session response")
 	}
 }
 
@@ -149,10 +160,12 @@ func TestAuthLogoutSuccess(t *testing.T) {
 
 	sessionCookie := loginRR.Header().Get("Set-Cookie")
 	parts := strings.Split(sessionCookie, ";")[0]
+	csrfToken := loginRR.Header().Get("X-CSRF-Token")
 
-	// Logout with session cookie
+	// Logout with session cookie and CSRF token
 	logoutReq := testRequest(http.MethodPost, "/api/auth/logout", nil)
 	logoutReq.Header.Set("Cookie", strings.TrimSpace(parts))
+	logoutReq.Header.Set("X-CSRF-Token", csrfToken)
 	rr := testResponse(t, s, logoutReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("logout: status = %d; body: %s", rr.Code, rr.Body.String())

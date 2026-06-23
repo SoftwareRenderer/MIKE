@@ -77,7 +77,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 // sessionKey is the context key for the authenticated session id.
 type sessionKey struct{}
 
-// SessionMiddleware validates the SESSION cookie and injects auth state into context.
+// SessionMiddleware validates the PHPSESSID cookie and injects auth state into context.
 // Public paths (health check, login, session check) bypass validation.
 func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,7 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		sessionID, err := s.sessionMgr.Validate(cookie.Value)
+		sessionID, _, err := s.sessionMgr.Validate(cookie.Value)
 		if err != nil {
 			JSONError(w, http.StatusUnauthorized, "invalid session")
 			return
@@ -125,4 +125,62 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// csrfKey is the context key for the CSRF token.
+type csrfKey struct{}
+
+// CSRFMiddleware validates the X-CSRF-Token header against the stored token.
+// GET, HEAD, and OPTIONS requests are exempt. Public paths are exempt.
+func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip safe/idempotent methods
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip public paths
+		if isPublicPath(r.URL.Path, r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Extract CSRF token from header
+		csrfHeader := r.Header.Get("X-CSRF-Token")
+		if csrfHeader == "" {
+			JSONError(w, http.StatusForbidden, "missing CSRF token")
+			return
+		}
+
+		// Look up session to get stored CSRF token
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil {
+			JSONError(w, http.StatusForbidden, "missing session")
+			return
+		}
+
+		_, storedCSRF, err := s.sessionMgr.Validate(cookie.Value)
+		if err != nil {
+			JSONError(w, http.StatusForbidden, "invalid session")
+			return
+		}
+
+		if csrfHeader != storedCSRF {
+			JSONError(w, http.StatusForbidden, "invalid CSRF token")
+			return
+		}
+
+		// Inject CSRF token into context
+		ctx := context.WithValue(r.Context(), csrfKey{}, storedCSRF)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// GetCSRFToken retrieves the CSRF token from the request context.
+func GetCSRFToken(r *http.Request) string {
+	if token, ok := r.Context().Value(csrfKey{}).(string); ok {
+		return token
+	}
+	return ""
 }

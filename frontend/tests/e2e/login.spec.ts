@@ -24,9 +24,15 @@ test.describe.serial('Login', () => {
 
         // Login via API directly (bypass UI for reliability)
         const context = page.context();
-        await context.request.post('/api/auth/login', {
+        const response = await context.request.post('/api/auth/login', {
             data: { password: 'test-password-1234' },
         });
+        expect(response.status()).toBe(200);
+
+        // Verify CSRF token is present in response headers
+        const csrfToken = response.headers()['x-csrf-token'];
+        expect(csrfToken).toBeTruthy();
+        expect(csrfToken!.length).toBe(32);
 
         // Reload page to reflect authenticated state
         await page.reload();

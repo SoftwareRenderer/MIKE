@@ -35,6 +35,7 @@ const MOCK_PORT = 9999;
 const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
 const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
+const AUTH_FILE = '/tmp/kanban-test-auth.json';
 const KANBAN_BIN = '/home/mwren/projects/kanban/kanban';
 const TEST_PASSWORD = 'test-password-1234';
 
@@ -64,8 +65,13 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT, 15000);
     console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
-    // 5b. Login to get session cookie
-    const sessionCookie = await login(KANBAN_BASE);
+    // 5b. Login to get session cookie and CSRF token
+    const { cookie: sessionCookie, csrfToken } = await login(KANBAN_BASE);
+    // Write auth info for Playwright to pick up
+    fs.writeFileSync(AUTH_FILE, JSON.stringify({
+        cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+        csrfToken,
+    }));
     console.log(`[global-setup] Logged in to test server`);
 
     // 6. Configure mock provider via API (if using mock LLM)
@@ -84,7 +90,7 @@ async function setup(): Promise<void> {
                 default_model: 'mock-model',
             }],
             default_provider: 'mock',
-        }, sessionCookie);
+        }, sessionCookie, csrfToken);
         console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
 
@@ -107,7 +113,7 @@ async function setup(): Promise<void> {
     const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
-    }, sessionCookie);
+    }, sessionCookie, csrfToken);
     console.log(`[global-setup] Test project created: ${project.id}`);
 
     // 9. Create test tasks with provider URL
@@ -117,8 +123,8 @@ async function setup(): Promise<void> {
     const taskPayload2 = useMock
         ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
         : { prompt: 'Second test task' };
-    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload, sessionCookie);
-    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie);
+    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload, sessionCookie, csrfToken);
+    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie, csrfToken);
     console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
     // 10. Start isolated kanban server (for config-modifying test suites)
@@ -134,7 +140,12 @@ async function setup(): Promise<void> {
     console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
 
     // 10b. Login to isolated server
-    const sessionCookieIso = await login(KANBAN_BASE_ISOLATED);
+    const { cookie: sessionCookieIso, csrfToken: csrfTokenIso } = await login(KANBAN_BASE_ISOLATED);
+    // Write isolated auth info
+    fs.writeFileSync(AUTH_FILE + '.isolated', JSON.stringify({
+        cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+        csrfToken: csrfTokenIso,
+    }));
     console.log(`[global-setup] Logged in to isolated server`);
 
     // 11. Configure mock provider on isolated server
@@ -151,7 +162,7 @@ async function setup(): Promise<void> {
                 default_model: 'mock-model',
             }],
             default_provider: 'mock',
-        }, sessionCookieIso);
+        }, sessionCookieIso, csrfTokenIso);
         console.log(`[global-setup] Mock provider configured on isolated server`);
     }
 
@@ -159,12 +170,12 @@ async function setup(): Promise<void> {
     const projectIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
-    }, sessionCookieIso);
+    }, sessionCookieIso, csrfTokenIso);
     console.log(`[global-setup] Test project created on isolated server: ${projectIso.id}`);
 
     // 13. Create test tasks on isolated server
-    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload, sessionCookieIso);
-    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2, sessionCookieIso);
+    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload, sessionCookieIso, csrfTokenIso);
+    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2, sessionCookieIso, csrfTokenIso);
     console.log(`[global-setup] Test tasks created on isolated server: ${taskIso.id}, ${taskIso2.id}`);
 
     // 14. Create lock file to signal setup complete
@@ -221,6 +232,9 @@ async function teardown(): Promise<void> {
 
     // 8. Remove lock file
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+    // 9. Remove auth files
+    try { fs.unlinkSync(AUTH_FILE); } catch { /* ignore */ }
+    try { fs.unlinkSync(AUTH_FILE + '.isolated'); } catch { /* ignore */ }
 }
 
 // --- Helpers ---
@@ -330,7 +344,7 @@ function waitForServer(port: number, timeout = 5000): Promise<void> {
     });
 }
 
-function postJson(url: string, body: any, cookie?: string): Promise<any> {
+function postJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
         const headers: Record<string, string> = {
@@ -338,6 +352,7 @@ function postJson(url: string, body: any, cookie?: string): Promise<any> {
             'Content-Length': Buffer.byteLength(data).toString(),
         };
         if (cookie) headers['Cookie'] = cookie;
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
         const req = http.request(url, {
             method: 'POST',
             headers,
@@ -354,7 +369,7 @@ function postJson(url: string, body: any, cookie?: string): Promise<any> {
     });
 }
 
-function putJson(url: string, body: any, cookie?: string): Promise<any> {
+function putJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
         const headers: Record<string, string> = {
@@ -362,6 +377,7 @@ function putJson(url: string, body: any, cookie?: string): Promise<any> {
             'Content-Length': Buffer.byteLength(data).toString(),
         };
         if (cookie) headers['Cookie'] = cookie;
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
         const req = http.request(url, {
             method: 'PUT',
             headers,
@@ -394,8 +410,8 @@ function getJson(url: string, cookie?: string): Promise<any> {
     });
 }
 
-/** Login to the server and return the session cookie string. */
-async function login(base: string): Promise<string> {
+/** Login to the server and return the session cookie string and CSRF token. */
+async function login(base: string): Promise<{ cookie: string; csrfToken: string }> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify({ password: TEST_PASSWORD });
         const req = http.request(`${base}/api/auth/login`, {
@@ -406,6 +422,7 @@ async function login(base: string): Promise<string> {
             },
         }, (res) => {
             const setCookie = res.headers['set-cookie'];
+            const csrfToken = res.headers['x-csrf-token'];
             let responseData = '';
             res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
@@ -413,10 +430,10 @@ async function login(base: string): Promise<string> {
                     reject(new Error(`Login failed: ${responseData}`));
                     return;
                 }
-                // Extract just the SESSION=token part
+                // Extract just the PHPSESSID=token part
                 const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
                 const parts = cookie.split(';')[0].trim();
-                resolve(parts);
+                resolve({ cookie: parts, csrfToken: csrfToken || '' });
             });
         });
         req.on('error', reject);

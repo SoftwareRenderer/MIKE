@@ -1,4 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
+import fs from 'node:fs';
+
+// Read auth info written by global-setup (session cookie + CSRF token)
+function readAuth(path: string) {
+    try { return JSON.parse(fs.readFileSync(path, 'utf-8')); } catch { return null; }
+}
+const authInfo = readAuth('/tmp/kanban-test-auth.json');
+const authInfoIso = readAuth('/tmp/kanban-test-auth.json.isolated');
+
+function makeStorageState(info: any) {
+    if (!info) return undefined;
+    return { cookies: info.cookies || [], origins: [] };
+}
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -16,13 +29,20 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+          ...devices['Desktop Chrome'],
+          ...(authInfo ? { storageState: makeStorageState(authInfo) } : {}),
+      },
       // All test files EXCEPT config-modifying suites (those run on isolated server)
       testMatch: /\/tests\/e2e\/(?!model-selector|settings-redesign|debug-cards|settings-model-delete|settings-reasoning-effort|reasoning-effort|sandbox-toggle|sandbox-tool-calls).*\.spec\.ts$/,
     },
     {
       name: 'isolated',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3001' },
+      use: {
+          ...devices['Desktop Chrome'],
+          baseURL: 'http://localhost:3001',
+          ...(authInfoIso ? { storageState: makeStorageState(authInfoIso) } : {}),
+      },
       // Config-modifying suites run on isolated server (port 3001, own DB)
       // Serialized to avoid races between suites that modify shared config
       testMatch: ['**/model-selector.spec.ts', '**/settings-redesign.spec.ts', '**/debug-cards.spec.ts', '**/settings-model-delete.spec.ts', '**/settings-reasoning-effort.spec.ts', '**/reasoning-effort.spec.ts', '**/sandbox-toggle.spec.ts', '**/sandbox-tool-calls.spec.ts'],
