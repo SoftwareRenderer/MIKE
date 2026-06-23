@@ -358,6 +358,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     });
 
+
+
     // Status badge
     let badge = $derived.by(() => {
         const streaming = $streamingTaskIds.has(task.id);

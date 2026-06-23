@@ -442,6 +442,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             if (currentProject?.id === p.id) {
                 currentProject = updated;
                 selectedProject.set(updated);
+                // Close terminal so it restarts with updated sandbox mode
+                showTerminal.set(false);
             }
         } catch (e) {
             addProjectError = String(e);
@@ -644,7 +646,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         />
     {/if}
     {#if showTerminalVal}
-        <svelte:component this={TerminalPanelComponent} />
+        {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
+            <svelte:component this={TerminalPanelComponent} />
+        {/key}
     {/if}
     {#if showStatsVal}
         <StatsModal

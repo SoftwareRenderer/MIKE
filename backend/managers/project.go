@@ -209,6 +209,14 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return
 			}
+			// Close all terminal sessions so they restart with the new sandbox mode
+			if h.terminalMgr != nil {
+				tasks, _ := h.store.GetTasksByProject(id)
+				for _, task := range tasks {
+					h.terminalMgr.RemoveSession(task.ID)
+				}
+				h.terminalMgr.RemoveSession("proj:" + id)
+			}
 		}
 		// Fetch latest state
 		p, err := h.store.GetProject(id)
