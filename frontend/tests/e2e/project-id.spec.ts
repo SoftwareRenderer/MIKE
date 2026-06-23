@@ -1,4 +1,5 @@
-import { test, expect } from './helpers';
+import { test, expect } from '@playwright/test';
+import { csrfFetch } from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Project ID generation', () => {
@@ -49,22 +50,17 @@ test.describe('Project ID generation', () => {
       );
     }
 
-    const result = await page.evaluate(async (path: string) => {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      return (await res.json()) as any;
-    }, tempPath);
+    const result = await csrfFetch(page, '/api/projects', {
+      method: 'POST',
+      body: { path: tempPath },
+    });
+    const projectData = result.data;
 
     // Basename "kanban-test-repo" is already taken, so it should fall back to slugified full path
-    expect(result.id).not.toBe('kanban-test-repo');
-    expect(result.id).toBe('tmp-collision-parent-kanban-test-repo');
+    expect(projectData.id).not.toBe('kanban-test-repo');
+    expect(projectData.id).toBe('tmp-collision-parent-kanban-test-repo');
 
     // Clean up
-    await page.evaluate(async (id: string) => {
-      await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-    }, result.id);
+    await csrfFetch(page, `/api/projects/${projectData.id}`, { method: 'DELETE' });
   });
 });

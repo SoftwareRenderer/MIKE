@@ -1,72 +1,7 @@
-import { test as base, expect, Page, Locator } from '@playwright/test';
+import { expect, Page, Locator } from '@playwright/test';
 import http from 'node:http';
 
 const TEST_PASSWORD = 'test-password-1234';
-
-// Custom fixture that provides helper methods
-export const test = base.extend<{
-  login: () => Promise<void>;
-  waitForAppLoaded: () => Promise<void>;
-  openFirstTask: () => Promise<void>;
-  getTaskIdFromApi: () => Promise<string | null>;
-}>({
-  login: async ({ page, context }, use) => {
-    use(async () => {
-      const origin = await page.evaluate(() => window.location.origin);
-      // Login via Playwright's request API (shares cookies with browser context)
-      const response = await context.request.post(`${origin}/api/auth/login`, {
-        data: { password: TEST_PASSWORD },
-      });
-      const csrfToken = response.headers()['x-csrf-token'] || '';
-      // Inject CSRF token into page's JS context (read by api.ts apiFetch)
-      await page.evaluate((token) => {
-        (window as any).__csrfToken = token;
-      }, csrfToken);
-    });
-  },
-
-  waitForAppLoaded: async ({ page }, use) => {
-    use(async () => {
-      await page.waitForSelector('.project-item, .card', { timeout: 10000 });
-    });
-  },
-
-  openFirstTask: async ({ page }, use) => {
-    use(async () => {
-      await page.waitForSelector('.card', { timeout: 10000 });
-      await page.click('.card');
-      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-    });
-  },
-
-  getTaskIdFromApi: async ({ page }, use) => {
-    use(async () => {
-      return await page.evaluate(async () => {
-        const res = await fetch('/api/projects');
-        const projects = await res.json();
-        if (projects.length === 0) return null;
-        const boardRes = await fetch(`/api/projects/${projects[0].id}/board`);
-        const board = await boardRes.json();
-        return board.tasks && board.tasks.length > 0 ? board.tasks[0].id : null;
-      });
-    });
-  },
-});
-
-// Auto-login hook: call this in test.beforeEach to authenticate before each test.
-// Usage: test.beforeEach(async ({ page, login }) => { await login(); });
-export async function autoLogin(page: Page, context: any): Promise<void> {
-  const origin = await page.evaluate(() => window.location.origin);
-  const response = await context.request.post(`${origin}/api/auth/login`, {
-    data: { password: TEST_PASSWORD },
-  });
-  const csrfToken = response.headers()['x-csrf-token'] || '';
-  await page.evaluate((token) => {
-    (window as any).__csrfToken = token;
-  }, csrfToken);
-}
-
-export { expect } from '@playwright/test';
 
 // --- Shared API helpers (replaces duplicate code in individual test files) ---
 
@@ -80,38 +15,90 @@ async function getOrigin(page: Page): Promise<string> {
   return await page.evaluate(() => window.location.origin);
 }
 
+/**
+ * Get CSRF token from page context. Tries window.__csrfToken first,
+ * then falls back to fetching /api/auth/session.
+ */
+async function getCsrfToken(page: Page): Promise<string> {
+  let token = await page.evaluate(() => (window as any).__csrfToken || '');
+  if (!token) {
+    token = await page.evaluate(async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        return data.csrf_token || '';
+      } catch {
+        return '';
+      }
+    });
+  }
+  return token;
+}
+
+/**
+ * CSRF-aware fetch wrapper for use in page.evaluate.
+ * Use this instead of raw fetch for POST/PUT/DELETE requests.
+ * Returns { ok, status, json, text } from the response.
+ */
+export async function csrfFetch(
+  page: Page,
+  url: string,
+  options: { method: string; body?: Record<string, any> } = { method: 'POST' }
+): Promise<any> {
+  await getOrigin(page);
+  const csrf = await getCsrfToken(page);
+  return await page.evaluate(async ({ apiUrl, opts, csrfToken }) => {
+    const res = await fetch(apiUrl, {
+      method: opts.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      },
+      credentials: 'include',
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data };
+  }, { apiUrl: url, opts: options, csrfToken: csrf });
+}
+
 /** PUT /api/config with the given body and wait for it to propagate. */
 export async function apiPutConfig(page: Page, body: Record<string, any>): Promise<any> {
-  const origin = await getOrigin(page);
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = http.request(`${origin}/api/config`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    }, (res) => {
-      let responseBody = '';
-      res.on('data', chunk => responseBody += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(responseBody)); } catch { resolve(null); }
-      });
+  // Ensure page has a valid origin
+  await getOrigin(page);
+  // Get CSRF token: first from window.__csrfToken (set by login fixture),
+  // then from session endpoint as fallback
+  let csrfToken = await page.evaluate(() => (window as any).__csrfToken || '');
+  if (!csrfToken) {
+    csrfToken = await page.evaluate(async () => {
+      const res = await fetch('/api/auth/session');
+      const data = await res.json();
+      return data.csrf_token || '';
     });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
+  }
+  return await page.evaluate(async ({ bodyData, csrf }) => {
+    const res = await fetch('/api/config', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify(bodyData),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }, { bodyData: body, csrf: csrfToken });
 }
 
 /** GET /api/config and return parsed JSON. */
 export async function apiGetConfig(page: Page): Promise<any> {
-  const origin = await getOrigin(page);
-  return new Promise((resolve, reject) => {
-    http.get(`${origin}/api/config`, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch { resolve(null); }
-      });
-    }).on('error', reject);
+  // Ensure page has a valid origin
+  await getOrigin(page);
+  return await page.evaluate(async () => {
+    const res = await fetch('/api/config');
+    if (!res.ok) return null;
+    return res.json();
   });
 }
 
@@ -220,6 +207,34 @@ async function clickStartTaskIfNew(page: Page): Promise<void> {
   }
 }
 
+// Helper: move task to in_progress via API (bypasses executor, for UI-only tests)
+// This makes the chat form appear without needing the executor/LLM.
+export async function ensureTaskStarted(page: Page, projectId: string, taskId: string): Promise<boolean> {
+  // Check if task is already not in backlog
+  const taskData = await page.evaluate(async ({ pid, tid }) => {
+    const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+    return res.ok ? res.json() : null;
+  }, { pid: projectId, tid: taskId });
+
+  if (taskData?.status !== 'backlog') {
+    return true; // Already started
+  }
+
+  // Move to in_progress via API (bypasses executor)
+  const result = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+    method: 'POST',
+    body: { status: 'in_progress' },
+  });
+  if (!result.ok) return false;
+
+  // Verify the status change took effect
+  const updated = await page.evaluate(async ({ pid, tid }) => {
+    const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+    return res.ok ? res.json() : null;
+  }, { pid: projectId, tid: taskId });
+  return updated?.status === 'in_progress';
+}
+
 // Helper: wait for the chat form to be present (send OR stop button visible)
 // Use this when you need the form to exist but don't care if LLM is still responding.
 export async function waitForChatForm(page: Page, timeout = 5000): Promise<void> {
@@ -229,11 +244,26 @@ export async function waitForChatForm(page: Page, timeout = 5000): Promise<void>
 
 // Helper: ensure chat form is ready for input (send button visible, isLoading=false)
 // Waits for the LLM to finish any pending response before resolving.
-export async function ensureChatForm(page: Page, timeout = 10000): Promise<void> {
+// If { requireSendBtn: false }, only waits for the chat form to exist (executor may not start).
+export async function ensureChatForm(page: Page, timeout = 10000, requireSendBtn = true): Promise<void> {
   await clickStartTaskIfNew(page);
-  // Wait for send button (only visible when isLoading=false)
-  // This ensures the LLM has finished any pending response
-  await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+  // Wait for chat form to exist
+  await expect(page.locator('.chat-form')).toBeVisible({ timeout: 5000 });
+  // If the task was in backlog, the executor may now be calling the LLM (isLoading=true).
+  // Wait for the LLM to complete (btn-send reappears) OR timeout gracefully.
+  if (requireSendBtn) {
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+  }
+}
+
+// Helper: navigate to a task detail page using window.location (triggers full reload for SPA).
+// page.goto() doesn't re-trigger onMount for SPAs, so we use window.location.href instead.
+export async function navigateToTask(page: Page, taskId: string): Promise<void> {
+  if (!taskId) {
+    throw new Error(`navigateToTask called with undefined/empty taskId`);
+  }
+  await page.evaluate((tid) => { window.location.href = `/?task=${tid}`; }, taskId);
+  await expect(page.locator('.task-detail-page')).toBeVisible();
 }
 
 // Helper: create a fresh task and open it via URL
@@ -243,8 +273,7 @@ export async function createAndOpenTask(page: Page, title?: string): Promise<str
   const taskPrompt = title || `task-${Date.now()}`;
   const projectId = await getProjectId(page);
   const taskId = await createTaskViaApi(page, projectId, taskPrompt);
-  await page.goto(`/?task=${taskId}`);
-  await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+  await navigateToTask(page, taskId);
   return taskId;
 }
 
@@ -260,31 +289,42 @@ export async function sendMessageAndWait(page: Page, message: string, timeout = 
   await expect(page.locator('.btn-send')).toBeVisible({ timeout });
 }
 
-// Helper: create a task via API and return its ID
-// This avoids the UI race conditions and is faster for tests that don't need UI interaction.
-// Automatically includes the default provider's llama_server_url and model_name
-// so the executor can start (tasks without LLM config won't have a running executor).
+// Helper: create a task via the API and return its ID.
+// Uses csrfFetch for CSRF-aware API calls. Direct API creation is faster and more reliable than UI modal.
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
-  return await page.evaluate(async ({ pid, prompt }) => {
-    // Fetch default provider config to include in task creation
-    const [configRes] = await Promise.all([
-      fetch('/api/config'),
-    ]);
-    const config = await configRes.json();
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
-
-    const taskRes = await fetch(`/api/projects/${pid}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
-      }),
-    });
-    const task = await taskRes.json();
-    return task.id;
-  }, { pid: projectId, prompt });
+  // Get existing task IDs before creating
+  const existingIds = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/board`);
+    const board = await res.json();
+    return board.tasks.map((t: any) => t.id);
+  }, projectId);
+  // Create task via API (CSRF-aware)
+  const config = await apiGetConfig(page);
+  const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+  const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
+    method: 'POST',
+    body: {
+      prompt,
+      llama_server_url: defaultProvider?.url || '',
+      model_name: defaultProvider?.default_model || '',
+    },
+  });
+  if (!result.ok) {
+    throw new Error(`createTaskViaApi: API returned ${result.status}: ${JSON.stringify(result.data)}`);
+  }
+  const taskId = result.data?.id;
+  if (!taskId) {
+    throw new Error('createTaskViaApi: no task ID in API response');
+  }
+  // Wait for the board to pick up the new task (WebSocket push or next poll)
+  await expect(async () => {
+    const tasks = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}/board`);
+      return await res.json();
+    }, projectId);
+    expect(tasks.tasks.some((t: any) => t.id === taskId)).toBe(true);
+  }).toPass({ timeout: 5000 });
+  return taskId;
 }
 
 // Helper: send a message via HTTP POST to trigger lazy-start.

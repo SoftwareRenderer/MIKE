@@ -59,12 +59,12 @@ test.describe.serial('Settings API Key', () => {
     await expect(row).toBeVisible();
 
     // API key input is visible and editable (not disabled)
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await expect(apiKeyInput).toBeVisible();
     expect(await apiKeyInput.isDisabled()).toBe(false);
 
     // Placeholder is ********
-    await expect(apiKeyInput).toHaveAttribute('placeholder', '********');
+    await expect(apiKeyInput).toHaveAttribute('placeholder', 'API key...');
 
     // Label says "optional"
     const label = card.locator('.api-key-label');
@@ -96,7 +96,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Input value is masked (10 bullets)
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     const value = await apiKeyInput.inputValue();
     expect(value).toBe('••••••••••');
   });
@@ -112,7 +112,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Enter a new key directly
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await apiKeyInput.fill('sk-new-api-key-xyz');
     await expect(apiKeyInput).toHaveValue('sk-new-api-key-xyz');
 
@@ -171,7 +171,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Enter a key to trigger the warning
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await apiKeyInput.fill('sk-test-warning');
 
     // Warning should be visible
@@ -212,7 +212,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Enter an API key
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await apiKeyInput.fill('sk-test-connection-key');
 
     // Intercept the test-connection API call to verify the API key is sent
@@ -245,7 +245,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Enter an API key
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await apiKeyInput.fill('sk-fetch-models-key');
 
     // Intercept the fetch-models API call
@@ -290,7 +290,7 @@ test.describe.serial('Settings API Key', () => {
     }
 
     // Clear the masked key and enter empty
-    const apiKeyInput = card.locator('.api-key-input');
+    const apiKeyInput = card.locator('.api-key-field input');
     await apiKeyInput.fill('');
 
     // Save

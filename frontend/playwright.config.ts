@@ -10,7 +10,12 @@ const authInfoIso = readAuth('/tmp/kanban-test-auth.json.isolated');
 
 function makeStorageState(info: any) {
     if (!info) return undefined;
-    return { cookies: info.cookies || [], origins: [] };
+    // Ensure cookies have valid expires field (Playwright requires float timestamp)
+    const cookies = (info.cookies || []).map((c: any) => ({
+        ...c,
+        expires: c.expires ?? Math.floor(Date.now() / 1000) + 86400 * 365, // 1 year from now
+    }));
+    return { cookies, origins: [] };
 }
 
 export default defineConfig({

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureChatForm, waitForChatForm, createAndOpenTask, getProjectId, createTaskViaApi } from './helpers';
+import {ensureChatForm, waitForChatForm, createAndOpenTask, getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted} from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Task Chat', () => {
@@ -8,25 +8,38 @@ test.describe('Task Chat', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  // Create task via API (includes default provider config) and open it.
-  // Waits for chat form to be ready (executor started).
-  // Skips the test gracefully if the executor doesn't start in time.
+  // Open an existing task and ensure chat form is ready.
+  // Uses API to move task to in_progress (bypasses executor).
   async function openTask(page: any, title?: string): Promise<void> {
     const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, title || `chat-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    // Get the first task ID
+    const taskId = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}/board`);
+      const board = await res.json();
+      return board.tasks[0]?.id || '';
+    }, projectId);
+    if (!taskId) test.skip('No tasks found');
+
+    // Navigate to task
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    // Graceful: executor may not start in test env under load
-    const chatReady = await page.locator('.btn-send').isVisible({ timeout: 10000 }).catch(() => false);
-    if (!chatReady) test.skip();
+
+    // Move task to in_progress via API (bypasses executor, shows chat form)
+    const ok = await ensureTaskStarted(page, projectId, taskId);
+    if (!ok) test.skip('Could not move task to in_progress');
+
+    // Reload to pick up status change
+    await page.reload();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    // Wait for chat form to appear
+    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
   }
 
-  // Create task via API and open it without waiting for chat form.
+  // Open an existing task by clicking on its card.
   // Use for tests that don't need the chat form (diff, task list, etc.).
   async function openTaskNoChat(page: any, title?: string): Promise<void> {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, title || `chat-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
   }
 

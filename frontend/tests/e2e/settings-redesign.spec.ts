@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, apiPutConfig, apiGetConfig, waitForConfig } from './helpers';
+import {getProjectId, createTaskViaApi, apiPutConfig, apiGetConfig, waitForConfig, navigateToTask} from './helpers';
 
 const DEFAULT_CONFIG = {
   providers: [
@@ -54,7 +54,7 @@ test.describe.serial('Settings Redesign', () => {
     }
 
     // URL is visible in the card header
-    await expect(card.locator('.url-input')).toHaveValue('http://localhost:9999/v1');
+    await expect(card.locator('.url-field input')).toHaveValue('http://localhost:9999/v1');
   });
 
   test('should show model count badge on collapsed card', async ({ page }) => {
@@ -442,7 +442,7 @@ test.describe.serial('Settings Redesign', () => {
     const taskId = await createTaskViaApi(page, projectId, `model-update-test-${Date.now()}`);
 
     // Navigate to task
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await page.waitForSelector('.task-detail-page', { timeout: 10000 });
     // Wait for chat form to appear (may not appear without providers)
     const chatFormVisible = await page.locator('.chat-form').isVisible({ timeout: 10000 }).catch(() => false);
@@ -479,7 +479,7 @@ test.describe.serial('Settings Redesign', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
     // Navigate back to the task
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await page.waitForSelector('.task-detail-page', { timeout: 10000 });
     // Wait for chat form to appear (replaces waitForSettle(3000))
     await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });

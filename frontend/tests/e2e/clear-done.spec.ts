@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch } from './helpers';
 
 test.describe.serial('Clear All Done Tasks', () => {
   let projectId: string;
@@ -15,16 +15,12 @@ test.describe.serial('Clear All Done Tasks', () => {
     const taskId = await createTaskViaApi(page, projectId, `clear-done-visible-${Date.now()}`);
     expect(taskId).not.toBe('');
 
-    // Move task to done via API
-    const moveStatus = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'done' }),
-      });
-      return res.status;
-    }, { pid: projectId, tid: taskId });
-    expect(moveStatus).toBe(200);
+    // Move task to done via API (CSRF-aware)
+    const moveResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST',
+      body: { status: 'done' },
+    });
+    expect(moveResult.status).toBe(200);
 
     // Navigate to the board view
     await page.goto('/');
@@ -113,33 +109,37 @@ test.describe.serial('Clear All Done Tasks', () => {
   });
 
   test('should delete all done tasks on confirmation', async ({ page }) => {
+    // Count done tasks before creating new ones
+    const doneCountBase = await page.evaluate(async ({ pid }) => {
+      const res = await fetch(`/api/projects/${pid}/board`);
+      const board = await res.json();
+      return board.tasks.filter((t: any) => t.status === 'done').length;
+    }, { pid: projectId });
+
     // Create multiple tasks and move them to done
     const taskId1 = await createTaskViaApi(page, projectId, `clear-done-delete-1-${Date.now()}`);
     const taskId2 = await createTaskViaApi(page, projectId, `clear-done-delete-2-${Date.now()}`);
 
-    await page.evaluate(async ({ pid, tid1, tid2 }) => {
-      await fetch(`/api/projects/${pid}/tasks/${tid1}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'done' }),
-      });
-      await fetch(`/api/projects/${pid}/tasks/${tid2}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'done' }),
-      });
-    }, { pid: projectId, tid1: taskId1, tid2: taskId2 });
+    // Move tasks to done via API (CSRF-aware)
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId1}/move`, {
+      method: 'POST',
+      body: { status: 'done' },
+    });
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId2}/move`, {
+      method: 'POST',
+      body: { status: 'done' },
+    });
 
     await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.waitForSelector('.card');
 
-    // Count done tasks before
+    // Verify done count increased by 2
     const doneCountBefore = await page.evaluate(async ({ pid }) => {
       const res = await fetch(`/api/projects/${pid}/board`);
       const board = await res.json();
       return board.tasks.filter((t: any) => t.status === 'done').length;
     }, { pid: projectId });
-    expect(doneCountBefore).toBeGreaterThanOrEqual(2);
+    expect(doneCountBefore).toBe(doneCountBase + 2);
 
     // Click clear button to trigger confirmation dialog
     await page.click('.clear-btn');
@@ -150,7 +150,7 @@ test.describe.serial('Clear All Done Tasks', () => {
 
     // Wait for done tasks to be deleted (replaces waitForTimeout(1000) + navigate)
     await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.waitForSelector('.card');
 
     // All done tasks should be deleted
     const doneCountAfter = await page.evaluate(async ({ pid }) => {

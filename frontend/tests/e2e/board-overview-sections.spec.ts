@@ -1,4 +1,5 @@
-import { test, expect, getProjectId, createTaskViaApi } from './helpers';
+import { test, expect } from '@playwright/test';
+import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Board overview sections in task detail', () => {
@@ -10,7 +11,7 @@ test.describe('Board overview sections in task detail', () => {
   test('should show all 4 sections in the side panel', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `overview-sections-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // All 4 section headers should be visible
@@ -29,7 +30,7 @@ test.describe('Board overview sections in task detail', () => {
     const projectId = await getProjectId(page);
     // Create a task in backlog (default status)
     const taskId = await createTaskViaApi(page, projectId, `empty-sections-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // All 4 section groups should be visible (even In Progress, Review, Done are empty)
@@ -44,7 +45,7 @@ test.describe('Board overview sections in task detail', () => {
   test('should have collapsible sections with chevron', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `collapse-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Chevron icons should be present

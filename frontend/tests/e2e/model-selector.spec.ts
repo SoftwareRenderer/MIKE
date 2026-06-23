@@ -1,11 +1,9 @@
 import { test, expect } from '@playwright/test';
-import {
-  getProjectId,
+import {getProjectId,
   createTaskViaApi,
   apiPutConfig,
   apiGetConfig,
-  waitForConfig,
-} from './helpers';
+  waitForConfig, navigateToTask} from './helpers';
 
 // Create a task via API with a unique title and open it via URL navigation.
 // If waitForModelTrigger is true, verifies config has providers before navigating
@@ -37,7 +35,7 @@ async function createAndOpenTask(page: any, projectId: string, waitForModelTrigg
     }
   }
   // Navigate to the task URL
-  await page.goto(`/?task=${taskId}`);
+  await navigateToTask(page, taskId);
   await page.waitForSelector('.task-detail-page', { timeout: 10000 });
   // Handle "Start Task" button if task is new
   const startBtn = page.locator('.btn-start-task');
@@ -88,7 +86,9 @@ test.describe.serial('Model Selector', () => {
 
   test('should update task when a model is selected', async ({ page }) => {
     const projectId = await getProjectId(page);
-    const taskId = await createAndOpenTask(page, projectId);
+    await page.click('.card');
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    const taskId = await page.evaluate(() => new URLSearchParams(location.search).get('task') || '');
     await page.locator('.model-trigger').click();
     // Wait for dropdown to appear (replaces waitForSettle())
     await expect(page.locator('.portal-model-dropdown')).toBeVisible();
@@ -310,12 +310,19 @@ test.describe.serial('CreateTaskModal Provider Selector', () => {
       default_provider: '',
     });
     await waitForConfig(page, c => c.providers && c.providers.length === 2);
+    // Reload to ensure frontend picks up the config
+    await page.reload();
+    await page.waitForSelector('.card', { timeout: 10000 });
+
     await page.getByText('+ Add Task').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
+    // Wait for model selector row to appear (providers load via store subscription)
+    await expect(page.locator('.model-select-row')).toBeVisible({ timeout: 10000 });
+
     // Provider selector should be visible (more than 1 provider)
     const providerTrigger = page.locator('.provider-trigger');
-    await expect(providerTrigger).toBeVisible();
+    await expect(providerTrigger).toBeVisible({ timeout: 10000 });
     await expect(providerTrigger).toContainText('Alpha Server');
 
     // Model selector should show the first provider's default model

@@ -1,7 +1,6 @@
-import { test, expect } from './helpers';
+import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import http from 'node:http';
 
 const TEST_NON_GIT = '/tmp/kanban-test-nongit';
 const TEST_NEW_FOLDER_PARENT = '/tmp/kanban-test-mkdir-parent';
@@ -50,16 +49,12 @@ test.describe('File Browser Actions', () => {
     // Click "Initialize Git"
     await page.click('.btn-select');
 
-    // Wait for init to complete by polling the API
-    const origin = await page.evaluate(() => window.location.origin);
+    // Wait for init to complete by polling the API (via page.evaluate for auth)
     await expect(async () => {
-        const data: any = await new Promise((resolve, reject) => {
-            http.get(`${origin}/api/fs?path=${encodeURIComponent(TEST_NON_GIT)}`, (res) => {
-                let resp = '';
-                res.on('data', chunk => resp += chunk);
-                res.on('end', () => resolve(JSON.parse(resp)));
-            }).on('error', reject);
-        });
+        const data = await page.evaluate(async (path) => {
+            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}`);
+            return res.json();
+        }, TEST_NON_GIT);
         expect(data.isGitRepo).toBe(true);
     }).toPass({ timeout: 15000 });
 

@@ -227,25 +227,53 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     onDestroy(() => {
         disconnectBoardStream();
+        if (urlPollTimer) clearInterval(urlPollTimer);
     });
 
-    // Function to restore task from URL after board loads
-    function restoreTaskFromUrl() {
+    // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
+    // popstate handles browser back/forward. This handles same-origin navigations that
+    // don't trigger popstate (Playwright page.goto() to /?task=xxx while app is mounted).
+    let urlPollTimer: ReturnType<typeof setInterval> | null = null;
+    $effect(() => {
+        if (!isAuthenticated || !currentProject) return;
+        if (urlPollTimer) clearInterval(urlPollTimer);
+        urlPollTimer = setInterval(() => {
+            if (tasks.length > 0) {
+                restoreTaskFromUrl();
+            }
+        }, 500);
+        return () => { if (urlPollTimer) clearInterval(urlPollTimer); };
+    });
+
+    // Function to restore task from URL after board loads.
+    // When task is not in local tasks array (e.g., created via API, board stream
+    // hasn't pushed yet), refresh board from server to pick up new tasks.
+    async function restoreTaskFromUrl() {
         const params = new URLSearchParams(location.search);
         const taskId = params.get('task');
-        if (taskId) {
-            const task = tasks.find(t => t.id === taskId);
-            if (task) {
-                selectedTaskVal = task;
-                showCardDetailVal = true;
-                selectedTask.set(task);
-            } else {
-                // Task not found (e.g., deleted) — clear task param, keep project
-                const url = new URL(location.href);
-                url.searchParams.delete('task');
-                history.replaceState(null, '', location.pathname + url.search);
+        if (!taskId || !currentProject) return;
+        let task = tasks.find(t => t.id === taskId);
+        if (!task) {
+            try {
+                // Refresh board to pick up tasks created via API
+                const b = await getBoard(currentProject.id);
+                tasks = b.tasks || [];
+                boardStore.set(b);
+                task = tasks.find(t => t.id === taskId);
+                if (!task) {
+                    // Task truly doesn't exist — clear task param
+                    const url = new URL(location.href);
+                    url.searchParams.delete('task');
+                    history.replaceState(null, '', location.pathname + url.search);
+                    return;
+                }
+            } catch {
+                return;
             }
         }
+        selectedTaskVal = task;
+        showCardDetailVal = true;
+        selectedTask.set(task);
     }
 
     function disconnectBoardStream() {
@@ -299,8 +327,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
             boardStore.set(b);
-            // Restore task from URL after board loads
-            restoreTaskFromUrl();
+            // Restore task from URL after board loads (await so task detail renders before return)
+            await restoreTaskFromUrl();
             // Connect board stream for real-time updates
             boardStream = createBoardStream(p.id, () => refreshBoard(), (counts) => {
                 projectCounts = counts;

@@ -1,10 +1,10 @@
-import { test, expect, getProjectId, createTaskViaApi } from './helpers';
+import { test, expect } from '@playwright/test';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Task Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await page.waitForSelector('.card', { timeout: 10000 });
   });
 
   test('should display the board with columns', async ({ page }) => {
@@ -24,17 +24,13 @@ test.describe('Task Management', () => {
   });
 
   test('should open task detail view', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `basic-open-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.project-prefix')).toBeVisible();
   });
 
   test('should navigate back to board from task detail', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `basic-nav-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await page.click('.btn-back');
     await expect(page.locator('.board')).toBeVisible();
@@ -43,17 +39,13 @@ test.describe('Task Management', () => {
 
   test('should show sidebar hidden when task detail is open', async ({ page }) => {
     await expect(page.locator('.sidebar')).toBeVisible();
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `basic-sidebar-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.sidebar')).not.toBeVisible();
   });
 
   test('should have 3-column layout in task detail', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `basic-columns-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     const columns = page.locator('.columns .column');
     await expect(columns).toHaveCount(3);

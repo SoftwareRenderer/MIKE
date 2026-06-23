@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi } from './helpers';
+import {getProjectId, createTaskViaApi, navigateToTask} from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Task Actions', () => {
@@ -9,9 +9,8 @@ test.describe('Task Actions', () => {
   });
 
   test('should not show Start/Stop buttons in header', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, 'Task for conversational start');
-    await page.goto(`/?task=${taskId}`);
+    await page.click('.card');
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Should NOT show legacy Start/Stop buttons (conversational model)
@@ -29,7 +28,7 @@ test.describe('Task Actions', () => {
   test('should show Delete button', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `actions-delete-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Delete button should be visible
@@ -40,7 +39,7 @@ test.describe('Task Actions', () => {
   test('should confirm before deleting task', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `actions-confirm-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Click delete button to trigger confirmation dialog
@@ -57,7 +56,7 @@ test.describe('Task Actions', () => {
   test('should cancel delete task', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `actions-cancel-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Click delete button to trigger confirmation dialog
@@ -74,7 +73,7 @@ test.describe('Task Actions', () => {
   test('should show Backlog column title in context', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `actions-backlog-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Context column should show Backlog section title
@@ -84,7 +83,7 @@ test.describe('Task Actions', () => {
   test('should show task count in context column', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `actions-count-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Context column should be visible with section headers
@@ -94,7 +93,7 @@ test.describe('Task Actions', () => {
   test('should show Start Task button for new tasks', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `Start task test ${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // New task should show the Start Task button

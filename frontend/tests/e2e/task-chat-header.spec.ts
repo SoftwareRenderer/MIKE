@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId } from './helpers';
+import {getProjectId, navigateToTask, csrfFetch, apiGetConfig} from './helpers';
 
 test.describe.serial('Task Chat Sticky Header', () => {
   test.use({ viewport: { width: 1280, height: 600 } });
@@ -23,28 +23,22 @@ test.describe.serial('Task Chat Sticky Header', () => {
       '9. Update the frontend to use the new endpoint\n' +
       '10. Add proper error messages and user feedback\n\n' +
       'Please ensure all changes follow the existing code style and patterns.';
-    const taskId = await page.evaluate(async ({ pid, prompt }) => {
-      const configRes = await fetch('/api/config');
-      const config = await configRes.json();
-      const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
-      const taskRes = await fetch(`/api/projects/${pid}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          llama_server_url: defaultProvider?.url || '',
-          model_name: defaultProvider?.default_model || '',
-        }),
-      });
-      const task = await taskRes.json();
-      return task.id;
-    }, { pid: projectId, prompt: longPrompt });
-    return taskId;
+    const config = await apiGetConfig(page);
+    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
+    const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
+      method: 'POST',
+      body: {
+        prompt: longPrompt,
+        llama_server_url: defaultProvider?.url || '',
+        model_name: defaultProvider?.default_model || '',
+      },
+    });
+    return result.data.id;
   }
 
   test('should show task title header element', async ({ page }) => {
     const taskId = await createScrollableTask(page);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.chat-message')).toBeVisible({ timeout: 10000 });
 
@@ -71,7 +65,7 @@ test.describe.serial('Task Chat Sticky Header', () => {
 
   test('should show header when scrolled and hide when at top', async ({ page }) => {
     const taskId = await createScrollableTask(page);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.chat-message')).toBeVisible({ timeout: 10000 });
 

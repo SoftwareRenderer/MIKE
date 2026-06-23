@@ -33,9 +33,16 @@ test.describe.serial('Reasoning Effort in Model Dropdowns', () => {
   });
 
   test('should show unique model+effort pairs in create task modal with badges', async ({ page }) => {
+    // Reload to ensure frontend picks up the config
+    await page.reload();
+    await page.waitForSelector('.card', { timeout: 10000 });
+
     // Open create task modal
     await page.click('.add-task-btn');
     await page.waitForSelector('.modal', { timeout: 5000 });
+
+    // Wait for model selector to appear (providers may load async)
+    await expect(page.locator('.model-trigger')).toBeVisible({ timeout: 10000 });
 
     // Open model selector dropdown
     await page.locator('.model-trigger').click();

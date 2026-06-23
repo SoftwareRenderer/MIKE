@@ -1,4 +1,4 @@
-import { test, expect } from '../e2e/helpers';
+import { test, expect } from '@playwright/test';
 
 test.describe.serial('Login', () => {
     test.beforeEach(async ({ page }) => {
@@ -42,7 +42,7 @@ test.describe.serial('Login', () => {
         await expect(page.locator('.login-modal')).not.toBeVisible({ timeout: 10000 });
 
         // App content should be visible
-        await expect(page.locator('.project-item')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
     });
 
     test('should show error on wrong password', async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe.serial('Login', () => {
         });
         await page.reload();
         await expect(page.locator('.login-modal')).not.toBeVisible({ timeout: 10000 });
-        await expect(page.locator('.project-item')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
 
         // Navigate to a project to see the top bar with logout button
         await page.click('.project-item');

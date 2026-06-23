@@ -1,11 +1,11 @@
+import { navigateToTask, getProjectId, createTaskViaApi, csrfFetch } from './helpers';
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, statSync, existsSync } from 'fs';
 import { join } from 'path';
 
 function getTestRepoPath(): string {
-    const config = JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
-    return config.workspace_dir;
+    return '/tmp/kanban-test-worktrees';
 }
 
 function findWorktreeDir(taskId: string): string {
@@ -35,27 +35,52 @@ test.describe.serial('Checkpoint View Changes', () => {
     let taskId: string = '';
 
     test.beforeEach(async ({ page }) => {
+        test.setTimeout(30000);
         await page.goto('/');
-        await page.waitForSelector('.card', { timeout: 10000 });
+        await page.waitForSelector('.card');
 
-        const projects = JSON.parse(execSync('curl -s http://localhost:3000/api/projects', { encoding: 'utf-8' }));
-        projectId = projects[0].id;
+        // Get project ID
+        projectId = await getProjectId(page);
 
-        const tasks = JSON.parse(execSync(
-            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks"`,
-            { encoding: 'utf-8' }
-        ));
-        const task = tasks.find((t: any) => t.status === 'in_progress' && t.branch);
-        if (task) {
-            taskId = task.id;
-            worktreeDir = findWorktreeDir(taskId);
+        // Create a task and start it to get a worktree
+        taskId = await createTaskViaApi(page, projectId, `checkpoint-test-${Date.now()}`);
+        const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
+
+        // Graceful: worktree creation may fail in test env
+        if (!startResult.ok) {
+            console.log('[Checkpoint] Task start failed, will skip tests requiring worktree');
+            return;
+        }
+
+        // Wait for worktree to be created
+        await expect(async () => {
+            const taskData = await page.evaluate(async ({ pid, tid }) => {
+                const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+                return res.json();
+            }, { pid: projectId, tid: taskId });
+            expect(taskData.branch).toBeTruthy();
+        }).toPass({ timeout: 10000 });
+
+        // Find worktree directory
+        const possiblePaths = [
+            join(getTestRepoPath(), taskId),
+            `/tmp/kanban-test-worktrees/${taskId}`,
+        ];
+        for (const p of possiblePaths) {
+            if (existsSync(p)) {
+                worktreeDir = p;
+                break;
+            }
+        }
+
+        if (!worktreeDir) {
+            console.log('[Checkpoint] Worktree dir not found, will skip tests requiring worktree');
         }
     });
 
     test('View Changes button shows and overlay renders correctly', async ({ page }) => {
         if (!worktreeDir || !taskId) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
+            test.skip('Worktree not available (executor/worktree creation not available in test env)');
         }
 
         // Clear existing stashes to start clean
@@ -73,24 +98,31 @@ test.describe.serial('Checkpoint View Changes', () => {
         const stashList = getStashList(worktreeDir);
         console.log('Stash list:', stashList.map(e => `${e.index} ${e.hash.slice(0,7)} ${e.subject}`).join('\n'));
 
-        // Set hash on last assistant message
-        const messages = JSON.parse(execSync(
-            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages"`,
-            { encoding: 'utf-8' }
-        ));
+        // Set hash on last assistant message (via page.evaluate for auth)
+        const messages = await page.evaluate(async ({ pid, tid }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
+            return res.json();
+        }, { pid: projectId, tid: taskId });
         const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
         if (assistantMsgs.length > 0) {
-            execSync(
-                `curl -s -X PATCH "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}" -H "Content-Type: application/json" -d '{"git_commit_hash":"${stash2}"}'`,
-                { encoding: 'utf-8' }
-            );
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}`, {
+                method: 'PATCH',
+                body: { git_commit_hash: stash2 },
+            });
             console.log(`Set hash ${stash2.slice(0, 7)} on assistant ${assistantMsgs[assistantMsgs.length - 1].id.slice(0, 8)}`);
+        } else {
+            // No assistant messages - create one with the hash
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
+                method: 'POST',
+                body: { role: 'assistant', content: 'checkpoint marker', git_commit_hash: stash2 },
+            });
+            console.log(`Created assistant message with hash ${stash2.slice(0, 7)}`);
         }
 
         await page.waitForTimeout(500);
 
         // Open the task
-        await page.goto(`/?project=${projectId}&task=${taskId}`);
+        await navigateToTask(page, taskId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
@@ -132,8 +164,7 @@ test.describe.serial('Checkpoint View Changes', () => {
 
     test('View Changes shows state BEFORE checkpoint (not including checkpoint)', async ({ page }) => {
         if (!worktreeDir || !taskId) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
+            test.skip('Worktree not available (executor/worktree creation not available in test env)');
         }
 
         // Clear existing stashes
@@ -150,23 +181,29 @@ test.describe.serial('Checkpoint View Changes', () => {
         execSync(`cd ${worktreeDir} && git add -A && git stash push -u -m "On ${branch}: checkpoint B"`);
         const stashB = execSync(`cd ${worktreeDir} && git rev-parse stash@{0}`, { encoding: 'utf-8' }).trim();
 
-        // Set hash on last assistant message to stashB (newest)
-        const messages = JSON.parse(execSync(
-            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages"`,
-            { encoding: 'utf-8' }
-        ));
+        // Set hash on last assistant message to stashB (newest, via page.evaluate for auth)
+        const messages = await page.evaluate(async ({ pid, tid }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
+            return res.json();
+        }, { pid: projectId, tid: taskId });
         const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
         if (assistantMsgs.length > 0) {
-            execSync(
-                `curl -s -X PATCH "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}" -H "Content-Type: application/json" -d '{"git_commit_hash":"${stashB}"}'`,
-                { encoding: 'utf-8' }
-            );
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}`, {
+                method: 'PATCH',
+                body: { git_commit_hash: stashB },
+            });
+        } else {
+            // No assistant messages - create one with the hash
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
+                method: 'POST',
+                body: { role: 'assistant', content: 'checkpoint marker B', git_commit_hash: stashB },
+            });
         }
 
         await page.waitForTimeout(500);
 
         // Open the task
-        await page.goto(`/?project=${projectId}&task=${taskId}`);
+        await navigateToTask(page, taskId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
@@ -234,7 +271,7 @@ test.describe.serial('Checkpoint View Changes', () => {
         await page.waitForTimeout(500);
 
         // Open the task
-        await page.goto(`/?project=${projectId}&task=${taskId}`);
+        await navigateToTask(page, taskId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
@@ -297,7 +334,7 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         await page.waitForTimeout(500);
 
-        await page.goto(`/?project=${projectId}&task=${taskId}`);
+        await navigateToTask(page, taskId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');

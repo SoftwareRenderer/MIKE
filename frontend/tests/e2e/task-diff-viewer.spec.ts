@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi } from './helpers';
+import {getProjectId, createTaskViaApi, navigateToTask} from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Structured Diff Viewer', () => {
@@ -12,7 +12,7 @@ test.describe('Structured Diff Viewer', () => {
   test('should show diff column in task detail', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `diff-empty-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // The diff column should exist
@@ -22,7 +22,7 @@ test.describe('Structured Diff Viewer', () => {
   test('should show empty diff state for new tasks', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `diff-column-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Diff content area should be visible (empty state)

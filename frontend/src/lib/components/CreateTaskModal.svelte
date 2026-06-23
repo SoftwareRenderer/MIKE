@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import { get } from 'svelte/store';
+    import { onMount, onDestroy } from 'svelte';
     import type { Provider } from '$lib/types';
     import { createTask, getTask } from '$lib/api';
     import { config as configStore, showCreateTask } from '$lib/store';
@@ -46,14 +45,15 @@
     let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
 
-    onMount(async () => {
-        triggerEl = document.activeElement as HTMLElement;
-        // Use config from store (already fetched by App) instead of separate API call
-        const cfg = get(configStore);
-        if (cfg && cfg.providers) {
+    // Subscribe to config store to pick up providers (may load after modal opens)
+    // $configStore syntax auto-subscribes to store changes
+    let cfg = $state(null);
+    const unsubConfig = configStore.subscribe(val => { cfg = val; });
+    $effect(() => {
+        if (cfg?.providers) {
             providers = cfg.providers;
-            // Pre-select highest-priority provider's default model
-            if (providers.length > 0) {
+            // Pre-select highest-priority provider's default model (only if not already selected)
+            if (providers.length > 0 && !selectedModel) {
                 const firstProvider = providers[0];
                 const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
                 if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
@@ -66,6 +66,10 @@
                 }
             }
         }
+    });
+
+    onMount(async () => {
+        triggerEl = document.activeElement as HTMLElement;
         // Fetch parent task title if creating a subtask
         if (parentId && projectId) {
             try {
@@ -84,6 +88,10 @@
                 textarea?.focus();
             }, 50);
         }
+    });
+
+    onDestroy(() => {
+        unsubConfig();
     });
 
     function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {

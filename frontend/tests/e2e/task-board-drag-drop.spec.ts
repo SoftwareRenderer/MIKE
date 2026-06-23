@@ -1,4 +1,5 @@
-import { test, expect, getProjectId, createTaskViaApi } from './helpers';
+import { test, expect } from '@playwright/test';
+import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Task board interactions in task detail', () => {
@@ -14,7 +15,7 @@ test.describe('Task board interactions in task detail', () => {
     const taskId2 = await createTaskViaApi(page, projectId, `switch-b-${timestamp}`);
 
     // Open task 1
-    await page.goto(`/?task=${taskId1}`);
+    await navigateToTask(page, taskId1);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Verify we're on task 1
@@ -34,7 +35,7 @@ test.describe('Task board interactions in task detail', () => {
   test('should have draggable cards and drop zones in board overview', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `draggable-${Date.now()}`);
-    await page.goto(`/?task=${taskId}`);
+    await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // All 4 section headers should be visible
