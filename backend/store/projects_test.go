@@ -457,3 +457,64 @@ func TestProjectSandboxEnabled(t *testing.T) {
 		t.Fatalf("expected 2 projects, got %d", len(projects))
 	}
 }
+
+func TestProjectSandboxNetworkIsolation(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with network isolation disabled (default)
+	proj := newProject("proj-1", "test", "/tmp/repo")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	got, _ := s.GetProject("proj-1")
+	if got.SandboxNetworkIsolation {
+		t.Fatal("expected sandbox_network_isolation to be false by default")
+	}
+
+	// Enable network isolation
+	if err := s.UpdateProjectSandboxNetworkIsolation("proj-1", true); err != nil {
+		t.Fatalf("update network isolation: %v", err)
+	}
+	got, _ = s.GetProject("proj-1")
+	if !got.SandboxNetworkIsolation {
+		t.Fatal("expected sandbox_network_isolation to be true after update")
+	}
+
+	// Disable network isolation
+	if err := s.UpdateProjectSandboxNetworkIsolation("proj-1", false); err != nil {
+		t.Fatalf("update network isolation: %v", err)
+	}
+	got, _ = s.GetProject("proj-1")
+	if got.SandboxNetworkIsolation {
+		t.Fatal("expected sandbox_network_isolation to be false after disable")
+	}
+
+	// Create project with both sandbox and network isolation enabled
+	proj2 := newProject("proj-2", "isolated", "/tmp/repo2")
+	proj2.SandboxEnabled = true
+	proj2.SandboxNetworkIsolation = true
+	if err := s.CreateProject(proj2); err != nil {
+		t.Fatalf("create isolated project: %v", err)
+	}
+	got2, _ := s.GetProject("proj-2")
+	if !got2.SandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be true")
+	}
+	if !got2.SandboxNetworkIsolation {
+		t.Fatal("expected sandbox_network_isolation to be true")
+	}
+
+	// Verify ListProjects includes sandbox_network_isolation
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(projects))
+	}
+	for _, p := range projects {
+		if p.ID == "proj-2" && !p.SandboxNetworkIsolation {
+			t.Fatal("expected proj-2 to have network isolation in list")
+		}
+	}
+}

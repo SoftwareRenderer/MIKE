@@ -85,7 +85,8 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 // Create creates a gVisor sandbox container for a task.
 // The worktree is bind-mounted read-write at SandboxMountPath inside the container.
 // If baseImage is empty, the default BaseImage constant is used.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string) error {
+// If networkIsolation is true, the container is created with --network none.
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, networkIsolation bool) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -146,9 +147,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string) error {
 		"-e", "HOME=" + SandboxMountPath,
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		image,
-		"sleep", "infinity",
 	}
+	if networkIsolation {
+		createArgs = append(createArgs, "--network", "none")
+	}
+	createArgs = append(createArgs, image, "sleep", "infinity")
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
@@ -235,7 +238,7 @@ type ShellProcess struct {
 // with the PTY master file descriptor for I/O relay.
 // The caller is responsible for calling Close() when done.
 func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
-	return sm.startShell(taskID, false, "", "")
+	return sm.startShell(taskID, false, "", "", false)
 }
 
 // StartShellWithCreate starts an interactive shell, creating the sandbox container
@@ -243,11 +246,12 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
 // task lifecycle to manage the container. The caller is responsible for calling
 // Close() on the ShellProcess and Stop() on the container when done.
 // If baseImage is empty, the default BaseImage constant is used.
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage string) (*ShellProcess, error) {
-	return sm.startShell(taskID, true, worktreePath, baseImage)
+// If networkIsolation is true, the container is created with --network none.
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage string, networkIsolation bool) (*ShellProcess, error) {
+	return sm.startShell(taskID, true, worktreePath, baseImage, networkIsolation)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string) (*ShellProcess, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	sm.mu.Unlock()
@@ -257,7 +261,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 			return nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err := sm.Create(taskID, worktreePath, baseImage); err != nil {
+		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation); err != nil {
 			return nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()

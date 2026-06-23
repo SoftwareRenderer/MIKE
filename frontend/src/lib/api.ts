@@ -97,7 +97,7 @@ export async function createProject(path: string): Promise<Project> {
     return res.json();
 }
 
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean }): Promise<Project> {
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean }): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

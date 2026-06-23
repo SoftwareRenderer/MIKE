@@ -218,6 +218,12 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 				h.terminalMgr.RemoveSession("proj:" + id)
 			}
 		}
+		if req.SandboxNetworkIsolation != nil {
+			if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox network isolation setting")
+				return
+			}
+		}
 		// Fetch latest state
 		p, err := h.store.GetProject(id)
 		if err != nil {

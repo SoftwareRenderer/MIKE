@@ -645,6 +645,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		return fmt.Errorf("get project for sandbox check: %w", projErr)
 	}
 	sandboxEnabled := project.SandboxEnabled
+	networkIsolation := project.SandboxNetworkIsolation
 	baseImage := ""
 	if sandboxEnabled {
 		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
@@ -652,7 +653,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		}
 	}
 
-	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, baseImage)
+	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage)
 	return nil
 }
 
@@ -789,6 +790,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	sandboxEnabled := project.SandboxEnabled
+	networkIsolation := project.SandboxNetworkIsolation
 	baseImage := ""
 	if sandboxEnabled {
 		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
@@ -796,7 +798,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		}
 	}
 
-	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, baseImage)
+	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage)
 }
 
 // -- Helper functions --

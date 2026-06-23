@@ -5,6 +5,7 @@
     import { config as configStore, showConfig } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
+    import ToggleSwitch from './ToggleSwitch.svelte';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -758,18 +759,7 @@
                             </svg>
                         </span>
                     </div>
-                    <button
-                        type="button"
-                        role="switch"
-                        class="toggle-switch"
-                        class:active={defaultAutoCommit}
-                        aria-checked={defaultAutoCommit}
-                        aria-labelledby="toggle-autocommit"
-                        onclick={() => defaultAutoCommit = !defaultAutoCommit}
-                        title="Automatically commit changes when the task completes"
-                    >
-                        <span class="toggle-knob"></span>
-                    </button>
+                    <ToggleSwitch bind:checked={defaultAutoCommit} ariaLabel="Auto-commit" />
                 </div>
 
                 <div class="toggle-field">
@@ -782,18 +772,7 @@
                             </svg>
                         </span>
                     </div>
-                    <button
-                        type="button"
-                        role="switch"
-                        class="toggle-switch"
-                        class:active={defaultPlanMode}
-                        aria-checked={defaultPlanMode}
-                        aria-labelledby="toggle-planmode"
-                        onclick={() => defaultPlanMode = !defaultPlanMode}
-                        title="Task describes its plan before making changes"
-                    >
-                        <span class="toggle-knob"></span>
-                    </button>
+                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" />
                 </div>
 
                 <div class="field-row">
@@ -971,32 +950,6 @@
         font-weight: 500;
         color: var(--color-text-primary);
     }
-    .toggle-switch {
-        width: 40px;
-        height: 22px;
-        background: var(--color-surface-4);
-        border-radius: 11px;
-        position: relative;
-        transition: background 0.2s ease;
-        flex-shrink: 0;
-    }
-    .toggle-switch.active {
-        background: var(--color-accent);
-    }
-    .toggle-knob {
-        width: 16px;
-        height: 16px;
-        background: white;
-        border-radius: 50%;
-        position: absolute;
-        top: 3px;
-        left: 3px;
-        transition: transform 0.2s ease;
-    }
-    .toggle-switch.active .toggle-knob {
-        transform: translateX(18px);
-    }
-
     /* Field row (inline label + input) */
     .field-row {
         display: flex;

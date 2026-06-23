@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createBoardStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -18,6 +18,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
     import LoginModal from './LoginModal.svelte';
+    import SandboxConfigModal from './SandboxConfigModal.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -91,6 +92,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let showTerminalVal = $state(false);
     let showStatsVal = $state(false);
     let showCardDetailVal = $state(false);
+    let showSandboxConfigVal = $state(false);
     let showFileBrowserVal = $state(false);
     let addProjectError = $state('');
     let currentBranch = $state('');
@@ -466,39 +468,28 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         }
     }
 
-    async function toggleSandbox(p: Project) {
-        const inProgressCount = projectCounts[p.id]?.in_progress ?? 0;
-        if (inProgressCount > 0) return; // Cannot change when tasks are In Progress
+    function openSandboxConfig(p: Project) {
+        showSandboxConfigVal = true;
+    }
 
-        const newEnabled = !p.sandbox_enabled;
-        if (newEnabled) {
-            // Turning ON — no confirmation needed
-        } else {
-            // Turning OFF — require confirmation
-            const confirmed = await showConfirm({
-                title: 'Disable Sandbox',
-                message: `Disable sandbox isolation for "${p.name}"?\n\nTasks will run without gVisor sandboxing, executing commands directly on the host.`,
-                confirmText: 'Disable',
-                cancelText: 'Cancel',
-            });
-            if (!confirmed) return;
-        }
-
+    async function handleSandboxSaved() {
+        showSandboxConfigVal = false;
+        // Refresh projects list to pick up changes
         try {
-            const updated = await updateProject(p.id, { sandbox_enabled: newEnabled });
-            const index = projects.indexOf(p);
-            if (index !== -1) {
-                projects[index] = updated;
-                projectsStore.set(projects);
-            }
-            if (currentProject?.id === p.id) {
-                currentProject = updated;
-                selectedProject.set(updated);
-                // Close terminal so it restarts with updated sandbox mode
-                showTerminal.set(false);
+            const projs = await getProjects();
+            projects = projs || [];
+            projectsStore.set(projects);
+            if (currentProject) {
+                const updated = projects.find(p => p.id === currentProject.id);
+                if (updated) {
+                    currentProject = updated;
+                    selectedProject.set(updated);
+                    // Close terminal so it restarts with updated sandbox mode
+                    showTerminal.set(false);
+                }
             }
         } catch (e) {
-            addProjectError = String(e);
+            console.error('Failed to refresh projects:', e);
         }
     }
 </script>
@@ -543,26 +534,16 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                             {#if p.sandbox_enabled}
                                 <span
                                     class="sandbox-badge"
-                                    class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
-                                    role="button"
-                                    tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
-                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox enabled — cannot change while tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
-                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode while tasks are In Progress' : 'Sandbox enabled (gVisor). Click to disable.'}
-                                    onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
-                                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
+                                    aria-label="Sandbox enabled (gVisor)"
+                                    title="Sandbox enabled (gVisor)"
                                 >
                                     <img src={shieldIcon} width="14" height="14" alt="" />
                                 </span>
                             {:else}
                                 <span
                                     class="sandbox-badge sandbox-badge-off"
-                                    class:sandbox-badge-locked={projectCounts[p.id]?.in_progress > 0}
-                                    role="button"
-                                    tabindex={projectCounts[p.id]?.in_progress > 0 ? -1 : 0}
-                                    aria-label={projectCounts[p.id]?.in_progress > 0 ? 'Sandbox disabled — cannot change while tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
-                                    title={projectCounts[p.id]?.in_progress > 0 ? 'Cannot change sandbox mode while tasks are In Progress' : 'Sandbox disabled (tasks run without isolation). Click to enable.'}
-                                    onclick={(e) => { e.stopPropagation(); toggleSandbox(p); }}
-                                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSandbox(p); } }}
+                                    aria-label="Sandbox disabled"
+                                    title="Sandbox disabled"
                                 >
                                     <img src={shieldOffIcon} width="14" height="14" alt="" />
                                 </span>
@@ -621,6 +602,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         </svg>
                     </button>
                 {/if}
+                <button class="icon-btn sandbox-config-btn" onclick={() => openSandboxConfig(currentProject)} aria-label="Sandbox configuration" title="Sandbox configuration">
+                    {#if currentProject.sandbox_enabled}
+                        <img src={shieldIcon} width="14" height="14" alt="" />
+                    {:else}
+                        <img src={shieldOffIcon} width="14" height="14" alt="" />
+                    {/if}
+                </button>
                 <span class="project-title">{getHomeRelativePath(currentProject.path)}{currentBranch ? ` (${currentBranch})` : ''}</span>
                 <div class="actions">
                     <button class="icon-btn" onclick={() => { loadTerminalPanel(); showTerminal.set(true); }} aria-label="Open terminal" title="Open terminal">
@@ -720,6 +708,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         <FileBrowser
             onClose={() => showFileBrowserVal = false}
             onSelect={handleSelectProjectPath}
+        />
+    {/if}
+    {#if showSandboxConfigVal && currentProject}
+        <SandboxConfigModal
+            project={currentProject}
+            inProgressCount={projectCounts[currentProject.id]?.in_progress ?? 0}
+            onClose={() => showSandboxConfigVal = false}
+            onSaved={handleSandboxSaved}
         />
     {/if}
     {#if addProjectError}
@@ -877,14 +873,6 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         display: flex;
         align-items: center;
         height: 1em;
-        cursor: pointer;
-        transition: opacity 0.15s;
-    }
-    .sandbox-badge:hover {
-        opacity: 0.7;
-    }
-    .sandbox-badge-locked {
-        cursor: not-allowed;
     }
     .sandbox-badge-off {
         color: var(--color-status-red, #f85149);
@@ -993,10 +981,21 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         padding: 8px 16px;
         border-bottom: 1px solid var(--color-border);
         background: var(--color-surface-1);
+        gap: 8px;
+    }
+    .sandbox-config-btn {
+        flex-shrink: 0;
     }
     .project-title {
+        display: flex;
+        align-items: center;
         font-size: 0.875rem;
         font-weight: 600;
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .actions {
         display: flex;

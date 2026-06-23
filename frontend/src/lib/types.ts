@@ -21,6 +21,7 @@ export interface Project {
     path: string;
     origin_branch?: string;
     sandbox_enabled?: boolean;
+    sandbox_network_isolation?: boolean;
     created_at: string;
     updated_at: string;
 }

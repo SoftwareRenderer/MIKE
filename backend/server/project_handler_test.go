@@ -125,6 +125,55 @@ func TestProjectUpdate(t *testing.T) {
 	}
 }
 
+func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Verify default: sandbox disabled, network isolation disabled
+	req := testRequest("GET", "/api/projects/"+projID, nil)
+	rr := testResponseAuth(t, s, req)
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_enabled"] == true {
+		t.Fatal("expected sandbox_enabled to be false by default")
+	}
+	if result["sandbox_network_isolation"] == true {
+		t.Fatal("expected sandbox_network_isolation to be false by default")
+	}
+
+	// Enable sandbox and network isolation
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+		"sandbox_enabled":            true,
+		"sandbox_network_isolation": true,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatal("expected sandbox_enabled to be true")
+	}
+	if result["sandbox_network_isolation"] != true {
+		t.Fatal("expected sandbox_network_isolation to be true")
+	}
+
+	// Disable only network isolation (sandbox stays on)
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+		"sandbox_network_isolation": false,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatal("expected sandbox_enabled to still be true")
+	}
+	if result["sandbox_network_isolation"] != false {
+		t.Fatal("expected sandbox_network_isolation to be false")
+	}
+}
+
 func TestProjectDelete(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
