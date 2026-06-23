@@ -17,6 +17,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
+    import LoginModal from './LoginModal.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -97,6 +98,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let creatingChildOfVal: string | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isMobile = $derived(false);
+    let isAuthenticated = $state(false);
     let hasProviders = $derived(!!cfg?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
@@ -182,7 +184,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         return () => window.removeEventListener('popstate', handlePopState);
     });
 
-    onMount(async () => {
+    async function loadAppData() {
         try {
             const projs = await getProjects();
             projects = projs || [];
@@ -204,6 +206,20 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             projectCounts = counts;
         } catch (e) {
             console.error('Failed to load:', e);
+        }
+    }
+
+    onMount(async () => {
+        // Check auth status first
+        try {
+            const authRes = await fetch('/api/auth/session', { credentials: 'include' });
+            const authData = await authRes.json();
+            isAuthenticated = authData.authenticated;
+            if (isAuthenticated) {
+                await loadAppData();
+            }
+        } catch (e) {
+            console.error('Failed to check auth:', e);
         }
     });
 
@@ -451,6 +467,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
 </script>
 
+<!-- Login gate -->
+{#if !isAuthenticated}
+    <LoginModal onClose={async () => {
+        isAuthenticated = true;
+        await loadAppData();
+    }} />
+{:else}
 <div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -583,6 +606,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
                         </svg>
                     </button>
+                    <button class="icon-btn" onclick={() => { fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); isAuthenticated = false; }} aria-label="Sign out" title="Sign out">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                    </button>
                 </div>
             </header>
             {/if}
@@ -668,6 +698,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     <Toast />
     <ConfirmationDialog />
 </div>
+{/if}
 
 <svelte:head>
     <title>{pageTitle}</title>

@@ -58,6 +58,9 @@ func (s *Server) setupRoutes() {
 	s.mux = http.NewServeMux()
 
 	s.mux.HandleFunc("/api/health", s.handleHealth)
+	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
 
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)

@@ -9,8 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// testPassword is the password used in tests (matches KANBAN_PASSWORD env var).
+const testPassword = "test-password-1234"
 
 // testServer creates a Server with a temporary database for testing.
 // The temp directory is cleaned up by t.Cleanup.
@@ -29,6 +33,17 @@ func testServer(t *testing.T) *Server {
 			os.Setenv("WORKTREES_DIR", oldWT)
 		} else {
 			os.Unsetenv("WORKTREES_DIR")
+		}
+	})
+
+	// Set env var for auth password
+	oldPW := os.Getenv("KANBAN_PASSWORD")
+	os.Setenv("KANBAN_PASSWORD", testPassword)
+	t.Cleanup(func() {
+		if oldPW != "" {
+			os.Setenv("KANBAN_PASSWORD", oldPW)
+		} else {
+			os.Unsetenv("KANBAN_PASSWORD")
 		}
 	})
 
@@ -55,10 +70,43 @@ func testRequest(method, path string, body interface{}) *http.Request {
 }
 
 // testResponse runs a request against the server and returns the response.
+// Uses the full middleware chain (CORS + Session + Compress).
 func testResponse(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	handler := CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+// loginTest logs in via the API and returns the session cookie string.
+func loginTest(t *testing.T, s *Server) string {
+	t.Helper()
+	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
+		"password": testPassword,
+	})
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
+	}
+	return rr.Header().Get("Set-Cookie")
+}
+
+// withAuth adds the session cookie to a request.
+func withAuth(req *http.Request, cookie string) {
+	parts := strings.Split(cookie, ";")[0]
+	req.Header.Set("Cookie", strings.TrimSpace(parts))
+}
+
+// testResponseAuth logs in and runs a request against the server with auth.
+// Uses the full middleware chain (CORS + Session + Compress).
+func testResponseAuth(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := loginTest(t, s)
+	withAuth(req, cookie)
+	rr := httptest.NewRecorder()
+	handler := CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))
+	handler.ServeHTTP(rr, req)
 	return rr
 }
 
@@ -79,11 +127,13 @@ func createTestProject(t *testing.T, s *Server) string {
 	t.Helper()
 	dir := t.TempDir()
 	initGitRepo(t, dir)
+	cookie := loginTest(t, s)
 	proj := map[string]interface{}{
 		"name": "test-project",
 		"path": dir,
 	}
 	req := testRequest("POST", "/api/projects", proj)
+	withAuth(req, cookie)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
@@ -118,10 +168,12 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 // createTestTask creates a task via the API and returns its ID.
 func createTestTask(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()
+	cookie := loginTest(t, s)
 	task := map[string]interface{}{
 		"prompt": prompt,
 	}
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
+	withAuth(req, cookie)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())

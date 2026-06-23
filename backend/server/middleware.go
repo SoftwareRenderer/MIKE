@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,27 @@ var (
 // Re-export GetEnv from managers.
 var GetEnv = managers.GetEnv
 
+// Paths that don't require authentication.
+var publicPaths = map[string]map[string]struct{}{
+	"/api/health":        {http.MethodGet: {}},
+	"/api/auth/login":    {http.MethodPost: {}},
+	"/api/auth/session":  {http.MethodGet: {}},
+}
+
+// isPublicPath returns true if the given path+method combination is publicly accessible.
+// Static assets (frontend) are always public.
+func isPublicPath(path, method string) bool {
+	// Frontend static assets are always public
+	if path == "/" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
+		return true
+	}
+	if methods, ok := publicPaths[path]; ok {
+		_, ok := methods[method]
+		return ok
+	}
+	return false
+}
+
 // CORS middleware.
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,15 +53,65 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		// Reflect the request Origin (required for cookies with credentials).
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else {
+			// Same-origin request (e.g., browser navigating directly)
+			// No CORS headers needed
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sessionKey is the context key for the authenticated session id.
+type sessionKey struct{}
+
+// SessionMiddleware validates the SESSION cookie and injects auth state into context.
+// Public paths (health check, login, session check) bypass validation.
+func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow public paths without auth
+		if isPublicPath(r.URL.Path, r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil {
+			JSONError(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+
+		sessionID, err := s.sessionMgr.Validate(cookie.Value)
+		if err != nil {
+			JSONError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
+
+		// Inject session id into context for downstream handlers
+		ctx := context.WithValue(r.Context(), sessionKey{}, sessionID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// GetSessionID retrieves the session id from the request context.
+// Returns empty string if not present (e.g., public endpoint).
+func GetSessionID(r *http.Request) string {
+	if id, ok := r.Context().Value(sessionKey{}).(string); ok {
+		return id
+	}
+	return ""
 }
 
 // PanicRecoveryMiddleware recovers from panics and returns a JSON error.

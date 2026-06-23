@@ -36,6 +36,7 @@ const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
 const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
 const KANBAN_BIN = '/home/mwren/projects/kanban/kanban';
+const TEST_PASSWORD = 'test-password-1234';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
@@ -53,7 +54,7 @@ async function setup(): Promise<void> {
     // Use setsid to start server in a new session (truly independent of this process)
     kanbanServer = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB], {
         cwd: '/home/mwren/projects/kanban',
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES },
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD },
         stdio: 'ignore',
         detached: true,
     });
@@ -63,11 +64,15 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT, 15000);
     console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
+    // 5b. Login to get session cookie
+    const sessionCookie = await login(KANBAN_BASE);
+    console.log(`[global-setup] Logged in to test server`);
+
     // 6. Configure mock provider via API (if using mock LLM)
     const useMock = process.env.USE_MOCK_LLM !== '0';
     const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
     if (useMock) {
-        const config = await getJson(`${KANBAN_BASE}/api/config`);
+        const config = await getJson(`${KANBAN_BASE}/api/config`, sessionCookie);
         await putJson(`${KANBAN_BASE}/api/config`, {
             ...config,
             providers: [{
@@ -79,7 +84,7 @@ async function setup(): Promise<void> {
                 default_model: 'mock-model',
             }],
             default_provider: 'mock',
-        });
+        }, sessionCookie);
         console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
 
@@ -102,7 +107,7 @@ async function setup(): Promise<void> {
     const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
-    });
+    }, sessionCookie);
     console.log(`[global-setup] Test project created: ${project.id}`);
 
     // 9. Create test tasks with provider URL
@@ -112,15 +117,15 @@ async function setup(): Promise<void> {
     const taskPayload2 = useMock
         ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
         : { prompt: 'Second test task' };
-    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload);
-    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2);
+    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload, sessionCookie);
+    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie);
     console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB_ISOLATED], {
         cwd: '/home/mwren/projects/kanban',
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED) },
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD },
         stdio: 'ignore',
         detached: true,
     });
@@ -128,9 +133,13 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT_ISOLATED, 15000);
     console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
 
+    // 10b. Login to isolated server
+    const sessionCookieIso = await login(KANBAN_BASE_ISOLATED);
+    console.log(`[global-setup] Logged in to isolated server`);
+
     // 11. Configure mock provider on isolated server
     if (useMock) {
-        const configIso = await getJson(`${KANBAN_BASE_ISOLATED}/api/config`);
+        const configIso = await getJson(`${KANBAN_BASE_ISOLATED}/api/config`, sessionCookieIso);
         await putJson(`${KANBAN_BASE_ISOLATED}/api/config`, {
             ...configIso,
             providers: [{
@@ -142,7 +151,7 @@ async function setup(): Promise<void> {
                 default_model: 'mock-model',
             }],
             default_provider: 'mock',
-        });
+        }, sessionCookieIso);
         console.log(`[global-setup] Mock provider configured on isolated server`);
     }
 
@@ -150,12 +159,12 @@ async function setup(): Promise<void> {
     const projectIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
-    });
+    }, sessionCookieIso);
     console.log(`[global-setup] Test project created on isolated server: ${projectIso.id}`);
 
     // 13. Create test tasks on isolated server
-    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload);
-    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2);
+    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload, sessionCookieIso);
+    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2, sessionCookieIso);
     console.log(`[global-setup] Test tasks created on isolated server: ${taskIso.id}, ${taskIso2.id}`);
 
     // 14. Create lock file to signal setup complete
@@ -321,60 +330,97 @@ function waitForServer(port: number, timeout = 5000): Promise<void> {
     });
 }
 
-function postJson(url: string, body: any): Promise<any> {
+function postJson(url: string, body: any, cookie?: string): Promise<any> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data).toString(),
+        };
+        if (cookie) headers['Cookie'] = cookie;
         const req = http.request(url, {
+            method: 'POST',
+            headers,
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
+
+function putJson(url: string, body: any, cookie?: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data).toString(),
+        };
+        if (cookie) headers['Cookie'] = cookie;
+        const req = http.request(url, {
+            method: 'PUT',
+            headers,
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
+
+function getJson(url: string, cookie?: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const headers: Record<string, string> = {};
+        if (cookie) headers['Cookie'] = cookie;
+        const req = http.get(url, { headers }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+
+/** Login to the server and return the session cookie string. */
+async function login(base: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const data = JSON.stringify({ password: TEST_PASSWORD });
+        const req = http.request(`${base}/api/auth/login`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(data),
+                'Content-Length': Buffer.byteLength(data).toString(),
             },
         }, (res) => {
+            const setCookie = res.headers['set-cookie'];
             let responseData = '';
             res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
-                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+                if (!setCookie || setCookie.length === 0) {
+                    reject(new Error(`Login failed: ${responseData}`));
+                    return;
+                }
+                // Extract just the SESSION=token part
+                const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+                const parts = cookie.split(';')[0].trim();
+                resolve(parts);
             });
         });
         req.on('error', reject);
         req.write(data);
-        req.end();
-    });
-}
-
-function putJson(url: string, body: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const data = JSON.stringify(body);
-        const req = http.request(url, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(data),
-            },
-        }, (res) => {
-            let responseData = '';
-            res.on('data', chunk => responseData += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
-            });
-        });
-        req.on('error', reject);
-        req.write(data);
-        req.end();
-    });
-}
-
-function getJson(url: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const req = http.get(url, (res) => {
-            let responseData = '';
-            res.on('data', chunk => responseData += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
-            });
-        });
-        req.on('error', reject);
         req.end();
     });
 }

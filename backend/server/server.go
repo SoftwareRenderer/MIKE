@@ -9,6 +9,7 @@ import (
 	"time"
 
 	bkg "kanban/backend"
+	"kanban/backend/auth"
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
@@ -23,6 +24,7 @@ import (
 type Server struct {
 	store          *store.Store
 	configStore    *config.ConfigStore
+	sessionMgr     *auth.SessionManager
 	projectHandler *managers.ProjectHandler
 	taskHandler    *managers.TaskHandler
 	boardHandler   *managers.BoardHandler
@@ -63,6 +65,18 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		addr:        addr,
 	}
 
+	// Create session manager — fails if KANBAN_PASSWORD is not set
+	sessionMgr, err := auth.NewSessionManager(store)
+	if err != nil {
+		return nil, fmt.Errorf("create session manager: %w\nSet KANBAN_PASSWORD environment variable to enable authentication", err)
+	}
+	s.sessionMgr = sessionMgr
+
+	// Configure cookie Secure flag based on bind address.
+	// Secure flag requires HTTPS — for local dev (HTTP), keep it off.
+	// Enable only when explicitly behind a reverse proxy with HTTPS.
+	sessionCookieSecure = os.Getenv("KANBAN_SECURE_COOKIES") == "1"
+
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr, cfgStore)
@@ -98,7 +112,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           PanicRecoveryMiddleware(CORSMiddleware(CompressMiddleware(s.mux))),
+		Handler:           PanicRecoveryMiddleware(CORSMiddleware(s.SessionMiddleware(CompressMiddleware(s.mux)))),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

@@ -1,5 +1,15 @@
 const API_BASE = '/api';
 
+/** Wrapper around fetch that includes credentials (cookies) on every request. */
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+    return fetch(url, { ...init, credentials: 'include' });
+}
+
+/** Returns true if the response is a 401 Unauthorized. */
+export function isUnauthorized(res: Response): boolean {
+    return res.status === 401;
+}
+
 /** Extract error message from a failed API response, falling back to a default. */
 async function apiError(res: Response, defaultMsg: string): Promise<Error> {
     try {
@@ -12,19 +22,19 @@ async function apiError(res: Response, defaultMsg: string): Promise<Error> {
 
 // -- Project endpoints --
 export async function getProjects(): Promise<Project[]> {
-    const res = await fetch(`${API_BASE}/projects`);
+    const res = await apiFetch(`${API_BASE}/projects`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
     return res.json();
 }
 
 export async function getProjectCounts(): Promise<Record<string, ProjectCounts>> {
-    const res = await fetch(`${API_BASE}/projects/counts`);
+    const res = await apiFetch(`${API_BASE}/projects/counts`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch project counts');
     return res.json();
 }
 
 export async function getProjectStats(projectId: string): Promise<ProjectStats> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/stats`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch project stats');
     return res.json();
 }
@@ -32,12 +42,12 @@ export async function getProjectStats(projectId: string): Promise<ProjectStats> 
 export async function resetProjectStats(projectId: string, modelName: string, providerName?: string): Promise<void> {
     const params = new URLSearchParams({ model_name: modelName });
     if (providerName) params.set('provider_name', providerName);
-    const res = await fetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to reset stats');
 }
 
 export async function createProject(path: string): Promise<Project> {
-    const res = await fetch(`${API_BASE}/projects`, {
+    const res = await apiFetch(`${API_BASE}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
@@ -47,7 +57,7 @@ export async function createProject(path: string): Promise<Project> {
 }
 
 export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean }): Promise<Project> {
-    const res = await fetch(`${API_BASE}/projects/${id}`, {
+    const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -57,19 +67,19 @@ export async function updateProject(id: string, updates: { name?: string; sandbo
 }
 
 export async function deleteProject(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to delete project');
 }
 
 // -- Board endpoints --
 export async function getBoard(projectId: string): Promise<Board> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/board`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch board');
     return res.json();
 }
 
 export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/reorder`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/reorder`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reorders),
@@ -79,7 +89,7 @@ export async function reorderTasks(projectId: string, reorders: ReorderRequest[]
 
 // -- Task CRUD endpoints --
 export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
@@ -89,13 +99,13 @@ export async function createTask(projectId: string, task: Partial<Task>): Promis
 }
 
 export async function getTask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
     if (!res.ok) throw await apiError(res, 'Task not found');
     return res.json();
 }
 
 export async function updateTask(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
@@ -105,12 +115,12 @@ export async function updateTask(projectId: string, taskId: string, task: Partia
 }
 
 export async function deleteTask(projectId: string, taskId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to delete task');
 }
 
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/move`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -120,7 +130,7 @@ export async function moveTask(projectId: string, taskId: string, status: string
 }
 
 export async function commitAndDone(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit`, {
         method: 'POST',
     });
     if (!res.ok) throw await apiError(res, 'Failed to commit and mark as done');
@@ -128,38 +138,38 @@ export async function commitAndDone(projectId: string, taskId: string): Promise<
 }
 
 export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to clear done tasks');
     return res.json();
 }
 
 // -- Task execution endpoints --
 export async function startTask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to start task');
     return res.json();
 }
 
 export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start-subtask`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start-subtask`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to start subtask');
     return res.json();
 }
 
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to stop task');
     return res.json();
 }
 
 export async function retryTask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to retry task');
     return res.json();
 }
 
 export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to resume task');
     return res.json();
 }
@@ -262,7 +272,7 @@ export async function sendTaskMessage(
     if (attachments && attachments.length > 0) {
         body.attachments = JSON.stringify(attachments);
     }
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/send`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -272,13 +282,13 @@ export async function sendTaskMessage(
 }
 
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
     return res.json();
 }
 
 export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content }),
@@ -288,7 +298,7 @@ export async function createTaskMessage(projectId: string, taskId: string, role:
 }
 
 export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId, regenerate }),
@@ -298,7 +308,7 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
 
 /** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. */
 export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId, delete_single: true }),
@@ -311,13 +321,13 @@ export const regenerateTaskMessages = deleteTaskMessagesAfter;
 
 /** Check if deleting a message would also delete a fork branch. */
 export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);
     if (!res.ok) throw await apiError(res, 'Failed to check message delete');
     return res.json();
 }
 
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
@@ -330,19 +340,19 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
-    const res = await fetch(url);
+    const res = await apiFetch(url);
     if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
     return res.json();
 }
 
 export async function getTaskCommits(projectId: string, taskId: string): Promise<{ base_commit?: TaskCommit; commits: TaskCommit[] }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch commits');
     return res.json();
 }
 
 export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/reset-worktree`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/reset-worktree`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ commit_hash: commitHash }),
@@ -353,7 +363,7 @@ export async function resetWorktree(projectId: string, taskId: string, commitHas
 
 // -- Prompt endpoints --
 export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
-    const res = await fetch(`${API_BASE}/prompts/reload`, {
+    const res = await apiFetch(`${API_BASE}/prompts/reload`, {
         method: 'POST',
     });
     if (!res.ok) throw await apiError(res, 'Failed to reload prompts');
@@ -362,13 +372,13 @@ export async function reloadPrompts(): Promise<{ status: string; message: string
 
 // -- Configuration endpoints --
 export async function getConfig(): Promise<Config> {
-    const res = await fetch(`${API_BASE}/config`);
+    const res = await apiFetch(`${API_BASE}/config`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch config');
     return res.json();
 }
 
 export async function updateConfig(config: Config): Promise<Config> {
-    const res = await fetch(`${API_BASE}/config`, {
+    const res = await apiFetch(`${API_BASE}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
@@ -378,7 +388,7 @@ export async function updateConfig(config: Config): Promise<Config> {
 }
 
 export async function testConnection(llamaServerUrl: string, modelName: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE}/config/test-connection`, {
+    const res = await apiFetch(`${API_BASE}/config/test-connection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llama_server_url: llamaServerUrl, model_name: modelName, api_key: apiKey }),
@@ -388,7 +398,7 @@ export async function testConnection(llamaServerUrl: string, modelName: string, 
 }
 
 export async function fetchModels(llamaServerUrl: string, apiKey?: string): Promise<{ models: Array<{ name: string; context_window?: number }>; error?: string }> {
-    const res = await fetch(`${API_BASE}/config/fetch-models`, {
+    const res = await apiFetch(`${API_BASE}/config/fetch-models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llama_server_url: llamaServerUrl, api_key: apiKey }),
@@ -410,13 +420,13 @@ export function resolveProviderModel(
 
 // -- Dependency endpoints --
 export async function getDependencies(projectId: string, taskId: string): Promise<TaskDependency[]> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch dependencies');
     return res.json();
 }
 
 export async function createDependency(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ child_task_id: childTaskId, auto_start: autoStart }),
@@ -427,13 +437,13 @@ export async function createDependency(projectId: string, taskId: string, childT
 
 // -- Review comment endpoints --
 export async function getReviewComments(projectId: string, taskId: string): Promise<ReviewComment[]> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch review comments');
     return res.json();
 }
 
 export async function createReviewComment(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_path: filePath, line_num: lineNum, comment }),
@@ -445,33 +455,33 @@ export async function createReviewComment(projectId: string, taskId: string, fil
 // -- Git endpoints --
 export async function getGitLog(projectId: string, branch?: string): Promise<GitCommit[]> {
     const url = branch ? `${API_BASE}/projects/${projectId}/git/log?branch=${branch}` : `${API_BASE}/projects/${projectId}/git/log`;
-    const res = await fetch(url);
+    const res = await apiFetch(url);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
     return res.json();
 }
 
 export async function getGitStatus(projectId: string): Promise<GitStatus> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/git/status`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
     return res.json();
 }
 
 // -- Home agent endpoints --
 export async function getHomeAgentMessages(projectId: string): Promise<HomeAgentMessage[]> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/home-agent/messages`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/home-agent/messages`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
     return res.json();
 }
 
 // -- Thread endpoints --
 export async function getTaskThreads(projectId: string, taskId: string): Promise<Thread[]> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch threads');
     return res.json();
 }
 
 export async function switchTaskThread(projectId: string, taskId: string, threadId: string): Promise<Thread> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/switch`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/switch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_id: threadId }),
@@ -483,7 +493,7 @@ export async function switchTaskThread(projectId: string, taskId: string, thread
 export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
     const body: Record<string, string> = { from_thread_id: fromThreadId, from_message_id: fromMessageId };
     if (newContent) body.new_content = newContent;
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -493,7 +503,7 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
 }
 
 export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`, {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_id: threadId }),

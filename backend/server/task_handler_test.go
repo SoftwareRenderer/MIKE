@@ -12,7 +12,7 @@ func TestTaskCreate(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
 		"prompt": "Add login feature",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -42,7 +42,7 @@ func TestTaskCreateWithTitle(t *testing.T) {
 		"prompt": "Add login feature",
 		"title":  "Custom Title",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -58,7 +58,7 @@ func TestTaskCreateInvalidJSON(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks", "not json")
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
@@ -74,7 +74,7 @@ func TestTaskList(t *testing.T) {
 	}
 
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -91,7 +91,7 @@ func TestTaskGetByID(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Get me")
 
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -107,7 +107,7 @@ func TestTaskGetByIDNotFound(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/nonexistent", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr.Code)
 	}
@@ -122,7 +122,7 @@ func TestTaskUpdate(t *testing.T) {
 	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]interface{}{
 		"title": "Updated Title",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -140,14 +140,14 @@ func TestTaskDelete(t *testing.T) {
 
 	// Delete the task
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify it's gone
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 after delete, got %d", rr.Code)
 	}
@@ -162,7 +162,7 @@ func TestTaskMove(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]interface{}{
 		"status": "in_progress",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -189,14 +189,14 @@ func TestTaskReorder(t *testing.T) {
 		{"id": taskIDs[1], "column_order": 20},
 		{"id": taskIDs[2], "column_order": 0},
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify new order: taskIDs[2] (order=0) first, taskIDs[0] (order=10) last
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	tasks := mustJSON[[]map[string]interface{}](t, rr.Body)
 	if tasks[0]["id"] != taskIDs[2] || tasks[1]["id"] != taskIDs[0] || tasks[2]["id"] != taskIDs[1] {
 		t.Fatalf("reorder failed: expected [%s, %s, %s], got [%s, %s, %s]",
@@ -217,7 +217,7 @@ func TestTaskParentValidation(t *testing.T) {
 		"prompt":         "Child task",
 		"parent_task_id": parentID,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -226,14 +226,14 @@ func TestTaskParentValidation(t *testing.T) {
 	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/move", map[string]interface{}{
 		"status": "in_progress",
 	})
-	testResponse(t, s, req)
+	testResponseAuth(t, s, req)
 
 	// Try to create another child — should fail
 	req = testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
 		"prompt":         "Another child",
 		"parent_task_id": parentID,
 	})
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for non-backlog parent, got %d", rr.Code)
 	}
@@ -247,7 +247,7 @@ func TestTaskParentNotFound(t *testing.T) {
 		"prompt":         "Child with missing parent",
 		"parent_task_id": "nonexistent-parent",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
@@ -262,7 +262,7 @@ func createTestTaskWithLLM(t *testing.T, s *Server, projectID string, prompt str
 		"model_name":       "mock-model",
 	}
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
 	}
@@ -278,7 +278,7 @@ func createTestSubtask(t *testing.T, s *Server, projectID string, parentTaskID s
 		"parent_task_id": parentTaskID,
 	}
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create subtask: %d %s", rr.Code, rr.Body.String())
 	}
@@ -290,7 +290,7 @@ func createTestSubtask(t *testing.T, s *Server, projectID string, parentTaskID s
 func getTaskStatus(t *testing.T, s *Server, projectID string, taskID string) string {
 	t.Helper()
 	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
 	}
@@ -302,7 +302,7 @@ func getTaskStatus(t *testing.T, s *Server, projectID string, taskID string) str
 func getTaskStatusState(t *testing.T, s *Server, projectID string, taskID string) string {
 	t.Helper()
 	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
 	}
@@ -319,7 +319,7 @@ func moveTask(t *testing.T, s *Server, projectID string, taskID string, status s
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks/"+taskID+"/move", map[string]interface{}{
 		"status": status,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("move task to %s: %d %s", status, rr.Code, rr.Body.String())
 	}
@@ -329,7 +329,7 @@ func moveTask(t *testing.T, s *Server, projectID string, taskID string, status s
 func updateTask(t *testing.T, s *Server, projectID string, taskID string, updates map[string]interface{}) {
 	t.Helper()
 	req := testRequest("PUT", "/api/projects/"+projectID+"/tasks/"+taskID, updates)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("update task: %d %s", rr.Code, rr.Body.String())
 	}
@@ -392,7 +392,7 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+subID+"/move", map[string]interface{}{
 		"status": "backlog",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -481,7 +481,7 @@ func TestTaskStartChangesStatus(t *testing.T) {
 
 	// Start the task via API
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("start task: %d %s", rr.Code, rr.Body.String())
 	}
@@ -507,14 +507,14 @@ func TestTaskDeleteViaHandler(t *testing.T) {
 
 	// Delete the task (returns 204 NoContent)
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete task: expected 204, got %d %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify task is gone
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 after delete, got %d", rr.Code)
 	}
@@ -537,19 +537,19 @@ func TestTaskDeleteCascadesToSubtasks(t *testing.T) {
 
 	// Delete the parent (returns 204 NoContent)
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+parentID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete parent: expected 204, got %d %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify both are gone
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+parentID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for parent, got %d", rr.Code)
 	}
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+subID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for subtask (cascade), got %d", rr.Code)
 	}
@@ -621,7 +621,7 @@ func TestProjectSandboxToggle(t *testing.T) {
 
 	// Get project
 	req := testRequest("GET", "/api/projects/"+projID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	proj := mustJSON[map[string]interface{}](t, rr.Body)
 
 	initialSandbox := proj["sandbox_enabled"].(bool)
@@ -630,14 +630,14 @@ func TestProjectSandboxToggle(t *testing.T) {
 	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
 		"sandbox_enabled": !initialSandbox,
 	})
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("toggle sandbox: %d %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify toggle
 	req = testRequest("GET", "/api/projects/"+projID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	proj = mustJSON[map[string]interface{}](t, rr.Body)
 	if proj["sandbox_enabled"].(bool) == initialSandbox {
 		t.Fatal("sandbox should have toggled")
@@ -659,7 +659,7 @@ func TestClearDoneTasks(t *testing.T) {
 
 	// Verify: 2 done, 1 backlog
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	tasks := mustJSON[[]map[string]interface{}](t, rr.Body)
 	if len(tasks) != 3 {
 		t.Fatalf("expected 3 tasks, got %d", len(tasks))
@@ -667,14 +667,14 @@ func TestClearDoneTasks(t *testing.T) {
 
 	// Clear done tasks (DELETE /api/projects/{id}/tasks/done)
 	req = testRequest("DELETE", "/api/projects/"+projID+"/tasks/done", nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("clear done: %d %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify: only backlog task remains
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	tasks = mustJSON[[]map[string]interface{}](t, rr.Body)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after clear done, got %d", len(tasks))
@@ -696,7 +696,7 @@ func TestCreateSubtaskWithLLM(t *testing.T) {
 		"llama_server_url": "http://localhost:9999/v1",
 		"model_name":       "mock-model",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create subtask with LLM: %d %s", rr.Code, rr.Body.String())
 	}
@@ -722,7 +722,7 @@ func TestBoardEndpointSubtasks(t *testing.T) {
 
 	// Get board
 	req := testRequest("GET", "/api/projects/"+projID+"/board", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get board: %d %s", rr.Code, rr.Body.String())
 	}

@@ -14,7 +14,7 @@ func TestMessageCreate(t *testing.T) {
 		"role":    "user",
 		"content": "Hello world",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -41,7 +41,7 @@ func TestMessageCreateMissingFields(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
 		"content": "Hello",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing role, got %d", rr.Code)
 	}
@@ -50,7 +50,7 @@ func TestMessageCreateMissingFields(t *testing.T) {
 	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
 		"role": "user",
 	})
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing content, got %d", rr.Code)
 	}
@@ -67,11 +67,11 @@ func TestMessageList(t *testing.T) {
 			"role":    "user",
 			"content": content,
 		})
-		testResponse(t, s, req)
+		testResponseAuth(t, s, req)
 	}
 
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -93,7 +93,7 @@ func TestMessageUpdate(t *testing.T) {
 		"role":    "user",
 		"content": "Original content",
 	})
-	createRR := testResponse(t, s, createReq)
+	createRR := testResponseAuth(t, s, createReq)
 	msg := mustJSON[map[string]interface{}](t, createRR.Body)
 	msgID := msg["id"].(string)
 
@@ -101,14 +101,14 @@ func TestMessageUpdate(t *testing.T) {
 	req := testRequest("PATCH", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, map[string]interface{}{
 		"content": "Updated content",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify update
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	msgs := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	if msgs[len(msgs)-1]["content"] != "Updated content" {
 		t.Fatalf("expected updated content, got %s", msgs[len(msgs)-1]["content"])
@@ -127,7 +127,7 @@ func TestMessageDeleteAfter(t *testing.T) {
 			"role":    "user",
 			"content": content,
 		})
-		rr := testResponse(t, s, req)
+		rr := testResponseAuth(t, s, req)
 		msg := mustJSON[map[string]interface{}](t, rr.Body)
 		msgIDs = append(msgIDs, msg["id"].(string))
 	}
@@ -136,7 +136,7 @@ func TestMessageDeleteAfter(t *testing.T) {
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
 		"message_id": msgIDs[1],
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -145,7 +145,7 @@ func TestMessageDeleteAfter(t *testing.T) {
 	// Note: due to second-level timestamp granularity, messages created in the same
 	// second may all be deleted together. The store layer tests verify precise behavior.
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	remaining := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	// At least the deleted message itself should be gone
 	for _, m := range remaining {
@@ -162,7 +162,7 @@ func TestMessageDeleteMissingID(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Test task")
 
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
@@ -178,13 +178,13 @@ func TestMessageGetByID(t *testing.T) {
 		"role":    "user",
 		"content": "Hello",
 	})
-	createRR := testResponse(t, s, createReq)
+	createRR := testResponseAuth(t, s, createReq)
 	msg := mustJSON[map[string]interface{}](t, createRR.Body)
 	msgID := msg["id"].(string)
 
 	// Get message metadata (will_delete_branch check)
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}

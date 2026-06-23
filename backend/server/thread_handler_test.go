@@ -11,7 +11,7 @@ func TestThreadList(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Test task")
 
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -39,7 +39,7 @@ func TestThreadFork(t *testing.T) {
 
 	// Get the Main thread
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	threads := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	if len(threads) < 1 {
 		t.Fatal("expected at least 1 thread")
@@ -51,7 +51,7 @@ func TestThreadFork(t *testing.T) {
 		"role":    "user",
 		"content": "Message to fork from",
 	})
-	createRR := testResponse(t, s, createReq)
+	createRR := testResponseAuth(t, s, createReq)
 	msg := mustJSON[map[string]interface{}](t, createRR.Body)
 	msgID := msg["id"].(string)
 
@@ -60,7 +60,7 @@ func TestThreadFork(t *testing.T) {
 		"from_thread_id":  mainThreadID,
 		"from_message_id": msgID,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -79,7 +79,7 @@ func TestThreadFork(t *testing.T) {
 
 	// Verify task's current_thread_id is updated
 	taskReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	taskRR := testResponse(t, s, taskReq)
+	taskRR := testResponseAuth(t, s, taskReq)
 	task := mustJSON[map[string]interface{}](t, taskRR.Body)
 	if task["current_thread_id"] != result["id"] {
 		t.Fatalf("task current_thread_id not updated: %s vs %s", task["current_thread_id"], result["id"])
@@ -93,7 +93,7 @@ func TestThreadSwitch(t *testing.T) {
 
 	// Get existing threads
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	threads := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	if len(threads) < 1 {
 		t.Fatal("expected at least 1 thread")
@@ -105,7 +105,7 @@ func TestThreadSwitch(t *testing.T) {
 		"role":    "user",
 		"content": "Message for fork",
 	})
-	createRR := testResponse(t, s, createReq)
+	createRR := testResponseAuth(t, s, createReq)
 	msg := mustJSON[map[string]interface{}](t, createRR.Body)
 	msgID := msg["id"].(string)
 
@@ -114,7 +114,7 @@ func TestThreadSwitch(t *testing.T) {
 		"from_thread_id":  mainThreadID,
 		"from_message_id": msgID,
 	})
-	forkRR := testResponse(t, s, forkReq)
+	forkRR := testResponseAuth(t, s, forkReq)
 	fork := mustJSON[map[string]interface{}](t, forkRR.Body)
 	forkThreadID := fork["id"].(string)
 
@@ -122,14 +122,14 @@ func TestThreadSwitch(t *testing.T) {
 	switchReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]interface{}{
 		"thread_id": mainThreadID,
 	})
-	switchRR := testResponse(t, s, switchReq)
+	switchRR := testResponseAuth(t, s, switchReq)
 	if switchRR.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", switchRR.Code, switchRR.Body.String())
 	}
 
 	// Verify task's current_thread_id is updated to Main
 	taskReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	taskRR := testResponse(t, s, taskReq)
+	taskRR := testResponseAuth(t, s, taskReq)
 	task := mustJSON[map[string]interface{}](t, taskRR.Body)
 	if task["current_thread_id"] != mainThreadID {
 		t.Fatalf("expected current_thread_id=%s, got %s", mainThreadID, task["current_thread_id"])
@@ -137,7 +137,7 @@ func TestThreadSwitch(t *testing.T) {
 
 	// Verify thread list shows correct active state
 	listReq2 := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR2 := testResponse(t, s, listReq2)
+	listRR2 := testResponseAuth(t, s, listReq2)
 	threads2 := mustJSON[[]map[string]interface{}](t, listRR2.Body)
 
 	activeCount := 0
@@ -165,7 +165,7 @@ func TestThreadSwitchNotFound(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]interface{}{
 		"thread_id": "nonexistent-thread",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound && rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 404 or 400 for nonexistent thread, got %d", rr.Code)
 	}
@@ -178,7 +178,7 @@ func TestMessageScopedToThread(t *testing.T) {
 
 	// Get Main thread
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	threads := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	if len(threads) < 1 {
 		t.Fatal("expected at least 1 thread")
@@ -190,7 +190,7 @@ func TestMessageScopedToThread(t *testing.T) {
 		"role":    "user",
 		"content": "Fork point",
 	})
-	createRR2 := testResponse(t, s, createReq2)
+	createRR2 := testResponseAuth(t, s, createReq2)
 	msg := mustJSON[map[string]interface{}](t, createRR2.Body)
 	msgID := msg["id"].(string)
 
@@ -199,7 +199,7 @@ func TestMessageScopedToThread(t *testing.T) {
 		"from_thread_id":  mainThreadID,
 		"from_message_id": msgID,
 	})
-	forkRR := testResponse(t, s, forkReq)
+	forkRR := testResponseAuth(t, s, forkReq)
 	fork := mustJSON[map[string]interface{}](t, forkRR.Body)
 	forkThreadID := fork["id"].(string)
 
@@ -208,11 +208,11 @@ func TestMessageScopedToThread(t *testing.T) {
 		"role":    "user",
 		"content": "Message in Fork",
 	})
-	testResponse(t, s, createReq3)
+	testResponseAuth(t, s, createReq3)
 
 	// Get messages — should be scoped to current (fork) thread
 	listMsgReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listMsgRR := testResponse(t, s, listMsgReq)
+	listMsgRR := testResponseAuth(t, s, listMsgReq)
 	msgs := mustJSON[[]map[string]interface{}](t, listMsgRR.Body)
 
 	// Fork thread should have copied messages + new message

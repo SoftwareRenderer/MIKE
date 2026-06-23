@@ -14,7 +14,7 @@ func TestProjectCreate(t *testing.T) {
 		"name": "My Project",
 		"path": dir,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -38,14 +38,14 @@ func TestProjectCreateDuplicatePath(t *testing.T) {
 		"name": "Project A",
 		"path": dir,
 	})
-	testResponse(t, s, req)
+	testResponseAuth(t, s, req)
 
 	// Create second project with same path — should fail (500 for UNIQUE constraint violation)
 	req = testRequest("POST", "/api/projects", map[string]interface{}{
 		"name": "Project B",
 		"path": dir,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code < http.StatusBadRequest {
 		t.Fatalf("expected error for duplicate path, got %d", rr.Code)
 	}
@@ -62,11 +62,11 @@ func TestProjectList(t *testing.T) {
 			"name": name,
 			"path": dir,
 		})
-		testResponse(t, s, req)
+		testResponseAuth(t, s, req)
 	}
 
 	req := testRequest("GET", "/api/projects", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -86,7 +86,7 @@ func TestProjectGetByID(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	req := testRequest("GET", "/api/projects/"+projID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestProjectGetByIDNotFound(t *testing.T) {
 	s := testServer(t)
 
 	req := testRequest("GET", "/api/projects/nonexistent", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr.Code)
 	}
@@ -114,7 +114,7 @@ func TestProjectUpdate(t *testing.T) {
 	req := testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
 		"name": "Renamed Project",
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -130,14 +130,14 @@ func TestProjectDelete(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	req := testRequest("DELETE", "/api/projects/"+projID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify it's gone
 	req = testRequest("GET", "/api/projects/"+projID, nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 after delete, got %d", rr.Code)
 	}
@@ -156,7 +156,7 @@ func TestProjectCounts(t *testing.T) {
 	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]interface{}{
 		"status": "in_progress",
 	})
-	moveRR := testResponse(t, s, moveReq)
+	moveRR := testResponseAuth(t, s, moveReq)
 	if moveRR.Code != http.StatusOK {
 		t.Fatalf("move to in_progress failed: %d %s", moveRR.Code, moveRR.Body.String())
 	}
@@ -166,21 +166,21 @@ func TestProjectCounts(t *testing.T) {
 	moveReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+reviewTaskID+"/move", map[string]interface{}{
 		"status": "review",
 	})
-	moveRR2 := testResponse(t, s, moveReq2)
+	moveRR2 := testResponseAuth(t, s, moveReq2)
 	if moveRR2.Code != http.StatusOK {
 		t.Fatalf("move to review failed: %d %s", moveRR2.Code, moveRR2.Body.String())
 	}
 
 	// Debug: list tasks and their statuses
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	tasks := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	for _, task := range tasks {
 		t.Logf("task %s: status=%s", task["id"], task["status"])
 	}
 
 	req := testRequest("GET", "/api/projects/counts", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -210,7 +210,7 @@ func TestBoardEndpoint(t *testing.T) {
 	createTestTask(t, s, projID, "Task B")
 
 	req := testRequest("GET", "/api/projects/"+projID+"/board", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -234,21 +234,21 @@ func TestClearDone(t *testing.T) {
 	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+doneTask+"/move", map[string]interface{}{
 		"status": "done",
 	})
-	moveRR := testResponse(t, s, moveReq)
+	moveRR := testResponseAuth(t, s, moveReq)
 	if moveRR.Code != http.StatusOK {
 		t.Fatalf("move to done failed: %d %s", moveRR.Code, moveRR.Body.String())
 	}
 
 	// Clear done tasks
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/done", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify done task is gone but backlog task remains
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	listRR := testResponse(t, s, listReq)
+	listRR := testResponseAuth(t, s, listReq)
 	tasks := mustJSON[[]map[string]interface{}](t, listRR.Body)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after clear done, got %d", len(tasks))

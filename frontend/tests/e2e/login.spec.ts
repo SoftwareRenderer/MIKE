@@ -1,0 +1,77 @@
+import { test, expect } from '../e2e/helpers';
+
+test.describe.serial('Login', () => {
+    test.beforeEach(async ({ page }) => {
+        // Clear cookies to simulate fresh session
+        const context = page.context();
+        await context.clearCookies();
+        await page.goto('/');
+    });
+
+    test('should show login modal when not authenticated', async ({ page }) => {
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.login-form h2')).toHaveText('Sign in');
+    });
+
+    test('should hide app content when not authenticated', async ({ page }) => {
+        // The sidebar and main content should not be visible
+        await expect(page.locator('.sidebar')).not.toBeVisible();
+        await expect(page.locator('.project-item')).not.toBeVisible();
+    });
+
+    test('should login with correct password', async ({ page }) => {
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+
+        // Login via API directly (bypass UI for reliability)
+        const context = page.context();
+        await context.request.post('/api/auth/login', {
+            data: { password: 'test-password-1234' },
+        });
+
+        // Reload page to reflect authenticated state
+        await page.reload();
+        await page.waitForURL('/', { timeout: 10000 });
+
+        // Login modal should not be visible
+        await expect(page.locator('.login-modal')).not.toBeVisible({ timeout: 10000 });
+
+        // App content should be visible
+        await expect(page.locator('.project-item')).toBeVisible({ timeout: 10000 });
+    });
+
+    test('should show error on wrong password', async ({ page }) => {
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+
+        // Try wrong password via API
+        const response = await page.context().request.post('/api/auth/login', {
+            data: { password: 'wrong-password' },
+        });
+        expect(response.status()).toBe(401);
+
+        // Login modal should still be visible (no valid session)
+        await expect(page.locator('.login-modal')).toBeVisible();
+    });
+
+    test('should logout and show login modal again', async ({ page }) => {
+        // Login first
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+        await page.context().request.post('/api/auth/login', {
+            data: { password: 'test-password-1234' },
+        });
+        await page.reload();
+        await expect(page.locator('.login-modal')).not.toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.project-item')).toBeVisible({ timeout: 10000 });
+
+        // Navigate to a project to see the top bar with logout button
+        await page.click('.project-item');
+        await page.waitForSelector('.card, .top-bar', { timeout: 10000 });
+
+        // Click logout button (last icon button in the actions area)
+        const logoutBtn = page.locator('.actions .icon-btn').last();
+        await expect(logoutBtn).toBeVisible();
+        await logoutBtn.click();
+
+        // Login modal should reappear
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+    });
+});

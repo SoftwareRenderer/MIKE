@@ -15,7 +15,7 @@ func TestDependencyCreate(t *testing.T) {
 		"child_task_id": childID,
 		"auto_start":    true,
 	})
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -41,12 +41,12 @@ func TestDependencyList(t *testing.T) {
 		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", map[string]interface{}{
 			"child_task_id": childID,
 		})
-		testResponse(t, s, req)
+		testResponseAuth(t, s, req)
 	}
 
 	// List dependents of parent
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -67,11 +67,11 @@ func TestDependencyListDependents(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", map[string]interface{}{
 		"child_task_id": childID,
 	})
-	testResponse(t, s, req)
+	testResponseAuth(t, s, req)
 
 	// List dependencies of child (tasks this child depends on)
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+childID+"/dependents", nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -95,18 +95,18 @@ func TestDependencyDelete(t *testing.T) {
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", map[string]interface{}{
 		"child_task_id": childID,
 	})
-	testResponse(t, s, req)
+	testResponseAuth(t, s, req)
 
 	// Delete dependency
 	req = testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies/"+childID, nil)
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify dependency is gone
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", nil)
-	rr = testResponse(t, s, req)
+	rr = testResponseAuth(t, s, req)
 	deps := mustJSON[[]map[string]interface{}](t, rr.Body)
 	if len(deps) != 0 {
 		t.Fatalf("expected 0 dependents after delete, got %d", len(deps))
@@ -119,7 +119,7 @@ func TestDependencyCreateInvalidJSON(t *testing.T) {
 	parentID := createTestTask(t, s, projID, "Parent task")
 
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/dependencies", "not json")
-	rr := testResponse(t, s, req)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}

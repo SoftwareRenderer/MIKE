@@ -53,6 +53,9 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	if err := s.initSessions(); err != nil {
+		return nil, fmt.Errorf("init sessions: %w", err)
+	}
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
 	}
