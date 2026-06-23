@@ -40,6 +40,7 @@ type executionState struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	userMsgChan chan stream.UserMessage
+	createdIDs  []string // task IDs created by create_task during this execution
 }
 
 // modelConfig holds mutable model/provider settings for an executor.

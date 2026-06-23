@@ -1516,8 +1516,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     {#if showStartButton}
         <div class="chat-start">
-            {#if providers.length > 0}
-                <div class="start-model-row">
+            <div class="start-model-row">
+                {#if providers.length > 0}
                     <ModelSelector
                         providers={providers}
                         currentModel={selectedModel}
@@ -1525,8 +1525,25 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         currentReasoningEffort={selectedReasoningEffort}
                         onSelect={handleModelSelect}
                     />
-                </div>
-            {/if}
+                {/if}
+                <button
+                    type="button"
+                    class="btn-plan-toggle"
+                    class:active={planMode}
+                    onclick={() => handlePlanModeToggle(!planMode)}
+                    title={planMode ? 'Plan mode: AI proposes subtasks. Click to switch to act mode.' : 'Act mode: AI makes changes directly. Click to switch to plan mode.'}
+                    aria-label="Toggle plan mode"
+                >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        {#if planMode}
+                            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        {:else}
+                            <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        {/if}
+                    </svg>
+                    <span>{planMode ? 'Plan' : 'Act'}</span>
+                </button>
+            </div>
             <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Start the AI task">
                 {#if isStarting}
                     <span class="spinner-inline"></span> Starting...
@@ -1805,6 +1822,31 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .start-model-row {
         display: flex;
         align-items: center;
+        gap: 8px;
+    }
+    .btn-plan-toggle {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-2);
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        flex-shrink: 0;
+    }
+    .btn-plan-toggle:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .btn-plan-toggle.active {
+        background: var(--color-accent)22;
+        border-color: var(--color-accent);
+        color: var(--color-accent);
     }
     .restart-model-row {
         display: flex;

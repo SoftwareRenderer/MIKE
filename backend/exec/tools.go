@@ -26,7 +26,7 @@ type readFunc func(path string) ([]byte, error)
 // writeFunc writes content to a file. When sandboxed, runs via container exec with stdin.
 type writeFunc func(path, content string) error
 
-func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
+func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, state *executionState, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
 	switch name {
 	case "read_file":
 		path, _ := args["path"].(string)
@@ -214,16 +214,46 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		}
 		return out, true
 	case "task_complete":
-		// In plan mode, require at least one subtask before allowing completion
+		// In plan mode, require at least one task created during planning before allowing completion
 		if task.PlanMode {
-			children, err := te.store.GetChildren(task.ID)
-			if err == nil && len(children) == 0 {
-				return "Error: Cannot complete planning without creating subtasks. Use create_task() to add at least one subtask first.", false
+			if state == nil {
+				return "Error: Cannot complete planning without creating tasks. Use create_task() to add at least one task first.", false
 			}
+			createdIDs := state.createdIDs
+			if len(createdIDs) == 0 {
+				return "Error: Cannot complete planning without creating tasks. Use create_task() to add at least one task first.", false
+			}
+			// Count independent tasks vs nested subtasks
+			independentCount := 0
+			nestedCount := 0
+			for _, id := range createdIDs {
+				t, err := te.store.GetTaskByTaskID(id)
+				if err != nil {
+					continue
+				}
+				if t.ParentTaskID == "" {
+					independentCount++
+				} else {
+					nestedCount++
+				}
+			}
+			// Build accurate summary
+			var summary string
+			if independentCount > 0 && nestedCount > 0 {
+				summary = fmt.Sprintf("Plan created with %d task%s and %d subtask%s. Awaiting approval.",
+					independentCount, pluralS(independentCount), nestedCount, pluralS(nestedCount))
+			} else if independentCount > 0 {
+				summary = fmt.Sprintf("Plan created with %d task%s. Awaiting approval.",
+					independentCount, pluralS(independentCount))
+			} else {
+				summary = fmt.Sprintf("Plan created with %d subtask%s. Awaiting approval.",
+					nestedCount, pluralS(nestedCount))
+			}
+			log.Printf("[task_complete] plan mode: %s", summary)
 		}
 		return "Task complete", true
 	case "create_task":
-		return te.handleCreateTask(args, task), true
+		return te.handleCreateTask(args, task, state), true
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), false
 	}
@@ -280,10 +310,34 @@ func validateWorktreePath(worktreePath, path string) string {
 
 	// Clean the input path
 	cleaned := filepath.Clean(path)
-	// Reject absolute paths (they shouldn't be used for worktree-relative paths)
+
+	// Handle absolute paths
 	if filepath.IsAbs(cleaned) {
-		return ""
+		// In sandbox mode, the LLM sees /worktree as the worktree root.
+		// Strip that prefix so the relative path can be validated normally.
+		if cleaned == "/worktree" || strings.HasPrefix(cleaned, "/worktree/") {
+			cleaned = cleaned[len("/worktree"):]
+			if cleaned == "" {
+				return worktreePath
+			}
+			if cleaned[0] == os.PathSeparator {
+				cleaned = cleaned[1:]
+			}
+		} else if strings.HasPrefix(cleaned, wt) || cleaned == worktreePath {
+			// Path matches the actual worktree (non-sandbox absolute path)
+			cleaned = cleaned[len(worktreePath):]
+			if cleaned == "" {
+				return worktreePath
+			}
+			if cleaned[0] == os.PathSeparator {
+				cleaned = cleaned[1:]
+			}
+		} else {
+			// Absolute path outside worktree
+			return ""
+		}
 	}
+
 	// Reject paths that escape with ..
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return ""
@@ -300,7 +354,7 @@ func validateWorktreePath(worktreePath, path string) string {
 
 // handleCreateTask creates a new task on the board, used by the LLM in plan mode
 // to decompose work into subtasks. The new task inherits settings from the parent.
-func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *types.Task) string {
+func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *types.Task, state *executionState) string {
 	title, _ := args["title"].(string)
 	prompt, _ := args["prompt"].(string)
 	parentTaskID, _ := args["parent_task_id"].(string)
@@ -358,6 +412,11 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 		return fmt.Sprintf("Error: failed to create task: %v", err)
 	}
 
+	// Track the created task ID for plan mode validation
+	if state != nil {
+		state.createdIDs = append(state.createdIDs, newTaskID)
+	}
+
 	// Create default "Main" thread for the new task
 	defaultThreadID := types.GenerateThreadID()
 	if err := te.store.CreateThread(&types.TaskThread{
@@ -396,4 +455,12 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
 	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})
 	return string(result)
+}
+
+// pluralS returns "s" if count > 1, empty string otherwise.
+func pluralS(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }

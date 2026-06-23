@@ -21,7 +21,12 @@ func BuildPlanModeSystemPrompt(worktreePath string) string {
 }
 
 func buildSystemPrompt(worktreePath string, planMode bool) string {
-	tools := GetToolDefinitions()
+	var tools []types.ChatTool
+	if planMode {
+		tools = GetPlanModeToolDefinitions()
+	} else {
+		tools = GetToolDefinitions()
+	}
 	toolInfos := make([]prompts.ToolInfo, len(tools))
 	for i, t := range tools {
 		toolInfos[i] = prompts.ToolInfo{

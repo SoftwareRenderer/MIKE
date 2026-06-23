@@ -89,7 +89,7 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "parent-task-1",
-	}, parent)
+	}, parent, nil)
 
 	// Should return JSON with task_id
 	var resp map[string]string
@@ -134,7 +134,7 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-2",
-	}, parent)
+	}, parent, nil)
 
 	// Get the child task
 	children, _ := te.store.GetChildren("parent-task-2")
@@ -167,7 +167,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 		"title":          "Level 1 Task",
 		"prompt":         "Level 1 prompt",
 		"parent_task_id": "parent-task-3",
-	}, parent)
+	}, parent, nil)
 
 	var resp1 map[string]string
 	json.Unmarshal([]byte(result1), &resp1)
@@ -179,7 +179,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 		"title":         "Level 2 Task",
 		"prompt":        "Level 2 prompt",
 		"parent_task_id": level1ID,
-	}, parent)
+	}, parent, nil)
 
 	var resp2 map[string]string
 	json.Unmarshal([]byte(result2), &resp2)
@@ -206,7 +206,7 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-4",
-	}, parent)
+	}, parent, nil)
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
@@ -236,7 +236,7 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Implement feature X",
 		"parent_task_id": "parent-task-5",
-	}, parent)
+	}, parent, nil)
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
@@ -265,7 +265,7 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 
 	result := te.handleCreateTask(map[string]interface{}{
 		"prompt": "Test prompt",
-	}, parent)
+	}, parent, nil)
 
 	if result != "Error: title and prompt are required" {
 		t.Errorf("expected error for missing title, got: %s", result)
@@ -278,7 +278,7 @@ func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 
 	result := te.handleCreateTask(map[string]interface{}{
 		"title": "Task without prompt",
-	}, parent)
+	}, parent, nil)
 
 	if result != "Error: title and prompt are required" {
 		t.Errorf("expected error for missing prompt, got: %s", result)
@@ -293,7 +293,7 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 		"title":         "Child Task",
 		"prompt":        "Test prompt",
 		"parent_task_id": "nonexistent-task",
-	}, parent)
+	}, parent, nil)
 
 	if !strings.Contains(result, "not found") {
 		t.Errorf("expected 'not found' error, got: %s", result)
@@ -308,7 +308,7 @@ func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-9",
-	}, parent)
+	}, parent, nil)
 
 	if !strings.Contains(result, "not in backlog") {
 		t.Errorf("expected 'not in backlog' error, got: %s", result)
@@ -323,7 +323,7 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-10",
-	}, parent)
+	}, parent, nil)
 
 	// Should succeed (in_progress parents can accept subtasks during planning)
 	var resp map[string]string
@@ -345,7 +345,7 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 			"title":          "Task " + string(rune('A'+i-1)),
 			"prompt":         "Prompt for task " + string(rune('A'+i-1)),
 			"parent_task_id": "parent-task-11",
-		}, parent)
+		}, parent, nil)
 
 		var resp map[string]string
 		if err := json.Unmarshal([]byte(result), &resp); err != nil {
@@ -374,7 +374,7 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 		"title":          `Task with "quotes" and \backslash`,
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-12",
-	}, parent)
+	}, parent, nil)
 
 	// Should return valid JSON even with special characters
 	var resp map[string]string
@@ -392,15 +392,16 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "plan-task-1", "proj-1", "backlog")
 
-	// Try to complete without subtasks
+	// Try to complete without subtasks (empty state)
+	state := &executionState{createdIDs: nil}
 	result, ok := te.executeTool("task_complete", map[string]interface{}{
 		"summary": "Plan complete",
-	}, "", parent, nil, nil, nil)
+	}, "", parent, state, nil, nil, nil)
 
 	if ok {
 		t.Error("expected task_complete to fail in plan mode without subtasks")
 	}
-	if !strings.Contains(result, "Cannot complete planning without creating subtasks") {
+	if !strings.Contains(result, "Cannot complete planning without creating") {
 		t.Errorf("unexpected error message: %s", result)
 	}
 }
@@ -410,11 +411,12 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	parent := createParentTask(t, te.store, "plan-parent-1", "proj-1", "backlog")
 
 	// Create a subtask via handleCreateTask
+	state := &executionState{}
 	result := te.handleCreateTask(map[string]interface{}{
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "plan-parent-1",
-	}, parent)
+	}, parent, state)
 
 	// Verify subtask was created
 	var resp map[string]string
@@ -431,7 +433,7 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	// Try to complete with subtask
 	result2, ok := te.executeTool("task_complete", map[string]interface{}{
 		"summary": "Plan complete",
-	}, "", parent, nil, nil, nil)
+	}, "", parent, state, nil, nil, nil)
 
 	if !ok {
 		t.Errorf("expected task_complete to succeed with subtasks, got: %s", result2)
@@ -462,7 +464,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 	// Try to complete without subtasks (should succeed)
 	result, ok := te.executeTool("task_complete", map[string]interface{}{
 		"summary": "Task complete",
-	}, "", task, nil, nil, nil)
+	}, "", task, nil, nil, nil, nil)
 
 	if !ok {
 		t.Errorf("expected task_complete to succeed in standard mode, got: %s", result)

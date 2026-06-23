@@ -3,6 +3,7 @@
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
+    import { fade } from 'svelte/transition';
 
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
 
@@ -732,7 +733,9 @@
     {#if expanded && hasChildren}
         <div class="subtask-list">
             {#each children as child}
-                <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
+                <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
+                    <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
+                </div>
             {/each}
         </div>
     {/if}

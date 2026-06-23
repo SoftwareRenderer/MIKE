@@ -874,7 +874,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				args := parseToolArgs(tc.Function.Arguments)
 				toolStart := time.Now()
-				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, execFn, readFn, writeFn)
+				te.taskMu.Lock()
+				state := te.tasks[task.ID]
+				te.taskMu.Unlock()
+				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})

@@ -163,8 +163,6 @@
         padding: 8px;
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .tool-sandbox-icon { opacity: 0.6; }
-    .tool-icon { opacity: 0.7; }
     .tool-name {
         font-size: 0.8125rem;
         font-weight: 600;

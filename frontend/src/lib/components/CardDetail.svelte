@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { fade } from 'svelte/transition';
     import { get } from 'svelte/store';
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
@@ -817,22 +818,24 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                             {#if !collapsedSections.has(section.id)}
                             <div class="section-body">
                                 {#each sectionTasks as t (t.id)}
-                                    <Card
-                                        task={t}
-                                        columnId={section.id}
-                                        projectId={task.project_id}
-                                        childrenMap={childrenMap}
-                                        expandedTasks={expandedTasks}
-                                        onToggleExpanded={toggleTaskExpanded}
-                                        onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
-                                        columnColor={getSectionColor(section.id)}
-                                        inline={false}
-                                        showSubtaskBorder={true}
-                                        onSelect={(selected) => {
-                                            if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
-                                        }}
-                                        onRefreshBoard={onRefreshBoard}
-                                    />
+                                    <div class="task-wrapper" transition:fade={{ duration: 200 }}>
+                                        <Card
+                                            task={t}
+                                            columnId={section.id}
+                                            projectId={task.project_id}
+                                            childrenMap={childrenMap}
+                                            expandedTasks={expandedTasks}
+                                            onToggleExpanded={toggleTaskExpanded}
+                                            onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
+                                            columnColor={getSectionColor(section.id)}
+                                            inline={false}
+                                            showSubtaskBorder={true}
+                                            onSelect={(selected) => {
+                                                if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
+                                            }}
+                                            onRefreshBoard={onRefreshBoard}
+                                        />
+                                    </div>
                                 {/each}
                                 {#if section.id === 'backlog'}
                                     <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
