@@ -45,6 +45,18 @@ test.describe.serial('Login', () => {
         await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
     });
 
+    test('should not dismiss login modal when clicking outside', async ({ page }) => {
+        await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
+
+        // Click on the overlay (outside the modal)
+        await page.locator('.login-overlay').click();
+
+        // Login modal should still be visible
+        await expect(page.locator('.login-modal')).toBeVisible();
+        // App content should still be hidden
+        await expect(page.locator('.sidebar')).not.toBeVisible();
+    });
+
     test('should show error on wrong password', async ({ page }) => {
         await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });
 
@@ -68,14 +80,19 @@ test.describe.serial('Login', () => {
         await expect(page.locator('.login-modal')).not.toBeVisible({ timeout: 10000 });
         await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
 
-        // Navigate to a project to see the top bar with logout button
+        // Navigate to a project to see the top bar with settings button
         await page.click('.project-item');
         await page.waitForSelector('.card, .top-bar', { timeout: 10000 });
 
-        // Click logout button (last icon button in the actions area)
-        const logoutBtn = page.locator('.actions .icon-btn').last();
-        await expect(logoutBtn).toBeVisible();
-        await logoutBtn.click();
+        // Click settings icon button in the top bar
+        const settingsBtn = page.locator('[aria-label="Settings"]');
+        await expect(settingsBtn).toBeVisible();
+        await settingsBtn.click();
+
+        // Click "Sign out" button in settings modal footer
+        const signOutBtn = page.locator('.btn-signout');
+        await expect(signOutBtn).toBeVisible({ timeout: 10000 });
+        await signOutBtn.click();
 
         // Login modal should reappear
         await expect(page.locator('.login-modal')).toBeVisible({ timeout: 10000 });

@@ -6,7 +6,7 @@
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
 
-    let { config, onClose, onSaved }: { config: Config | null; onClose: () => void; onSaved: () => void } = $props();
+    let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
     const MODEL_COLORS = [
         '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
@@ -815,10 +815,15 @@
             {/if}
 
             <div class="modal-footer">
-                <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading} title="Save settings">
-                    {loading ? 'Saving...' : 'Save'}
-                </button>
+                {#if onSignOut}
+                    <button type="button" class="btn-signout" onclick={onSignOut} title="Sign out of Kanban">Sign out</button>
+                {/if}
+                <div class="modal-footer-right">
+                    <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+                    <button type="submit" class="btn-primary" disabled={loading} title="Save settings">
+                        {loading ? 'Saving...' : 'Save'}
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -1701,7 +1706,8 @@
     }
     .modal-footer {
         display: flex;
-        justify-content: flex-end;
+        align-items: center;
+        justify-content: space-between;
         gap: 8px;
         padding: 12px 20px;
         border-top: 1px solid var(--color-border);
@@ -1710,6 +1716,25 @@
         position: sticky;
         bottom: 0;
         z-index: 10;
+    }
+    .modal-footer-right {
+        display: flex;
+        gap: 8px;
+    }
+    .btn-signout {
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--color-status-red, #f85149);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid var(--color-status-red, #f85149);
+        transition: background 0.15s, color 0.15s;
+    }
+    .btn-signout:hover {
+        background: var(--color-status-red, #f85149);
+        color: white;
     }
     .btn-primary {
         padding: 8px 20px;
