@@ -8,13 +8,13 @@ test.describe.serial('Task Message Actions', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(120000);
     await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
+    await page.waitForSelector('.card');
 
     projectId = await getProjectId(page);
     // Create a fresh task and open it
     taskId = await createTaskViaApi(page, projectId, `msg-actions-${Date.now()}`);
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Move task to in_progress via API (bypasses executor, shows chat form)
     const ok = await ensureTaskStarted(page, projectId, taskId);
@@ -23,9 +23,15 @@ test.describe.serial('Task Message Actions', () => {
     // Reload to pick up status change (retry if chat form doesn't appear)
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.reload();
-      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-      if (await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false)) {
-        break; // Chat form appeared
+      await expect(page.locator('.task-detail-page')).toBeVisible();
+      // Check for chat form, restart button, or start button
+      const hasForm = await page.locator('.chat-form').isVisible().catch(() => false);
+      if (hasForm) break;
+
+      // If restart button is visible, click it
+      if (await page.locator('.btn-restart-task').isVisible().catch(() => false)) {
+        await page.locator('.btn-restart-task').click();
+        if (await page.locator('.chat-form').isVisible().catch(() => false)) break;
       }
       // If start button is still visible, try moving again
       if (await page.locator('.btn-start-task').isVisible().catch(() => false)) {
@@ -33,7 +39,7 @@ test.describe.serial('Task Message Actions', () => {
       }
     }
     // Final check
-    if (!await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (!await page.locator('.chat-form').isVisible().catch(() => false)) {
       test.skip('Chat form not visible after reload (task may still be in backlog)');
     }
   });
@@ -48,12 +54,12 @@ test.describe.serial('Task Message Actions', () => {
 
     // Reload to pick up the new message
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // All three action buttons should be visible on the message
     const message = page.locator('.chat-message.user').last();
@@ -72,12 +78,12 @@ test.describe.serial('Task Message Actions', () => {
 
     // Reload to pick up the new message
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Grant clipboard permission and click copy
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -98,12 +104,12 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'user', content: `Delete test ${Date.now()}` },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Click delete button
     const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Delete"]');
@@ -111,7 +117,7 @@ test.describe.serial('Task Message Actions', () => {
 
     // Check that delete dialog appears
     const dialog = page.locator('.confirm-dialog');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible();
     await expect(dialog.locator('h3')).toContainText('Delete Message');
 
     // Cancel deletion
@@ -129,12 +135,12 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'user', content: `Will be deleted ${Date.now()}` },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Count user messages before delete
     const userCountBefore = await page.locator('.chat-message.user').count();
@@ -143,15 +149,15 @@ test.describe.serial('Task Message Actions', () => {
     // Click delete and confirm
     const deleteBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="Delete"]');
     await deleteBtn.click();
-    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.confirm-dialog')).toBeVisible();
     await page.locator('.confirm-dialog .btn-confirm').click();
 
     // Dialog should close
-    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.confirm-dialog')).not.toBeVisible();
 
     // Reload to pick up deletion (WebSocket may not update in test env)
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // User message count should decrease
     const userCountAfter = await page.locator('.chat-message.user').count();
@@ -175,19 +181,19 @@ test.describe.serial('Task Message Actions', () => {
 
     // Reload to pick up messages
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for chat form (retry if not visible)
     for (let i = 0; i < 3; i++) {
       if (await page.locator('.chat-form').isVisible().catch(() => false)) break;
       await page.waitForTimeout(1000);
     }
-    if (!await page.locator('.chat-form').isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (!await page.locator('.chat-form').isVisible().catch(() => false)) {
       test.skip('Chat form not visible after reload');
     }
 
     // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Click fork button
     const forkBtn = page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="new thread"]');
@@ -213,10 +219,10 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for cancel fork test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Enter fork mode
     await page.locator('.chat-message.user').last().locator('.action-btn[aria-label*="new thread"]').click();
@@ -242,10 +248,10 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for fork submit test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-message.user').last()).toBeVisible();
 
     // Fork the message
     const forkedMsg = `Forked content ${Date.now()}`;
@@ -254,7 +260,7 @@ test.describe.serial('Task Message Actions', () => {
     await page.locator('.btn-edit-submit').click();
 
     // Fork form should close
-    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form')).not.toBeVisible();
 
     // The message should still be visible
     const userMessages = page.locator('.chat-message.user');
@@ -270,10 +276,10 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: assistantMsg },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-message.assistant').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-message.assistant').last()).toBeVisible();
 
     // Get the assistant message content
     const lastAssistant = page.locator('.chat-message.assistant').last();
@@ -301,10 +307,10 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for regenerate test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-message.assistant').last()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-message.assistant').last()).toBeVisible();
 
     // Regenerate button should be visible on the last assistant message
     const lastAssistant = page.locator('.chat-message.assistant').last();
@@ -331,8 +337,8 @@ test.describe.serial('Task Message Actions', () => {
 
     // Navigate to the task to load messages
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.chat-message.assistant')).toHaveCount(2, { timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+    await expect(page.locator('.chat-message.assistant')).toHaveCount(2);
 
     // Get all assistant messages
     const assistantMessages = page.locator('.chat-message.assistant');
@@ -360,23 +366,23 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for follow-up fork test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Find the follow-up message by content
     const followUpEl = page.locator('.chat-message.user').filter({ hasText: followUpMsg }).last();
-    await expect(followUpEl).toBeVisible({ timeout: 10000 });
+    await expect(followUpEl).toBeVisible();
 
     // Fork the follow-up message
     const forkedMsg = `Forked follow up ${Date.now()}`;
     await followUpEl.locator('.action-btn[aria-label*="new thread"]').click();
-    await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form textarea')).toBeVisible();
     await page.locator('.edit-form textarea').fill(forkedMsg);
     await page.locator('.btn-edit-submit').click();
 
     // Fork form should close
-    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form')).not.toBeVisible();
 
     // Messages should still be visible
     const userMessages = page.locator('.chat-message.user');
@@ -392,12 +398,12 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'user', content: uniqueMsg },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Wait for the user message to appear
-    await expect(page.locator('.chat-message.user').filter({ hasText: uniqueMsg })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-message.user').filter({ hasText: uniqueMsg })).toBeVisible();
 
     // Click fork button (should show Send since no assistant response follows)
     const lastUserMsg = page.locator('.chat-message.user').filter({ hasText: uniqueMsg }).last();
@@ -422,9 +428,9 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for fork button test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
 
     // Click fork/edit on the user message that has an LLM response after it
     const userMsgWithResponse = page.locator('.chat-message.user').filter({ hasText: msgWithResponse }).last();
@@ -447,10 +453,10 @@ test.describe.serial('Task Message Actions', () => {
       body: { role: 'assistant', content: 'Response for edit submit test' },
     });
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     // Wait for chat form (with retry for flaky reloads)
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-message.user').filter({ hasText: originalMsg })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form')).toBeVisible();
+    await expect(page.locator('.chat-message.user').filter({ hasText: originalMsg })).toBeVisible();
 
     // Open edit form on the last user message
     const lastUserMsg = page.locator('.chat-message.user').filter({ hasText: originalMsg }).last();
@@ -465,10 +471,10 @@ test.describe.serial('Task Message Actions', () => {
     await page.locator('.btn-edit-submit').click();
 
     // Edit form should close
-    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form')).not.toBeVisible();
 
     // Wait for async operations to settle
-    await expect(page.locator(".btn-send")).toBeVisible({ timeout: 10000 }).catch(() => {});
+    await expect(page.locator(".btn-send")).toBeVisible().catch(() => {});
 
     // Messages should still be visible (either forked or edited)
     const userMessages = page.locator('.chat-message.user');

@@ -46,7 +46,7 @@ let requestCount = 0;
 let loopToolCount = 0;  // per-scenario counter for tool loop test
 let loopTextCount = 0;  // per-scenario counter for text loop test
 let loopPhraseCount = 0;  // per-scenario counter for phrase loop test
-let autoContinueCount = 0;  // tracks auto-continue cycles to eventually terminate
+// NOTE: autoContinueCount removed — use per-conversation tool result counting instead
 
 /**
  * Build a non-streaming JSON response (matching real LLM behavior for stream: false).
@@ -164,12 +164,13 @@ function selectResponse(parsed) {
 
     // If there are tool results in the conversation, the LLM should respond
     // with text (not another tool call) to avoid infinite tool-call loops.
-    // After a few auto-continue cycles, call task_complete to terminate.
+    // After enough tool cycles, call task_complete to terminate.
+    // Use per-conversation counting (tool message count) instead of a global counter.
     const hasToolResults = messages.some(m => m.role === 'tool');
     if (hasToolResults) {
-        autoContinueCount++;
-        if (autoContinueCount >= 2) {
-            autoContinueCount = 0;
+        const toolResultCount = messages.filter(m => m.role === 'tool').length;
+        // After 2+ tool results, signal task complete to terminate the executor
+        if (toolResultCount >= 4) {
             return { chunks: toolCallTaskComplete, chunkDelay: 1 };
         }
         return { chunks: toolCallComplete, chunkDelay: 1 };

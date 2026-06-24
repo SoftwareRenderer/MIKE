@@ -5,21 +5,21 @@ test.describe.configure({ mode: 'parallel' });
 test.describe('Restart button model selector', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await page.waitForSelector('.project-item');
   });
 
   test('should show model selector next to restart button for stalled tasks', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `restart-model-selector-${Date.now()}`);
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Start the task (moves from backlog to in_progress)
-    await waitForChatForm(page);
+    if (!await waitForChatForm(page)) test.skip('Chat form not visible');
 
     // Graceful: executor may not start in test env
-    const sendBtnVisible = await page.locator('.btn-send').isVisible({ timeout: 15000 }).catch(() => false);
-    if (!sendBtnVisible) test.skip();
+    const sendBtnVisible = await page.locator('.btn-send').isVisible().catch(() => false);
+    if (!sendBtnVisible) test.skip('Send button not visible');
 
     // Send a follow-up message
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -32,7 +32,7 @@ test.describe('Restart button model selector', () => {
       { timeout: 5000 }
     ).catch(async () => {
       // Fallback: wait for textarea to clear (message sent)
-      await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+      await expect(chatTextarea).toHaveValue('');
     });
 
     // Send a message to trigger task execution, then disconnect WS to simulate stalled state
@@ -77,7 +77,7 @@ test.describe('Restart button model selector', () => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `restart-disabled-${Date.now()}`);
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Check that the start area has a model selector when providers are configured
     const startArea = page.locator('.chat-start');

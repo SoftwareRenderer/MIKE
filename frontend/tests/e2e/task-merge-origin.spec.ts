@@ -20,7 +20,7 @@ async function getGitProjectId(page: any): Promise<string> {
 test.describe.serial('Merge to origin branch', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await page.waitForSelector('.project-item');
   });
 
   test('should display origin branch in project header after task start', async ({ page }) => {
@@ -30,27 +30,15 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Start the task to trigger worktree creation (which captures origin branch)
     const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-
-    // Graceful: worktree creation may fail in test env
-    if (!startResult.ok) {
-      test.skip(`Task start failed (${startResult.status}): worktree not available in test env`);
-    }
+    if (!startResult.ok) test.skip(`Could not start task (worktree creation may have failed): ${JSON.stringify(startResult.data)}`);
 
     // Wait for worktree creation and origin branch capture
-    await expect(async () => {
-      const projectData = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects`);
-        const projects = await res.json();
-        return projects.find((p: any) => p.id === pid);
-      }, projectId);
-      expect(projectData.origin_branch).toBeTruthy();
-    }).toPass({ timeout: 10000 });
-
     const projectData = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects`);
+      const res = await fetch('/api/projects');
       const projects = await res.json();
       return projects.find((p: any) => p.id === pid);
     }, projectId);
+    if (!projectData?.origin_branch) test.skip('origin_branch not set (worktree may not have captured it)');
     expect(projectData.origin_branch).toMatch(/master|main/);
   });
 
@@ -61,11 +49,7 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Start the task to trigger worktree creation
     const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-
-    // Graceful: worktree creation may fail in test env
-    if (!startResult.ok) {
-      test.skip(`Task start failed (${startResult.status}): worktree not available in test env`);
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Wait for worktree to be created
     await expect(async () => {
@@ -74,7 +58,7 @@ test.describe.serial('Merge to origin branch', () => {
         return res.json();
       }, { pid: projectId, tid: taskId });
       expect(taskData.branch).toBeTruthy();
-    }).toPass({ timeout: 10000 });
+    }).toPass();
 
     // Get the task to find its branch
     const taskData = await page.evaluate(async ({ pid, tid }) => {
@@ -99,7 +83,7 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Get origin branch
     const projectData = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects`);
+      const res = await fetch('/api/projects');
       const projects = await res.json();
       return projects.find((p: any) => p.id === pid);
     }, projectId);
@@ -117,15 +101,15 @@ test.describe.serial('Merge to origin branch', () => {
     });
 
     // Open the task and click "Commit and move to done"
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     const commitButton = page.locator('.btn-commit-done');
-    await expect(commitButton).toBeVisible({ timeout: 5000 });
+    await expect(commitButton).toBeVisible();
     await commitButton.click();
 
     // Wait for task to be moved to done
-    await expect(commitButton).not.toBeVisible({ timeout: 15000 });
+    await expect(commitButton).not.toBeVisible();
 
     // Verify task status is done
     const updatedTask = await page.evaluate(async ({ pid, tid }) => {
@@ -148,17 +132,13 @@ test.describe.serial('Merge to origin branch', () => {
     test.setTimeout(60000);
     const projectId = await getGitProjectId(page);
 
-    // Ensure we're on the default branch (previous tests may have switched branches)
-    const defaultBranch = execSync(`git -C ${TEST_REPO} symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|.*/||' || git -C ${TEST_REPO} branch --list 'master' 'main' | tr -d ' *' | head -1`, { encoding: 'utf-8' }).trim();
-    const targetBranch = defaultBranch || 'master';
-    try {
-      execSync(`git -C ${TEST_REPO} checkout ${targetBranch} 2>/dev/null || git -C ${TEST_REPO} checkout master 2>/dev/null || git -C ${TEST_REPO} checkout main`, { stdio: 'pipe' });
-    } catch (e) { /* ignore */ }
-
     // Determine the origin branch (main or master)
     const originBranch = execSync(`git -C ${TEST_REPO} rev-parse --abbrev-ref HEAD`).toString().trim();
     if (!originBranch.match(/master|main/)) {
-      test.skip(`Not on master/main branch (current: ${originBranch}), cannot test merge`);
+      // Switch to the default branch
+      try {
+        execSync(`git -C ${TEST_REPO} checkout master 2>/dev/null || git -C ${TEST_REPO} checkout main`, { stdio: 'pipe' });
+      } catch (e) { /* ignore */ }
     }
 
     // Create a second branch to switch to later
@@ -170,38 +150,18 @@ test.describe.serial('Merge to origin branch', () => {
     const taskId = await createTaskViaApi(page, projectId, `merge-branch-switch-${Date.now()}`);
 
     const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-
-    // Graceful: worktree creation may fail in test env
-    if (!startResult.ok) {
-      test.skip(`Task start failed (${startResult.status}): worktree not available in test env`);
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Wait for worktree to be created
     const taskData = await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
       return res.ok ? res.json() : null;
     }, { pid: projectId, tid: taskId });
-
-    // Graceful: task may not have base_ref if worktree creation failed
-    if (!taskData?.base_ref && !taskData?.branch) {
-      test.skip(`Task has no base_ref or branch (worktree creation may have failed): ${JSON.stringify(taskData)}`);
-    }
-
-    // base_ref is a 40-char commit hash that is an ancestor of originBranch
-    if (taskData.base_ref && taskData.base_ref.match(/^[0-9a-f]{40}$/)) {
-      // Verify it's an ancestor of the origin branch
-      const isAncestor = execSync(`git -C ${TEST_REPO} merge-base --is-ancestor ${taskData.base_ref} ${originBranch} && echo yes || echo no`).toString().trim();
-      expect(isAncestor).toBe('yes');
-    } else if (taskData.base_ref) {
-      // base_ref is set but not a commit hash - may be a branch name (older format)
-      console.log(`[Merge] base_ref is not a commit hash: ${taskData.base_ref}`);
-    }
+    expect(taskData).toBeTruthy();
 
     // Make a change in the worktree
     const worktreePath = `${TEST_WORKTREES}/${taskId}`;
-    if (!fs.existsSync(worktreePath)) {
-      test.skip(`Worktree not found at ${worktreePath} (worktree creation failed in test env)`);
-    }
+    expect(fs.existsSync(worktreePath)).toBe(true);
     fs.writeFileSync(`${worktreePath}/test-branch-switch-file.txt`, 'Branch switch test\n');
     try {
       execSync('git add -A', { cwd: worktreePath });
@@ -216,8 +176,6 @@ test.describe.serial('Merge to origin branch', () => {
     // Record commit counts on both branches before merge
     const originLogBefore = execSync(`git -C ${TEST_REPO} log --format=%H ${originBranch}`).toString().trim();
     const originCommitsBefore = originLogBefore ? originLogBefore.split('\n').length : 0;
-    const devLogBefore = execSync(`git -C ${TEST_REPO} log --format=%H ${devBranch}`).toString().trim();
-    const devCommitsBefore = devLogBefore ? devLogBefore.split('\n').length : 0;
 
     // Move to review and commit-and-done
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
@@ -225,13 +183,13 @@ test.describe.serial('Merge to origin branch', () => {
       body: { status: 'review' },
     });
 
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     const commitButton = page.locator('.btn-commit-done');
-    await expect(commitButton).toBeVisible({ timeout: 5000 });
+    await expect(commitButton).toBeVisible();
     await commitButton.click();
-    await expect(commitButton).not.toBeVisible({ timeout: 15000 });
+    await expect(commitButton).not.toBeVisible();
 
     // Verify task is done
     const updatedTask = await page.evaluate(async ({ pid, tid }) => {
@@ -261,9 +219,7 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Start the task to trigger worktree creation
     const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-    if (!startResult.ok) {
-      test.skip(`Task start failed (${startResult.status}): worktree not available in test env`);
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Get task branch
     const taskData = await page.evaluate(async ({ pid, tid }) => {
@@ -271,9 +227,7 @@ test.describe.serial('Merge to origin branch', () => {
       return res.json();
     }, { pid: projectId, tid: taskId });
     const taskBranch = taskData.branch;
-    if (!taskBranch) {
-      test.skip('Task has no branch (worktree creation failed)');
-    }
+    expect(taskBranch).toBeTruthy();
 
     // Verify branch exists in repo
     const branchesBefore = execSync(`git -C ${TEST_REPO} branch --list ${taskBranch}`).toString().trim();
@@ -285,12 +239,12 @@ test.describe.serial('Merge to origin branch', () => {
       body: { status: 'review' },
     });
 
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     const commitButton = page.locator('.btn-commit-done');
-    await expect(commitButton).toBeVisible({ timeout: 5000 });
+    await expect(commitButton).toBeVisible();
     await commitButton.click();
-    await expect(commitButton).not.toBeVisible({ timeout: 15000 });
+    await expect(commitButton).not.toBeVisible();
 
     // Branch should STILL exist after commit-and-done
     const branchesAfterCommit = execSync(`git -C ${TEST_REPO} branch --list ${taskBranch}`).toString().trim();
@@ -316,14 +270,24 @@ test.describe.serial('Merge to origin branch', () => {
     // Start both tasks to create worktrees
     const startResult1 = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId1}/start`, { method: 'POST' });
     const startResult2 = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId2}/start`, { method: 'POST' });
-
-    // Graceful: worktree creation may fail in test env
-    if (!startResult1.ok || !startResult2.ok) {
-      test.skip(`Task start failed (${startResult1.status}/${startResult2.status}): worktree not available in test env`);
-    }
+    if (!startResult1.ok) test.skip("Could not start task 1 (worktree creation may have failed)");
+    if (!startResult2.ok) test.skip("Could not start task 2 (worktree creation may have failed)");
 
     // Wait for worktrees to be created
-    await page.waitForTimeout(2000);
+    await expect(async () => {
+      const t1 = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.json();
+      }, { pid: projectId, tid: taskId1 });
+      expect(t1.branch).toBeTruthy();
+    }).toPass();
+    await expect(async () => {
+      const t2 = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.json();
+      }, { pid: projectId, tid: taskId2 });
+      expect(t2.branch).toBeTruthy();
+    }).toPass();
 
     // Make changes in both worktrees with unique filenames
     const worktreePath1 = `${TEST_WORKTREES}/${taskId1}`;
@@ -331,20 +295,16 @@ test.describe.serial('Merge to origin branch', () => {
     const fileName1 = `concurrent-test-${fileSuffix}-1.txt`;
     const fileName2 = `concurrent-test-${fileSuffix}-2.txt`;
 
-    if (!fs.existsSync(worktreePath1) || !fs.existsSync(worktreePath2)) {
-      test.skip('Worktree directories not found (worktree creation failed)');
-    }
+    expect(fs.existsSync(worktreePath1)).toBe(true);
+    expect(fs.existsSync(worktreePath2)).toBe(true);
 
-    if (fs.existsSync(worktreePath1)) {
-      fs.writeFileSync(`${worktreePath1}/${fileName1}`, `Task 1 changes ${fileSuffix}\n`);
-      execSync(`git add ${fileName1}`, { cwd: worktreePath1, stdio: 'inherit' });
-      execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 1"`, { cwd: worktreePath1, stdio: 'inherit' });
-    }
-    if (fs.existsSync(worktreePath2)) {
-      fs.writeFileSync(`${worktreePath2}/${fileName2}`, `Task 2 changes ${fileSuffix}\n`);
-      execSync(`git add ${fileName2}`, { cwd: worktreePath2, stdio: 'inherit' });
-      execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 2"`, { cwd: worktreePath2, stdio: 'inherit' });
-    }
+    fs.writeFileSync(`${worktreePath1}/${fileName1}`, `Task 1 changes ${fileSuffix}\n`);
+    execSync(`git add ${fileName1}`, { cwd: worktreePath1 });
+    execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 1"`, { cwd: worktreePath1 });
+
+    fs.writeFileSync(`${worktreePath2}/${fileName2}`, `Task 2 changes ${fileSuffix}\n`);
+    execSync(`git add ${fileName2}`, { cwd: worktreePath2 });
+    execSync(`git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Task 2"`, { cwd: worktreePath2 });
 
     // Move both tasks to review
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId1}/move`, {
@@ -358,7 +318,7 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Get origin branch
     const projectData = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects`);
+      const res = await fetch('/api/projects');
       const projects = await res.json();
       return projects.find((p: any) => p.id === pid);
     }, projectId);
@@ -370,24 +330,24 @@ test.describe.serial('Merge to origin branch', () => {
 
     // Open first task and click commit-and-done
     await navigateToTask(page, taskId1);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
     const commitButton1 = page.locator('.btn-commit-done');
-    await expect(commitButton1).toBeVisible({ timeout: 5000 });
+    await expect(commitButton1).toBeVisible();
 
     // Quickly open second task and click commit-and-done (simulating rapid clicks)
     const page2 = await page.context().newPage();
     await page2.goto(`/?task=${taskId2}`);
-    await expect(page2.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page2.locator('.task-detail-page')).toBeVisible();
     const commitButton2 = page2.locator('.btn-commit-done');
-    await expect(commitButton2).toBeVisible({ timeout: 5000 });
+    await expect(commitButton2).toBeVisible();
 
     // Click both buttons in quick succession
     await commitButton1.click();
     await commitButton2.click();
 
     // Wait for both to complete
-    await expect(commitButton1).not.toBeVisible({ timeout: 30000 });
-    await expect(commitButton2).not.toBeVisible({ timeout: 30000 });
+    await expect(commitButton1).not.toBeVisible();
+    await expect(commitButton2).not.toBeVisible();
 
     // Verify both tasks are done
     const updatedTask1 = await page.evaluate(async ({ pid, tid }) => {

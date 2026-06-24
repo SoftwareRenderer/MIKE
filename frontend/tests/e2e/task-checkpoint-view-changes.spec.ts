@@ -45,12 +45,7 @@ test.describe.serial('Checkpoint View Changes', () => {
         // Create a task and start it to get a worktree
         taskId = await createTaskViaApi(page, projectId, `checkpoint-test-${Date.now()}`);
         const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-
-        // Graceful: worktree creation may fail in test env
-        if (!startResult.ok) {
-            console.log('[Checkpoint] Task start failed, will skip tests requiring worktree');
-            return;
-        }
+        if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
         // Wait for worktree to be created
         await expect(async () => {
@@ -73,16 +68,10 @@ test.describe.serial('Checkpoint View Changes', () => {
             }
         }
 
-        if (!worktreeDir) {
-            console.log('[Checkpoint] Worktree dir not found, will skip tests requiring worktree');
-        }
+        expect(worktreeDir).toBeTruthy();
     });
 
     test('View Changes button shows and overlay renders correctly', async ({ page }) => {
-        if (!worktreeDir || !taskId) {
-            test.skip('Worktree not available (executor/worktree creation not available in test env)');
-        }
-
         // Clear existing stashes to start clean
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
 
@@ -119,17 +108,14 @@ test.describe.serial('Checkpoint View Changes', () => {
             console.log(`Created assistant message with hash ${stash2.slice(0, 7)}`);
         }
 
-        await page.waitForTimeout(500);
-
         // Open the task
-        await navigateToTask(page, taskId);
+        await navigateToTask(page, taskId, projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
             await changesTab.click();
         }
-        await page.waitForTimeout(1000);
 
         // Check View Changes buttons
         const viewChangesBtns = page.locator('.view-changes-btn');
@@ -140,11 +126,10 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         // Click "View Changes"
         await viewChangesBtns.first().click();
-        await page.waitForTimeout(1500);
 
         // Verify the overlay appears
         const overlay = page.locator('.checkpoint-diff-overlay');
-        await expect(overlay).toBeVisible();
+        await expect(overlay).toBeVisible({ timeout: 5000 });
 
         // Verify the overlay header
         await expect(page.locator('.checkpoint-diff-header')).toBeVisible();
@@ -155,18 +140,13 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         // Close
         await page.locator('.btn-close-checkpoint').click();
-        await page.waitForTimeout(500);
-        await expect(overlay).not.toBeVisible();
+        await expect(overlay).not.toBeVisible({ timeout: 5000 });
 
         // Clean up
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
     });
 
     test('View Changes shows state BEFORE checkpoint (not including checkpoint)', async ({ page }) => {
-        if (!worktreeDir || !taskId) {
-            test.skip('Worktree not available (executor/worktree creation not available in test env)');
-        }
-
         // Clear existing stashes
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
 
@@ -200,17 +180,14 @@ test.describe.serial('Checkpoint View Changes', () => {
             });
         }
 
-        await page.waitForTimeout(500);
-
         // Open the task
-        await navigateToTask(page, taskId);
+        await navigateToTask(page, taskId, projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
             await changesTab.click();
         }
-        await page.waitForTimeout(1000);
 
         const viewChangesBtns = page.locator('.view-changes-btn');
         if (await viewChangesBtns.count() === 0) {
@@ -221,10 +198,9 @@ test.describe.serial('Checkpoint View Changes', () => {
         // Click "View Changes" — should show state BEFORE checkpoint B
         // State before B = stash A (which has file-a only, not file-b)
         await viewChangesBtns.first().click();
-        await page.waitForTimeout(1500);
 
         const overlay = page.locator('.checkpoint-diff-overlay');
-        await expect(overlay).toBeVisible();
+        await expect(overlay).toBeVisible({ timeout: 5000 });
 
         // The diff should show file-a (from checkpoint A) but NOT file-b (from checkpoint B)
         const overlayText = await overlay.textContent();
@@ -233,18 +209,13 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         // Close
         await page.locator('.btn-close-checkpoint').click();
-        await page.waitForTimeout(500);
+        await expect(overlay).not.toBeVisible({ timeout: 5000 });
 
         // Clean up
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
     });
 
     test('First checkpoint shows No Changes (state before = origin)', async ({ page }) => {
-        if (!worktreeDir || !taskId) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
-
         // Clear existing stashes
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
 
@@ -256,29 +227,26 @@ test.describe.serial('Checkpoint View Changes', () => {
         const stashFirst = execSync(`cd ${worktreeDir} && git rev-parse stash@{0}`, { encoding: 'utf-8' }).trim();
 
         // Set hash on last assistant message
-        const messages = JSON.parse(execSync(
-            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages"`,
-            { encoding: 'utf-8' }
-        ));
+        const messages = await page.evaluate(async ({ pid, tid }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
+            return res.json();
+        }, { pid: projectId, tid: taskId });
         const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
         if (assistantMsgs.length > 0) {
-            execSync(
-                `curl -s -X PATCH "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}" -H "Content-Type: application/json" -d '{"git_commit_hash":"${stashFirst}"}'`,
-                { encoding: 'utf-8' }
-            );
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}`, {
+                method: 'PATCH',
+                body: { git_commit_hash: stashFirst },
+            });
         }
 
-        await page.waitForTimeout(500);
-
         // Open the task
-        await navigateToTask(page, taskId);
+        await navigateToTask(page, taskId, projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
             await changesTab.click();
         }
-        await page.waitForTimeout(1000);
 
         const viewChangesBtns = page.locator('.view-changes-btn');
         if (await viewChangesBtns.count() === 0) {
@@ -288,10 +256,9 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         // Click "View Changes" — first checkpoint, state before = origin = no changes
         await viewChangesBtns.first().click();
-        await page.waitForTimeout(1500);
 
         const overlay = page.locator('.checkpoint-diff-overlay');
-        await expect(overlay).toBeVisible();
+        await expect(overlay).toBeVisible({ timeout: 5000 });
 
         // Should show "No changes" or empty diff
         const diffEmpty = overlay.locator('.diff-empty');
@@ -302,46 +269,38 @@ test.describe.serial('Checkpoint View Changes', () => {
 
         // Close
         await page.locator('.btn-close-checkpoint').click();
-        await page.waitForTimeout(500);
+        await expect(overlay).not.toBeVisible({ timeout: 5000 });
 
         // Clean up
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
     });
 
     test('Escape key closes the overlay', async ({ page }) => {
-        if (!worktreeDir || !taskId) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
-
         const branch = execSync(`cd ${worktreeDir} && git branch --show-current`, { encoding: 'utf-8' }).trim();
         execSync(`cd ${worktreeDir} && git stash clear 2>/dev/null || true`);
         execSync(`echo "esc-test" > ${worktreeDir}/esc-test.txt`);
         execSync(`cd ${worktreeDir} && git add -A && git stash push -u -m "On ${branch}: esc test"`);
         const stashHash = execSync(`cd ${worktreeDir} && git rev-parse stash@{0}`, { encoding: 'utf-8' }).trim();
 
-        const messages = JSON.parse(execSync(
-            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages"`,
-            { encoding: 'utf-8' }
-        ));
+        const messages = await page.evaluate(async ({ pid, tid }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
+            return res.json();
+        }, { pid: projectId, tid: taskId });
         const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
         if (assistantMsgs.length > 0) {
-            execSync(
-                `curl -s -X PATCH "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}" -H "Content-Type: application/json" -d '{"git_commit_hash":"${stashHash}"}'`,
-                { encoding: 'utf-8' }
-            );
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages/${assistantMsgs[assistantMsgs.length - 1].id}`, {
+                method: 'PATCH',
+                body: { git_commit_hash: stashHash },
+            });
         }
 
-        await page.waitForTimeout(500);
-
-        await navigateToTask(page, taskId);
+        await navigateToTask(page, taskId, projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
             await changesTab.click();
         }
-        await page.waitForTimeout(1000);
 
         const viewChangesBtns = page.locator('.view-changes-btn');
         if (await viewChangesBtns.count() === 0) {
@@ -350,15 +309,13 @@ test.describe.serial('Checkpoint View Changes', () => {
         }
 
         await viewChangesBtns.first().click();
-        await page.waitForTimeout(1000);
 
         const overlay = page.locator('.checkpoint-diff-overlay');
-        await expect(overlay).toBeVisible();
+        await expect(overlay).toBeVisible({ timeout: 5000 });
 
         // Press Escape — should close overlay, not the task detail
         await page.press('Escape');
-        await page.waitForTimeout(500);
-        await expect(overlay).not.toBeVisible();
+        await expect(overlay).not.toBeVisible({ timeout: 5000 });
         await expect(page.locator('.task-detail-page')).toBeVisible();
 
         // Clean up

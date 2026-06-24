@@ -9,7 +9,7 @@ test.describe.serial('Task Initial Prompt as Message', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(30000);
     await page.goto('/');
-    await page.waitForSelector('.project-item, .card', { timeout: 10000 });
+    await page.waitForSelector('.project-item, .card');
     projectId = await getProjectId(page);
     taskPrompt = `Test prompt ${Date.now()}`;
     // Create task via API (faster, no UI races)
@@ -19,45 +19,45 @@ test.describe.serial('Task Initial Prompt as Message', () => {
   test('should show the prompt as the first user message when task is opened', async ({ page }) => {
     test.setTimeout(30000);
     // Navigate to the task via URL
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // The prompt should appear in the chat area
     // Try .chat-message.user first, fallback to any .chat-message
     const userMsg = page.locator('.chat-message.user').first();
     const anyMsg = page.locator('.chat-message').first();
 
-    const userVisible = await userMsg.isVisible({ timeout: 5000 }).catch(() => false);
+    const userVisible = await userMsg.isVisible().catch(() => false);
     if (userVisible) {
       await expect(userMsg.locator('.message-text')).toContainText(taskPrompt);
     } else {
       // Fallback: any chat message should be visible
-      await expect(anyMsg).toBeVisible({ timeout: 10000 });
+      await expect(anyMsg).toBeVisible();
     }
   });
 
   test('should show fork and copy buttons on the prompt message', async ({ page }) => {
     test.setTimeout(30000);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     const firstUserMessage = page.locator('.chat-message.user').first();
-    const isVisible = await firstUserMessage.isVisible({ timeout: 10000 }).catch(() => false);
+    const isVisible = await firstUserMessage.isVisible().catch(() => false);
     if (!isVisible) return;
 
     // Action buttons should be visible (graceful: buttons may not render for all message types)
     const copyBtn = firstUserMessage.locator('.action-btn[aria-label*="Copy"]');
     const forkBtn = firstUserMessage.locator('.action-btn[aria-label*="new thread"]');
-    await copyBtn.isVisible({ timeout: 5000 }).catch(() => {});
-    await forkBtn.isVisible({ timeout: 5000 }).catch(() => {});
+    await copyBtn.isVisible().catch(() => {});
+    await forkBtn.isVisible().catch(() => {});
   });
 
   test('should update task description when prompt message is fork-edited (backlog soft-edit)', async ({ page }) => {
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     const firstUserMessage = page.locator('.chat-message.user').first();
-    const isVisible = await firstUserMessage.isVisible({ timeout: 10000 }).catch(() => false);
+    const isVisible = await firstUserMessage.isVisible().catch(() => false);
     if (!isVisible) {
       test.skip('First user message not visible (task may not have prompt message)');
     }
@@ -68,7 +68,7 @@ test.describe.serial('Task Initial Prompt as Message', () => {
       test.skip('Fork button not visible on prompt message');
     }
     await forkBtn.click();
-    await expect(page.locator('.edit-form textarea')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form textarea')).toBeVisible();
 
     // Edit the content
     const newPrompt = `Edited prompt ${Date.now()}`;
@@ -76,7 +76,7 @@ test.describe.serial('Task Initial Prompt as Message', () => {
     await page.locator('.btn-edit-submit').click();
 
     // Form should close and message should show new content
-    await expect(page.locator('.edit-form')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.edit-form')).not.toBeVisible();
     await expect(firstUserMessage.locator('.message-text')).toContainText(newPrompt);
 
     // Verify the task prompt was updated via API

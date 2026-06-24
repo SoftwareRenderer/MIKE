@@ -240,29 +240,21 @@ async function teardown(): Promise<void> {
 // --- Helpers ---
 
 function ensureTestRepo(): void {
-    if (!fs.existsSync(TEST_REPO)) {
-        console.log('[global-setup] Creating test git repo...');
-        fs.mkdirSync(TEST_REPO, { recursive: true });
-        fs.writeFileSync(`${TEST_REPO}/README.md`, '# Test Repository\n');
+    // Always recreate test repos to ensure clean state (no stale branches/files)
+    for (const repo of [TEST_REPO, TEST_REPO_2]) {
+        const label = repo === TEST_REPO ? 'test git repo' : 'second test git repo';
+        // Remove existing repo and worktrees
+        try { fs.rmSync(repo, { recursive: true, force: true }); } catch { /* ignore */ }
+        console.log(`[global-setup] Creating ${label}...`);
+        fs.mkdirSync(repo, { recursive: true });
+        const readme = repo === TEST_REPO ? '# Test Repository\n' : '# Second Test Repository\n';
+        fs.writeFileSync(`${repo}/README.md`, readme);
         try {
-            execSync('git init', { cwd: TEST_REPO });
-            execSync('git add README.md', { cwd: TEST_REPO });
-            execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: TEST_REPO });
+            execSync('git init', { cwd: repo });
+            execSync('git add README.md', { cwd: repo });
+            execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: repo });
         } catch (e) {
-            console.error('[global-setup] Failed to create test repo:', e);
-            throw e;
-        }
-    }
-    if (!fs.existsSync(TEST_REPO_2)) {
-        console.log('[global-setup] Creating second test git repo...');
-        fs.mkdirSync(TEST_REPO_2, { recursive: true });
-        fs.writeFileSync(`${TEST_REPO_2}/README.md`, '# Second Test Repository\n');
-        try {
-            execSync('git init', { cwd: TEST_REPO_2 });
-            execSync('git add README.md', { cwd: TEST_REPO_2 });
-            execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: TEST_REPO_2 });
-        } catch (e) {
-            console.error('[global-setup] Failed to create second test repo:', e);
+            console.error(`[global-setup] Failed to create ${label}:`, e);
             throw e;
         }
     }

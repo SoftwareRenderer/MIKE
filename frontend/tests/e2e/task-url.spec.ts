@@ -22,7 +22,7 @@ test.describe('Task URL Navigation', () => {
   test('should update URL when opening a task', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `url-open-${Date.now()}`);
-    await navigateToTask(page, taskId);
+    await navigateToTask(page, taskId, projectId);
     await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     expect(page.url()).toContain(`task=${taskId}`);
@@ -32,7 +32,7 @@ test.describe('Task URL Navigation', () => {
   test('should clear task URL when closing task detail (keep project)', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `url-close-${Date.now()}`);
-    await navigateToTask(page, taskId);
+    await navigateToTask(page, taskId, projectId);
     await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await page.click('.btn-back');
@@ -46,7 +46,7 @@ test.describe('Task URL Navigation', () => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `url-direct-${Date.now()}`);
     expect(taskId).not.toBeNull();
-    await navigateToTask(page, taskId);
+    await navigateToTask(page, taskId, projectId);
     await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     expect(page.url()).toContain(`task=${taskId}`);
@@ -125,7 +125,7 @@ test.describe('Task URL Navigation', () => {
     const taskId = await createTaskViaApi(page, projectId, `refresh-task-${Date.now()}`);
 
     // Navigate to task with project param
-    await navigateToTask(page, taskId);
+    await navigateToTask(page, taskId, projectId);
     await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     expect(page.url()).toContain(`task=${taskId}`);
@@ -181,7 +181,7 @@ test.describe.serial('Task URL Navigation — Project Switch', () => {
     const taskId = await createTaskViaApi(page, projectId, `proj-switch-${Date.now()}`);
 
     // Open a task in the first project
-    await navigateToTask(page, taskId);
+    await navigateToTask(page, taskId, projectId);
     await page.waitForSelector('.task-detail-page, .board', { timeout: 10000 });
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     expect(page.url()).toContain(`task=${taskId}`);

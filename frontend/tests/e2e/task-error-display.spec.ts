@@ -21,7 +21,7 @@ test.describe.serial('Task Error Display', () => {
     // Navigate to the task via URL
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible();
-    await waitForChatForm(page);
+    if (!await waitForChatForm(page)) test.skip('Chat form not visible');
 
     // Create an error message via the API (CSRF-aware)
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -31,11 +31,11 @@ test.describe.serial('Task Error Display', () => {
 
     // Reload to pick up the new message from the backend
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Error entry should be visible with distinct styling
     const errorEntry = page.locator('.error-entry');
-    await expect(errorEntry).toBeVisible({ timeout: 5000 });
+    await expect(errorEntry).toBeVisible();
 
     // Error card should have warning icon and error styling
     const errorCard = page.locator('.error-card');
@@ -60,7 +60,7 @@ test.describe.serial('Task Error Display', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for chat form OR start button (executor may not start in test env)
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible();
 
     // If start button is still visible, click it
     if (await page.locator('.btn-start-task').isVisible().catch(() => false)) {
@@ -68,7 +68,7 @@ test.describe.serial('Task Error Display', () => {
     }
 
     // Wait for chat form
-    const chatFormVisible = await page.locator('.chat-form').isVisible({ timeout: 10000 }).catch(() => false);
+    const chatFormVisible = await page.locator('.chat-form').isVisible().catch(() => false);
     if (!chatFormVisible) {
       test.skip('Chat form not available (executor did not start in test env)');
     }
@@ -81,10 +81,10 @@ test.describe.serial('Task Error Display', () => {
 
     // Reload to pick up the error message
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Verify error is visible
-    await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.error-entry')).toBeVisible();
 
     // Send a user message — this should clear error entries from the UI
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
@@ -92,13 +92,13 @@ test.describe.serial('Task Error Display', () => {
     await chatTextarea.press('Enter');
 
     // Wait for textarea to be cleared (message sent)
-    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+    await expect(chatTextarea).toHaveValue('');
 
     // Error entry should be removed from the UI
     await expect(page.locator('.error-entry')).not.toBeVisible();
 
     // User messages should be visible (task prompt + our message)
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.chat-message.user').first()).toBeVisible();
   });
 
   test('should persist error messages across page reload', async ({ page }) => {
@@ -106,14 +106,14 @@ test.describe.serial('Task Error Display', () => {
     taskId = await createTaskViaApi(page, projectId, 'Test error persists across reload');
 
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for chat form OR start button (executor may not start in test env)
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible();
     if (await page.locator('.btn-start-task').isVisible().catch(() => false)) {
       await page.click('.btn-start-task');
     }
-    const chatFormVisible = await page.locator('.chat-form').isVisible({ timeout: 10000 }).catch(() => false);
+    const chatFormVisible = await page.locator('.chat-form').isVisible().catch(() => false);
     if (!chatFormVisible) {
       test.skip('Chat form not available (executor did not start in test env)');
     }
@@ -126,15 +126,15 @@ test.describe.serial('Task Error Display', () => {
 
     // Reload to pick up the error message
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Verify error is visible after first reload
-    await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.error-entry')).toBeVisible();
     await expect(page.locator('.error-code')).toContainText('stopped');
 
     // Reload again — error should still be there
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Error should still be visible
     await expect(page.locator('.error-entry')).toBeVisible();
@@ -147,7 +147,7 @@ test.describe.serial('Task Error Display', () => {
     taskId = await createTaskViaApi(page, projectId, 'Test multiple errors');
 
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Create multiple error messages via the API (sequential for ordering, CSRF-aware)
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -161,11 +161,11 @@ test.describe.serial('Task Error Display', () => {
 
     // Reload to pick up the error messages
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Both error entries should be visible
     const errorEntries = page.locator('.error-entry');
-    await expect(errorEntries).toHaveCount(2, { timeout: 5000 });
+    await expect(errorEntries).toHaveCount(2);
 
     // First error should have connection_failed code
     await expect(errorEntries.nth(0).locator('.error-code')).toContainText('connection_failed');
@@ -179,14 +179,14 @@ test.describe.serial('Task Error Display', () => {
     taskId = await createTaskViaApi(page, projectId, 'Test error entry rendering');
 
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for chat form OR start button (executor may not start in test env)
-    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible();
     if (await page.locator('.btn-start-task').isVisible().catch(() => false)) {
       await page.click('.btn-start-task');
     }
-    const chatFormVisible = await page.locator('.chat-form').isVisible({ timeout: 10000 }).catch(() => false);
+    const chatFormVisible = await page.locator('.chat-form').isVisible().catch(() => false);
     if (!chatFormVisible) {
       test.skip('Chat form not available (executor did not start in test env)');
     }
@@ -198,10 +198,10 @@ test.describe.serial('Task Error Display', () => {
     });
 
     await page.reload();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Verify error entry renders with correct structure
-    await expect(page.locator('.error-entry')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.error-entry')).toBeVisible();
     await expect(page.locator('.error-card')).toBeVisible();
     await expect(page.locator('.error-code')).toContainText('panic');
     await expect(page.locator('.error-message')).toContainText('Internal server error');

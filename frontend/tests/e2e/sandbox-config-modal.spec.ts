@@ -4,13 +4,8 @@ import { getProjectId, csrfFetch } from './helpers';
 test.describe.serial('Sandbox Config Modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    // Ensure sidebar is expanded
-    if (await page.locator('.app.collapsed').isVisible().catch(() => false)) {
-      await page.locator('.toggle-btn').click();
-      await expect(page.locator('.app:not(.collapsed)')).toBeVisible({ timeout: 5000 });
-    }
     await page.waitForSelector('.project-item', { timeout: 10000 });
-    // Ensure no tasks are in progress
+    // Ensure no tasks are in progress (API call)
     const projectId = await getProjectId(page);
     const tasks = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}/tasks`);
@@ -23,6 +18,15 @@ test.describe.serial('Sandbox Config Modal', () => {
           body: { status: 'backlog' },
         });
       }
+    }
+    // Reload to reset component state (projectCounts, showSandboxConfigVal, etc.)
+    // This ensures the openSandboxConfig guard sees updated task counts.
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    // Ensure sidebar is expanded (project items hidden when collapsed)
+    if (await page.locator('.app.collapsed').isVisible().catch(() => false)) {
+      await page.locator('.toggle-btn').click();
+      await expect(page.locator('.app:not(.collapsed)')).toBeVisible({ timeout: 5000 });
     }
   });
 

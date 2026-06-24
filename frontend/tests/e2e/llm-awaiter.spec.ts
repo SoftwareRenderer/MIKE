@@ -37,7 +37,7 @@ test.describe('LLM Awaiting Spinner', () => {
     await chatTextarea.press('Enter');
 
     // Wait for textarea to be cleared (message sent)
-    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+    await expect(chatTextarea).toHaveValue('');
 
     // Wait for user message to appear
     await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
@@ -65,7 +65,7 @@ test.describe('LLM Awaiting Spinner', () => {
     await chatTextarea.press('Enter');
 
     // Wait for textarea to be cleared (message sent)
-    await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+    await expect(chatTextarea).toHaveValue('');
 
     // Wait for user message to appear
     await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });

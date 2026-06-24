@@ -177,34 +177,56 @@ export async function getTaskData(page: Page, projectId: string, taskId: string)
 }
 
 // Helper: wait for WebSocket to connect by checking chat form is interactive
-export async function waitForWebSocket(page: Page, timeout = 5000): Promise<void> {
-  await expect(page.locator('.chat-form')).toBeVisible({ timeout });
+export async function waitForWebSocket(page: Page): Promise<void> {
+  await expect(page.locator('.chat-form')).toBeVisible();
 }
 
-// Helper: wait for textarea to be cleared after sending message
-export async function waitForMessageSent(page: Page, timeout = 5000): Promise<void> {
-  await expect(page.locator('textarea[placeholder*="message"], textarea[placeholder*="Send"]')).toHaveValue('', { timeout });
+// Helper: wait for the send button to be visible (chat form ready for input, isLoading=false).
+// Use this BEFORE interacting with the textarea to ensure the form is stable.
+export async function waitForSendButton(page: Page): Promise<void> {
+  await expect(page.locator('.btn-send')).toBeVisible();
+}
+
+// Helper: like waitForSendButton but returns false instead of throwing on timeout.
+// Use this with test.skip() for graceful handling of executor-dependent tests.
+export async function waitForSendButtonGraceful(page: Page): Promise<boolean> {
+  return page.locator('.btn-send').isVisible().catch(() => false);
+}
+
+// Helper: wait for the chat form to be interactive (send OR stop button visible).
+// Use this after starting a task when the executor may be calling the LLM.
+export async function waitForChatFormReady(page: Page): Promise<void> {
+  await expect(page.locator('.chat-form')).toBeVisible();
+  // Wait for either the send button (idle) or stop button (LLM responding)
+  await expect(async () => {
+    const hasSend = await page.locator('.btn-send').isVisible();
+    const hasStop = await page.locator('.btn-stop').isVisible();
+    expect(hasSend || hasStop).toBe(true);
+  }).toPass();
+}
+
+// Helper: wait for a new user message to appear in the chat (after sending).
+// Compares count before/after to detect the new message.
+export async function waitForNewUserMessage(page: Page): Promise<void> {
+  const countBefore = await page.locator('.chat-message.user').count();
+  await expect(async () => {
+    const count = await page.locator('.chat-message.user').count();
+    expect(count).toBeGreaterThan(countBefore);
+  }).toPass();
 }
 
 // Helper: wait for chat message to appear
-export async function waitForChatMessage(page: Page, timeout = 10000): Promise<void> {
-  await expect(page.locator('.chat-message')).toBeVisible({ timeout });
+export async function waitForChatMessage(page: Page): Promise<void> {
+  await expect(page.locator('.chat-message')).toBeVisible();
 }
 
 // Helper: click "Start Task" if the task is in new state
 async function clickStartTaskIfNew(page: Page): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const startButton = page.locator('.btn-start-task');
-    if (!(await startButton.isVisible().catch(() => false))) {
-      break; // Button not visible, task is not new
-    }
-    try {
-      await startButton.click({ timeout: 5000 });
-      break; // Click succeeded
-    } catch {
-      // Button may have been detached - retry
-    }
+  const startButton = page.locator('.btn-start-task');
+  if (!(await startButton.isVisible().catch(() => false))) {
+    return; // Button not visible, task is not new
   }
+  await startButton.click().catch(() => {});
 }
 
 // Helper: move task to in_progress via API (bypasses executor, for UI-only tests)
@@ -235,34 +257,45 @@ export async function ensureTaskStarted(page: Page, projectId: string, taskId: s
   return updated?.status === 'in_progress';
 }
 
-// Helper: wait for the chat form to be present (send OR stop button visible)
-// Use this when you need the form to exist but don't care if LLM is still responding.
-export async function waitForChatForm(page: Page, timeout = 5000): Promise<void> {
+// Helper: wait for the chat form to appear. Handles the case where the "Restart Task"
+// button is shown (executor hasn't responded to initial prompt yet).
+// Returns true if the chat form is visible, false otherwise.
+export async function waitForChatForm(page: Page): Promise<boolean> {
   await clickStartTaskIfNew(page);
-  await expect(page.locator('.chat-form')).toBeVisible({ timeout });
+  // Wait for either the chat form or the restart button
+  const hasFormOrRestart = await page.waitForFunction(() => {
+    return document.querySelector('.chat-form') || document.querySelector('.btn-restart-task');
+  }).catch(() => false);
+
+  if (!hasFormOrRestart) return false;
+
+  // If restart button is visible, click it to restart the executor
+  if (await page.locator('.btn-restart-task').isVisible().catch(() => false)) {
+    await page.locator('.btn-restart-task').click();
+    await expect(page.locator('.chat-form')).toBeVisible();
+    return true;
+  }
+  await expect(page.locator('.chat-form')).toBeVisible();
+  return true;
 }
 
 // Helper: ensure chat form is ready for input (send button visible, isLoading=false)
 // Waits for the LLM to finish any pending response before resolving.
-// If { requireSendBtn: false }, only waits for the chat form to exist (executor may not start).
-export async function ensureChatForm(page: Page, timeout = 10000, requireSendBtn = true): Promise<void> {
-  await clickStartTaskIfNew(page);
-  // Wait for chat form to exist
-  await expect(page.locator('.chat-form')).toBeVisible({ timeout: 5000 });
-  // If the task was in backlog, the executor may now be calling the LLM (isLoading=true).
-  // Wait for the LLM to complete (btn-send reappears) OR timeout gracefully.
+export async function ensureChatForm(page: Page, requireSendBtn = true): Promise<void> {
+  await waitForChatForm(page);
   if (requireSendBtn) {
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+    await expect(page.locator('.btn-send')).toBeVisible();
   }
 }
 
 // Helper: navigate to a task detail page using window.location (triggers full reload for SPA).
 // page.goto() doesn't re-trigger onMount for SPAs, so we use window.location.href instead.
-export async function navigateToTask(page: Page, taskId: string): Promise<void> {
+export async function navigateToTask(page: Page, taskId: string, projectId?: string): Promise<void> {
   if (!taskId) {
     throw new Error(`navigateToTask called with undefined/empty taskId`);
   }
-  await page.evaluate((tid) => { window.location.href = `/?task=${tid}`; }, taskId);
+  const path = projectId ? `/?project=${projectId}&task=${taskId}` : `/?task=${taskId}`;
+  await page.evaluate((u) => { window.location.href = u; }, path);
   await expect(page.locator('.task-detail-page')).toBeVisible();
 }
 
@@ -277,16 +310,26 @@ export async function createAndOpenTask(page: Page, title?: string): Promise<str
   return taskId;
 }
 
-// Helper: send a message and wait for the LLM response to complete
-// Returns after the send button reappears (isLoading=false).
-export async function sendMessageAndWait(page: Page, message: string, timeout = 15000): Promise<void> {
+// Helper: send a message via the chat UI.
+// Waits for send button (form stable) → fills → presses Enter → waits for user message to appear.
+// Uses Playwright auto-wait (no arbitrary timeouts).
+export async function sendMessage(page: Page, message: string): Promise<void> {
+  // Wait for the send button to be visible (form is stable, not loading).
+  await waitForSendButton(page);
+  // Fill and send — Playwright auto-waits for textarea to be actionable
   const chatTextarea = page.locator('textarea[placeholder*="message"]');
   await chatTextarea.fill(message);
   await chatTextarea.press('Enter');
-  // Wait for textarea to be cleared (message sent)
-  await expect(chatTextarea).toHaveValue('', { timeout: 5000 });
+  // Wait for the user message to appear in chat (confirms message was sent)
+  await waitForNewUserMessage(page);
+}
+
+// Helper: send a message and wait for the LLM response to complete.
+// Returns after the send button reappears (isLoading=false).
+export async function sendMessageAndWait(page: Page, message: string): Promise<void> {
+  await sendMessage(page, message);
   // Wait for send button to reappear (LLM complete)
-  await expect(page.locator('.btn-send')).toBeVisible({ timeout });
+  await expect(page.locator('.btn-send')).toBeVisible();
 }
 
 // Helper: create a task via the API and return its ID.

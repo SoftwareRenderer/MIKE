@@ -4,25 +4,9 @@ import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './hel
 test.describe.serial('Sandbox Toggle', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    // Ensure sidebar is expanded (project items hidden when collapsed)
-    if (await page.locator('.app.collapsed').isVisible().catch(() => false)) {
-      await page.locator('.toggle-btn').click();
-      await expect(page.locator('.app:not(.collapsed)')).toBeVisible({ timeout: 5000 });
-    }
     await page.waitForSelector('.project-item', { timeout: 10000 });
-  });
-
-  test('should toggle sandbox on by clicking the shield', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Ensure sidebar is expanded (sandbox badge is hidden when collapsed)
-    // The collapsed class is on .app, not .sidebar directly
-    if (await page.locator('.app.collapsed').isVisible().catch(() => false)) {
-      await page.locator('.toggle-btn').click();
-      await expect(page.locator('.app:not(.collapsed)')).toBeVisible({ timeout: 5000 });
-    }
-
     // Ensure no tasks are in progress (blocks sandbox toggle)
+    const projectId = await getProjectId(page);
     const tasks = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}/tasks`);
       return res.ok ? res.json() : [];
@@ -35,56 +19,41 @@ test.describe.serial('Sandbox Toggle', () => {
         });
       }
     }
+    // Reload to reset component state (projectCounts, modal state)
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
 
-    // Wait for sandbox badge to appear (may need a moment after sidebar expand)
-    await expect(page.locator('.sandbox-badge-off')).toBeVisible({ timeout: 10000 });
+  test('should toggle sandbox on via config modal', async ({ page }) => {
+    const projectId = await getProjectId(page);
 
-    // Ensure sandbox is off (default), then toggle on
+    // Ensure sandbox is off via API
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: false } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    // Verify sandbox is off
     const isSandboxOn = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}`);
       const proj = await res.json();
       return proj.sandbox_enabled;
     }, projectId);
+    expect(isSandboxOn).toBe(false);
 
-    if (isSandboxOn) {
-      // Toggle off first (with confirmation)
-      await page.click('.sandbox-badge:not(.sandbox-badge-off)');
-      await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-      await page.click('.btn-confirm');
-      await page.waitForFunction(
-        async () => {
-          const res = await fetch('/api/projects');
-          const projects = await res.json();
-          return projects[0]?.sandbox_enabled === false;
-        },
-        { timeout: 5000 }
-      );
-      // Wait for sandbox-off badge to reappear
-      await expect(page.locator('.sandbox-badge-off')).toBeVisible({ timeout: 10000 });
-    }
+    // Open sandbox config modal via top bar button
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
-    // Now toggle on (no confirmation needed)
-    await page.click('.sandbox-badge-off');
-    await page.waitForFunction(
-      async () => {
-        const res = await fetch('/api/projects');
-        const projects = await res.json();
-        return projects[0]?.sandbox_enabled === true;
-      },
-      { timeout: 5000 }
-    );
+    // Toggle sandbox on
+    const toggle = page.locator('.toggle-switch:not(.active)');
+    await expect(toggle).toBeVisible({ timeout: 5000 });
+    await toggle.click();
 
-    // Reload to pick up project change (frontend may not update via WebSocket)
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    // Save
+    await page.click('.btn-save');
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
 
-    // Ensure sidebar is still expanded after reload
-    if (await page.locator('.app.collapsed').isVisible().catch(() => false)) {
-      await page.locator('.toggle-btn').click();
-      await expect(page.locator('.app:not(.collapsed)')).toBeVisible({ timeout: 5000 });
-    }
-
-    // Verify API state is correct after reload
+    // Verify API state
     const apiSandboxOn = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}`);
       const proj = await res.json();
@@ -92,30 +61,49 @@ test.describe.serial('Sandbox Toggle', () => {
     }, projectId);
     expect(apiSandboxOn).toBe(true);
 
-    // Verify UI updated
+    // Verify UI updated (sandbox badge visible, not off)
     await expect(page.locator('.sandbox-badge:not(.sandbox-badge-off)')).toBeVisible({ timeout: 10000 });
   });
 
-  test('should show confirmation dialog when toggling sandbox off', async ({ page }) => {
+  test('should show confirmation dialog when toggling sandbox off via modal', async ({ page }) => {
     const projectId = await getProjectId(page);
 
     // Ensure sandbox is on via API
     await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true } });
     await page.reload();
-    await page.waitForSelector('.sandbox-badge:not(.sandbox-badge-off)', { timeout: 5000 });
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
-    // Click to toggle off — should show confirmation
-    await page.click('.sandbox-badge:not(.sandbox-badge-off)');
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
-    // Wait for confirmation dialog
+    // Toggle should be on
+    const toggleOn = page.locator('.toggle-switch.active');
+    await expect(toggleOn).toBeVisible({ timeout: 5000 });
+
+    // Toggle sandbox off
+    await toggleOn.click();
+
+    // Click save — should show confirmation
+    await page.click('.btn-save');
+
+    // Confirmation dialog should appear
     await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('.confirm-dialog h3')).toContainText('Disable Sandbox');
 
     // Confirm
     await page.click('.btn-confirm');
 
-    // Verify toggled off
-    await expect(page.locator('.sandbox-badge-off')).toBeVisible({ timeout: 5000 });
+    // Modal should close
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify toggled off via API
+    const apiSandboxOff = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      const proj = await res.json();
+      return proj.sandbox_enabled;
+    }, projectId);
+    expect(apiSandboxOff).toBe(false);
   });
 
   test('should cancel toggle when confirmation is dismissed', async ({ page }) => {
@@ -124,18 +112,37 @@ test.describe.serial('Sandbox Toggle', () => {
     // Ensure sandbox is on via API
     await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true } });
     await page.reload();
-    await page.waitForSelector('.sandbox-badge:not(.sandbox-badge-off)', { timeout: 5000 });
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
-    // Click to toggle off — should show confirmation
-    await page.click('.sandbox-badge:not(.sandbox-badge-off)');
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Toggle sandbox off
+    await page.click('.toggle-switch.active');
+
+    // Click save — should show confirmation
+    await page.click('.btn-save');
     await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
 
     // Cancel
-    await page.click('.btn-cancel');
+    await page.click('.confirm-dialog .btn-cancel');
 
-    // Verify still enabled (no toggle happened)
-    await expect(page.locator('.confirm-dialog')).not.toBeVisible();
-    await expect(page.locator('.sandbox-badge:not(.sandbox-badge-off)')).toBeVisible();
+    // Confirm dialog should close, sandbox config modal should still be open
+    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible();
+
+    // Verify sandbox is still on via API
+    const sandboxOn = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      const proj = await res.json();
+      return proj.sandbox_enabled;
+    }, projectId);
+    expect(sandboxOn).toBe(true);
+
+    // Close the modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should not allow toggle when tasks are In Progress', async ({ page }) => {
@@ -170,53 +177,39 @@ test.describe.serial('Sandbox Toggle', () => {
     await page.reload();
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
-    // Verify the shield shows as locked (tooltip contains lock message)
-    const shield = page.locator('.sandbox-badge.sandbox-badge-locked');
-    await expect(shield).toBeVisible();
-    const tooltip = await shield.getAttribute('title');
-    expect(tooltip).toContain('Cannot change');
+    // Click sandbox config button — should show toast, not open modal
+    await page.click('.sandbox-config-btn');
 
-    // Click should not toggle
-    await shield.click();
-    // Should still show as enabled (no toggle, no confirmation)
-    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 2000 });
-    await expect(page.locator('.sandbox-badge:not(.sandbox-badge-off)')).toBeVisible();
+    // Toast error should appear
+    await expect(page.locator('.toast.error')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.toast.error')).toContainText('Cannot change sandbox settings');
+
+    // Modal should NOT be visible
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 2000 });
   });
 
-  test('should not navigate to project when clicking shield', async ({ page }) => {
+  test('should not navigate to project when opening sandbox config', async ({ page }) => {
     const projectId = await getProjectId(page);
-
-    // Ensure no tasks are In Progress (clean up from previous test)
-    const board = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      return res.json();
-    }, projectId);
-    for (const task of board.tasks) {
-      if (task.status === 'in_progress') {
-        await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
-          method: 'POST',
-          body: { status: 'backlog' },
-        });
-      }
-    }
 
     // Ensure sandbox is off
     await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: false } });
     await page.reload();
-    await page.waitForSelector('.sandbox-badge-off', { timeout: 5000 });
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
     // Record current URL before click
     const urlBefore = page.url();
 
-    // Click the shield (should toggle, not navigate)
-    await page.click('.sandbox-badge-off');
-
-    // Verify sandbox toggled on
-    await expect(page.locator('.sandbox-badge:not(.sandbox-badge-off)')).toBeVisible({ timeout: 5000 });
+    // Click the sandbox config button (opens modal, should not navigate)
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
     // Verify URL didn't change (no navigation)
     const urlAfter = page.url();
     expect(urlAfter).toBe(urlBefore);
+
+    // Close modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should show sandbox icon in task detail header when enabled', async ({ page }) => {

@@ -39,7 +39,7 @@ test.describe('Task Title Generation', () => {
     const newCard = backlogColumn.locator('.card').first();
 
     // Wait for title to be set
-    await expect(newCard.locator('.card-title-text')).toBeVisible();
+    await expect(newCard.locator('.card-title-text')).toBeVisible({ timeout: 10000 });
 
     // Get the title
     const title = await newCard.locator('.card-title-text').textContent();
@@ -73,7 +73,7 @@ test.describe('Task Title Generation', () => {
 
     // Find the card by its unique title text
     const newCard = page.locator('.card').filter({ hasText: title });
-    await expect(newCard.locator('.card-title-text')).toBeVisible();
+    await expect(newCard.locator('.card-title-text')).toBeVisible({ timeout: 10000 });
     const cardTitle = await newCard.locator('.card-title-text').textContent();
     expect(cardTitle!.trim()).toBe(title);
 
@@ -102,7 +102,7 @@ test.describe('Task Title Generation', () => {
     const newCard = backlogColumn.locator('.card').last();
 
     // Wait for title to be set (auto-wait)
-    await expect(newCard.locator('.card-title-text')).toBeVisible();
+    await expect(newCard.locator('.card-title-text')).toBeVisible({ timeout: 10000 });
 
     // Wait for spinner to disappear (graceful: LLM may not respond in test env)
     await newCard.locator('.title-spinner').isHidden({ timeout: 5000 }).catch(() => {});

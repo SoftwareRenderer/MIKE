@@ -87,30 +87,18 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start the parent task via API
     const startResult = await startTask(page, parentId);
-
-    // Graceful: start may fail in test env (worktree creation may fail)
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Both subtasks should be moved to in_progress
-    // Graceful: if status doesn't change, skip (executor may not be available)
-    const sub1After = await getTask(page, sub1Id);
-    if (sub1After.status !== 'in_progress') {
-      test.skip(`Subtask not moved to in_progress (status: ${sub1After.status}), executor not available`);
-    }
-
+    await waitForTaskStatus(page, sub1Id, 'in_progress');
     await waitForTaskStatus(page, sub2Id, 'in_progress');
     await waitForTaskStatus(page, parentId, 'in_progress');
 
     // One subtask should be running (the executor started), the other idle
-    // Graceful: executor may not start in test env (worktree creation may fail)
     sub1 = await getTask(page, sub1Id);
     sub2 = await getTask(page, sub2Id);
     const hasRunning = sub1.status_state === 'running' || sub2.status_state === 'running';
-    if (!hasRunning) {
-      test.skip('Executor did not start a subtask (worktree/LLM not available in test env)');
-    }
+    expect(hasRunning).toBe(true);
     const runningSubtask = sub1.status_state === 'running' ? sub1 : sub2;
     expect(runningSubtask.status_state).toBe('running');
   });
@@ -134,7 +122,8 @@ test.describe('Subtask Auto-Start', () => {
     expect(subD.status).toBe('backlog');
 
     // Start the parent task via API
-    await startTask(page, parentId);
+    const startResult = await startTask(page, parentId);
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Parent should be in_progress
     await waitForTaskStatus(page, parentId, 'in_progress');
@@ -157,9 +146,7 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start parent
     const startResult = await startTask(page, parentId);
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // All should be in_progress
     await waitForTaskStatus(page, parentId, 'in_progress');
@@ -168,11 +155,6 @@ test.describe('Subtask Auto-Start', () => {
     await waitForTaskStatus(page, subDId, 'in_progress');
 
     // D should finish (mock LLM returns text-only, transitions to review)
-    // Graceful: executor may not complete in test env
-    const subDAfter = await getTask(page, subDId);
-    if (subDAfter.status === 'in_progress' && subDAfter.status_state === 'idle') {
-      test.skip('Executor did not complete subtask (LLM not available in test env)');
-    }
     await waitForTaskStatus(page, subDId, 'review', 30000);
 
     // B stays in_progress (child D is in review, not done)
@@ -195,9 +177,7 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start parent (starts first subtask)
     const startResult = await startTask(page, parentId);
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Wait for first subtask to be in_progress
     await waitForTaskStatus(page, sub1Id, 'in_progress');
@@ -207,11 +187,6 @@ test.describe('Subtask Auto-Start', () => {
 
     // Second subtask should auto-start (moved to in_progress)
     await waitForTaskStatus(page, sub2Id, 'in_progress');
-    // Graceful: executor may not start in test env
-    const sub2After = await getTask(page, sub2Id);
-    if (sub2After.status_state !== 'running') {
-      test.skip(`Executor did not start subtask (status_state: ${sub2After.status_state})`);
-    }
     await waitForTaskState(page, sub2Id, 'running', 15000);
   });
 
@@ -224,9 +199,7 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start parent
     const startResult = await startTask(page, parentId);
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     await waitForTaskStatus(page, sub1Id, 'in_progress');
 
@@ -235,11 +208,6 @@ test.describe('Subtask Auto-Start', () => {
 
     // Second subtask should auto-start (moved to in_progress)
     await waitForTaskStatus(page, sub2Id, 'in_progress');
-    // Graceful: executor may not start in test env
-    const sub2After = await getTask(page, sub2Id);
-    if (sub2After.status_state !== 'running') {
-      test.skip(`Executor did not start subtask (status_state: ${sub2After.status_state})`);
-    }
     await waitForTaskState(page, sub2Id, 'running', 15000);
   });
 
@@ -254,19 +222,12 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start parent (starts first subtask)
     const startResult = await startTask(page, parentId);
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Wait for a subtask to start running
     await waitForTaskStatus(page, sub1Id, 'in_progress');
 
     // Wait for the first subtask to transition to review (LLM finishes, no tool_complete)
-    // Graceful: executor may not complete in test env
-    const sub1After = await getTask(page, sub1Id);
-    if (sub1After.status === 'in_progress' && sub1After.status_state === 'idle') {
-      test.skip('Executor did not complete subtask (LLM not available in test env)');
-    }
     await waitForTaskStatus(page, sub1Id, 'review', 30000);
 
     // The remaining sibling should auto-start.
@@ -284,7 +245,8 @@ test.describe('Subtask Auto-Start', () => {
     const sub1Id = await createTask(page, `no-auto-sub1-${Date.now()}`, parentId);
 
     // Start parent
-    await startTask(page, parentId);
+    const startResult = await startTask(page, parentId);
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     await waitForTaskStatus(page, sub1Id, 'in_progress');
 
@@ -304,9 +266,7 @@ test.describe('Subtask Auto-Start', () => {
 
     // Start parent (starts subtask)
     const startResult = await startTask(page, parentId);
-    if (!startResult?.ok) {
-      test.skip('Task start failed: worktree not available in test env');
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     await waitForTaskStatus(page, sub1Id, 'in_progress');
 
@@ -315,11 +275,6 @@ test.describe('Subtask Auto-Start', () => {
 
     // Parent should start its own execution (not move to done)
     await waitForTaskStatus(page, parentId, 'in_progress', 10000);
-    // Graceful: executor may not start in test env
-    const parentAfter = await getTask(page, parentId);
-    if (parentAfter.status_state !== 'running') {
-      test.skip(`Executor did not start parent (status_state: ${parentAfter.status_state})`);
-    }
     await waitForTaskState(page, parentId, 'running', 15000);
   });
 });

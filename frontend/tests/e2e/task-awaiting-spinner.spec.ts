@@ -22,10 +22,7 @@ test.describe.serial('Task Start via API', () => {
     const startResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/start`, {
       method: 'POST',
     });
-    // Graceful: executor may fail in test env (worktree conflict, etc.)
-    if (!startResult.ok) {
-      test.skip(`Task start returned ${startResult.status} (executor may not be available in test env)`);
-    }
+    if (!startResult.ok) test.skip("Could not start task (worktree creation may have failed)");
 
     // Navigate to the task detail
     await navigateToTask(page, taskId);
