@@ -32,6 +32,18 @@ type Client struct {
 	cwd         string
 	env         []string
 	sessionName string
+	modelName   string // model name from get_state response
+}
+
+// ModelName returns the Pi model name discovered via get_state.
+// Returns "Pi" if unknown.
+func (c *Client) ModelName() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.modelName == "" {
+		return "Pi"
+	}
+	return c.modelName
 }
 
 // PiEvent represents an event from the Pi RPC protocol.
@@ -184,6 +196,46 @@ func (c *Client) Abort(ctx context.Context) error {
 	return nil
 }
 
+// QueryModel sends get_state and waits for the response to discover the active model.
+// Returns the model name (e.g., "anthropic/claude-sonnet-4-20250514") or "Pi" on error.
+func (c *Client) QueryModel(ctx context.Context) string {
+	cmd := map[string]interface{}{
+		"type": "get_state",
+		"id":   fmt.Sprintf("get_state-%d", time.Now().UnixNano()),
+	}
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		return "Pi"
+	}
+
+	c.mu.Lock()
+	if !c.closed {
+		c.stdin.Write(append(data, '\n'))
+	}
+	c.mu.Unlock()
+
+	// Wait for response with timeout
+	for {
+		select {
+		case event := <-c.eventChan:
+			if event.Type == "response" && event.Command == "get_state" && event.Success {
+				// Extract model info from the raw data
+				// The data contains model: {provider: "...", modelId: "...", ...}
+				// We need to re-parse the raw line, but we don't have it here.
+				// Instead, we'll use the response data fields.
+				c.mu.Lock()
+				name := c.modelName
+				c.mu.Unlock()
+				return name
+			}
+		case <-ctx.Done():
+			return "Pi"
+		case <-time.After(3 * time.Second):
+			return "Pi"
+		}
+	}
+}
+
 // Close gracefully shuts down the Pi subprocess.
 func (c *Client) Close() {
 	c.mu.Lock()
@@ -284,6 +336,25 @@ func (c *Client) readEvents() {
 			}
 			if err, ok := raw["error"].(string); ok {
 				event.Error = err
+			}
+			// Extract model name from get_state response
+			if command, ok := raw["command"].(string); ok && command == "get_state" {
+				if data, ok := raw["data"].(map[string]interface{}); ok {
+					if model, ok := data["model"].(map[string]interface{}); ok {
+						provider, _ := model["provider"].(string)
+						modelID, _ := model["modelId"].(string)
+						if provider != "" && modelID != "" {
+							c.mu.Lock()
+							c.modelName = provider + "/" + modelID
+							c.mu.Unlock()
+							log.Printf("[pi] model discovered: %s/%s", provider, modelID)
+						} else if modelID != "" {
+							c.mu.Lock()
+							c.modelName = modelID
+							c.mu.Unlock()
+						}
+					}
+				}
 			}
 
 		case "message_update":
