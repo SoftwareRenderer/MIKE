@@ -118,7 +118,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             showCreateTask.subscribe(v => showCreateTaskVal = v),
             creatingChildOfStore.subscribe(v => creatingChildOfVal = v),
             showConfig.subscribe(v => showConfigVal = v),
-            showTerminal.subscribe(v => showTerminalVal = v),
+            showTerminal.subscribe(v => { showTerminalVal = v; if (v) loadTerminalPanel(); }),
             showStats.subscribe(v => showStatsVal = v),
             showCardDetail.subscribe(v => showCardDetailVal = v),
             configStore.subscribe(v => { if (v) cfg = v; }),

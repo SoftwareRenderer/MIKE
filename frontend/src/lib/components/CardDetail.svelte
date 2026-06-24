@@ -600,7 +600,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const unsubDiff = taskDiffStore.subscribe(diffs => {
             const diffData = diffs[task.id];
             if (diffData) {
-                updateDiff({ diff: diffData.diff, untracked: diffData.untracked }, true);
+                updateDiff({ diff: diffData.diff, untracked: diffData.untracked });
             }
         });
 
@@ -660,12 +660,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
 
-    function updateDiff(data: DiffData, fromApi = false) {
-        const hasContent = (data.diff && data.diff.trim().length > 0) || (data.untracked && data.untracked.length > 0);
-        // Don't overwrite existing diff with empty data from WebSocket baseline sync
-        if (!fromApi && !hasContent && (diffFiles.length > 0 || untrackedFiles.length > 0)) {
-            return;
-        }
+    function updateDiff(data: DiffData) {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
         diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path));
         untrackedFiles = (data.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
@@ -698,7 +693,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             const headRef = diffTo === 'working' ? undefined : diffTo;
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef });
-            updateDiff(result, true);
+            updateDiff(result);
         } catch (e) {
             diffFiles = [];
             untrackedFiles = [];

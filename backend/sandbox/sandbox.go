@@ -108,10 +108,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		return fmt.Errorf("check container: %w", err)
 	}
 	if exists {
-		// Clean up stale container
+		// Clean up stale container from a previous server run
 		log.Printf("[sandbox] task=%s removing stale container %s", taskID, containerName)
-		if rmOut, rmErr := sm.podmanExec("rm", "-f", containerName); rmErr != nil {
-			log.Printf("[sandbox] task=%s warning: failed to remove stale container: %s", taskID, rmOut)
+		rmOut, rmErr := sm.podmanExec("rm", "-f", containerName)
+		if rmErr != nil {
+			return fmt.Errorf("remove stale container %s: %w (%s)", containerName, rmErr, rmOut)
 		}
 	}
 
