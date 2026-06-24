@@ -198,7 +198,7 @@
                     </div>
                     <div class="config-text">
                         <span class="config-label">Sandbox Isolation</span>
-                        <span class="config-desc">Use gVisor container isolation</span>
+                        <span class="config-desc">Use gVisor to isolate all AI actions within a sandbox</span>
                     </div>
                 </div>
                 <ToggleSwitch bind:checked={sandboxEnabled} disabled={isLocked} ariaLabel="Sandbox isolation" />
