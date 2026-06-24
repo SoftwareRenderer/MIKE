@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 # Install gVisor (runsc) for use with podman.
 # Downloads the latest release binaries from Google's storage bucket.
-# Requires sudo — installs to /usr/local/bin so runsc is in PATH for all users.
+#
+# Supports both system-wide (root) and user-local (rootless) installation:
+#   sudo bash scripts/install-gvisor.sh   → /usr/local/bin (all users)
+#   bash scripts/install-gvisor.sh        → ~/.local/bin   (current user)
 #
 # gVisor works with rootless podman using --runtime-flag ignore-cgroups=true.
 # See: https://gvisor.dev/docs/user_guide/rootless/
-#
-# Usage:
-#   sudo bash scripts/install-gvisor.sh
 
 set -euo pipefail
-
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "ERROR: This script must be run as root (sudo)." >&2
-    echo "  sudo bash scripts/install-gvisor.sh" >&2
-    exit 1
-fi
 
 ARCH="$(uname -m)"
 if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" ]]; then
@@ -24,7 +18,14 @@ if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" ]]; then
 fi
 
 URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}"
-INSTALL_DIR="/usr/local/bin"
+
+# Choose install directory based on privileges
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    INSTALL_DIR="/usr/local/bin"
+else
+    INSTALL_DIR="${HOME}/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+fi
 
 echo "Installing gVisor (runsc) to ${INSTALL_DIR}..."
 echo "Architecture: ${ARCH}"
