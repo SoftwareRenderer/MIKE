@@ -150,7 +150,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		"--security-opt", "no-new-privileges",
 		"--workdir", SandboxMountPath,
 		"-v", absWorktree + ":" + SandboxMountPath + ":rprivate,rw",
-		"-e", "HOME=" + SandboxMountPath,
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
