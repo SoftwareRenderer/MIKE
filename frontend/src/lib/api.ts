@@ -460,6 +460,26 @@ export async function fetchModels(llamaServerUrl: string, apiKey?: string): Prom
     return res.json();
 }
 
+/** Check if Pi is available on the server. */
+export async function checkPiAvailable(): Promise<{ available: boolean; version?: string }> {
+    const res = await apiFetch(`${API_BASE}/config/pi-available`, {
+        method: 'GET',
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to check Pi availability');
+    return res.json();
+}
+
+/** Test Pi connection (runs `pi --version`). */
+export async function testPiConnection(): Promise<{ success: boolean; message: string }> {
+    const res = await apiFetch(`${API_BASE}/config/test-pi-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to test Pi connection');
+    return res.json();
+}
+
 /** Resolve a provider+model selection to the actual server URL and model name. */
 export function resolveProviderModel(
     providers: { name: string; url: string; models: Array<{ name: string; reasoning_effort?: string }> }[],

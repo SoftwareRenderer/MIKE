@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
+    import { PI_SENTINEL_URL } from '$lib/types';
 
     interface Props {
         providers: Provider[];
@@ -54,6 +55,19 @@
 
     let activeProviders = $derived(
         providers.filter(p => p.models.length > 0)
+    );
+
+    let hasPiProvider = $derived(
+        providers.some(p => p.kind === 'pi' || p.url === PI_SENTINEL_URL)
+    );
+
+    // Total selectable options: LLM providers with models + Pi agent
+    let selectableCount = $derived(
+        activeProviders.length + (hasPiProvider ? 1 : 0)
+    );
+
+    let isPiSelected = $derived(
+        selectedProviderUrl === PI_SENTINEL_URL
     );
 
     $effect(() => {
@@ -147,6 +161,13 @@
         if (modelToSelect) {
             onSelect(provider.name, modelToSelect.name, provider.url, modelToSelect.effort);
         }
+    }
+
+    function selectPiAgent() {
+        selectedProviderUrl = PI_SENTINEL_URL;
+        providerDropdownOpen = false;
+        modelDropdownOpen = false;
+        onSelect('pi', 'Pi Coding Agent', PI_SENTINEL_URL);
     }
 
     function selectModel(modelName: string, reasoningEffort?: string) {
@@ -256,7 +277,7 @@
 </script>
 
 <div class="model-selector">
-    {#if activeProviders.length > 1}
+    {#if selectableCount > 1}
         <button
             type="button"
             class="selector-trigger provider-trigger"
@@ -275,7 +296,7 @@
                 <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <span class="selector-label">
-                {selectedProvider?.display_name || selectedProvider?.name || 'Provider'}
+                {isPiSelected ? 'Pi Coding Agent' : (selectedProvider?.display_name || selectedProvider?.name || 'Provider')}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -283,37 +304,54 @@
         </button>
     {/if}
 
-    <button
-        type="button"
-        class="selector-trigger model-trigger"
-        class:open={modelDropdownOpen}
-        class:disabled={disabled}
-        bind:this={modelTriggerEl}
-        onclick={toggleModelDropdown}
-        onkeydown={handleModelKeydown}
-        aria-label="Select model"
-        aria-haspopup="listbox"
-        aria-expanded={modelDropdownOpen}
-        title="Select model"
-    >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-            <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
-        </svg>
-        <span class="selector-label model-name" class:current={!!currentModel}>
-            {currentModel || 'Select model'}
-        </span>
-        <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    </button>
+    {#if !isPiSelected}
+        <button
+            type="button"
+            class="selector-trigger model-trigger"
+            class:open={modelDropdownOpen}
+            class:disabled={disabled}
+            bind:this={modelTriggerEl}
+            onclick={toggleModelDropdown}
+            onkeydown={handleModelKeydown}
+            aria-label="Select model"
+            aria-haspopup="listbox"
+            aria-expanded={modelDropdownOpen}
+            title="Select model"
+        >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+                <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span class="selector-label model-name" class:current={!!currentModel}>
+                {currentModel || 'Select model'}
+            </span>
+            <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
+    {/if}
 </div>
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
     <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+        {#if hasPiProvider}
+            <button type="button" class="provider-option provider-option-pi" class:active={isPiSelected} onclick={selectPiAgent} role="option" aria-selected={isPiSelected}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                    <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                </svg>
+                <span class="provider-name">Pi Coding Agent</span>
+                {#if isPiSelected}
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                {/if}
+            </button>
+        {/if}
         {#each activeProviders as provider}
             <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)} role="option" aria-selected={provider.url === selectedProviderUrl}>
                 <span class="provider-name">{provider.display_name || provider.name}</span>
@@ -436,6 +474,16 @@
     }
     .provider-option:hover {
         background: var(--color-surface-3);
+    }
+    .provider-option-pi {
+        color: #A371F7;
+    }
+    .provider-option-pi:hover {
+        background: rgba(163, 113, 247, 0.08);
+    }
+    .provider-option-pi.active {
+        background: rgba(163, 113, 247, 0.1);
+        color: #A371F7;
     }
     .provider-option.active {
         background: color-mix(in srgb, var(--color-accent) 10%, transparent);

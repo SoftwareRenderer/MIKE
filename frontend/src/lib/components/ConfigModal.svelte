@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Config, Provider } from '$lib/types';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
+    import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
+    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
     import { config as configStore, showConfig } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
@@ -63,6 +64,7 @@
     interface ProviderDraft {
         name: string;
         display_name: string;
+        kind: 'llm' | 'pi';
         url: string;
         api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
         models: ModelEntry[];
@@ -121,8 +123,11 @@
     function buildProviders(cfg: Config | null): ProviderDraft[] {
         const oldGlobalDefault = cfg?.default_model || '';
         return (cfg?.providers || []).map(p => {
+            // Detect Pi provider by kind field OR sentinel URL
+            const isAgent = p.kind === 'pi' || p.url === PI_SENTINEL_URL;
             const draft: ProviderDraft = {
                 ...p,
+                kind: isAgent ? 'pi' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
                 concurrency: p.concurrency || 1,
                 default_model: p.default_model || '',
@@ -135,7 +140,7 @@
                 expanded: !p.default_model, // collapse if already configured
                 testingConnection: false,
                 testResult: null,
-                models: (p.models || []).map(m => {
+                models: isAgent ? [] : (p.models || []).map(m => {
                     // Handle both old format (string) and new format ({name, reasoning_effort})
                     if (typeof m === 'string') {
                         return { name: m, readonly: false, reasoning_effort: 'medium' as const };
@@ -144,7 +149,7 @@
                 }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
             };
             // Migrate: if old global default_model belongs to this provider and provider has no default set
-            if (!draft.default_model && oldGlobalDefault && p.models?.some(m => (typeof m === 'string' ? m : m.name) === oldGlobalDefault)) {
+            if (!isAgent && !draft.default_model && oldGlobalDefault && p.models?.some(m => (typeof m === 'string' ? m : m.name) === oldGlobalDefault)) {
                 draft.default_model = oldGlobalDefault;
             }
             return draft;
@@ -162,6 +167,20 @@
         providers = buildProviders(config);
     });
 
+    // Close agent menu when clicking outside
+    $effect(() => {
+        if (!agentMenuOpen) return;
+        function handleClick(e: MouseEvent) {
+            if (agentMenuBtn && agentMenuBtn.contains(e.target as Node)) return;
+            const menu = document.querySelector('.agent-menu');
+            if (menu && menu.contains(e.target as Node)) return;
+            agentMenuOpen = false;
+            agentMenuRect = null;
+        }
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    });
+
     function toggleProvider(idx: number) {
         providers[idx].expanded = !providers[idx].expanded;
     }
@@ -175,18 +194,26 @@
 
     async function testProviderConnection(idx: number) {
         const p = providers[idx];
-        if (!p.url.trim()) return;
         p.testingConnection = true;
         p.testResult = null;
         try {
-            const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');
-            // Send the raw value — masked keys won't match the pattern so backend ignores them
-            const apiKey = p.api_key || '';
-            const result = await testConnectionApi(p.url.trim(), defaultModelName, apiKey);
-            p.testResult = {
-                success: result.success,
-                message: result.message,
-            };
+            if (p.kind === 'pi') {
+                // Test Pi connection (runs `pi --version`)
+                const result = await testPiConnectionApi();
+                p.testResult = {
+                    success: result.success,
+                    message: result.success ? `Pi available: ${result.message}` : result.message,
+                };
+            } else {
+                if (!p.url.trim()) { p.testingConnection = false; return; }
+                const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');
+                const apiKey = p.api_key || '';
+                const result = await testConnectionApi(p.url.trim(), defaultModelName, apiKey);
+                p.testResult = {
+                    success: result.success,
+                    message: result.message,
+                };
+            }
         } catch (e) {
             p.testResult = { success: false, message: String(e) };
         } finally {
@@ -198,7 +225,55 @@
         providers.push({
             name: '',
             display_name: '',
+            kind: 'llm',
             url: '',
+            api_key: '',
+            models: [],
+            concurrency: 1,
+            default_model: '',
+            input_price: 0,
+            output_price: 0,
+            cache_read_price: 0,
+            cache_write_price: 0,
+            fetchingModels: false,
+            fetchError: '',
+            expanded: true,
+            testingConnection: false,
+            testResult: null,
+        });
+    }
+
+    let agentMenuOpen = $state(false);
+    let agentMenuBtn: HTMLButtonElement | null = $state(null);
+    let agentMenuRect = $state<{ top: number; left: number } | null>(null);
+
+    function toggleAgentMenu(e: MouseEvent) {
+        e.stopPropagation();
+        if (providers.some(p => p.kind === 'pi')) return;
+        if (agentMenuOpen) {
+            agentMenuOpen = false;
+            agentMenuRect = null;
+        } else {
+            if (agentMenuBtn) {
+                const r = agentMenuBtn.getBoundingClientRect();
+                agentMenuRect = { top: r.bottom + 4, left: r.left };
+            }
+            agentMenuOpen = true;
+        }
+    }
+
+    function addAgent() {
+        // Only one Pi agent allowed
+        if (providers.some(p => p.kind === 'pi')) {
+            return;
+        }
+        agentMenuOpen = false;
+        agentMenuRect = null;
+        providers.push({
+            name: 'pi',
+            display_name: 'Pi Coding Agent',
+            kind: 'pi',
+            url: PI_SENTINEL_URL,
             api_key: '',
             models: [],
             concurrency: 1,
@@ -379,15 +454,16 @@
         error = '';
         try {
             const savedProviders: Provider[] = providers
-                .filter(p => p.url.trim())
+                .filter(p => p.kind === 'pi' || p.url.trim())
                 .map(p => {
-                    syncProviderMeta(p);
+                    if (p.kind !== 'pi') syncProviderMeta(p);
                     const trimmedKey = p.api_key?.trim() || '';
                     // Masked keys are all bullets — don't send them. Only send real values.
                     const isMasked = trimmedKey && trimmedKey.replace(/•/g, '').length === 0;
                     const base: Provider = {
                         name: p.name.trim(),
                         display_name: p.display_name.trim(),
+                        kind: p.kind,
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => ({
                             name: m.name.trim(),
@@ -400,7 +476,7 @@
                         cache_read_price: p.cache_read_price,
                         cache_write_price: p.cache_write_price,
                     };
-                    if (!isMasked) {
+                    if (!isMasked && p.kind !== 'pi') {
                         base.api_key = trimmedKey;
                     }
                     return base;
@@ -458,7 +534,28 @@
             <fieldset class="section">
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
-                    <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
+                    <div class="section-actions">
+                        {#if !providers.some(p => p.kind === 'pi')}
+                            <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
+                                + Add Agent
+                                <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        {/if}
+                        <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
+                    </div>
+                    <!-- Agent selection dropdown -->
+                    {#if agentMenuOpen && agentMenuRect}
+                        <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()}>
+                            <button type="button" class="agent-menu-item" onclick={addAgent}>
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                    <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                                    <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                                    <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                                </svg>
+                                Pi Coding Agent
+                            </button>
+                        </div>
+                    {/if}
                 </div>
                 <div class="providers-list">
                     {#each providers as p, i}
@@ -479,6 +576,16 @@
                                 </div>
                                 <div class="provider-title-section">
                                     <div class="provider-title-main">
+                                        {#if p.kind === 'pi'}
+                                            <span class="pi-icon" title="Pi coding agent">
+                                                <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                                                    <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+                                                    <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                                                    <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                                                    <path d="M8 2v3M5 4h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                                                </svg>
+                                            </span>
+                                        {/if}
                                         <span class="provider-display-name">{p.display_name || 'New Provider'}</span>
                                         {#if i === 0 && providers.length > 1}
                                             <span class="priority-badge">Default</span>
@@ -486,7 +593,9 @@
                                     </div>
                                 </div>
                                 <div class="provider-actions">
-                                    <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
+                                    {#if p.kind !== 'pi'}
+                                        <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
+                                    {/if}
                                     {#if p.default_model}
                                         {@const defaultModelInfo = parseDefaultModel(p.default_model)}
                                         <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}22">{defaultModelInfo.name}</span>
@@ -508,30 +617,60 @@
                             <!-- Expanded details -->
                             {#if p.expanded}
                                 <div class="provider-details">
-                                    <div class="url-and-key-row">
-                                        <div class="url-field">
-                                            <label class="url-label">Provider URL</label>
-                                            <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                    {#if p.kind === 'pi'}
+                                        <!-- Pi Coding Agent Info -->
+                                        <div class="pi-info-section">
+                                            <div class="pi-info-header">
+                                                <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                                                    <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+                                                    <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                                                    <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                                                    <path d="M8 2v3M5 4h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                                                </svg>
+                                                <span>Pi Coding Agent</span>
+                                            </div>
+                                            <p class="pi-info-text">
+                                                Pi is a full coding agent that handles its own LLM calls, tool execution, and reasoning.
+                                                When selected, Pi runs inside the task's worktree and manages the entire task lifecycle.
+                                            </p>
+                                            <div class="pi-info-box">
+                                                <h4 class="pi-info-box-title">Setup</h4>
+                                                <ul class="pi-info-list">
+                                                    <li><strong>Authentication:</strong> Configure Pi separately via <code>pi /login</code> or API keys. Pi uses <code>~/.pi/agent/auth.json</code>.</li>
+                                                    <li><strong>Models:</strong> Select models within Pi via <code>pi /model</code>. All Pi-supported models are available.</li>
+                                                    <li><strong>Sandbox:</strong> Your sandbox image must include <code>pi</code> on <code>$PATH</code>. Pi's config directory (<code>~/.pi/agent/</code>) is bind-mounted into the container at <code>/pi-config</code> with <code>PI_CODING_AGENT_DIR</code> set and read/write access.</li>
+                                                    <li><strong>Sessions:</strong> Each task gets its own Pi session for continuity. Sessions persist in <code>~/.pi/agent/sessions/</code>.</li>
+                                                </ul>
+                                            </div>
                                         </div>
-                                        <div class="api-key-field">
-                                            <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
-                                            <input
-                                                type="password"
-                                                bind:value={p.api_key}
-                                                placeholder="API key..."
-                                                onclick={(e) => e.stopPropagation()}
-                                            />
+                                    {:else}
+                                        <!-- LLM Provider Fields -->
+                                        <div class="url-and-key-row">
+                                            <div class="url-field">
+                                                <label class="url-label">Provider URL</label>
+                                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                            </div>
+                                            <div class="api-key-field">
+                                                <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
+                                                <input
+                                                    type="password"
+                                                    bind:value={p.api_key}
+                                                    placeholder="API key..."
+                                                    onclick={(e) => e.stopPropagation()}
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-                                    {#if !encryptionEnabled && p.api_key && p.api_key.trim() !== ''}
-                                        <div class="encryption-warning">
-                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                                <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-                                                <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                                            </svg>
-                                            API key stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to encrypt with AES-256-GCM.
-                                        </div>
+                                        {#if !encryptionEnabled && p.api_key && p.api_key.trim() !== ''}
+                                            <div class="encryption-warning">
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                                                    <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                                                </svg>
+                                                API key stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to encrypt with AES-256-GCM.
+                                            </div>
+                                        {/if}
                                     {/if}
+                                    {#if p.kind !== 'pi'}
                                     <div class="details-actions">
                                         <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}
@@ -701,6 +840,7 @@
                                             </div>
                                         </div>
                                     </div>
+                                    {/if}
                                 </div>
                             {/if}
                         </div>
@@ -885,6 +1025,119 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+    }
+    .section-actions {
+        display: flex;
+        gap: 8px;
+    }
+    .btn-agent {
+        color: #A371F7;
+        border-color: #A371F733;
+    }
+    .btn-agent:hover {
+        background: #A371F711;
+    }
+    .btn-agent .chevron {
+        transition: transform 0.15s ease;
+        flex-shrink: 0;
+    }
+    .btn-agent.open .chevron {
+        transform: rotate(180deg);
+    }
+
+    /* Agent selection dropdown */
+    .agent-menu {
+        min-width: 200px;
+        background: var(--color-surface-1, #1e1e2e);
+        border: 1px solid var(--color-border, #333);
+        border-radius: var(--radius-md, 8px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        padding: 4px;
+    }
+    .agent-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: var(--radius-sm, 4px);
+        border: none;
+        background: none;
+        color: #A371F7;
+        font-size: 0.8125rem;
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.1s ease;
+    }
+    .agent-menu-item:hover {
+        background: rgba(163, 113, 247, 0.08);
+    }
+
+    /* Pi Coding Agent Styles */
+    .pi-icon {
+        color: #A371F7;
+        display: inline-flex;
+        margin-right: 6px;
+        flex-shrink: 0;
+    }
+    .pi-info-section {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+    }
+    .pi-info-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #A371F7;
+    }
+    .pi-info-text {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        margin: 0;
+    }
+    .pi-info-box {
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 12px;
+    }
+    .pi-info-box-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-tertiary);
+        margin: 0 0 8px;
+    }
+    .pi-info-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .pi-info-list li {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+    }
+    .pi-info-list code {
+        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+        font-size: 0.75rem;
+        background: var(--color-surface-3);
+        padding: 1px 4px;
+        border-radius: 3px;
     }
 
     /* Field labels */

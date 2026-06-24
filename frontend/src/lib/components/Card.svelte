@@ -145,6 +145,10 @@
         const cfg = $configStore;
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
+        // Check if task uses Pi agent
+        if (task.llama_server_url === 'pi://agent') {
+                                    return { text: 'Pi Coding Agent', provider: null, model: null, color: '#A371F7', isAgent: true };
+        }
         // Use task model if set, otherwise fall back to default model
         const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
         const activeModel = task.model_name || (providers[0]?.default_model && providers[0]?.models.some(m => getModelName(m) === providers[0].default_model) ? providers[0].default_model : providers[0]?.models.length > 0 ? getModelName(providers[0].models[0]) : null);
@@ -155,7 +159,7 @@
         const showProvider = providers.length > 1;
         const provName = showProvider && provider ? provider.display_name : null;
         const text = provName ? `${provName} · ${activeModel}` : activeModel;
-        return { text, provider: provName, model: activeModel, color: getModelColor(activeModel) };
+        return { text, provider: provName, model: activeModel, color: getModelColor(activeModel), isAgent: false };
     });
 
     // Model picker dropdown - only in Backlog column (task not yet started)
@@ -203,7 +207,26 @@
         } catch (err) {
             console.error('Failed to update model:', err);
         }
-        closePicker();
+    }
+
+    async function selectAgent() {
+        if (!projectId) return;
+        try {
+            const updated = await updateTask(projectId, task.id, { model_name: null, llama_server_url: 'pi://agent', reasoning_effort: null });
+            task.model_name = updated.model_name;
+            task.llama_server_url = updated.llama_server_url;
+            task.reasoning_effort = updated.reasoning_effort;
+            boardStore.update(b => {
+                if (!b) return b;
+                const idx = b.tasks.findIndex(t => t.id === task.id);
+                if (idx !== -1) b.tasks[idx] = updated;
+                return { ...b };
+            });
+        } catch (err) {
+            console.error('Failed to select agent:', err);
+        }
+        modelPickerOpen = false;
+        pickerRect = null;
     }
 
     $effect(() => {
@@ -686,7 +709,16 @@
                 </div>
             {/if}
             {#if modelBadge.text}
-                {#if isConfigurable}
+                {#if modelBadge.isAgent}
+                    <div class="badge model-badge pi-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
+                            <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                            <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                            <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                        </svg>
+                        Pi Coding Agent
+                    </div>
+                {:else if isConfigurable}
                     <button
                         type="button"
                         class="badge model-badge"
@@ -745,7 +777,19 @@
 
 <!-- Model picker dropdown (portal to escape card overflow) -->
 {#if modelPickerOpen && pickerRect && providers.length > 0}
+        {@const isAgentActive = task.llama_server_url === 'pi://agent'}
     <svelte:element this={"div"} class="portal-card-model-picker" role="listbox" aria-label="Select model" style="position:fixed;top:{pickerRect.top}px;left:{pickerRect.left}px;z-index:10000;min-width:200px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+        <button type="button" class="picker-model-option picker-agent-option" class:active={isAgentActive} onclick={selectAgent} role="option" aria-selected={isAgentActive}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px;flex-shrink:0">
+                <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                <circle cx="10" cy="9" r="1" fill="currentColor"/>
+            </svg>
+            <span class="option-name">Pi Coding Agent</span>
+            {#if isAgentActive}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            {/if}
+        </button>
         {#each providers as provider}
             {#if provider.models.length > 0}
                 <div class="picker-provider-header">{provider.display_name || provider.name}</div>
@@ -1178,6 +1222,16 @@
     .picker-model-option.active {
         background: color-mix(in srgb, var(--color-accent) 10%, transparent);
         color: var(--color-accent);
+    }
+    .picker-agent-option {
+        color: #A371F7;
+    }
+    .picker-agent-option.active {
+        background: rgba(163, 113, 247, 0.1);
+        color: #A371F7;
+    }
+    .picker-agent-option:hover {
+        background: rgba(163, 113, 247, 0.08);
     }
     .option-name {
         overflow: hidden;

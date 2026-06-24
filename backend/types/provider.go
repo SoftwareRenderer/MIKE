@@ -10,6 +10,7 @@ const DefaultReasoningEffort = "medium"
 
 // UnmarshalJSON implements backward-compatible JSON unmarshaling for Provider.
 // Accepts both the new format (models as []ModelConfig) and the old format (models as []string).
+// Normalizes Kind to "llm" when empty (backward compatibility).
 func (p *Provider) UnmarshalJSON(data []byte) error {
 	type providerAlias Provider
 	var raw struct {
@@ -20,6 +21,11 @@ func (p *Provider) UnmarshalJSON(data []byte) error {
 
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+
+	// Normalize kind: empty string defaults to "llm" for backward compatibility
+	if p.Kind == "" {
+		p.Kind = ProviderKindLLM
 	}
 
 	// Try new format: []ModelConfig

@@ -66,6 +66,8 @@ func (s *Server) setupRoutes() {
 
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
 	s.mux.HandleFunc("/api/config/fetch-models", s.configStore.HandleFetchModels)
+	s.mux.HandleFunc("/api/config/pi-available", s.configStore.HandlePiAvailability)
+	s.mux.HandleFunc("/api/config/test-pi-connection", s.configStore.HandleTestPiConnection)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)

@@ -100,6 +100,7 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tok
 export interface Provider {
     name: string;
     display_name: string;
+    kind?: 'llm' | 'pi';       // "llm" (default) or "pi"
     url: string;
     api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
     models: ProviderModel[];
@@ -109,6 +110,14 @@ export interface Provider {
     output_price?: number;     // USD per 1M output tokens
     cache_read_price?: number; // USD per 1M cache-read tokens
     cache_write_price?: number; // USD per 1M cache-write tokens (overrides input_price when set)
+}
+
+/** Sentinel URL used when a task uses Pi agent instead of an LLM provider. */
+export const PI_SENTINEL_URL = 'pi://agent';
+
+/** Check if a provider is a Pi agent. */
+export function isAgentProvider(p: Provider): boolean {
+    return p.kind === 'pi';
 }
 
 export interface TaskDependency {

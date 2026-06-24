@@ -24,6 +24,8 @@ const (
 	BaseImage = "docker.io/library/ubuntu:latest"
 	// SandboxMountPath is where the worktree is bind-mounted inside the container.
 	SandboxMountPath = "/worktree"
+	// PiConfigMount is where ~/.pi/agent/ is bind-mounted inside the container (for Pi agent tasks).
+	PiConfigMount = "/pi-config"
 	// KeepAliveTimeout is how long to wait for container cleanup.
 	KeepAliveTimeout = 30 * time.Second
 )
@@ -90,7 +92,9 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int) error {
+// If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
+// and PI_CODING_AGENT_DIR env var is set (only for Pi agent tasks).
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -162,6 +166,18 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	}
 	if memoryLimit > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
+	}
+	// Pi agent config mount (only for Pi tasks)
+	if piAgentDir != "" {
+		absPiDir, err := filepath.Abs(piAgentDir)
+		if err != nil {
+			return fmt.Errorf("resolve pi agent dir path: %w", err)
+		}
+		createArgs = append(createArgs,
+			"-v", absPiDir+":"+PiConfigMount+":rprivate,rw",
+			"-e", "PI_CODING_AGENT_DIR="+PiConfigMount,
+		)
+		log.Printf("[sandbox] task=%s mounting pi agent dir %s at %s", taskID, absPiDir, PiConfigMount)
 	}
 	createArgs = append(createArgs, image, "sleep", "infinity")
 
@@ -274,7 +290,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 			return nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation, memoryLimit); err != nil {
+		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation, memoryLimit, ""); err != nil {
 			return nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()

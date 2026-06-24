@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -12,12 +13,16 @@ import (
 	"time"
 
 	"kanban/backend/llama"
+	"kanban/backend/pi"
 	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
 )
+
+// PiSentinelURL is the sentinel value for llama_server_url when a task uses Pi.
+const PiSentinelURL = "pi://agent"
 
 // LoopType indicates the type of loop detected.
 type LoopType int
@@ -472,7 +477,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 		}
-		if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit); err != nil {
+		// Determine if Pi agent dir should be mounted (only for Pi tasks)
+			piAgentDir := ""
+			if serverURL == PiSentinelURL {
+				homeDir, _ := os.UserHomeDir()
+				piAgentDir = filepath.Join(homeDir, ".pi", "agent")
+			}
+			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			task.StatusState = "failed"
 			task.Status = "review"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
@@ -502,6 +513,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			return nil
 		}
+	}
+
+	// Check if this task uses Pi agent
+	if serverURL == PiSentinelURL {
+		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, b, userMsgChan, sandboxEnabled)
+		return
 	}
 
 	mc := &modelConfig{serverURL: serverURL, modelName: modelName}
@@ -1559,4 +1576,238 @@ func formatConversationTurns(messages []types.ChatMessage) string {
 		}
 	}
 	return sb.String()
+}
+
+// -- Pi Agent Execution --
+
+// executeTaskWithPi runs the task using Pi agent via RPC mode.
+// Pi handles its own LLM calls, tool execution, loop detection, and compaction.
+// Kanban only manages the subprocess lifecycle and streams events to the frontend.
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
+			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+		}
+		te.taskMu.Lock()
+		delete(te.tasks, task.ID)
+		te.taskMu.Unlock()
+	}()
+
+	// Determine working directory and environment for Pi
+	cwd := worktreePath
+	var env []string
+
+	if sandboxEnabled {
+		// Pi runs inside the sandbox
+		// ~/.pi/agent/ is bind-mounted at /pi-config (handled by sandbox manager)
+		cwd = sandbox.SandboxMountPath
+		env = append(env, "PI_CODING_AGENT_DIR=/pi-config")
+	}
+
+	sessionName := fmt.Sprintf("kanban-%s", task.ID)
+
+	// Create Pi client
+	client, err := pi.NewClient(cwd, sessionName, env)
+	if err != nil {
+		task.StatusState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Failed to start Pi agent: %v", err)
+		te.store.UpdateTask(task)
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
+		return
+	}
+	defer client.Close()
+
+	log.Printf("[pi] task=%s client started (pid=%d, cwd=%s)", task.ID, client.PID(), cwd)
+
+	// Get existing messages
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+
+	// If no messages exist yet, create the initial user message from the task prompt
+	if len(taskMsgs) == 0 {
+		te.store.CreateTaskMessage(&types.TaskMessage{
+			ID:        uuid.New().String(),
+			TaskID:    task.ID,
+			ThreadID:  task.CurrentThreadID,
+			Role:      "user",
+			Content:   task.Prompt,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+
+	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi agent started"}})
+
+	// Send initial prompt to Pi
+	err = client.Prompt(ctx, task.Prompt)
+	if err != nil {
+		task.StatusState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Failed to send prompt to Pi: %v", err)
+		te.store.UpdateTask(task)
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
+		return
+	}
+
+	// Event loop
+	startTime := time.Now()
+	agentEnded := false
+	var stopReason string
+
+	for !agentEnded {
+		select {
+		case <-ctx.Done():
+			log.Printf("[pi] task=%s context cancelled", task.ID)
+			client.Abort(ctx)
+			task.StatusState = "stopped"
+			task.Status = "review"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
+			return
+
+		case event, ok := <-client.EventChan():
+			if !ok {
+				// Channel closed — process exited
+				agentEnded = true
+				stopReason = "process_exited"
+				break
+			}
+
+			// Stream the event to frontend
+			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
+				b.Send(streamEvent)
+			}
+
+			switch event.Type {
+			case "agent_end":
+				agentEnded = true
+				stopReason = event.StopReason
+				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
+
+				// Persist assistant messages from agent_end
+				if len(event.Messages) > 0 {
+					for _, msg := range event.Messages {
+						role, _ := msg["role"].(string)
+						if role != "assistant" {
+							continue
+						}
+
+						// Extract text content
+						var assistantText, reasoningText string
+						if content, ok := msg["content"].([]interface{}); ok {
+							var texts []string
+							for _, c := range content {
+								if cm, ok := c.(map[string]interface{}); ok {
+									switch cm["type"] {
+									case "text":
+										if t, ok := cm["text"].(string); ok {
+											texts = append(texts, t)
+										}
+									case "thinking":
+										if t, ok := cm["thinking"].(string); ok {
+											reasoningText = t
+										}
+									}
+								}
+							}
+							assistantText = strings.Join(texts, "\n")
+						}
+
+						// Extract usage data if available
+						var promptTokens, predictedTokens int
+						if usage, ok := msg["usage"].(map[string]interface{}); ok {
+							if input, ok := usage["input"].(float64); ok {
+								promptTokens = int(input)
+							}
+							if output, ok := usage["output"].(float64); ok {
+								predictedTokens = int(output)
+							}
+						}
+
+						te.store.CreateTaskMessage(&types.TaskMessage{
+							ID:               uuid.New().String(),
+							TaskID:           task.ID,
+							ThreadID:         task.CurrentThreadID,
+							Role:             "assistant",
+							Content:          assistantText,
+							ReasoningContent: reasoningText,
+							ModelName:        "pi",
+							ProviderName:     "Pi Agent",
+							PromptTokens:     promptTokens,
+							PredictedTokens:  predictedTokens,
+							Duration:         time.Since(startTime).Milliseconds(),
+							CreatedAt:        time.Now().UTC(),
+						})
+					}
+				}
+
+			case "response":
+				if !event.Success && event.Error != "" && event.Command == "prompt" {
+					log.Printf("[pi] task=%s prompt response error: %s", task.ID, event.Error)
+					te.sendAndPersistError(b, task.ID, event.Error, "pi_rpc_error")
+				}
+			}
+
+		case um := <-userMsgChan:
+			// Forward user message to Pi
+			log.Printf("[pi] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
+			err := client.Prompt(ctx, um.Content)
+			if err != nil {
+				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
+			}
+		}
+	}
+
+	// Task completion
+	duration := time.Since(startTime)
+	log.Printf("[pi] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
+
+	if stopReason == "stop" || stopReason == "length" || stopReason == "process_exited" {
+		if task.AutoCommit {
+			// Commit changes
+			summary := task.ChangeSummary
+			if summary == "" {
+				summary = task.Title
+			}
+			commitMsg := fmt.Sprintf("%s, generated by Pi Agent\n\n%s", task.Title, summary)
+			te.gitRun(worktreePath, "add", "-A")
+			te.gitRun(worktreePath, "commit", "-m", commitMsg)
+			task.StatusState = "completed"
+			task.Status = "done"
+		} else {
+			task.StatusState = "awaiting_review"
+			task.Status = "review"
+		}
+		task.Output = fmt.Sprintf("Pi agent finished (%s)", stopReason)
+		te.store.UpdateTask(task)
+
+		// Broadcast complete event
+		b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
+			"state":    task.StatusState,
+			"summary":  "Pi agent finished",
+			"model_name": "pi",
+			"duration": duration.Milliseconds(),
+		}})
+
+		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+
+		// Broadcast diff
+		baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
+		if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
+			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+			for i, u := range diffResult.Untracked {
+				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+			}
+			te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+		}
+
+		// Auto-start next sibling if subtask
+		if task.ParentTaskID != "" {
+			_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
+		}
+	}
 }
