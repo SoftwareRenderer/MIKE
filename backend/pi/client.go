@@ -507,16 +507,16 @@ func ToStreamEvent(event PiEvent) types.StreamEvent {
 	case "agent_start":
 		return types.StreamEvent{
 			Type: types.WSTypeStatus,
-			Data: map[string]string{"state": "running", "activity": "Pi agent started"},
+			Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"},
 		}
 
 	case "agent_end":
 		state := "idle"
-		activity := "Pi agent finished"
+		activity := "Pi Coding Agent finished"
 		if event.StopReason == "toolUse" {
 			// Pi is waiting for tool results — shouldn't happen since Pi runs its own tools
 			state = "running"
-			activity = "Pi agent continuing"
+			activity = "Pi Coding Agent continuing"
 		}
 		return types.StreamEvent{
 			Type: types.WSTypeStatus,

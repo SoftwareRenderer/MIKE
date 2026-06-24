@@ -1612,7 +1612,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	if err != nil {
 		task.StatusState = "failed"
 		task.Status = "review"
-		task.Output = fmt.Sprintf("Failed to start Pi agent: %v", err)
+		task.Output = fmt.Sprintf("Failed to start Pi Coding Agent: %v", err)
 		te.store.UpdateTask(task)
 		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
@@ -1643,7 +1643,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		})
 	}
 
-	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi agent started"}})
+	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
 
 	// Send initial prompt to Pi
 	err = client.Prompt(ctx, task.Prompt)
@@ -1742,7 +1742,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							Content:          assistantText,
 							ReasoningContent: reasoningText,
 							ModelName:        "pi",
-							ProviderName:     "Pi Agent",
+							ProviderName:     "Pi Coding Agent",
 							PromptTokens:     promptTokens,
 							PredictedTokens:  predictedTokens,
 							Duration:         time.Since(startTime).Milliseconds(),
@@ -1788,13 +1788,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.StatusState = "awaiting_review"
 			task.Status = "review"
 		}
-		task.Output = fmt.Sprintf("Pi agent finished (%s)", stopReason)
+		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
 		te.store.UpdateTask(task)
 
 		// Broadcast complete event
 		b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 			"state":    task.StatusState,
-			"summary":  "Pi agent finished",
+			"summary":  "Pi Coding Agent finished",
 			"model_name": client.ModelName(),
 			"duration": duration.Milliseconds(),
 		}})
