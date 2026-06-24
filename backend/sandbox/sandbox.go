@@ -19,7 +19,7 @@ const (
 	// ContainerNamePrefix is the prefix for sandbox container names.
 	ContainerNamePrefix = "kanban-sandbox"
 	// BaseImage is the default container image.
-	BaseImage = "docker.io/library/alpine:latest"
+	BaseImage = "docker.io/library/ubuntu:latest"
 	// SandboxMountPath is where the worktree is bind-mounted inside the container.
 	SandboxMountPath = "/worktree"
 	// KeepAliveTimeout is how long to wait for container cleanup.
@@ -28,8 +28,8 @@ const (
 
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
-	mu       sync.Mutex
-	active   map[string]string // taskID -> containerName
+	mu        sync.Mutex
+	active    map[string]string // taskID -> containerName
 	available bool
 }
 
@@ -74,10 +74,11 @@ func (sm *SandboxManager) checkAvailable() bool {
 	return true
 }
 
-// podmanExec runs a podman command via sudo (needed for gVisor cgroup permissions).
+// podmanExec runs a podman command.
+// When using gVisor (runsc) with rootless podman, --runtime-flag ignore-cgroups=true
+// must be passed to both create and start commands.
 func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
-	cmd := append([]string{"podman"}, args...)
-	c := exec.Command("sudo", cmd...)
+	c := exec.Command("podman", args...)
 	out, err := c.CombinedOutput()
 	return out, err
 }
@@ -121,27 +122,32 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	}
 
 	// Create container with gVisor runtime
-	// --runtime runsc: use gVisor
-	// --userns=keep-id: map host UID/GID to container (so worktree files are accessible)
+	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
+	// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
 	// --security-opt label=disable: required for gVisor (no SELinux support)
-	// --cap-drop=ALL: drop all Linux capabilities
-	// --security-opt no-new-privileges: prevent privilege escalation
-	// --read-only: mount root filesystem read-only (except explicit mounts)
+	// --cap-drop=ALL: drop all capabilities, re-add only what's needed (see below)
+	// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
 	image := baseImage
 	if image == "" {
 		image = BaseImage
 	}
 
+	// --runtime-flag is a global podman option (must come before subcommand)
+	// Do not include leading -- in the flag value per podman docs
 	createArgs := []string{
+		"--runtime-flag=overlay2=root:self",
+		"--runtime-flag=ignore-cgroups",
 		"create",
 		"--name", containerName,
 		"--runtime", "runsc",
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
-		"--cap-add", "CAP_FOWNER",      // needed to modify files owned by other UIDs
-		"--cap-add", "CAP_DAC_OVERRIDE", // needed to bypass file permission checks
+		"--cap-add", "CAP_CHOWN", // worktree files may have mismatched ownership
+		"--cap-add", "CAP_DAC_OVERRIDE", // apt's _apt user must access root-owned temp files
+		"--cap-add", "CAP_SETUID", // apt drops privileges via seteuid()
+		"--cap-add", "CAP_SETGID", // apt drops privileges via setegid()
+		"--cap-add", "CAP_FOWNER", // apt chmod on /var/lib/apt/lists/
 		"--security-opt", "no-new-privileges",
-		"--read-only",
 		"--workdir", SandboxMountPath,
 		"-v", absWorktree + ":" + SandboxMountPath + ":rprivate,rw",
 		"-e", "HOME=" + SandboxMountPath,
@@ -159,7 +165,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	}
 
 	// Start the container (needed for exec sessions)
-	startOut, err := sm.podmanExec("start", containerName)
+	// --runtime-flag ignore-cgroups=true is required for rootless gVisor
+	startOut, err := sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", containerName)
 	if err != nil {
 		// Clean up on start failure
 		_, _ = sm.podmanExec("rm", "-f", containerName)
@@ -167,7 +174,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	}
 
 	sm.active[taskID] = containerName
-	log.Printf("[sandbox] task=%s created container %s image=%s", taskID, containerName, image)
 	return nil
 }
 
@@ -214,7 +220,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 	// Run sh -c to handle shell features
 	execArgs = append(execArgs, "sh", "-c", command)
 
-	c := exec.Command("sudo", append([]string{"podman"}, execArgs...)...)
+	c := exec.Command("podman", execArgs...)
 
 	if stdin != nil {
 		c.Stdin = bytes.NewReader(stdin)
@@ -279,7 +285,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
 	cmd := exec.Command(
-		"sudo", "podman", "exec", "-it",
+		"podman", "exec", "-it",
 		"-w", SandboxMountPath,
 		containerName,
 		shell,
@@ -337,6 +343,29 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	}
 
 	log.Printf("[sandbox] task=%s removed container %s", taskID, containerName)
+	return nil
+}
+
+// ImageReady checks if a container image is available locally.
+func (sm *SandboxManager) ImageReady(image string) bool {
+	if image == "" {
+		image = BaseImage
+	}
+	_, err := sm.podmanExec("image", "exists", image)
+	return err == nil
+}
+
+// PullImage downloads a container image. Blocks until the pull completes.
+func (sm *SandboxManager) PullImage(image string) error {
+	if image == "" {
+		image = BaseImage
+	}
+	log.Printf("[sandbox] pulling image %s", image)
+	out, err := sm.podmanExec("pull", image)
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w (%s)", image, err, out)
+	}
+	log.Printf("[sandbox] image %s pulled", image)
 	return nil
 }
 

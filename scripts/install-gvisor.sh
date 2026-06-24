@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # Install gVisor (runsc) for use with podman.
 # Downloads the latest release binaries from Google's storage bucket.
-# Requires sudo — installs to /usr/local/bin so runsc has cgroup permissions.
+# Requires sudo — installs to /usr/local/bin so runsc is in PATH for all users.
 #
-# gVisor needs root-level cgroup access to create container cgroup hierarchies.
-# Even with rootless podman, runsc must be able to write /sys/fs/cgroup/cgroup.subtree_control.
-# Installing system-wide (rather than user-local) and running podman commands via sudo
-# is the most reliable approach on systemd-based distros.
+# gVisor works with rootless podman using --runtime-flag ignore-cgroups=true.
+# See: https://gvisor.dev/docs/user_guide/rootless/
 #
 # Usage:
 #   sudo bash scripts/install-gvisor.sh
@@ -67,7 +65,7 @@ if "$INSTALL_DIR/runsc" --version >/dev/null 2>&1; then
     echo "  Version: ${VERSION}"
     echo ""
     echo "Verify with podman:"
-    echo "  sudo podman run --rm --runtime runsc --security-opt label=disable alpine echo hello"
+    echo "  podman run --rm --runtime runsc --security-opt label=disable alpine echo hello"
 else
     echo "ERROR: runsc installed but version check failed" >&2
     exit 1

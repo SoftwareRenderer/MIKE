@@ -22,6 +22,7 @@ export interface Project {
     origin_branch?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;
+    sandbox_image?: string;
     created_at: string;
     updated_at: string;
 }
@@ -76,7 +77,6 @@ export interface Config {
     default_auto_commit?: boolean;
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
-    default_sandbox_image?: string;
     encryption_enabled?: boolean;
 }
 

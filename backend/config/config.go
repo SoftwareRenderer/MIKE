@@ -69,7 +69,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
-	defaultSandboxImageRaw, _ := cs.store.GetConfigValue("default_sandbox_image")
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -85,9 +84,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
-	}
-	if defaultSandboxImageRaw != "" {
-		cfg.DefaultSandboxImage = defaultSandboxImageRaw
 	}
 	return cfg, nil
 }
@@ -136,9 +132,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	if err := cs.store.SetConfigValue("default_sandbox_image", c.DefaultSandboxImage); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -151,7 +144,6 @@ type configResponse struct {
 	DefaultAutoCommit   *bool      `json:"default_auto_commit,omitempty"`
 	DefaultPlanMode     *bool      `json:"default_plan_mode,omitempty"`
 	DefaultMaxFailedTurns *int     `json:"default_max_failed_turns,omitempty"`
-	DefaultSandboxImage string     `json:"default_sandbox_image,omitempty"`
 	EncryptionEnabled   bool       `json:"encryption_enabled"`
 }
 
@@ -186,7 +178,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultAutoCommit:   cfg.DefaultAutoCommit,
 			DefaultPlanMode:     cfg.DefaultPlanMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
-			DefaultSandboxImage: cfg.DefaultSandboxImage,
 			EncryptionEnabled:   crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)
@@ -247,11 +238,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultMaxFailedTurns = &v
 			}
 		}
-		if dsi, ok := updates["default_sandbox_image"]; ok {
-			if s, ok := dsi.(string); ok {
-				current.DefaultSandboxImage = s
-			}
-		}
 		if err := cs.UpdateConfig(current); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
 			return
@@ -266,7 +252,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultAutoCommit:   current.DefaultAutoCommit,
 			DefaultPlanMode:     current.DefaultPlanMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
-			DefaultSandboxImage: current.DefaultSandboxImage,
 			EncryptionEnabled:   crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)

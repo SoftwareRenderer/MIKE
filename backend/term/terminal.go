@@ -78,6 +78,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	// Check if sandbox is enabled for this project
 	sandboxEnabled := false
 	networkIsolation := false
+	baseImage := ""
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -85,6 +86,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		sandboxEnabled = proj.SandboxEnabled
 		networkIsolation = proj.SandboxNetworkIsolation
+		baseImage = proj.SandboxImage
 	}
 
 	var sess *taskTerminal
@@ -95,11 +97,6 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		if !tm.sandboxMgr.IsAvailable() {
 			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
-		}
-		// Get configured base image from global config
-		baseImage := ""
-		if cfg, cfgErr := tm.cfgStore.GetConfig(); cfgErr == nil {
-			baseImage = cfg.DefaultSandboxImage
 		}
 		var shell *sandbox.ShellProcess
 		var err error
@@ -166,6 +163,23 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	if ok {
 		session.close()
 		log.Printf("terminal: removed session for task %s", taskID)
+	}
+}
+
+// RemoveProjectSessions closes all terminal sessions and stops sandbox containers
+// for every task in a project. Called when project sandbox settings change.
+func (tm *TerminalManager) RemoveProjectSessions(projectID string) {
+	tasks, _ := tm.store.GetTasksByProject(projectID)
+	for _, task := range tasks {
+		tm.RemoveSession(task.ID)
+	}
+	tm.RemoveSession("proj:" + projectID)
+	// Stop sandbox containers so they'll be recreated with the new image
+	if tm.sandboxMgr != nil {
+		for _, task := range tasks {
+			_ = tm.sandboxMgr.Stop(task.ID)
+		}
+		_ = tm.sandboxMgr.Stop("proj:" + projectID)
 	}
 }
 
@@ -252,14 +266,7 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 	}
 	worktreePath := filepath.Join(cfg.WorkspaceDir, taskID)
 
-	session, err := tm.getOrCreate(taskID, taskID, worktreePath, projectID)
-	if err != nil {
-		log.Printf("terminal pty error for task %s: %v", taskID, err)
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")
-		return
-	}
-
-	tm.handleTerminalWS(w, r, session)
+	tm.handleTerminalWSWithSetup(w, r, taskID, taskID, worktreePath, projectID)
 }
 
 // HandleProjectTerminal handles WebSocket connections for a project-level terminal.
@@ -276,14 +283,107 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 	}
 
 	sessionKey := "proj:" + projectID
-	session, err := tm.getOrCreate(sessionKey, sessionKey, project.Path, projectID)
+	tm.handleTerminalWSWithSetup(w, r, sessionKey, sessionKey, project.Path, projectID)
+}
+
+// handleTerminalWSWithSetup upgrades the WebSocket first, then creates the terminal session.
+// This allows sending status messages (e.g., pulling image) before the shell is ready.
+func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *http.Request, sessionKey, taskID, worktreePath, projectID string) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
+	})
 	if err != nil {
-		log.Printf("terminal pty error for project %s: %v", projectID, err)
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to start terminal")
+		log.Printf("terminal accept error: %v", err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "closed")
+
+	ctx := context.Background()
+
+	// Check if sandbox needs an image pull
+	sandboxEnabled := false
+	baseImage := ""
+	if projectID != "" {
+		proj, err := tm.store.GetProject(projectID)
+		if err == nil && proj.SandboxEnabled {
+			sandboxEnabled = true
+			baseImage = proj.SandboxImage
+		}
+	}
+	imageToUse := baseImage
+	if imageToUse == "" {
+		imageToUse = sandbox.BaseImage
+	}
+	if sandboxEnabled && tm.sandboxMgr != nil && !tm.sandboxMgr.ImageReady(imageToUse) {
+		statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Pulling " + imageToUse + "...\n"})
+		_ = conn.Write(ctx, websocket.MessageText, statusMsg)
+		if pullErr := tm.sandboxMgr.PullImage(imageToUse); pullErr != nil {
+			errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to pull image: " + pullErr.Error() + "\n"})
+			_ = conn.Write(ctx, websocket.MessageText, errMsg)
+			closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+			_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+			return
+		}
+	}
+
+	session, err := tm.getOrCreate(sessionKey, taskID, worktreePath, projectID)
+	if err != nil {
+		log.Printf("terminal pty error for %s: %v", sessionKey, err)
+		errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to start terminal: " + err.Error() + "\n"})
+		_ = conn.Write(ctx, websocket.MessageText, errMsg)
+		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+		_ = conn.Write(ctx, websocket.MessageText, closeMsg)
 		return
 	}
 
-	tm.handleTerminalWS(w, r, session)
+	// Relay ready message
+	readyMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "\u001b[2J\u001b[H"}) // clear screen
+	_ = conn.Write(ctx, websocket.MessageText, readyMsg)
+
+	// Switch to normal I/O relay
+	session.mu.Lock()
+	session.conns[conn] = true
+	session.lastActive = time.Now()
+	bufCopy := make([][]byte, len(session.buf))
+	copy(bufCopy, session.buf)
+	session.mu.Unlock()
+
+	for _, frame := range bufCopy {
+		_ = conn.Write(ctx, websocket.MessageText, frame)
+	}
+
+	defer func() {
+		session.mu.Lock()
+		delete(session.conns, conn)
+		session.mu.Unlock()
+	}()
+
+	rctx := r.Context()
+	for {
+		msgType, data, err := conn.Read(rctx)
+		if err != nil {
+			return
+		}
+		if msgType != websocket.MessageText {
+			continue
+		}
+
+		var msg types.TerminalMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case "input":
+			session.ptmx.Write([]byte(msg.Data))
+		case "resize":
+			sz := &pty.Winsize{Rows: uint16(msg.Rows), Cols: uint16(msg.Cols)}
+			if err := pty.Setsize(session.ptmx, sz); err != nil {
+				log.Printf("terminal resize error: %v", err)
+			}
+		}
+	}
 }
 
 // handleTerminalWS is the shared WebSocket handler for both task and project terminals.

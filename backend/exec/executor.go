@@ -646,18 +646,11 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	}
 	sandboxEnabled := project.SandboxEnabled
 	networkIsolation := project.SandboxNetworkIsolation
-	baseImage := ""
-	if sandboxEnabled {
-		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
-			baseImage = cfg.DefaultSandboxImage
-		}
-	}
+	baseImage := project.SandboxImage
 
 	go te.executeTask(ctx, task, projectID, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage)
 	return nil
 }
-
-// StopTask cancels a running task.
 func (te *TaskExecutor) StopTask(taskID string) error {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
@@ -791,12 +784,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	}
 	sandboxEnabled := project.SandboxEnabled
 	networkIsolation := project.SandboxNetworkIsolation
-	baseImage := ""
-	if sandboxEnabled {
-		if cfg, cfgErr := te.configStore.GetConfig(); cfgErr == nil {
-			baseImage = cfg.DefaultSandboxImage
-		}
-	}
+	baseImage := project.SandboxImage
 
 	go te.executeTask(ctx, task, projectID, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage)
 }

@@ -436,6 +436,22 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
 			return
 		}
+		// Pull image if not available locally
+		imageToUse := baseImage
+		if imageToUse == "" {
+			imageToUse = sandbox.BaseImage
+		}
+		if !te.sandboxMgr.ImageReady(imageToUse) {
+			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
+			if err := te.sandboxMgr.PullImage(imageToUse); err != nil {
+				task.StatusState = "failed"
+				task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
+				te.store.UpdateTask(task)
+				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image pull failed: %v", err), "image_pull_failed")
+				return
+			}
+		}
 		if err := te.sandboxMgr.Create(task.ID, worktreePath, baseImage, networkIsolation); err != nil {
 			task.StatusState = "failed"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)

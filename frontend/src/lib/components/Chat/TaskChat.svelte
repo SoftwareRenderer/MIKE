@@ -405,8 +405,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'status': {
-                const data = event.data as { state: string };
-                if (data.state === 'running') {
+                const data = event.data as { state: string; activity?: string };
+                if (data.state === 'pulling_image') {
+                    // Image is being pulled — show a system message
+                    const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
+                    createTaskMessage(projectId, taskId, 'system', `Pulling ${imgName}...`)
+                        .catch(() => {});
+                } else if (data.state === 'running') {
                     // A new executor is starting (e.g., lazy-start after user follow-up).
                     // Clear pending tool calls and streaming state from any previous executor
                     // to avoid mixing tool call deltas from concurrent executors.

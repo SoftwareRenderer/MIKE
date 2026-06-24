@@ -16,6 +16,7 @@
 
     let sandboxEnabled = $state(project.sandbox_enabled ?? false);
     let networkIsolation = $state(project.sandbox_network_isolation ?? false);
+    let sandboxImage = $state(project.sandbox_image ?? '');
     let saving = $state(false);
     let error = $state('');
     let isLocked = $derived(inProgressCount > 0);
@@ -47,7 +48,7 @@
         saving = true;
         error = '';
 
-        const changes: { sandbox_enabled?: boolean; sandbox_network_isolation?: boolean } = {};
+        const changes: { sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string } = {};
         let needsConfirmation = false;
 
         if (sandboxEnabled !== (project.sandbox_enabled ?? false)) {
@@ -60,9 +61,12 @@
         if (networkIsolation !== (project.sandbox_network_isolation ?? false)) {
             changes.sandbox_network_isolation = networkIsolation;
         }
+        if (sandboxImage !== (project.sandbox_image ?? '')) {
+            changes.sandbox_image = sandboxImage;
+        }
 
         // No changes made
-        if (changes.sandbox_enabled === undefined && changes.sandbox_network_isolation === undefined) {
+        if (Object.keys(changes).length === 0) {
             saving = false;
             return;
         }
@@ -152,6 +156,24 @@
                     </div>
                 </div>
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
+            </div>
+
+            <!-- Base image (only visible when sandbox is enabled) -->
+            <div class="config-row config-row-input">
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <rect x="3" y="5" width="14" height="10" stroke="currentColor" stroke-width="1.3"/>
+                            <path d="M6.5 5v10M10 5v10M13.5 5v10" stroke="currentColor" stroke-width="1"/>
+                            <path d="M2 4.5h2.5v2H2zM2 13.5h2.5v2H2zM15.5 4.5h2.5v2h-2.5zM15.5 13.5h2.5v2h-2.5z" stroke="currentColor" stroke-width="1.1"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label">Base Image</span>
+                        <span class="config-desc">Docker image for sandbox containers</span>
+                    </div>
+                </div>
+                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="ubuntu:latest" disabled={isLocked} />
             </div>
             {/if}
         </div>
@@ -267,6 +289,32 @@
 
     .config-row:not(:last-child) {
         border-bottom: 1px solid var(--color-border);
+    }
+
+    .config-row-input {
+        gap: 12px;
+    }
+
+    .image-input {
+        flex-shrink: 0;
+        width: 160px;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+    }
+
+    .image-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .image-input:disabled {
+        opacity: 0.5;
     }
 
     .config-info {

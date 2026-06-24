@@ -186,3 +186,37 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
 }
+
+func TestImageReady(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping image test")
+	}
+
+	// alpine:latest should be available (used in tests)
+	if !sm.ImageReady("alpine:latest") {
+		t.Skip("alpine:latest not available locally, skipping")
+	}
+
+	// Non-existent image should not be ready
+	if sm.ImageReady("nonexistent-image-xyz-12345:latest") {
+		t.Error("expected nonexistent image to not be ready")
+	}
+
+	// Empty string should use default (ubuntu:latest)
+	// This may or may not be available, just check it doesn't panic
+	_ = sm.ImageReady("")
+}
+
+func TestPullImage(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping image test")
+	}
+
+	// Pulling an already-available image should succeed (no-op or fast)
+	err := sm.PullImage("alpine:latest")
+	if err != nil {
+		t.Fatalf("pull alpine:latest: %v", err)
+	}
+}

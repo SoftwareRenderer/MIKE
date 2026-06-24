@@ -18,6 +18,7 @@ test.describe('File Browser Actions', () => {
     execSync('git init', { cwd: TEST_NEW_FOLDER_PARENT });
     execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: TEST_NEW_FOLDER_PARENT });
 
+
     await page.goto('/');
     await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
   });
@@ -133,5 +134,95 @@ test.describe('File Browser Actions', () => {
     await expect(page.locator('.error')).toBeVisible({ timeout: 5000 });
     const errorText = await page.locator('.error').textContent();
     expect(errorText).toContain('already exists');
+  });
+
+  test('should create project with sandbox enabled when checkbox is checked (default)', async ({ page }) => {
+    const initialCount = await page.locator('.project-item').count();
+    const uniqueDir = `/tmp/kanban-test-sandbox-on-${Date.now()}`;
+    try { rmSync(uniqueDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    mkdirSync(uniqueDir, { recursive: true });
+    execSync('git init', { cwd: uniqueDir });
+    execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: uniqueDir });
+
+    // Open the file browser
+    await page.click('.add-project-btn');
+    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
+
+    // Verify "Use Sandbox" checkbox is checked by default
+    const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
+    await expect(sandboxCheckbox).toBeChecked();
+
+    // Navigate to the test git directory
+    const pathInput = page.locator('.path-input');
+    await pathInput.fill(uniqueDir);
+    await pathInput.press('Enter');
+
+    // Wait for git indicator
+    await expect(page.locator('.git-indicator')).toBeVisible({ timeout: 5000 });
+
+    // Click Select
+    await page.click('.btn-select');
+
+    // Browser should close
+    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
+
+    // New project should be added
+    await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
+
+    // Verify via API that the last project has sandbox_enabled: true
+    await expect(async () => {
+        const projects = await page.evaluate(async () => {
+            const res = await fetch('/api/projects');
+            return res.json();
+        });
+        const lastProject = projects[projects.length - 1];
+        expect(lastProject.sandbox_enabled).toBe(true);
+    }).toPass({ timeout: 5000 });
+  });
+
+  test('should create project with sandbox disabled when checkbox is unchecked', async ({ page }) => {
+    const initialCount = await page.locator('.project-item').count();
+
+    // Open the file browser
+    await page.click('.add-project-btn');
+    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
+
+    // Uncheck "Use Sandbox"
+    const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
+    await sandboxCheckbox.click();
+    await expect(sandboxCheckbox).not.toBeChecked();
+
+    // Navigate to a unique directory
+    const uniqueDir = `/tmp/kanban-test-sandbox-off-${Date.now()}`;
+    try { rmSync(uniqueDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    mkdirSync(uniqueDir, { recursive: true });
+    execSync('git init', { cwd: uniqueDir });
+    execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: uniqueDir });
+
+    const pathInput = page.locator('.path-input');
+    await pathInput.fill(uniqueDir);
+    await pathInput.press('Enter');
+
+    // Wait for git indicator
+    await expect(page.locator('.git-indicator')).toBeVisible({ timeout: 5000 });
+
+    // Click Select
+    await page.click('.btn-select');
+
+    // Browser should close
+    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
+
+    // New project should be added
+    await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
+
+    // Verify via API that the last project has sandbox_enabled: false
+    await expect(async () => {
+        const projects = await page.evaluate(async () => {
+            const res = await fetch('/api/projects');
+            return res.json();
+        });
+        const lastProject = projects[projects.length - 1];
+        expect(lastProject.sandbox_enabled).toBe(false);
+    }).toPass({ timeout: 5000 });
   });
 });

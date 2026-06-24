@@ -92,12 +92,14 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	p := &types.Project{
-		ID:             GenerateProjectID(req.Path, existingIDs),
-		Name:           name,
-		Path:           req.Path,
-		SandboxEnabled: req.SandboxEnabled,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                      GenerateProjectID(req.Path, existingIDs),
+		Name:                    name,
+		Path:                    req.Path,
+		SandboxEnabled:          req.SandboxEnabled,
+		SandboxNetworkIsolation: req.SandboxNetworkIsolation,
+		SandboxImage:            req.SandboxImage,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 
 	if err := h.store.CreateProject(p); err != nil {
@@ -209,19 +211,23 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return
 			}
-			// Close all terminal sessions so they restart with the new sandbox mode
 			if h.terminalMgr != nil {
-				tasks, _ := h.store.GetTasksByProject(id)
-				for _, task := range tasks {
-					h.terminalMgr.RemoveSession(task.ID)
-				}
-				h.terminalMgr.RemoveSession("proj:" + id)
+				h.terminalMgr.RemoveProjectSessions(id)
 			}
 		}
 		if req.SandboxNetworkIsolation != nil {
 			if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox network isolation setting")
 				return
+			}
+		}
+		if req.SandboxImage != nil {
+			if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox image setting")
+				return
+			}
+			if h.terminalMgr != nil {
+				h.terminalMgr.RemoveProjectSessions(id)
 			}
 		}
 		// Fetch latest state

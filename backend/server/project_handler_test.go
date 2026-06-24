@@ -28,6 +28,39 @@ func TestProjectCreate(t *testing.T) {
 	}
 }
 
+func TestProjectCreateSandboxEnabled(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	req := testRequest("POST", "/api/projects", map[string]interface{}{
+		"name":             "Sandboxed Project",
+		"path":             dir,
+		"sandbox_enabled":  true,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatalf("expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
+	}
+	if result["sandbox_network_isolation"] == true {
+		t.Fatal("expected sandbox_network_isolation to be false by default")
+	}
+
+	// Verify via GET
+	projID := result["id"].(string)
+	req = testRequest("GET", "/api/projects/"+projID, nil)
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatalf("GET: expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
+	}
+}
+
 func TestProjectCreateDuplicatePath(t *testing.T) {
 	s := testServer(t)
 	dir := t.TempDir()

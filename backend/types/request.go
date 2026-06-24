@@ -17,13 +17,15 @@ type CreateProjectRequest struct {
 	Name                      string `json:"name,omitempty"`
 	SandboxEnabled            bool   `json:"sandbox_enabled"`
 	SandboxNetworkIsolation   bool   `json:"sandbox_network_isolation"`
+	SandboxImage              string `json:"sandbox_image,omitempty"`
 }
 
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
-	Name                      string `json:"name,omitempty"`
-	SandboxEnabled            *bool  `json:"sandbox_enabled,omitempty"`
-	SandboxNetworkIsolation   *bool  `json:"sandbox_network_isolation,omitempty"`
+	Name                      string  `json:"name,omitempty"`
+	SandboxEnabled            *bool   `json:"sandbox_enabled,omitempty"`
+	SandboxNetworkIsolation   *bool   `json:"sandbox_network_isolation,omitempty"`
+	SandboxImage              *string `json:"sandbox_image,omitempty"`
 }
 
 // CreateDependencyRequest is the request body for creating a dependency.

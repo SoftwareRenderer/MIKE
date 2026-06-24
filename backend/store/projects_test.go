@@ -518,3 +518,60 @@ func TestProjectSandboxNetworkIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectSandboxImage(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with custom sandbox image
+	proj := newProject("proj-image", "image-test", "/tmp/repo-image")
+	proj.SandboxEnabled = true
+	proj.SandboxImage = "docker.io/library/ubuntu:22.04"
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-image")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.SandboxImage != "docker.io/library/ubuntu:22.04" {
+		t.Fatalf("expected ubuntu:22.04, got %q", got.SandboxImage)
+	}
+
+	// Update the sandbox image
+	if err := s.UpdateProjectSandboxImage("proj-image", "docker.io/library/alpine:3.19"); err != nil {
+		t.Fatalf("update sandbox image: %v", err)
+	}
+	got, _ = s.GetProject("proj-image")
+	if got.SandboxImage != "docker.io/library/alpine:3.19" {
+		t.Fatalf("expected alpine:3.19, got %q", got.SandboxImage)
+	}
+
+	// Clear the sandbox image
+	if err := s.UpdateProjectSandboxImage("proj-image", ""); err != nil {
+		t.Fatalf("clear sandbox image: %v", err)
+	}
+	got, _ = s.GetProject("proj-image")
+	if got.SandboxImage != "" {
+		t.Fatalf("expected empty sandbox image, got %q", got.SandboxImage)
+	}
+
+	// Verify ListProjects includes sandbox_image
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-image" {
+			found = true
+			if p.SandboxImage != "" {
+				t.Fatalf("expected empty sandbox image in list, got %q", p.SandboxImage)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-image in list")
+	}
+}

@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS projects (
     origin_branch            TEXT DEFAULT NULL,
     sandbox_enabled          INTEGER NOT NULL DEFAULT 0,
     sandbox_network_isolation INTEGER NOT NULL DEFAULT 0,
+    sandbox_image            TEXT DEFAULT NULL,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );
@@ -254,6 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_network_isolation INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_image TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)

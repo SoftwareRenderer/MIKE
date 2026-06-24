@@ -419,11 +419,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         showFileBrowserVal = false;
         addProjectError = '';
         try {
-            const proj = await createProject(path);
-            // Update sandbox_enabled if different from default
-            if (proj.sandbox_enabled !== sandboxEnabled) {
-                await updateProject(proj.id, { sandbox_enabled: sandboxEnabled });
-            }
+            const proj = await createProject(path, sandboxEnabled);
             projects.push(proj);
             projectsStore.set(projects);
             clearTaskDetail();

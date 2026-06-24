@@ -709,6 +709,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const streaming = get(streamingTaskIds).has(t.id);
         const state = $boardStore?.tasks.find(tt => tt.id === t.id)?.status_state ?? t.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return { text: '', color: 'var(--color-text-tertiary)' };

@@ -48,16 +48,17 @@
 
     // Check if any descendant is running (for pause button on parent)
     let hasRunningDescendant = $derived.by(() => {
-        if (!hasChildren) return task.status_state === 'running';
+        const isActive = (s: string) => s === 'running' || s === 'pulling_image';
+        if (!hasChildren) return isActive(task.status_state);
         for (const child of children) {
-            if (child.status_state === 'running') return true;
+            if (isActive(child.status_state)) return true;
             // Recursively check (childrenMap has all tasks, not just same-column)
             const grandChildren = childrenMap?.get(child.id) ?? [];
             for (const gc of grandChildren) {
-                if (gc.status_state === 'running') return true;
+                if (isActive(gc.status_state)) return true;
             }
         }
-        return task.status_state === 'running';
+        return isActive(task.status_state);
     });
 
     // Number of action icons in the title bar (for dynamic padding)
@@ -120,6 +121,7 @@
         const streaming = $streamingTaskIds.has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return null;

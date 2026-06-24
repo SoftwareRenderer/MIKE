@@ -87,17 +87,17 @@ export async function resetProjectStats(projectId: string, modelName: string, pr
     if (!res.ok) throw await apiError(res, 'Failed to reset stats');
 }
 
-export async function createProject(path: string): Promise<Project> {
+export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path, sandbox_enabled: sandboxEnabled }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to create project');
     return res.json();
 }
 
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean }): Promise<Project> {
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string }): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -602,6 +602,7 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
         const msg = JSON.parse(e.data);
         if (msg.type === 'output') term.write(msg.data);
         if (msg.type === 'title') term.title = msg.data;
+        if (msg.type === 'status') term.write(msg.data);
         if (msg.type === 'closed' && onClosed) onClosed();
     };
     ws.onclose = () => {

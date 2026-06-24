@@ -14,12 +14,12 @@ sudo bash scripts/install-gvisor.sh
 **Verify:**
 ```bash
 runsc --version
-sudo podman run --rm --runtime runsc --security-opt label=disable alpine echo hello
+podman run --rm --runtime runsc --runtime-flag ignore-cgroups=true --security-opt label=disable alpine echo hello
 ```
 
 **Notes:**
 - gVisor must be installed system-wide (`/usr/local/bin/runsc`) — it needs root-level cgroup access
-- Podman sandbox commands run via `sudo podman --runtime runsc`
+- Podman sandbox commands run via `podman --runtime runsc`
 - Without gVisor, projects with sandboxing enabled will refuse to start tasks (hard error, no fallback)
 
 ## Server Management

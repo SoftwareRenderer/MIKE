@@ -60,7 +60,6 @@ type Config struct {
 	DefaultAutoCommit     *bool      `json:"default_auto_commit,omitempty"`
 	DefaultPlanMode       *bool      `json:"default_plan_mode,omitempty"`
 	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
-	DefaultSandboxImage   string     `json:"default_sandbox_image,omitempty"`
 }
 
 // ModelConfig represents a model with its per-model settings.
@@ -101,6 +100,7 @@ type Project struct {
 	OriginBranch            string    `json:"origin_branch,omitempty"`
 	SandboxEnabled          bool      `json:"sandbox_enabled"`
 	SandboxNetworkIsolation bool      `json:"sandbox_network_isolation"`
+	SandboxImage            string    `json:"sandbox_image,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }
