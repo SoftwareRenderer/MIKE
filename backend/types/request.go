@@ -16,7 +16,7 @@ type CreateProjectRequest struct {
 	Path                      string `json:"path"`
 	Name                      string `json:"name,omitempty"`
 	SandboxEnabled            bool   `json:"sandbox_enabled"`
-	SandboxNetworkIsolation   bool   `json:"sandbox_network_isolation"`
+	SandboxNetworkIsolation   *bool  `json:"sandbox_network_isolation"`
 	SandboxImage              string `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath     string `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxMemoryLimit        int    `json:"sandbox_memory_limit"`

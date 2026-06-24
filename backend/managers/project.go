@@ -97,12 +97,21 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if memoryLimit == 0 {
 		memoryLimit = 1024 // default 1 GB
 	}
+	// When sandbox is enabled, network isolation must be explicitly specified
+	if req.SandboxEnabled && req.SandboxNetworkIsolation == nil {
+		httputil.JSONError(w, http.StatusBadRequest, "sandbox_network_isolation is required when sandbox_enabled is true")
+		return
+	}
+	networkIsolation := false
+	if req.SandboxNetworkIsolation != nil {
+		networkIsolation = *req.SandboxNetworkIsolation
+	}
 	p := &types.Project{
 		ID:                      GenerateProjectID(req.Path, existingIDs),
 		Name:                    name,
 		Path:                    req.Path,
 		SandboxEnabled:          req.SandboxEnabled,
-		SandboxNetworkIsolation: req.SandboxNetworkIsolation,
+		SandboxNetworkIsolation: networkIsolation,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
 		SandboxMemoryLimit:      memoryLimit,

@@ -88,10 +88,14 @@ export async function resetProjectStats(projectId: string, modelName: string, pr
 }
 
 export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
+    const body: Record<string, unknown> = { path, sandbox_enabled: sandboxEnabled };
+    if (sandboxEnabled) {
+        body.sandbox_network_isolation = true;
+    }
     const res = await apiFetch(`${API_BASE}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, sandbox_enabled: sandboxEnabled }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) throw await apiError(res, 'Failed to create project');
     return res.json();

@@ -30,6 +30,18 @@
     let isLocked = $derived(inProgressCount > 0);
     let modalEl: HTMLDivElement | null = null;
 
+    // Auto-enable network isolation when sandbox is toggled on
+    let prevSandboxEnabled = $state(project.sandbox_enabled ?? false);
+    let userToggledNetwork = $state(false);
+    let networkIsolationBaseline = $state(project.sandbox_network_isolation ?? false);
+    $effect(() => {
+        if (sandboxEnabled && prevSandboxEnabled === false && !userToggledNetwork) {
+            networkIsolation = true;
+            networkIsolationBaseline = true;
+        }
+        prevSandboxEnabled = sandboxEnabled;
+    });
+
     onMount(() => {
         window.addEventListener('keydown', handleKeydown);
     });
@@ -109,7 +121,7 @@
                 needsConfirmation = true;
             }
         }
-        if (networkIsolation !== (project.sandbox_network_isolation ?? false)) {
+        if (networkIsolation !== networkIsolationBaseline) {
             changes.sandbox_network_isolation = networkIsolation;
         }
         if (sandboxMemoryLimit !== (project.sandbox_memory_limit ?? 1024)) {
@@ -207,12 +219,12 @@
             <!-- Options visible when sandbox is enabled -->
             {#if sandboxEnabled}
             <!-- Network isolation toggle -->
-            <div class="config-row">
+            <div class="config-row" onclickcapture={() => { userToggledNetwork = true; }}>
                 <div class="config-info">
                     <div class="config-icon">
                         {#if networkIsolation}
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                <path d="M10 2v7M6.5 9h7M7.5 13h5M8.5 16h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                <path d="M10 1v10M5 11h10M7 15h6M8.5 19h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                             </svg>
                         {:else}
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -236,9 +248,10 @@
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <rect x="6" y="6" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
-                            <rect x="8" y="8" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1"/>
-                            <path d="M9 4v2M11 4v2M9 14v2M11 14v2M4 9h2M4 11h2M14 9h2M14 11h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                            <rect x="2" y="2" width="16" height="16" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                            <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1"/>
+                            <circle cx="4" cy="4" r="1" fill="currentColor"/>
+                            <path d="M4 2v-1M8 2v-1M12 2v-1M16 2v-1M4 18v1M8 18v1M12 18v1M16 18v1M2 4h-1M2 8h-1M2 12h-1M2 16h-1M18 4h1M18 8h1M18 12h1M18 16h1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                         </svg>
                     </div>
                     <div class="config-text">

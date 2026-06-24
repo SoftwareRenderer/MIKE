@@ -78,11 +78,10 @@ test.describe.serial('Sandbox Toggle', () => {
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
     // Toggle should be on
-    const toggleOn = page.locator('.toggle-switch.active');
-    await expect(toggleOn).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('switch', { name: 'Sandbox isolation' })).toBeChecked();
 
     // Toggle sandbox off
-    await toggleOn.click();
+    await page.getByRole('switch', { name: 'Sandbox isolation' }).click();
 
     // Click save — should show confirmation
     await page.click('.btn-save');
@@ -119,7 +118,7 @@ test.describe.serial('Sandbox Toggle', () => {
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
     // Toggle sandbox off
-    await page.click('.toggle-switch.active');
+    await page.getByRole('switch', { name: 'Sandbox isolation' }).click();
 
     // Click save — should show confirmation
     await page.click('.btn-save');

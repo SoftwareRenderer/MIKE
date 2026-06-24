@@ -61,13 +61,11 @@ test.describe.serial('Sandbox Config Modal', () => {
     await page.click('.sandbox-config-btn');
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
-    // Toggle sandbox on
-    const toggle = page.locator('.toggle-switch:not(.active)');
-    await expect(toggle).toBeVisible({ timeout: 5000 });
-    await toggle.click();
+    // Toggle sandbox on (use aria-label to target the sandbox toggle specifically)
+    await page.getByRole('switch', { name: 'Sandbox isolation' }).click();
 
-    // Now toggle should be on
-    await expect(page.locator('.toggle-switch.active')).toBeVisible();
+    // Sandbox toggle should now be on
+    await expect(page.getByRole('switch', { name: 'Sandbox isolation' })).toBeChecked();
 
     // Save
     await page.click('.btn-save');
@@ -88,6 +86,9 @@ test.describe.serial('Sandbox Config Modal', () => {
     const projectId = await getProjectId(page);
     // Ensure sandbox is on and network isolation is off
     await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_network_isolation: false } });
+    // Reload to pick up updated project state in frontend
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
     await page.click('.sandbox-config-btn');
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
@@ -140,11 +141,10 @@ test.describe.serial('Sandbox Config Modal', () => {
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
     // Toggle should be on
-    const toggleOn = page.locator('.toggle-switch.active');
-    await expect(toggleOn).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('switch', { name: 'Sandbox isolation' })).toBeChecked();
 
     // Toggle sandbox off
-    await toggleOn.click();
+    await page.getByRole('switch', { name: 'Sandbox isolation' }).click();
 
     // Click save — should show confirmation
     await page.click('.btn-save');
@@ -165,7 +165,7 @@ test.describe.serial('Sandbox Config Modal', () => {
     await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
 
     // Toggle sandbox off
-    await page.click('.toggle-switch.active');
+    await page.getByRole('switch', { name: 'Sandbox isolation' }).click();
 
     // Click save — should show confirmation
     await page.click('.btn-save');
@@ -471,5 +471,85 @@ test.describe.serial('Sandbox Config Modal', () => {
     // Memory limit row should NOT be visible
     const memoryRow = page.locator('.config-row:has-text("Memory Limit")');
     await expect(memoryRow).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should auto-enable network isolation when sandbox is toggled on', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Ensure sandbox is off and network isolation is off
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: false, sandbox_network_isolation: false } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Network isolation row should NOT be visible (sandbox is off)
+    const networkRow = page.locator('.config-row:has-text("Network Isolation")');
+    await expect(networkRow).not.toBeVisible({ timeout: 2000 });
+
+    // Toggle sandbox on
+    const toggle = page.locator('.toggle-switch:not(.active)');
+    await expect(toggle).toBeVisible({ timeout: 5000 });
+    await toggle.click();
+
+    // Network isolation row should now be visible
+    await expect(networkRow).toBeVisible({ timeout: 5000 });
+
+    // Network isolation toggle should be ON (auto-enabled)
+    const networkToggle = networkRow.locator('.toggle-switch.active');
+    await expect(networkToggle).toBeVisible({ timeout: 5000 });
+
+    // Save
+    await page.click('.btn-save');
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify API state: both sandbox and network isolation are on
+    const result = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.json();
+    }, projectId);
+    expect(result.sandbox_enabled).toBe(true);
+    expect(result.sandbox_network_isolation).toBe(true);
+  });
+
+  test('should allow manual disable of network isolation after auto-enable', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Ensure sandbox is off and network isolation is off
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: false, sandbox_network_isolation: false } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Toggle sandbox on (auto-enables network isolation)
+    const sandboxToggle = page.locator('.toggle-switch:not(.active)');
+    await expect(sandboxToggle).toBeVisible({ timeout: 5000 });
+    await sandboxToggle.click();
+
+    // Network isolation should be auto-enabled
+    const networkRow = page.locator('.config-row:has-text("Network Isolation")');
+    await expect(networkRow).toBeVisible({ timeout: 5000 });
+    const networkToggleOn = networkRow.locator('.toggle-switch.active');
+    await expect(networkToggleOn).toBeVisible();
+
+    // Manually toggle network isolation off
+    await networkToggleOn.click();
+
+    // Network isolation toggle should now be OFF
+    const networkToggleOff = networkRow.locator('.toggle-switch:not(.active)');
+    await expect(networkToggleOff).toBeVisible();
+
+    // Save
+    await page.click('.btn-save');
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify API state: sandbox on, network isolation off
+    const result = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.json();
+    }, projectId);
+    expect(result.sandbox_enabled).toBe(true);
+    expect(result.sandbox_network_isolation).toBe(false);
   });
 });

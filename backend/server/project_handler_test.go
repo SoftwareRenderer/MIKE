@@ -34,9 +34,10 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 	initGitRepo(t, dir)
 
 	req := testRequest("POST", "/api/projects", map[string]interface{}{
-		"name":             "Sandboxed Project",
-		"path":             dir,
-		"sandbox_enabled":  true,
+		"name":                      "Sandboxed Project",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": false,
 	})
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
@@ -48,7 +49,7 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 		t.Fatalf("expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
 	}
 	if result["sandbox_network_isolation"] == true {
-		t.Fatal("expected sandbox_network_isolation to be false by default")
+		t.Fatal("expected sandbox_network_isolation to be false")
 	}
 
 	// Verify via GET
@@ -58,6 +59,40 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 	result = mustJSON[map[string]interface{}](t, rr.Body)
 	if result["sandbox_enabled"] != true {
 		t.Fatalf("GET: expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
+	}
+}
+
+func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// sandbox_enabled=true without sandbox_network_isolation should return 400
+	req := testRequest("POST", "/api/projects", map[string]interface{}{
+		"name":            "Sandboxed Project",
+		"path":            dir,
+		"sandbox_enabled": true,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	msg, ok := result["error"].(string)
+	if !ok || msg == "" {
+		t.Fatal("expected error message in response")
+	}
+
+	// sandbox_enabled=false without sandbox_network_isolation should succeed
+	req = testRequest("POST", "/api/projects", map[string]interface{}{
+		"name":            "Non-Sandboxed Project",
+		"path":            dir,
+		"sandbox_enabled": false,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for non-sandboxed project, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -346,10 +381,11 @@ func TestProjectCreateWithMemoryLimit(t *testing.T) {
 	initGitRepo(t, dir)
 
 	req := testRequest("POST", "/api/projects", map[string]interface{}{
-		"name":               "Memory Limit Project",
-		"path":               dir,
-		"sandbox_enabled":    true,
-		"sandbox_memory_limit": 2048,
+		"name":                      "Memory Limit Project",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": false,
+		"sandbox_memory_limit":      2048,
 	})
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
@@ -378,9 +414,10 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 
 	// Create project with default memory limit
 	req := testRequest("POST", "/api/projects", map[string]interface{}{
-		"name":            "Memory Update Project",
-		"path":            dir,
-		"sandbox_enabled": true,
+		"name":                      "Memory Update Project",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": false,
 	})
 	rr := testResponseAuth(t, s, req)
 	result := mustJSON[map[string]interface{}](t, rr.Body)
