@@ -144,9 +144,10 @@
                             </svg>
                         {:else}
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/>
-                                <ellipse cx="10" cy="10" rx="3.5" ry="7" stroke="currentColor" stroke-width="1.2"/>
-                                <path d="M4 10h12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                                <circle cx="10" cy="17" r="1.2" fill="currentColor"/>
+                                <path d="M8 13.5Q10 12 12 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+                                <path d="M4.5 10.5Q10 6 15.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+                                <path d="M1 7.5Q10 0.5 19 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
                             </svg>
                         {/if}
                     </div>
