@@ -575,3 +575,60 @@ func TestProjectSandboxImage(t *testing.T) {
 		t.Fatal("expected to find proj-image in list")
 	}
 }
+
+func TestProjectSandboxDockerfilePath(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with Dockerfile path
+	proj := newProject("proj-df", "dockerfile-test", "/tmp/repo-df")
+	proj.SandboxEnabled = true
+	proj.SandboxDockerfilePath = "/tmp/repo-df/Dockerfile"
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-df")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.SandboxDockerfilePath != "/tmp/repo-df/Dockerfile" {
+		t.Fatalf("expected /tmp/repo-df/Dockerfile, got %q", got.SandboxDockerfilePath)
+	}
+
+	// Update the Dockerfile path
+	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", "/tmp/repo-df/Dockerfile.prod"); err != nil {
+		t.Fatalf("update dockerfile path: %v", err)
+	}
+	got, _ = s.GetProject("proj-df")
+	if got.SandboxDockerfilePath != "/tmp/repo-df/Dockerfile.prod" {
+		t.Fatalf("expected Dockerfile.prod, got %q", got.SandboxDockerfilePath)
+	}
+
+	// Clear the Dockerfile path
+	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", ""); err != nil {
+		t.Fatalf("clear dockerfile path: %v", err)
+	}
+	got, _ = s.GetProject("proj-df")
+	if got.SandboxDockerfilePath != "" {
+		t.Fatalf("expected empty dockerfile path, got %q", got.SandboxDockerfilePath)
+	}
+
+	// Verify ListProjects includes sandbox_dockerfile_path
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-df" {
+			found = true
+			if p.SandboxDockerfilePath != "" {
+				t.Fatalf("expected empty dockerfile path in list, got %q", p.SandboxDockerfilePath)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-df in list")
+	}
+}

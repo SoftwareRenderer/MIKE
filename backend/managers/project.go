@@ -11,6 +11,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/term"
 	"kanban/backend/types"
@@ -22,11 +23,12 @@ type ProjectHandler struct {
 	configStore *config.ConfigStore
 	worktreeMgr *git.WorktreeManager
 	terminalMgr *term.TerminalManager
+	sandboxMgr  *sandbox.SandboxManager
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr}
 }
 
 // HandleList returns all projects.
@@ -98,6 +100,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		SandboxEnabled:          req.SandboxEnabled,
 		SandboxNetworkIsolation: req.SandboxNetworkIsolation,
 		SandboxImage:            req.SandboxImage,
+		SandboxDockerfilePath:   req.SandboxDockerfilePath,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -182,6 +185,45 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	}
 }
 
+// HandleSandboxBuild builds a container image from the project's Dockerfile.
+func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Get the project to find the Dockerfile path
+	project, err := h.store.GetProject(id)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if project.SandboxDockerfilePath == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "no Dockerfile path configured for this project")
+		return
+	}
+	if h.sandboxMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "sandbox manager not available")
+		return
+	}
+
+	if err := h.sandboxMgr.BuildImage(project.Name, project.SandboxDockerfilePath); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Remove terminal sessions so they pick up the new image
+	if h.terminalMgr != nil {
+		h.terminalMgr.RemoveProjectSessions(id)
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{
+		"status":  "built",
+		"image":   sandbox.ProjectImageName(project.Name),
+		"project": id,
+	})
+}
+
 // HandleByID handles GET, PUT, DELETE for a single project.
 func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id string) {
 	switch r.Method {
@@ -227,6 +269,15 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 		if req.SandboxImage != nil {
 			if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox image setting")
+				return
+			}
+			if h.terminalMgr != nil {
+				h.terminalMgr.RemoveProjectSessions(id)
+			}
+		}
+		if req.SandboxDockerfilePath != nil {
+			if updateErr := h.store.UpdateProjectSandboxDockerfilePath(id, *req.SandboxDockerfilePath); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox dockerfile path setting")
 				return
 			}
 			if h.terminalMgr != nil {

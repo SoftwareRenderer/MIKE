@@ -1,11 +1,12 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Project } from '$lib/types';
-    import { updateProject } from '$lib/api';
+    import { updateProject, buildSandboxImage } from '$lib/api';
     import { showConfirm } from '$lib/store';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ToggleSwitch from './ToggleSwitch.svelte';
+    import DockerfilePicker from './DockerfilePicker.svelte';
 
     let { project, inProgressCount, onClose, onSaved }: {
         project: Project;
@@ -17,7 +18,13 @@
     let sandboxEnabled = $state(project.sandbox_enabled ?? false);
     let networkIsolation = $state(project.sandbox_network_isolation ?? false);
     let sandboxImage = $state(project.sandbox_image ?? '');
+    let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
+    let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
+    let showDockerfilePicker = $state(false);
+    let imageTag = $derived(`sandbox-${project.name.replace(/ /g, '-').replace(/\//g, '-')}`);
     let saving = $state(false);
+    let building = $state(false);
+    let buildError = $state('');
     let error = $state('');
     let isLocked = $derived(inProgressCount > 0);
     let modalEl: HTMLDivElement | null = null;
@@ -43,12 +50,54 @@
         }
     }
 
+    function handleImageSourceChange(source: 'image' | 'dockerfile') {
+        imageSource = source;
+        buildError = '';
+    }
+
+    function handleBrowseDockerfile() {
+        showDockerfilePicker = true;
+    }
+
+    function handleDockerfileSelected(path: string) {
+        sandboxDockerfilePath = path;
+        showDockerfilePicker = false;
+    }
+
+    function handleDockerfilePickerClose() {
+        showDockerfilePicker = false;
+    }
+
+    function getDockerfileName(path: string): string {
+        return path.split('/').pop() || path;
+    }
+
+    async function handleRebuild() {
+        if (!sandboxDockerfilePath || building) return;
+        building = true;
+        buildError = '';
+
+        try {
+            const result = await buildSandboxImage(project.id);
+            // Show success via the image tag display
+        } catch (e) {
+            buildError = String(e);
+        } finally {
+            building = false;
+        }
+    }
+
     async function handleSave() {
         if (isLocked || saving) return;
         saving = true;
         error = '';
 
-        const changes: { sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string } = {};
+        const changes: {
+            sandbox_enabled?: boolean;
+            sandbox_network_isolation?: boolean;
+            sandbox_image?: string;
+            sandbox_dockerfile_path?: string;
+        } = {};
         let needsConfirmation = false;
 
         if (sandboxEnabled !== (project.sandbox_enabled ?? false)) {
@@ -61,8 +110,25 @@
         if (networkIsolation !== (project.sandbox_network_isolation ?? false)) {
             changes.sandbox_network_isolation = networkIsolation;
         }
-        if (sandboxImage !== (project.sandbox_image ?? '')) {
-            changes.sandbox_image = sandboxImage;
+
+        // Handle image source switch — clear unused field
+        if (imageSource === 'image') {
+            if (sandboxImage !== (project.sandbox_image ?? '')) {
+                changes.sandbox_image = sandboxImage;
+            }
+            // Clear dockerfile path if switching away from it
+            if (project.sandbox_dockerfile_path) {
+                changes.sandbox_dockerfile_path = '';
+            }
+        } else {
+            // dockerfile mode
+            if (sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? '')) {
+                changes.sandbox_dockerfile_path = sandboxDockerfilePath;
+            }
+            // Clear image if switching away from it
+            if (project.sandbox_image) {
+                changes.sandbox_image = '';
+            }
         }
 
         // No changes made
@@ -133,8 +199,9 @@
                 <ToggleSwitch bind:checked={sandboxEnabled} disabled={isLocked} ariaLabel="Sandbox isolation" />
             </div>
 
-            <!-- Network isolation toggle (only visible when sandbox is enabled) -->
+            <!-- Options visible when sandbox is enabled -->
             {#if sandboxEnabled}
+            <!-- Network isolation toggle -->
             <div class="config-row">
                 <div class="config-info">
                     <div class="config-icon">
@@ -159,8 +226,8 @@
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
             </div>
 
-            <!-- Base image (only visible when sandbox is enabled) -->
-            <div class="config-row config-row-input">
+            <!-- Image source selector -->
+            <div class="config-row">
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -170,12 +237,90 @@
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label">Base Image</span>
+                        <span class="config-label">Image Source</span>
+                        <span class="config-desc">Container image for sandbox</span>
+                    </div>
+                </div>
+                <div class="radio-group">
+                    <label class="radio-label" class:active={imageSource === 'image'}>
+                        <input type="radio" name="image-source" value="image" checked={imageSource === 'image'} onchange={() => handleImageSourceChange('image')} disabled={isLocked} />
+                        <span class="radio-text">Pre-built</span>
+                    </label>
+                    <label class="radio-label" class:active={imageSource === 'dockerfile'}>
+                        <input type="radio" name="image-source" value="dockerfile" checked={imageSource === 'dockerfile'} onchange={() => handleImageSourceChange('dockerfile')} disabled={isLocked} />
+                        <span class="radio-text">Dockerfile</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Pre-built image input (only visible when image source is 'image') -->
+            {#if imageSource === 'image'}
+            <div class="config-row config-row-input">
+                <div class="config-info">
+                    <div class="config-text">
+                        <span class="config-label">Image Name</span>
                         <span class="config-desc">Docker image for sandbox containers</span>
                     </div>
                 </div>
                 <input type="text" class="image-input" bind:value={sandboxImage} placeholder="ubuntu:latest" disabled={isLocked} />
             </div>
+            {:else}
+            <!-- Dockerfile section -->
+            <div class="dockerfile-section">
+                <div class="dockerfile-header">
+                    <div class="config-text">
+                        <span class="config-label">Dockerfile</span>
+                        <span class="config-desc">Select a Dockerfile on the server</span>
+                    </div>
+                    <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building || !sandboxDockerfilePath} title="Rebuild image">
+                        {#if building}
+                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
+                            </svg>
+                        {:else}
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                <path d="M1.5 7a5.5 5.5 0 0110.2-2.8M12.5 7a5.5 5.5 0 01-10.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+                                <path d="M11.5 1.5v3h-3M2.5 12.5v-3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                            </svg>
+                        {/if}
+                        {building ? 'Building...' : 'Rebuild'}
+                    </button>
+                </div>
+
+                <div class="dockerfile-path-row">
+                    {#if sandboxDockerfilePath}
+                        <span class="dockerfile-path-display" title={sandboxDockerfilePath}>
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                <path d="M2 2h4l1.5 1.5V12H2V2z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                                <path d="M6.5 2H12V12H6.5V2z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                            </svg>
+                            {getDockerfileName(sandboxDockerfilePath)}
+                        </span>
+                    {:else}
+                        <span class="dockerfile-path-placeholder">No Dockerfile selected</span>
+                    {/if}
+                    <button type="button" class="btn-browse" onclick={handleBrowseDockerfile} disabled={isLocked} title="Browse for Dockerfile">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M2 4h10v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                            <path d="M4 4V2.5A1.5 1.5 0 015.5 1h3A1.5 1.5 0 0110 2.5V4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+                        </svg>
+                        Browse
+                    </button>
+                </div>
+
+                {#if buildError}
+                <div class="build-error">{buildError}</div>
+                {/if}
+
+                <div class="image-tag-info">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/>
+                        <path d="M6 3.5v0M6 5.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                    <span>Image tag: <code>{imageTag}</code></span>
+                </div>
+            </div>
+            {/if}
             {/if}
         </div>
 
@@ -191,6 +336,10 @@
         </div>
     </div>
 </div>
+
+{#if showDockerfilePicker}
+    <DockerfilePicker initialPath={project.path} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
+{/if}
 
 <style>
     .sandbox-config-overlay {
@@ -209,8 +358,10 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
         padding: 20px 24px;
-        max-width: 420px;
+        max-width: 480px;
         width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
         animation: scale-in 0.15s ease-out;
     }
 
@@ -354,6 +505,180 @@
         margin-top: 1px;
     }
 
+    /* Radio group */
+    .radio-group {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .radio-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        user-select: none;
+    }
+
+    .radio-label:first-child {
+        border-right: 1px solid var(--color-border);
+    }
+
+    .radio-label.active {
+        background: var(--color-accent);
+        color: white;
+    }
+
+    .radio-label:hover:not(.active) {
+        background: var(--color-surface-3);
+    }
+
+    .radio-label input[type="radio"] {
+        display: none;
+    }
+
+    .radio-label:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .radio-text {
+        white-space: nowrap;
+    }
+
+    /* Dockerfile section */
+    .dockerfile-section {
+        padding: 8px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .dockerfile-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .btn-rebuild {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-rebuild:hover {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-rebuild:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .dockerfile-path-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .dockerfile-path-display {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        overflow: hidden;
+        min-width: 0;
+    }
+
+    .dockerfile-path-placeholder {
+        flex: 1;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        border: 1px dashed var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        font-style: italic;
+    }
+
+    .btn-browse {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .btn-browse:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-browse:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .image-tag-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+    }
+
+    .image-tag-info code {
+        font-family: var(--font-mono, monospace);
+        background: var(--color-surface-1);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 0.6875rem;
+    }
+
+    .build-error {
+        padding: 6px 10px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-sm);
+        color: var(--color-status-red);
+        font-size: 0.75rem;
+    }
+
     .error-message {
         padding: 8px 12px;
         background: rgba(248, 81, 73, 0.1);
@@ -421,5 +746,14 @@
             opacity: 1;
             transform: scale(1);
         }
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    .spin {
+        animation: spin 1s linear infinite;
     }
 </style>

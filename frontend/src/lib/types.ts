@@ -23,6 +23,7 @@ export interface Project {
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;
     sandbox_image?: string;
+    sandbox_dockerfile_path?: string;
     created_at: string;
     updated_at: string;
 }

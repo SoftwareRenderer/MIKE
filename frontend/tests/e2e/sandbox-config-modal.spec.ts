@@ -269,6 +269,136 @@ test.describe.serial('Sandbox Config Modal', () => {
     await expect(page.locator('.btn-save')).toBeDisabled();
   });
 
+  test('should switch to Dockerfile image source', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Ensure sandbox is on, no dockerfile set
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_image: '', sandbox_dockerfile_path: '' } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Image Source row should be visible
+    const imageSourceRow = page.locator('.config-row:has-text("Image Source")');
+    await expect(imageSourceRow).toBeVisible({ timeout: 5000 });
+
+    // Click the "Dockerfile" radio
+    await page.click('.radio-label:has-text("Dockerfile")');
+
+    // Dockerfile section should be visible
+    const dockerfileSection = page.locator('.dockerfile-section');
+    await expect(dockerfileSection).toBeVisible();
+
+    // Browse button should be visible (replaces old text input)
+    const browseBtn = page.locator('.btn-browse');
+    await expect(browseBtn).toBeVisible();
+
+    // Placeholder text should be visible when no file selected
+    const placeholder = page.locator('.dockerfile-path-placeholder');
+    await expect(placeholder).toBeVisible();
+
+    // Image name input should NOT be visible
+    const imageInput = page.locator('.image-input');
+    await expect(imageInput).not.toBeVisible({ timeout: 2000 });
+
+    // Close modal without saving
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify dockerfile path was NOT set (we didn't save)
+    const result = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.json();
+    }, projectId);
+    expect(result.sandbox_dockerfile_path).toBeFalsy();
+  });
+
+  test('should display selected Dockerfile path', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Pre-set a dockerfile path via API
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_dockerfile_path: '/some/path/test.Dockerfile' } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Dockerfile section should be visible (auto-selected when path exists)
+    const dockerfileSection = page.locator('.dockerfile-section');
+    await expect(dockerfileSection).toBeVisible();
+
+    // Display should show the filename
+    const pathDisplay = page.locator('.dockerfile-path-display');
+    await expect(pathDisplay).toBeVisible();
+    await expect(pathDisplay).toContainText('test.Dockerfile');
+
+    // Browse button should also be visible
+    const browseBtn = page.locator('.btn-browse');
+    await expect(browseBtn).toBeVisible();
+  });
+
+  test('should switch back to pre-built image source', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Set up with dockerfile mode
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_image: '', sandbox_dockerfile_path: '/tmp/test/Dockerfile' } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Click the "Pre-built" radio
+    await page.click('.radio-label:has-text("Pre-built")');
+
+    // Image name input should be visible
+    const imageInput = page.locator('.image-input');
+    await expect(imageInput).toBeVisible({ timeout: 5000 });
+
+    // Dockerfile section should NOT be visible
+    const dockerfileSection = page.locator('.dockerfile-section');
+    await expect(dockerfileSection).not.toBeVisible({ timeout: 2000 });
+
+    // Enter an image name
+    await imageInput.fill('ubuntu:22.04');
+
+    // Save
+    await page.click('.btn-save');
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify API state
+    const result = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.json();
+    }, projectId);
+    expect(result.sandbox_image).toBe('ubuntu:22.04');
+    expect(result.sandbox_dockerfile_path).toBeFalsy();
+  });
+
+  test('should show rebuild button in Dockerfile mode', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_dockerfile_path: '/tmp/test/Dockerfile' } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Switch to Dockerfile mode
+    const dockerfileRadio = page.locator('.radio-label:has-text("Dockerfile")');
+    if (!(await dockerfileRadio.locator('.active').count())) {
+      await dockerfileRadio.click();
+    }
+
+    // Rebuild button should be visible
+    const rebuildBtn = page.locator('.btn-rebuild');
+    await expect(rebuildBtn).toBeVisible({ timeout: 5000 });
+
+    // Image tag info should be visible
+    const imageTagInfo = page.locator('.image-tag-info');
+    await expect(imageTagInfo).toBeVisible();
+  });
+
   test('should show sidebar shield as status-only (not clickable)', async ({ page }) => {
     // Ensure sandbox is off
     const projectId = await getProjectId(page);

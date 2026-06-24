@@ -317,6 +317,30 @@ func (s *Server) handleCreateOrphan(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"orphan": orphanName, "path": orphanPath})
 }
 
+// handleFSRead reads and returns the content of a file.
+func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	// Limit file size to 1MB to avoid loading huge files
+	content, err := os.ReadFile(path)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if len(content) > 1_000_000 {
+		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
+		return
+	}
+	JSONResponse(w, http.StatusOK, map[string]string{"content": string(content)})
+}
+
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -326,6 +350,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = string(os.PathSeparator)
 	}
+	includeFiles := r.URL.Query().Get("files") == "1"
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -359,7 +384,10 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, e := range entries {
-		if e.Name()[0] == '.' || !e.IsDir() {
+		if e.Name()[0] == '.' {
+			continue
+		}
+		if !includeFiles && !e.IsDir() {
 			continue
 		}
 		fullPath := filepath.Join(path, e.Name())

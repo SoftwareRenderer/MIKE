@@ -82,7 +82,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr, cfgStore)
 	s.sandboxMgr = sandbox.NewSandboxManager()
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr)
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
 	s.depHandler = managers.NewDependencyHandler(store)

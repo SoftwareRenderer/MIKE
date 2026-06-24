@@ -97,13 +97,21 @@ export async function createProject(path: string, sandboxEnabled = false): Promi
     return res.json();
 }
 
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string }): Promise<Project> {
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string }): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
     });
     if (!res.ok) throw await apiError(res, 'Failed to update project');
+    return res.json();
+}
+
+export async function buildSandboxImage(id: string): Promise<{ status: string; image: string; project: string }> {
+    const res = await apiFetch(`${API_BASE}/projects/${id}/sandbox/build`, {
+        method: 'POST',
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to build sandbox image');
     return res.json();
 }
 

@@ -409,7 +409,7 @@ func buildHint(loopType LoopType, target string) string {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage string) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -436,23 +436,40 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
 			return
 		}
-		// Pull image if not available locally
-		imageToUse := baseImage
-		if imageToUse == "" {
-			imageToUse = sandbox.BaseImage
-		}
-		if !te.sandboxMgr.ImageReady(imageToUse) {
-			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
-			if err := te.sandboxMgr.PullImage(imageToUse); err != nil {
-				task.StatusState = "failed"
-				task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
-				te.store.UpdateTask(task)
-				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image pull failed: %v", err), "image_pull_failed")
-				return
+		// Determine image to use: Dockerfile build takes precedence over pre-built image
+		imageToUse := ""
+		if sandboxDockerfilePath != "" {
+			imageToUse = sandbox.ProjectImageName(projectName)
+			if !te.sandboxMgr.ImageReadyForProject(projectName) {
+				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
+				if err := te.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); err != nil {
+					task.StatusState = "failed"
+					task.Output = fmt.Sprintf("Failed to build sandbox image: %v", err)
+					te.store.UpdateTask(task)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image build failed: %v", err), "image_build_failed")
+					return
+				}
+			}
+		} else {
+			// Pull pre-built image if not available locally
+			imageToUse = baseImage
+			if imageToUse == "" {
+				imageToUse = sandbox.BaseImage
+			}
+			if !te.sandboxMgr.ImageReady(imageToUse) {
+				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
+				if err := te.sandboxMgr.PullImage(imageToUse); err != nil {
+					task.StatusState = "failed"
+					task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
+					te.store.UpdateTask(task)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image pull failed: %v", err), "image_pull_failed")
+					return
+				}
 			}
 		}
-		if err := te.sandboxMgr.Create(task.ID, worktreePath, baseImage, networkIsolation); err != nil {
+		if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation); err != nil {
 			task.StatusState = "failed"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 			te.store.UpdateTask(task)
@@ -460,7 +477,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
 			return
 		}
-		log.Printf("[sandbox] task=%s sandbox created", task.ID)
+		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
 
 		// Build sandbox exec function
 		execFn = func(command string) (string, error) {

@@ -220,3 +220,89 @@ func TestPullImage(t *testing.T) {
 		t.Fatalf("pull alpine:latest: %v", err)
 	}
 }
+
+func TestBuildImage(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping build test")
+	}
+
+	// Create a temp directory with a simple Dockerfile
+	tmpDir := t.TempDir()
+	dockerfile := filepath.Join(tmpDir, "Dockerfile")
+	content := []byte("FROM alpine:latest\nRUN echo hello\n")
+	if err := os.WriteFile(dockerfile, content, 0644); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+
+	projectName := "test-build-proj"
+
+	// Build the image
+	err := sm.BuildImage(projectName, dockerfile)
+	if err != nil {
+		t.Fatalf("build image: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = sm.podmanExec("rmi", ProjectImageName(projectName))
+	})
+
+	// Verify the image exists
+	if !sm.ImageReadyForProject(projectName) {
+		t.Fatal("expected built image to be ready")
+	}
+
+	// Verify image name follows expected pattern
+	expectedName := ProjectImageName(projectName)
+	if !sm.ImageReady(expectedName) {
+		t.Fatalf("expected image %q to exist", expectedName)
+	}
+}
+
+func TestBuildImage_InvalidDockerfile(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping build test")
+	}
+
+	// Create a temp directory with an invalid Dockerfile
+	tmpDir := t.TempDir()
+	dockerfile := filepath.Join(tmpDir, "Dockerfile")
+	content := []byte("FROM nonexistent-image-xyz-12345:latest\n")
+	if err := os.WriteFile(dockerfile, content, 0644); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+
+	err := sm.BuildImage("test-invalid-proj", dockerfile)
+	if err == nil {
+		t.Fatal("expected error for invalid Dockerfile")
+	}
+}
+
+func TestBuildImage_MissingFile(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping build test")
+	}
+
+	err := sm.BuildImage("test-missing-proj", "/nonexistent/path/Dockerfile")
+	if err == nil {
+		t.Fatal("expected error for missing Dockerfile")
+	}
+}
+
+func TestProjectImageName(t *testing.T) {
+	name := ProjectImageName("my-project")
+	if name != "sandbox-my-project" {
+		t.Fatalf("unexpected image name: %q", name)
+	}
+	// Test with spaces
+	name2 := ProjectImageName("my project name")
+	if name2 != "sandbox-my-project-name" {
+		t.Fatalf("unexpected image name with spaces: %q", name2)
+	}
+	// Test with slashes
+	name3 := ProjectImageName("my/project")
+	if name3 != "sandbox-my-project" {
+		t.Fatalf("unexpected image name with slashes: %q", name3)
+	}
+}

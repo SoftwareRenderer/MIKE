@@ -46,6 +46,7 @@ var (
 	reProjectHomeAgentMsgs = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/messages$`)
 	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
 	reProjectStats         = regexp.MustCompile(`^/api/projects/([^/]+)/stats$`)
+	reProjectSandboxBuild  = regexp.MustCompile(`^/api/projects/([^/]+)/sandbox/build$`)
 	reProjectTerminal      = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
 	reTaskTerminal         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
 	reTaskCommit           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commit$`)
@@ -69,6 +70,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
+	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
 	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
 	s.mux.HandleFunc("/api/fs", s.handleFS)
@@ -294,6 +296,11 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 
 	if m := reTaskTerminal.FindStringSubmatch(path); m != nil {
 		s.terminalMgr.HandleTerminal(w, r, m[1], m[2])
+		return
+	}
+
+	if m := reProjectSandboxBuild.FindStringSubmatch(path); m != nil {
+		s.projectHandler.HandleSandboxBuild(w, r, m[1])
 		return
 	}
 

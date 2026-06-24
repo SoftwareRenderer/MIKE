@@ -79,6 +79,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	sandboxEnabled := false
 	networkIsolation := false
 	baseImage := ""
+	sandboxDockerfilePath := ""
+	projectName := ""
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -87,6 +89,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		sandboxEnabled = proj.SandboxEnabled
 		networkIsolation = proj.SandboxNetworkIsolation
 		baseImage = proj.SandboxImage
+		sandboxDockerfilePath = proj.SandboxDockerfilePath
+		projectName = proj.Name
 	}
 
 	var sess *taskTerminal
@@ -98,12 +102,27 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !tm.sandboxMgr.IsAvailable() {
 			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
 		}
+		// Determine image: Dockerfile build takes precedence over pre-built image
+		imageToUse := ""
+		if sandboxDockerfilePath != "" {
+			imageToUse = sandbox.ProjectImageName(projectName)
+			if !tm.sandboxMgr.ImageReadyForProject(projectName) {
+				if err := tm.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); err != nil {
+					return nil, fmt.Errorf("build sandbox image: %w", err)
+				}
+			}
+		} else {
+			imageToUse = baseImage
+			if imageToUse == "" {
+				imageToUse = sandbox.BaseImage
+			}
+		}
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, baseImage, networkIsolation)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)
@@ -115,7 +134,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			conns:      make(map[*websocket.Conn]bool),
 			lastActive: time.Now(),
 		}
-		log.Printf("[terminal] %s started sandbox shell", sessionKey)
+		log.Printf("[terminal] %s started sandbox shell with image %s", sessionKey, imageToUse)
 	}
 
 	if sess == nil {
@@ -301,29 +320,58 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 
 	ctx := context.Background()
 
-	// Check if sandbox needs an image pull
+	// Check if sandbox needs an image pull or build
 	sandboxEnabled := false
 	baseImage := ""
+	sandboxDockerfilePath := ""
+	projectName := ""
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err == nil && proj.SandboxEnabled {
 			sandboxEnabled = true
 			baseImage = proj.SandboxImage
+			sandboxDockerfilePath = proj.SandboxDockerfilePath
+			projectName = proj.Name
 		}
 	}
-	imageToUse := baseImage
-	if imageToUse == "" {
-		imageToUse = sandbox.BaseImage
+	imageToUse := ""
+	if sandboxDockerfilePath != "" {
+		imageToUse = sandbox.ProjectImageName(projectName)
+	} else {
+		imageToUse = baseImage
+		if imageToUse == "" {
+			imageToUse = sandbox.BaseImage
+		}
 	}
-	if sandboxEnabled && tm.sandboxMgr != nil && !tm.sandboxMgr.ImageReady(imageToUse) {
-		statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Pulling " + imageToUse + "...\n"})
-		_ = conn.Write(ctx, websocket.MessageText, statusMsg)
-		if pullErr := tm.sandboxMgr.PullImage(imageToUse); pullErr != nil {
-			errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to pull image: " + pullErr.Error() + "\n"})
-			_ = conn.Write(ctx, websocket.MessageText, errMsg)
-			closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-			_ = conn.Write(ctx, websocket.MessageText, closeMsg)
-			return
+	if sandboxEnabled && tm.sandboxMgr != nil {
+		needsImage := false
+		if sandboxDockerfilePath != "" {
+			needsImage = !tm.sandboxMgr.ImageReadyForProject(projectName)
+		} else {
+			needsImage = !tm.sandboxMgr.ImageReady(imageToUse)
+		}
+		if needsImage {
+			if sandboxDockerfilePath != "" {
+				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Building sandbox image from Dockerfile...\n"})
+				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
+				if buildErr := tm.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); buildErr != nil {
+					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to build image: " + buildErr.Error() + "\n"})
+					_ = conn.Write(ctx, websocket.MessageText, errMsg)
+					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+					_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+					return
+				}
+			} else {
+				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Pulling " + imageToUse + "...\n"})
+				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
+				if pullErr := tm.sandboxMgr.PullImage(imageToUse); pullErr != nil {
+					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to pull image: " + pullErr.Error() + "\n"})
+					_ = conn.Write(ctx, websocket.MessageText, errMsg)
+					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+					_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+					return
+				}
+			}
 		}
 	}
 

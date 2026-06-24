@@ -18,6 +18,8 @@ import (
 const (
 	// ContainerNamePrefix is the prefix for sandbox container names.
 	ContainerNamePrefix = "kanban-sandbox"
+	// ProjectImagePrefix is the prefix for per-project built images.
+	ProjectImagePrefix = "sandbox"
 	// BaseImage is the default container image.
 	BaseImage = "docker.io/library/ubuntu:latest"
 	// SandboxMountPath is where the worktree is bind-mounted inside the container.
@@ -367,6 +369,65 @@ func (sm *SandboxManager) PullImage(image string) error {
 	}
 	log.Printf("[sandbox] image %s pulled", image)
 	return nil
+}
+
+// ProjectImageName returns the image name for a project's custom-built Dockerfile image.
+// Uses a sanitized version of the project name for readability.
+func ProjectImageName(projectName string) string {
+	safeName := strings.ReplaceAll(projectName, " ", "-")
+	safeName = strings.ReplaceAll(safeName, "/", "-")
+	if ProjectImagePrefix == "" {
+		return safeName
+	}
+	return fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName)
+}
+
+// BuildImage builds a container image from a Dockerfile and tags it with the
+// project-specific name. The Dockerfile is copied to a temp directory for the build.
+// The temp directory is cleaned up after the build completes.
+func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
+	if !sm.available {
+		return fmt.Errorf("gVisor not available (runsc not installed)")
+	}
+
+	// Read the Dockerfile
+	content, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return fmt.Errorf("read dockerfile: %w", err)
+	}
+
+	// Create a temp directory and write the Dockerfile
+	tmpDir, err := os.MkdirTemp("", "kanban-sandbox-build")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dockerfile := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfile, content, 0o644); err != nil {
+		return fmt.Errorf("write dockerfile to temp dir: %w", err)
+	}
+
+	imageName := ProjectImageName(projectName)
+
+	// Remove any existing image with the same name
+	_, _ = sm.podmanExec("rmi", imageName) // best-effort
+
+	// Build the image
+	log.Printf("[sandbox] project=%s building image %s from %s", projectName, imageName, dockerfilePath)
+	out, err := sm.podmanExec("build", "-t", imageName, tmpDir)
+	if err != nil {
+		return fmt.Errorf("build image %s: %w (%s)", imageName, err, out)
+	}
+	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)
+	return nil
+}
+
+// ImageReadyForProject checks if a project's custom-built image exists locally.
+func (sm *SandboxManager) ImageReadyForProject(projectName string) bool {
+	imageName := ProjectImageName(projectName)
+	_, err := sm.podmanExec("image", "exists", imageName)
+	return err == nil
 }
 
 // containerExists checks if a container with the given name exists.
