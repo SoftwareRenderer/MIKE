@@ -417,4 +417,55 @@ test.describe.serial('Sandbox Config Modal', () => {
     await sidebarShield.click();
     await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 2000 });
   });
+
+  test('should set memory limit via modal', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Ensure sandbox is on with default memory limit
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: true, sandbox_memory_limit: 1024 } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Memory limit row should be visible (sandbox is on)
+    const memoryRow = page.locator('.config-row:has-text("Memory Limit")');
+    await expect(memoryRow).toBeVisible({ timeout: 5000 });
+
+    // Memory input should be visible and have default value
+    const memoryInput = page.locator('.memory-input');
+    await expect(memoryInput).toBeVisible();
+    const defaultValue = await memoryInput.inputValue();
+    expect(defaultValue).toBe('1024');
+
+    // Change memory limit to 2048
+    await memoryInput.fill('2048');
+
+    // Save
+    await page.click('.btn-save');
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify API state
+    const memoryLimit = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      const proj = await res.json();
+      return proj.sandbox_memory_limit;
+    }, projectId);
+    expect(memoryLimit).toBe(2048);
+  });
+
+  test('should hide memory limit when sandbox is disabled', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // Ensure sandbox is off
+    await csrfFetch(page, `/api/projects/${projectId}`, { method: 'PUT', body: { sandbox_enabled: false } });
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Memory limit row should NOT be visible
+    const memoryRow = page.locator('.config-row:has-text("Memory Limit")');
+    await expect(memoryRow).not.toBeVisible({ timeout: 5000 });
+  });
 });

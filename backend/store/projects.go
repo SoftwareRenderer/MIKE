@@ -12,9 +12,13 @@ import (
 func (s *Store) CreateProject(p *types.Project) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	memoryLimit := p.SandboxMemoryLimit
+	if memoryLimit == 0 {
+		memoryLimit = 1024 // default 1 GB
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), b2i(p.SandboxEnabled), b2i(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), b2i(p.SandboxEnabled), b2i(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -31,8 +35,8 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 	var originBranch, sandboxImage, sandboxDockerfilePath sql.NullString
 	var sandboxEnabled, sandboxNetworkIsolation int
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, created_at, updated_at FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &createdAt, &updatedAt)
+	err := s.db.QueryRow(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at FROM projects WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("project not found")
@@ -53,7 +57,7 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 func (s *Store) ListProjects() ([]types.Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, created_at, updated_at FROM projects ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +68,7 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 		var originBranch, sandboxImage, sandboxDockerfilePath sql.NullString
 		var sandboxEnabled, sandboxNetworkIsolation int
 		var createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		p.OriginBranch = originBranch.String
@@ -134,6 +138,15 @@ func (s *Store) UpdateProjectSandboxDockerfilePath(id string, path string) error
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`UPDATE projects SET sandbox_dockerfile_path = ?, updated_at = ? WHERE id = ?`, ptrStr(path), now.Format(time.RFC3339), id)
+	return err
+}
+
+// UpdateProjectSandboxMemoryLimit updates the sandbox_memory_limit for a project.
+func (s *Store) UpdateProjectSandboxMemoryLimit(id string, limit int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE projects SET sandbox_memory_limit = ?, updated_at = ? WHERE id = ?`, limit, now.Format(time.RFC3339), id)
 	return err
 }
 

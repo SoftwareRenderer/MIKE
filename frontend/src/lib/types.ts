@@ -24,6 +24,7 @@ export interface Project {
     sandbox_network_isolation?: boolean;
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
+    sandbox_memory_limit?: number;
     created_at: string;
     updated_at: string;
 }

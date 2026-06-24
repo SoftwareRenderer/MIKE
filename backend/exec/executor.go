@@ -648,8 +648,9 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	networkIsolation := project.SandboxNetworkIsolation
 	baseImage := project.SandboxImage
 	sandboxDockerfilePath := project.SandboxDockerfilePath
+	memoryLimit := project.SandboxMemoryLimit
 
-	go te.executeTask(ctx, task, projectID, project.Name, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath)
+	go te.executeTask(ctx, task, projectID, project.Name, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -787,8 +788,9 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	networkIsolation := project.SandboxNetworkIsolation
 	baseImage := project.SandboxImage
 	sandboxDockerfilePath := project.SandboxDockerfilePath
+	memoryLimit := project.SandboxMemoryLimit
 
-	go te.executeTask(ctx, task, projectID, project.Name, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath)
+	go te.executeTask(ctx, task, projectID, project.Name, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
 }
 
 // -- Helper functions --

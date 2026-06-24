@@ -102,6 +102,7 @@ type Project struct {
 	SandboxNetworkIsolation bool      `json:"sandbox_network_isolation"`
 	SandboxImage            string    `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath   string    `json:"sandbox_dockerfile_path,omitempty"`
+	SandboxMemoryLimit      int       `json:"sandbox_memory_limit"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }

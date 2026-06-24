@@ -17,6 +17,7 @@
 
     let sandboxEnabled = $state(project.sandbox_enabled ?? false);
     let networkIsolation = $state(project.sandbox_network_isolation ?? false);
+    let sandboxMemoryLimit = $state(project.sandbox_memory_limit ?? 1024);
     let sandboxImage = $state(project.sandbox_image ?? '');
     let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
     let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
@@ -97,6 +98,7 @@
             sandbox_network_isolation?: boolean;
             sandbox_image?: string;
             sandbox_dockerfile_path?: string;
+            sandbox_memory_limit?: number;
         } = {};
         let needsConfirmation = false;
 
@@ -109,6 +111,9 @@
         }
         if (networkIsolation !== (project.sandbox_network_isolation ?? false)) {
             changes.sandbox_network_isolation = networkIsolation;
+        }
+        if (sandboxMemoryLimit !== (project.sandbox_memory_limit ?? 1024)) {
+            changes.sandbox_memory_limit = sandboxMemoryLimit;
         }
 
         // Handle image source switch — clear unused field
@@ -224,6 +229,27 @@
                     </div>
                 </div>
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
+            </div>
+
+            <!-- Memory limit input -->
+            <div class="config-row config-row-input">
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <rect x="6" y="6" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
+                            <rect x="8" y="8" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1"/>
+                            <path d="M9 4v2M11 4v2M9 14v2M11 14v2M4 9h2M4 11h2M14 9h2M14 11h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label">Memory Limit</span>
+                        <span class="config-desc">Max container memory (MB)</span>
+                    </div>
+                </div>
+                <div class="memory-input-group">
+                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} />
+                    <span class="memory-unit">MB</span>
+                </div>
             </div>
 
             <!-- Image source selector -->
@@ -467,6 +493,47 @@
 
     .image-input:disabled {
         opacity: 0.5;
+    }
+
+    .memory-input-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .memory-input {
+        width: 80px;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+        -moz-appearance: textfield;
+    }
+
+    .memory-input::-webkit-outer-spin-button,
+    .memory-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .memory-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .memory-input:disabled {
+        opacity: 0.5;
+    }
+
+    .memory-unit {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        white-space: nowrap;
     }
 
     .config-info {

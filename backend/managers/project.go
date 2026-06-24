@@ -93,6 +93,10 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
+	memoryLimit := req.SandboxMemoryLimit
+	if memoryLimit == 0 {
+		memoryLimit = 1024 // default 1 GB
+	}
 	p := &types.Project{
 		ID:                      GenerateProjectID(req.Path, existingIDs),
 		Name:                    name,
@@ -101,6 +105,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		SandboxNetworkIsolation: req.SandboxNetworkIsolation,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
+		SandboxMemoryLimit:      memoryLimit,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -278,6 +283,15 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 		if req.SandboxDockerfilePath != nil {
 			if updateErr := h.store.UpdateProjectSandboxDockerfilePath(id, *req.SandboxDockerfilePath); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox dockerfile path setting")
+				return
+			}
+			if h.terminalMgr != nil {
+				h.terminalMgr.RemoveProjectSessions(id)
+			}
+		}
+		if req.SandboxMemoryLimit != nil {
+			if updateErr := h.store.UpdateProjectSandboxMemoryLimit(id, *req.SandboxMemoryLimit); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox memory limit setting")
 				return
 			}
 			if h.terminalMgr != nil {

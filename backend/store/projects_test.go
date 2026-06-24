@@ -3,6 +3,7 @@ package store
 import (
 	"kanban/backend/types"
 	"testing"
+	"time"
 )
 
 func TestCreateAndGetProject(t *testing.T) {
@@ -630,5 +631,71 @@ func TestProjectSandboxDockerfilePath(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected to find proj-df in list")
+	}
+}
+
+func TestProjectSandboxMemoryLimit(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with default memory limit
+	proj := &types.Project{
+		ID:        "proj-mem",
+		Name:      "Memory Limit Project",
+		Path:      "/tmp/test-mem-repo",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	got, err := s.GetProject("proj-mem")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.SandboxMemoryLimit != 1024 {
+		t.Fatalf("expected default memory limit 1024, got %d", got.SandboxMemoryLimit)
+	}
+
+	// Update to 2GB
+	if err := s.UpdateProjectSandboxMemoryLimit("proj-mem", 2048); err != nil {
+		t.Fatalf("update memory limit: %v", err)
+	}
+	got, err = s.GetProject("proj-mem")
+	if err != nil {
+		t.Fatalf("get project after update: %v", err)
+	}
+	if got.SandboxMemoryLimit != 2048 {
+		t.Fatalf("expected memory limit 2048, got %d", got.SandboxMemoryLimit)
+	}
+
+	// Update to 0 (no limit)
+	if err := s.UpdateProjectSandboxMemoryLimit("proj-mem", 0); err != nil {
+		t.Fatalf("update memory limit to 0: %v", err)
+	}
+	got, err = s.GetProject("proj-mem")
+	if err != nil {
+		t.Fatalf("get project after zero update: %v", err)
+	}
+	if got.SandboxMemoryLimit != 0 {
+		t.Fatalf("expected memory limit 0, got %d", got.SandboxMemoryLimit)
+	}
+
+	// Verify in list
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-mem" {
+			found = true
+			if p.SandboxMemoryLimit != 0 {
+				t.Fatalf("expected memory limit 0 in list, got %d", p.SandboxMemoryLimit)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-mem in list")
 	}
 }

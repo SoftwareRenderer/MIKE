@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_network_isolation INTEGER NOT NULL DEFAULT 0,
     sandbox_image            TEXT DEFAULT NULL,
     sandbox_dockerfile_path  TEXT DEFAULT NULL,
+    sandbox_memory_limit     INTEGER NOT NULL DEFAULT 1024,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );
@@ -258,6 +259,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_network_isolation INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_image TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_dockerfile_path TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_memory_limit INTEGER NOT NULL DEFAULT 1024`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)

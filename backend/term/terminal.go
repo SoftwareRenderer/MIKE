@@ -80,6 +80,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	networkIsolation := false
 	baseImage := ""
 	sandboxDockerfilePath := ""
+	memoryLimit := 0
 	projectName := ""
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
@@ -90,6 +91,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		networkIsolation = proj.SandboxNetworkIsolation
 		baseImage = proj.SandboxImage
 		sandboxDockerfilePath = proj.SandboxDockerfilePath
+		memoryLimit = proj.SandboxMemoryLimit
 		projectName = proj.Name
 	}
 
@@ -122,7 +124,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation, memoryLimit)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

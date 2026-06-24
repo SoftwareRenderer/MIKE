@@ -29,7 +29,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	err := sm.Create(taskID, dir, "", false)
+	err := sm.Create(taskID, dir, "", false, 0)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	err := sm.Create(taskID, dir, "", false)
+	err := sm.Create(taskID, dir, "", false, 0)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	err := sm.Create(taskID, dir, "", false)
+	err := sm.Create(taskID, dir, "", false, 0)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	err := sm.Create(taskID, dir, "", false)
+	err := sm.Create(taskID, dir, "", false, 0)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	err := sm.Create("task-1", "/tmp/test", "", false)
+	err := sm.Create("task-1", "/tmp/test", "", false, 0)
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -304,5 +304,42 @@ func TestProjectImageName(t *testing.T) {
 	name3 := ProjectImageName("my/project")
 	if name3 != "sandbox-my-project" {
 		t.Fatalf("unexpected image name with slashes: %q", name3)
+	}
+}
+
+func TestCreateWithMemoryLimit(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-memory-task"
+
+	// Create with 512MB memory limit
+	err := sm.Create(taskID, dir, "", false, 512)
+	if err != nil {
+		t.Fatalf("create sandbox with memory limit: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Verify container exists
+	exists, err := sm.containerExists(ContainerNamePrefix + "-" + taskID)
+	if err != nil {
+		t.Fatalf("check container: %v", err)
+	}
+	if !exists {
+		t.Error("expected container to exist after Create with memory limit")
+	}
+
+	// Verify the container can run commands
+	output, err := sm.Exec(taskID, "echo hello", nil)
+	if err != nil {
+		t.Fatalf("exec in memory-limited container: %v", err)
+	}
+	if output != "hello\n" {
+		t.Fatalf("unexpected output: %q", output)
 	}
 }

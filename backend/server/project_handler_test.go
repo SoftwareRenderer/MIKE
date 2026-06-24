@@ -339,3 +339,78 @@ func TestClearDone(t *testing.T) {
 		t.Fatalf("wrong task remaining: %s", tasks[0]["id"])
 	}
 }
+
+func TestProjectCreateWithMemoryLimit(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	req := testRequest("POST", "/api/projects", map[string]interface{}{
+		"name":               "Memory Limit Project",
+		"path":               dir,
+		"sandbox_enabled":    true,
+		"sandbox_memory_limit": 2048,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_memory_limit"].(float64) != 2048 {
+		t.Fatalf("expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
+	}
+
+	// Verify via GET
+	projID := result["id"].(string)
+	req = testRequest("GET", "/api/projects/"+projID, nil)
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_memory_limit"].(float64) != 2048 {
+		t.Fatalf("GET: expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
+	}
+}
+
+func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Create project with default memory limit
+	req := testRequest("POST", "/api/projects", map[string]interface{}{
+		"name":            "Memory Update Project",
+		"path":            dir,
+		"sandbox_enabled": true,
+	})
+	rr := testResponseAuth(t, s, req)
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	projID := result["id"].(string)
+
+	// Default should be 1024
+	if result["sandbox_memory_limit"].(float64) != 1024 {
+		t.Fatalf("expected default sandbox_memory_limit 1024, got %v", result["sandbox_memory_limit"])
+	}
+
+	// Update memory limit
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+		"sandbox_memory_limit": 4096,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_memory_limit"].(float64) != 4096 {
+		t.Fatalf("expected sandbox_memory_limit 4096, got %v", result["sandbox_memory_limit"])
+	}
+
+	// Update to 0 (no limit)
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+		"sandbox_memory_limit": 0,
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]interface{}](t, rr.Body)
+	if result["sandbox_memory_limit"].(float64) != 0 {
+		t.Fatalf("expected sandbox_memory_limit 0, got %v", result["sandbox_memory_limit"])
+	}
+}
