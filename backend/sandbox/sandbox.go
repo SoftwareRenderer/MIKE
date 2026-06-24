@@ -147,7 +147,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
 		"--cap-add", "CAP_CHOWN", // worktree files may have mismatched ownership
-		"--cap-add", "CAP_DAC_OVERRIDE", // apt's _apt user must access root-owned temp files
+		"--cap-add", "CAP_DAC_OVERRIDE", // apt's _apt user must access root-owned temp files accessible in the container
 		"--cap-add", "CAP_SETUID", // apt drops privileges via seteuid()
 		"--cap-add", "CAP_SETGID", // apt drops privileges via setegid()
 		"--cap-add", "CAP_FOWNER", // apt chmod on /var/lib/apt/lists/
