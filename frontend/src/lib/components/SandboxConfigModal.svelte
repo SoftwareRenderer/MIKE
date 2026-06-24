@@ -127,7 +127,7 @@
                     </div>
                     <div class="config-text">
                         <span class="config-label">Sandbox Isolation</span>
-                        <span class="config-desc">Run tasks in gVisor sandboxed containers</span>
+                        <span class="config-desc">Use gVisor container isolation</span>
                     </div>
                 </div>
                 <ToggleSwitch bind:checked={sandboxEnabled} disabled={isLocked} ariaLabel="Sandbox isolation" />
@@ -153,7 +153,7 @@
                     </div>
                     <div class="config-text">
                         <span class="config-label">Network Isolation</span>
-                        <span class="config-desc">Block all network access for sandboxed tasks</span>
+                        <span class="config-desc">Block all network access</span>
                     </div>
                 </div>
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
