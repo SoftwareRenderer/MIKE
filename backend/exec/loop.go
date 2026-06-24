@@ -430,6 +430,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	if sandboxEnabled {
 		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
 			task.StatusState = "failed"
+			task.Status = "review"
 			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -444,6 +445,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
 				if err := te.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); err != nil {
 					task.StatusState = "failed"
+					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to build sandbox image: %v", err)
 					te.store.UpdateTask(task)
 					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -461,6 +463,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
 				if err := te.sandboxMgr.PullImage(imageToUse); err != nil {
 					task.StatusState = "failed"
+					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
 					te.store.UpdateTask(task)
 					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -471,6 +474,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit); err != nil {
 			task.StatusState = "failed"
+			task.Status = "review"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -595,7 +599,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 	}
 
-	consecutiveFailures := 0
+	var tracker failureTracker
 	maxFailures := task.MaxConsecutiveFailedTurns
 	if maxFailures == 0 {
 		maxFailures = 3
@@ -622,6 +626,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		select {
 		case <-ctx.Done():
 			task.StatusState = "stopped"
+			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -777,6 +782,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.gate.Release(serverURL) // Release gate immediately so other tasks can proceed
 			<-streamDone // Then wait for goroutine to finish
 			task.StatusState = "stopped"
+			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -866,12 +872,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		callCancel()
 
 		if streamErr != nil {
-			task.StatusState = "failed"
-			task.Output = fmt.Sprintf("Connection failed: %v", streamErr)
-			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, streamErr.Error(), "connection_failed")
-			return
+			log.Printf("[connect] task=%s connection failed: %v, retrying...", task.ID, streamErr)
+			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Connection failed: %v, retrying...", streamErr)}})
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
 		// Release gate slot after LLM call (before tool execution).
@@ -884,6 +888,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			output     string
 		}
 		var toolResults []toolResult
+		var turnFailures []turnResult
 
 		if len(pendingToolCalls) > 0 {
 			// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
@@ -941,19 +946,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					CreatedAt:  time.Now().UTC(),
 				})
 
-				if !success {
-					consecutiveFailures++
-					if consecutiveFailures >= maxFailures {
-						task.StatusState = "failed"
-						task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
-						te.store.UpdateTask(task)
-						te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-						te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
-						return
-					}
-				} else {
-					consecutiveFailures = 0
-				}
+				turnFailures = append(turnFailures, turnResult{
+					signature: tc.Function.Name + ":" + tc.Function.Arguments,
+					success:   success,
+				})
 
 				if tc.Function.Name == "task_complete" {
 					// Extract summary from tool args
@@ -1009,6 +1005,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 			}
+			// Check consecutive identical tool call failures (turn-level).
+			if count := tracker.recordTurn(turnFailures); count >= maxFailures {
+				task.StatusState = "failed"
+				task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
+				te.store.UpdateTask(task)
+				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
+				return
+			}
+
 			// Build assistant message with merged reasoning + content + tool calls.
 			// Including tool_calls in the message history is critical for models like gemma
 			// to understand what tool was called and match it to the result.
@@ -1085,6 +1091,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
 		} else if assistantText != "" {
+			// Text-only response resets the failure tracker
+			tracker.reset()
+
 			// Merge reasoning into content so the model sees its own thinking
 			assistantContentFull := assistantText
 			if reasoningContent.Len() > 0 {
@@ -1113,6 +1122,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if loopType != LoopNone {
 				if detector.hintCount >= maxLoopHints {
 					task.StatusState = "failed"
+					task.Status = "review"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
 					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1205,6 +1215,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		select {
 		case <-ctx.Done():
 			task.StatusState = "stopped"
+			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
 			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)

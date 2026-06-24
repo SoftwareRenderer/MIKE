@@ -724,6 +724,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	if serverURL == "" {
 		log.Printf("[lazy-start] task=%s no server URL configured", taskID)
 		task.StatusState = "failed"
+		task.Status = "review"
 		task.Output = "LLM server URL not configured"
 		_ = te.store.UpdateTask(task)
 		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -742,6 +743,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	if err != nil {
 		log.Printf("[lazy-start] task=%s worktree error: %v", taskID, err)
 		task.StatusState = "failed"
+		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to create worktree: %v", err)
 		_ = te.store.UpdateTask(task)
 		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -778,6 +780,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	if projErr != nil {
 		log.Printf("[lazy-start] task=%s get project error: %v", taskID, projErr)
 		task.StatusState = "failed"
+		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to load project: %v", projErr)
 		_ = te.store.UpdateTask(task)
 		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
