@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createBoardStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -465,6 +465,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
 
     function openSandboxConfig(p: Project) {
+        if ((projectCounts[p.id]?.in_progress ?? 0) > 0) {
+            showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
+            return;
+        }
         showSandboxConfigVal = true;
     }
 

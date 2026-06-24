@@ -220,6 +220,9 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id s
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox network isolation setting")
 				return
 			}
+			if h.terminalMgr != nil {
+				h.terminalMgr.RemoveProjectSessions(id)
+			}
 		}
 		if req.SandboxImage != nil {
 			if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
