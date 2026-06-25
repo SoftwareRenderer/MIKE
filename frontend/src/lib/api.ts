@@ -1,7 +1,7 @@
 const API_BASE = '/api';
 
 /** Generate a unique ID. Falls back to timestamp-based ID if crypto.randomUUID is unavailable. */
-function generateId(): string {
+export function generateId(): string {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
     }
@@ -29,6 +29,7 @@ let isOffline = false;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
 let queueChangeCallbacks: Array<() => void> = [];
+let queueFlushedCallbacks: Array<(optimisticTaskIds: string[]) => void> = [];
 
 /** Check if the app is currently offline (WebSocket disconnected). */
 export function getOfflineStatus(): boolean {
@@ -54,6 +55,20 @@ export function onQueueChanged(callback: () => void) {
 function notifyQueueChanged() {
     for (const cb of queueChangeCallbacks) {
         try { cb(); } catch { /* ignore */ }
+    }
+}
+
+/** Register a callback fired when the queue finishes flushing. Receives list of optimistic task IDs that were created offline. */
+export function onQueueFlushed(callback: (optimisticTaskIds: string[]) => void): () => void {
+    queueFlushedCallbacks.push(callback);
+    return () => {
+        queueFlushedCallbacks = queueFlushedCallbacks.filter(cb => cb !== callback);
+    };
+}
+
+function notifyQueueFlushed(optimisticTaskIds: string[]) {
+    for (const cb of queueFlushedCallbacks) {
+        try { cb(optimisticTaskIds); } catch { /* ignore */ }
     }
 }
 
@@ -103,6 +118,21 @@ export function getQueuedTaskIds(): Set<string> {
     const ids = new Set<string>();
     for (const action of actionQueue) {
         if (action.params.taskId) ids.add(action.params.taskId);
+        // Also include optimistic task IDs from createTask actions
+        if (action.type === 'createTask' && action.params.taskData?.id) {
+            ids.add(action.params.taskData.id);
+        }
+    }
+    return ids;
+}
+
+/** Get set of task IDs that have a pending delete action. */
+export function getQueuedDeleteTaskIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const action of actionQueue) {
+        if (action.type === 'deleteTask' && action.params.taskId) {
+            ids.add(action.params.taskId);
+        }
     }
     return ids;
 }
@@ -127,10 +157,15 @@ async function flushQueue() {
         // Temporarily set online so raw functions execute directly
         isOffline = false;
         let hadFailure = false;
+        // Collect optimistic task IDs from createTask actions
+        const optimisticTaskIds: string[] = [];
 
         while (actionQueue.length > 0 && !hadFailure) {
             const action = actionQueue[0];
             try {
+                if (action.type === 'createTask' && action.params.taskData?.id) {
+                    optimisticTaskIds.push(action.params.taskData.id);
+                }
                 await executeQueuedAction(action);
                 actionQueue.shift();
                 saveQueue();
@@ -145,6 +180,8 @@ async function flushQueue() {
             isOffline = true;
         } else {
             isOffline = wasOffline;
+            // Notify listeners with optimistic task IDs so they can be removed
+            notifyQueueFlushed(optimisticTaskIds);
         }
         flushPromise = null;
     })();
@@ -279,11 +316,17 @@ export async function ensureCsrfToken(): Promise<string> {
     if (typeof window !== 'undefined' && (window as any).__csrfToken) return (window as any).__csrfToken;
     // Auto-fetch from session endpoint (public, no CSRF needed)
     try {
-        const res = await fetch('/api/auth/session', { credentials: 'include' });
-        const data = await res.json();
-        if (data.authenticated && data.csrf_token) {
-            csrfToken = data.csrf_token;
-            return csrfToken;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        try {
+            const res = await fetch('/api/auth/session', { credentials: 'include', signal: controller.signal });
+            const data = await res.json();
+            if (data.authenticated && data.csrf_token) {
+                csrfToken = data.csrf_token;
+                return csrfToken;
+            }
+        } finally {
+            clearTimeout(timeoutId);
         }
     } catch { /* ignore */ }
     return '';
@@ -297,7 +340,20 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
         const token = await ensureCsrfToken();
         if (token) headers.set('X-CSRF-Token', token);
     }
-    return fetch(url, { ...init, credentials: 'include', headers });
+    // Add timeout to prevent hanging requests when server is unreachable
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+        return await fetch(url, { ...init, credentials: 'include', headers, signal: controller.signal });
+    } catch (e: any) {
+        // If request fails, mark as offline so subsequent calls use the queue
+        if (e?.name === 'TypeError' || e?.name === 'AbortError') {
+            setOfflineStatus(true);
+        }
+        throw e;
+    } finally {
+        clearTimeout(timeoutId);
+    }
 }
 
 /** Returns true if the response is a 401 Unauthorized. */
@@ -670,9 +726,8 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         ws.onclose = () => {
             currentWs = null;
             if (isClosed) return;
-            if (hasConnectedOnce) {
-                callbacks.onConnected?.(false);
-            }
+            // Signal offline on any disconnect (including initial connection failure)
+            callbacks.onConnected?.(false);
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
             reconnectAttempts++;
             reconnectTimer = setTimeout(() => connect(true), delay);

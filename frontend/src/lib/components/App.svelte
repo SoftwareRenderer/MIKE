@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, onQueueFlushed } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -204,6 +204,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         try {
             // Restore offline action queue from localStorage
             loadQueue();
+            // After offline queue is flushed, remove optimistic tasks (real ones arrive via WebSocket)
+            onQueueFlushed((optimisticIds) => {
+                const idSet = new Set(optimisticIds);
+                tasks = tasks.filter(t => !idSet.has(t.id));
+                boardStore.update(b => b ? { ...b, tasks: tasks.filter(t => !idSet.has(t.id)) } : b);
+            });
             const projs = await getProjects();
             projects = projs || [];
             projectsStore.set(projects);
@@ -282,7 +288,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         if (idx !== -1) {
                             tasks[idx] = updatedTask;
                         } else {
-                            tasks.push(updatedTask);
+                            // New task from server — replace optimistic (queued) task in-place to avoid flicker
+                            const optIdx = tasks.findIndex(t => (t as any).queued);
+                            if (optIdx !== -1) {
+                                tasks[optIdx] = updatedTask;
+                            } else {
+                                tasks.push(updatedTask);
+                            }
                         }
                         boardStore.update(b => b ? { ...b, tasks } : b);
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
@@ -401,7 +413,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 }
             }
         } catch (e) {
-            console.error('Failed to refresh board:', e);
+            // When offline, sync tasks from boardStore (has optimistic updates)
+            const b = boardStore.get() as any;
+            if (b?.tasks) {
+                tasks = b.tasks;
+            }
         } finally {
             boardRefreshPending = false;
         }
@@ -731,6 +747,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             parentId={creatingChildOfVal ?? undefined}
             onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
             onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
+            onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
+            onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { const idx = tasks.findIndex(t => t.id === optimisticId); if (idx !== -1) { tasks[idx] = realTask; } }}
         />
     {/if}
     {#if showConfigVal}

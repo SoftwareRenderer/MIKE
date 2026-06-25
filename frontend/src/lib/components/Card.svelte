@@ -2,7 +2,7 @@
     import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, onQueueChanged } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { fade } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
@@ -10,8 +10,10 @@
 
     // Track if this task has queued offline actions (for diagonal fade effect)
     let taskHasQueuedActions = $state(false);
+    let taskIsQueuedDelete = $state(false);
     function checkQueuedActions() {
         taskHasQueuedActions = getQueuedTaskIds().has(task.id);
+        taskIsQueuedDelete = getQueuedDeleteTaskIds().has(task.id);
     }
     onMount(() => {
         checkQueuedActions();
@@ -392,6 +394,7 @@
     });
 
     function truncate(s: string, max: number): string {
+        if (!s) return '';
         return s.length > max ? s.slice(0, max) + '...' : s;
     }
 
@@ -544,6 +547,7 @@
     class:is-subtask={inline && !!task.parent_task_id}
     class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id}
     class:queued={taskHasQueuedActions}
+    class:queued-delete={taskIsQueuedDelete}
     data-task-id={task.id}
     draggable={!isMobile}
     onmousedown={handleMouseDown}
@@ -872,6 +876,22 @@
     .card.queued > * {
         position: relative;
         z-index: 2;
+    }
+    /* Inverted diagonal fade for tasks being deleted offline */
+    .card.queued-delete::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+            135deg,
+            rgba(0, 0, 0, 0.5) 0%,
+            rgba(0, 0, 0, 0.25) 35%,
+            transparent 65%,
+            transparent 100%
+        );
+        pointer-events: none;
+        z-index: 1;
     }
     .card.has-children:not(.is-subtask) {
         border-left: 3px solid var(--column-color, var(--color-border));

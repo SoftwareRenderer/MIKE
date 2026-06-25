@@ -1,12 +1,12 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import type { Provider } from '$lib/types';
-    import { createTask, getTask } from '$lib/api';
-    import { config as configStore, showCreateTask } from '$lib/store';
+    import type { Provider, Task } from '$lib/types';
+    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
+    import { config as configStore, showCreateTask, board as boardStore } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { createFocusTrap } from '$lib/a11y';
 
-    let { projectId, onClose, onTaskCreated, parentId }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string } = $props();
+    let { projectId, onClose, onTaskCreated, parentId, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
     let prompt = $state('');
     let autoCommit = $state(false);
@@ -110,29 +110,64 @@
         if (!projectId || !prompt.trim()) return;
         loading = true;
         error = '';
-        try {
-            const taskData: Record<string, unknown> = {
-                prompt: prompt.trim(),
-                auto_commit: autoCommit,
-                auto_pr: autoPr,
-                plan_mode: planMode,
-            };
-            if (attachments.length > 0) {
-                taskData.attachments = JSON.stringify(attachments);
-            }
-            if (selectedModel) taskData.model_name = selectedModel;
-            if (selectedUrl) taskData.llama_server_url = selectedUrl;
-            if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
-            if (parentId) taskData.parent_task_id = parentId;
-            await createTask(projectId, taskData);
-            // Board stream WebSocket will push the update; onTaskCreated triggers refreshBoard as fallback
-            showCreateTask.set(false);
-            onTaskCreated?.();
-            onClose();
-        } catch (e) {
-            error = String(e);
-        } finally {
-            loading = false;
+        const taskData: Record<string, unknown> = {
+            prompt: prompt.trim(),
+            auto_commit: autoCommit,
+            auto_pr: autoPr,
+            plan_mode: planMode,
+        };
+        if (attachments.length > 0) {
+            taskData.attachments = JSON.stringify(attachments);
+        }
+        if (selectedModel) taskData.model_name = selectedModel;
+        if (selectedUrl) taskData.llama_server_url = selectedUrl;
+        if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
+        if (parentId) taskData.parent_task_id = parentId;
+
+        const isOfflineNow = getOfflineStatus();
+        // Always show optimistic card immediately — close modal right away
+        const id = generateId();
+        // Include optimistic ID in taskData so getQueuedTaskIds() can find it
+        const taskDataWithId = { ...taskData, id };
+        const optimisticTask: Task = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true as any, actionId: '' } as Task;
+        if (isOfflineNow) {
+            const queued = enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            (optimisticTask as any).actionId = queued.id;
+        }
+        boardStore.update(b => {
+            if (!b) return b;
+            return { ...b, tasks: [...(b.tasks || []), optimisticTask] };
+        });
+        onOptimisticTaskCreated?.(optimisticTask);
+        showCreateTask.set(false);
+        onTaskCreated?.();
+        onClose();
+        loading = false;
+
+        // Fire-and-forget: try to create the task on the server in the background.
+        // If online, replace the optimistic task with the real one.
+        // If offline, createTask() returns the queued result (no-op since already queued above).
+        if (!isOfflineNow) {
+            createTask(projectId, taskData).then((realTask) => {
+                // Replace optimistic task with real one in boardStore
+                boardStore.update(b => {
+                    if (!b) return b;
+                    const idx = b.tasks.findIndex(t => t.id === id);
+                    if (idx !== -1) {
+                        const updated = [...b.tasks];
+                        updated[idx] = realTask;
+                        return { ...b, tasks: updated };
+                    }
+                    return b;
+                });
+                // Also replace in App's tasks array
+                onReplaceOptimisticTask?.(id, realTask);
+            }).catch(() => {
+                // Server unreachable — queue the action as fallback
+                setOfflineStatus(true);
+                const queued = enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+                (optimisticTask as any).actionId = queued.id;
+            });
         }
     }
 
