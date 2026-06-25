@@ -25,10 +25,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             args: Record<string, unknown>;
             raw_args?: string;
             sandbox?: boolean;
+            path?: string;
             result?: string;
             success?: boolean;
             duration?: number;
             isPending?: boolean;
+            bytesWritten?: number;
         }>;
         toolCall?: {
             toolName: string;
@@ -293,8 +295,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_result': {
-                console.log('[TaskChat] tool_result event received:', event.data);
-                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean };
+                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
                 const ref = activeToolCalls.get(data.tool_id);
                 activeToolCalls.delete(data.tool_id);
                 if (ref) {
@@ -310,6 +311,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             if (data.args) tc.args = data.args;
                             if (data.raw_args) tc.raw_args = data.raw_args;
                             if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                            if (data.path) tc.path = data.path;
                         }
                     }
                 }
@@ -324,13 +326,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_progress': {
-                const data = event.data as { tool_id?: string; bytes_written: number };
-                // Update the last pending tool call with bytes written
+                const data = event.data as { tool_id?: string; bytes_written: number; path?: string };
+                // Update the matching pending tool call with bytes written and path
                 for (const entry of entries) {
                     if (entry.toolCalls) {
                         for (const tc of entry.toolCalls) {
-                            if (tc.isPending) {
+                            if (tc.isPending && (!data.tool_id || tc.toolId === data.tool_id)) {
                                 tc.bytesWritten = data.bytes_written;
+                                if (data.path) tc.path = data.path;
                             }
                         }
                     }

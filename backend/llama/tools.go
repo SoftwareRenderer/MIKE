@@ -1,6 +1,10 @@
 package llama
 
-import "kanban/backend/types"
+import (
+	"encoding/json"
+
+	"kanban/backend/types"
+)
 
 // CreateTaskArgs holds the parsed arguments for the create_task tool.
 type CreateTaskArgs struct {
@@ -11,12 +15,12 @@ type CreateTaskArgs struct {
 
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
-	"read_file":        "Read",
-	"write_file":       "Write",
-	"edit_file":        "Edit",
-	"bash":             "Execute",
-	"task_complete":    "Done",
-	"create_task":      "Create Task",
+	"read_file":     "Read",
+	"write_file":    "Write",
+	"edit_file":     "Edit",
+	"bash":          "Execute",
+	"task_complete": "Done",
+	"create_task":   "Create Task",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -74,8 +78,8 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"title":         map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
-						"prompt":        map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
+						"title":          map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
+						"prompt":         map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
 						"parent_task_id": map[string]interface{}{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
@@ -128,11 +132,9 @@ func GetToolDefinitions() []types.ChatTool {
 				Description: "Write content to a file in the worktree (creates directories as needed)",
 				Parameters: map[string]interface{}{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"path":    map[string]interface{}{"type": "string", "description": "Path to the file"},
-						"content": map[string]interface{}{"type": "string", "description": "Content to write"},
-					},
-					"required": []string{"path", "content"},
+					// ensure that the LLM sees path before content
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file"},"content":{"type":"string","description":"Content to write"}}`),
+					"required":   []string{"path", "content"},
 				},
 			},
 		},
@@ -143,22 +145,9 @@ func GetToolDefinitions() []types.ChatTool {
 				DisplayName: "Edit",
 				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
 				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"path": map[string]interface{}{"type": "string", "description": "Path to the file to edit (relative to worktree root)"},
-						"edits": map[string]interface{}{
-							"type": "array",
-							"items": map[string]interface{}{
-								"type":       "object",
-								"properties": map[string]interface{}{
-									"oldText": map[string]interface{}{"type": "string", "description": "Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},
-									"newText": map[string]interface{}{"type": "string", "description": "Replacement text for this targeted edit."},
-								},
-								"required": []string{"oldText", "newText"},
-							},
-						},
-					},
-					"required": []string{"path", "edits"},
+					"type":       "object",
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit (relative to worktree root)"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
+					"required":   []string{"path", "edits"},
 				},
 			},
 		},
@@ -202,8 +191,8 @@ func GetToolDefinitions() []types.ChatTool {
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"title":         map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
-						"prompt":        map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
+						"title":          map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
+						"prompt":         map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
 						"parent_task_id": map[string]interface{}{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},

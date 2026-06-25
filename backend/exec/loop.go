@@ -24,11 +24,32 @@ import (
 
 var pathRegex = regexp.MustCompile(`"path"\s*:\s*"([^"]+)"`)
 
-// extractPathFromArgs extracts the "path" value from partial JSON args.
+// extractPathFromArgs extracts the "path" value from (possibly partial) JSON args.
+// Tries regex on raw string, then parsed JSON, then double-encoded JSON.
 func extractPathFromArgs(args string) string {
+	// Try regex on raw string (works when "path" key has appeared in stream)
 	matches := pathRegex.FindStringSubmatch(args)
 	if len(matches) > 1 {
 		return matches[1]
+	}
+	// Try parsed JSON (works when full JSON is available)
+	if parsed := parseToolArgs(args); parsed != nil {
+		if p, ok := parsed["path"].(string); ok && p != "" {
+			return p
+		}
+	}
+	// Try double-encoded JSON (some LLMs send escaped JSON)
+	var inner string
+	if err := json.Unmarshal([]byte(args), &inner); err == nil && inner != "" {
+		matches2 := pathRegex.FindStringSubmatch(inner)
+		if len(matches2) > 1 {
+			return matches2[1]
+		}
+		if parsed := parseToolArgs(inner); parsed != nil {
+			if p, ok := parsed["path"].(string); ok && p != "" {
+				return p
+			}
+		}
 	}
 	return ""
 }
@@ -788,19 +809,20 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					tc := pendingToolCalls[i]
 					if tc.ID != "" && tc.Function.Name != "" {
 						args := parseToolArgs(tc.Function.Arguments)
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+						path := extractPathFromArgs(tc.Function.Arguments)
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
 					}
 				}
 			}
-					// Throttled progress updates for write_file (1 per 2 seconds)
-					if time.Since(lastProgressSend) > 2*time.Second {
-						for _, tc := range pendingToolCalls {
-							if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
-								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments)}})
-								lastProgressSend = time.Now()
-							}
+				// Throttled progress updates for write_file (1 per 2 seconds)
+				if time.Since(lastProgressSend) > 2*time.Second {
+					for _, tc := range pendingToolCalls {
+						if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
+							lastProgressSend = time.Now()
 						}
 					}
+				}
 			})
 
 			// Retry on transient errors (skip if cancelled by user message).
@@ -966,6 +988,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					continue
 				}
 				args := parseToolArgs(tc.Function.Arguments)
+				// Send final path update before execution (full args now available)
+				if tc.Function.Name == "write_file" {
+					path := extractPathFromArgs(tc.Function.Arguments)
+					if path == "" {
+						if p, ok := args["path"].(string); ok && p != "" {
+							path = p
+						}
+					}
+					if path != "" {
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": path}})
+					}
+				}
 				// tool_call event already sent during streaming, just execute and send result
 				log.Printf("[tool] executing %s for task=%s", tc.Function.Name, task.ID)
 				toolStart := time.Now()
@@ -975,7 +1009,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
 				tcJSON, _ := json.Marshal(map[string]interface{}{
