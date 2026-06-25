@@ -6,14 +6,17 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown>):
             return `$ ${args.command as string}`;
         case 'read_file': {
             const p = args.path as string;
+            if (!p) return '';
             return p.startsWith('./') ? p : `./${p}`;
         }
         case 'write_file': {
             const p = args.path as string;
+            if (!p) return '';
             return p.startsWith('./') ? p : `./${p}`;
         }
         case 'edit_file': {
             const p = args.path as string;
+            if (!p) return '(editing...)';
             const edits = args.edits as Array<{ oldText: string; newText: string }>;
             const editCount = edits ? edits.length : 0;
             const pathDisplay = p.startsWith('./') ? p : `./${p}`;

@@ -20,9 +20,10 @@ import (
 
 const (
 	// DefaultBufferSize is the default ring buffer size per connection.
-	DefaultBufferSize = 500
+	// Large enough to hold a full LLM streaming session (tokens + reasoning) without evicting tool_call events.
+	DefaultBufferSize = 5000
 	// MaxBufferSize is the maximum ring buffer size per connection.
-	MaxBufferSize = 2000
+	MaxBufferSize = 20000
 )
 
 // UserMessage carries a user message with optional model override.

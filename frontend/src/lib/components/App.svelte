@@ -329,6 +329,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     },
                     onTaskEvent: (task_id: string, event: StreamEvent) => {
                         // Forward task events to the task event store for TaskStream to consume
+                        if (event.type === 'tool_call' || event.type === 'tool_result') {
+                            console.log('[App] task_event:', event.type, 'task_id=', task_id, 'selected=', selectedTaskVal?.id);
+                        }
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             taskEvent.set({ task_id, ...event });
                         }

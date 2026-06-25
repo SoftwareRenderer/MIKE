@@ -262,6 +262,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_call': {
+                console.log('[TaskChat] tool_call event received:', event.data);
                 clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
@@ -283,6 +284,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     args: data.args,
                     raw_args: data.raw_args,
                     sandbox: data.sandbox,
+                    path: data.path,
                     isPending: true
                 });
                 entry.isStreaming = true;
@@ -291,7 +293,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_result': {
-                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
+                console.log('[TaskChat] tool_result event received:', event.data);
+                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean };
                 const ref = activeToolCalls.get(data.tool_id);
                 activeToolCalls.delete(data.tool_id);
                 if (ref) {
@@ -303,6 +306,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             tc.success = data.success;
                             tc.duration = data.duration;
                             tc.isPending = false;
+                            // Update with final args (streaming event had partial args)
+                            if (data.args) tc.args = data.args;
+                            if (data.raw_args) tc.raw_args = data.raw_args;
+                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
                         }
                     }
                 }
@@ -314,6 +321,20 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     awaitingResponse = true;
                 }
                 scroll();
+                break;
+            }
+            case 'tool_progress': {
+                const data = event.data as { tool_id?: string; bytes_written: number };
+                // Update the last pending tool call with bytes written
+                for (const entry of entries) {
+                    if (entry.toolCalls) {
+                        for (const tc of entry.toolCalls) {
+                            if (tc.isPending) {
+                                tc.bytesWritten = data.bytes_written;
+                            }
+                        }
+                    }
+                }
                 break;
             }
             case 'user_message': {
@@ -1340,6 +1361,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         connect();
         // Subscribe to task events from the app stream
         const unsubTaskEvent = taskEvent.subscribe((event) => {
+            if (event && (event.type === 'tool_call' || event.type === 'tool_result')) {
+                console.log('[TaskChat subscription] received:', event.type, 'task_id=', event.task_id, 'matches=', event.task_id === taskId);
+            }
             if (event && event.task_id === taskId) {
                 handleEvent({ type: event.type, data: event.data });
             }

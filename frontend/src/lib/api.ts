@@ -737,6 +737,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             const msg = JSON.parse(e.data);
             // Handle task_event (server-side multiplexed task events)
             if (msg.type === 'task_event' && callbacks.onTaskEvent) {
+                if (msg.event === 'tool_call' || msg.event === 'tool_result') {
+                    console.log('[api.ts WS] task_event:', msg.event, 'task_id=', msg.task_id);
+                }
                 callbacks.onTaskEvent(msg.task_id, {
                     type: msg.event,
                     data: msg.data,

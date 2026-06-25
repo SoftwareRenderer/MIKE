@@ -9,10 +9,12 @@
         args: Record<string, unknown>;
         raw_args?: string;
         sandbox?: boolean;
+        path?: string;
         result?: string;
         success?: boolean;
         duration?: number;
         isPending?: boolean;
+        bytesWritten?: number;
     }
 
     interface Props {

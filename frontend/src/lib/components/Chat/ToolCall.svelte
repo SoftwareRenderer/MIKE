@@ -14,11 +14,13 @@
             toolName: string;
             displayName?: string;
             args: Record<string, unknown>;
+            path?: string;
             result?: string;
             success?: boolean;
             isPending?: boolean;
             sandbox?: boolean;
             duration?: number;
+            bytesWritten?: number;
         };
         expandedArgs: Set<string>;
         onToggleArgs: (toolId: string) => void;
@@ -30,6 +32,12 @@
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
         return { text: display.slice(0, ARGS_MAX_LEN) + '…', truncated: true };
+    }
+
+    function formatBytes(bytes: number): string {
+        if (bytes < 1024) return bytes + 'B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
     }
 
     let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));
@@ -109,7 +117,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span> Running...</span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}
@@ -200,6 +208,7 @@
         gap: 4px;
     }
     .tool-status.pending { color: var(--color-accent); }
+    .progress-text { font-size: 0.8125rem; font-weight: 600; }
     .tool-status.error { color: var(--color-status-red); }
     .spinner {
         display: inline-block;

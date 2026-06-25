@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +21,17 @@ import (
 
 	"github.com/google/uuid"
 )
+
+var pathRegex = regexp.MustCompile(`"path"\s*:\s*"([^"]+)"`)
+
+// extractPathFromArgs extracts the "path" value from partial JSON args.
+func extractPathFromArgs(args string) string {
+	matches := pathRegex.FindStringSubmatch(args)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
 
 // PiSentinelURL is the sentinel value for llama_server_url when a task uses Pi.
 const PiSentinelURL = "pi://agent"
@@ -750,6 +762,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		streamDone := make(chan struct{})
 		var usage *types.ChatUsage
 		var streamErr error
+		var lastProgressSend time.Time // throttle progress updates to ~1/2s
 
 		go func() {
 			usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
@@ -767,8 +780,27 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
-					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
+				priorLen := len(pendingToolCalls)
+				pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
+				// Send tool_call event as soon as a new tool call appears in the stream
+				// so the frontend shows a spinner during LLM token generation
+				for i := priorLen; i < len(pendingToolCalls); i++ {
+					tc := pendingToolCalls[i]
+					if tc.ID != "" && tc.Function.Name != "" {
+						args := parseToolArgs(tc.Function.Arguments)
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+					}
 				}
+			}
+					// Throttled progress updates for write_file (1 per 2 seconds)
+					if time.Since(lastProgressSend) > 2*time.Second {
+						for _, tc := range pendingToolCalls {
+							if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
+								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments)}})
+								lastProgressSend = time.Now()
+							}
+						}
+					}
 			})
 
 			// Retry on transient errors (skip if cancelled by user message).
@@ -934,6 +966,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					continue
 				}
 				args := parseToolArgs(tc.Function.Arguments)
+				// tool_call event already sent during streaming, just execute and send result
+				log.Printf("[tool] executing %s for task=%s", tc.Function.Name, task.ID)
 				toolStart := time.Now()
 				te.taskMu.Lock()
 				state := te.tasks[task.ID]
@@ -941,8 +975,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
 				tcJSON, _ := json.Marshal(map[string]interface{}{
