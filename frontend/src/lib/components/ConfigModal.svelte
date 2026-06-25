@@ -638,8 +638,8 @@
                                                 <h4 class="pi-info-box-title">Setup</h4>
                                                 <ul class="pi-info-list">
                                                     <li><strong>Inherited Config:</strong> Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.</li>
-                                                    <li><strong>Sandbox:</strong> Your sandbox image must include <code>pi</code> on <code>$PATH</code>. Pi's config directory (<code>~/.pi/agent/</code>) is bind-mounted into the container at <code>/pi-config</code> with <code>PI_CODING_AGENT_DIR</code> set and read/write access.</li>
-                                                    <li><strong>Sessions:</strong> Each task gets its own Pi session for continuity. Sessions persist in <code>~/.pi/agent/sessions/</code>.</li>
+                                                    <li><strong>Sandbox:</strong> Your sandbox image must include <code>pi</code> on <code>$PATH</code>. Pi's config directory (<code>~/.pi/agent/</code>) is bind-mounted into the container at <code>/root/.pi/agent</code> with read/write access. Pi finds its config at the default location via <code>HOME=/root</code>.</li>
+                                                    <li><strong>Sessions:</strong> Each task gets its own Pi session (named <code>kanban-&#123;task-id&#125;</code>) for continuity across restarts.</li>
                                                 </ul>
                                             </div>
                                         </div>

@@ -96,7 +96,7 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
-// and PI_CODING_AGENT_DIR env var is set (only for Pi agent tasks).
+// (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
 func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
