@@ -139,16 +139,25 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
-    // Subscribes when a task is selected, unsubscribes on switch/close.
+    // Subscribes when a task is selected, unsubscribes only when switching to a
+    // different task (not when closing the task detail — avoids unnecessary
+    // unsubscribe/resubscribe when navigating board ↔ task).
+    let lastSubKey = '';
+    let lastSubStream: ReturnType<typeof createAppStream> | null = null;
     $effect(() => {
-        const task = selectedTaskVal;
+        const taskId = selectedTaskVal?.id;
         const project = currentProject;
         const stream = appStream;
-        if (!stream || !project || !task) return;
-        stream.subscribeTask(project.id, task.id);
-        return () => {
-            stream.unsubscribeTask(project.id, task.id);
-        };
+        if (!stream || !project || !taskId) return;
+        const key = `${project.id}:${taskId}`;
+        if (key !== lastSubKey) {
+            if (lastSubKey) {
+                lastSubStream?.unsubscribeTask(lastSubKey.split(':')[0], lastSubKey.split(':')[1]);
+            }
+            stream.subscribeTask(project.id, taskId);
+            lastSubKey = key;
+            lastSubStream = stream;
+        }
     });
 
     // Handle browser back/forward
@@ -308,7 +317,6 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         }
                         boardStore.update(b => b ? { ...b, tasks } : b);
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
-                            selectedTaskVal = updatedTask;
                             selectedTask.set(updatedTask);
                         }
                     },
