@@ -25,4 +25,10 @@ export interface DiffFile {
     removed: number;
     /** File size in bytes, set when file is binary or too large to diff. */
     fileSize?: number;
+    /** True if this file was truncated (has more changes not shown). */
+    truncated?: boolean;
+    /** Original added count before truncation (for display in header). */
+    origAdded?: number;
+    /** Original removed count before truncation (for display in header). */
+    origRemoved?: number;
 }

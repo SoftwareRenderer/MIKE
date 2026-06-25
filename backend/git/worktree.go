@@ -460,10 +460,190 @@ type UntrackedFile struct {
 
 // TaskDiff holds the diff output and list of untracked files for a task.
 type TaskDiff struct {
-	Diff      string          `json:"diff"`
-	Untracked []UntrackedFile `json:"untracked"`
-	ShortStat string          `json:"short_stat"`
+	Diff             string          `json:"diff"`
+	Untracked        []UntrackedFile `json:"untracked"`
+	ShortStat        string          `json:"short_stat"`
+	TruncatedFiles   []string        `json:"truncated_files,omitempty"`
+	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
 }
+
+// FileChangeStats holds the original added/removed line counts for a file.
+type FileChangeStats struct {
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+}
+
+// Default maximum number of change lines per file before truncation.
+const defaultMaxChangeLines = 60
+
+// truncateDiffLines truncates a unified diff so each file has at most
+// maxChangeLines change lines (lines starting with + or -).
+// Within a hunk, lines are dropped from the end and the @@ header counts
+// are updated to stay valid. Returns the truncated diff and list of
+// truncated file paths.
+func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
+	if !strings.Contains(diff, "\n") {
+		return diff, nil
+	}
+
+	lines := strings.Split(diff, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	// Split into per-file blocks
+	type fileBlock struct {
+		path  string
+		lines []string
+	}
+	var blocks []fileBlock
+	var cur *fileBlock
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			if cur != nil {
+				blocks = append(blocks, *cur)
+			}
+			match := fileRe.FindStringSubmatch(line)
+			path := "unknown"
+			if match != nil {
+				path = match[1]
+			}
+			cur = &fileBlock{path: path, lines: []string{line}}
+			continue
+		}
+		if cur != nil {
+			cur.lines = append(cur.lines, line)
+		}
+	}
+	if cur != nil {
+		blocks = append(blocks, *cur)
+	}
+
+	var result []string
+	var truncatedFiles []string
+
+	for _, block := range blocks {
+		// Count total change lines
+		totalChanges := 0
+		for _, line := range block.lines {
+			if len(line) > 0 && (line[0] == '+' || line[0] == '-') &&
+				!strings.HasPrefix(line, "+++") && !strings.HasPrefix(line, "---") {
+				totalChanges++
+			}
+		}
+
+		needsTruncation := totalChanges > maxChangeLines
+		if needsTruncation {
+			truncatedFiles = append(truncatedFiles, block.path)
+		}
+
+		if !needsTruncation {
+			result = append(result, block.lines...)
+			continue
+		}
+
+		// Truncate: walk lines, keep first maxChangeLines changes.
+		// When limit is hit mid-hunk, update the @@ header counts and stop.
+		keptChanges := 0
+		inHunk := false
+		var hunkResultIdx int
+		var hunkOldStart, hunkNewStart int
+		var hunkContext string
+		var hunkOldLines, hunkNewLines int
+
+		for _, line := range block.lines {
+			if strings.HasPrefix(line, "@@") {
+				// If we already hit the limit in a previous hunk, stop
+				if keptChanges >= maxChangeLines {
+					break
+				}
+				inHunk = true
+				hunkResultIdx = len(result)
+				hunkOldLines = 0
+				hunkNewLines = 0
+				if m := hunkRe.FindStringSubmatch(line); m != nil {
+					hunkOldStart, _ = strconv.Atoi(m[1])
+					hunkNewStart, _ = strconv.Atoi(m[3])
+					hunkContext = m[5]
+				}
+				result = append(result, line)
+				continue
+			}
+			if !inHunk {
+				result = append(result, line)
+				continue
+			}
+
+			// Track old/new line counts
+			if len(line) > 0 {
+				if line[0] == ' ' || line[0] == '-' {
+					hunkOldLines++
+				}
+				if line[0] == ' ' || line[0] == '+' {
+					hunkNewLines++
+				}
+			}
+
+			isChange := len(line) > 0 && (line[0] == '+' || line[0] == '-')
+			if isChange {
+				keptChanges++
+				if keptChanges > maxChangeLines {
+					// Update the @@ header to reflect actual counts, then stop
+					result[hunkResultIdx] = fmt.Sprintf("@@ -%d,%d +%d,%d %s@@",
+						hunkOldStart, hunkOldLines, hunkNewStart, hunkNewLines, hunkContext)
+					return strings.Join(result, "\n"), truncatedFiles
+				}
+			}
+			result = append(result, line)
+		}
+
+		// Update header for last hunk (counts may differ from original)
+		if inHunk {
+			result[hunkResultIdx] = fmt.Sprintf("@@ -%d,%d +%d,%d %s@@",
+				hunkOldStart, hunkOldLines, hunkNewStart, hunkNewLines, hunkContext)
+		}
+	}
+
+	return strings.Join(result, "\n"), truncatedFiles
+}
+
+// countFileChanges scans a unified diff and returns per-file added/removed counts.
+func countFileChanges(diff string) map[string]FileChangeStats {
+	stats := make(map[string]FileChangeStats)
+	if !strings.Contains(diff, "\n") {
+		return stats
+	}
+
+	var currentPath string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			match := fileRe.FindStringSubmatch(line)
+			currentPath = "unknown"
+			if match != nil {
+				currentPath = match[1]
+			}
+			continue
+		}
+		if currentPath == "" {
+			continue
+		}
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			s := stats[currentPath]
+			s.Added++
+			stats[currentPath] = s
+		} else if len(line) > 0 && line[0] == '-' && !strings.HasPrefix(line, "---") {
+			s := stats[currentPath]
+			s.Removed++
+			stats[currentPath] = s
+		}
+	}
+	return stats
+}
+
+// hunkRe parses a unified diff hunk header.
+// Groups: 1=oldStart, 2=oldCount, 3=newStart, 4=newCount, 5=context
+var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
 
 // GetDiff returns the git diff for a task's worktree relative to baseRef (or HEAD if empty).
 func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
@@ -538,7 +718,8 @@ func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchNam
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
 // headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
 // When headRef is set, untracked files are omitted (commit-to-commit diff).
-func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDiff, error) {
+// If skipTruncate is true, the diff is not truncated (used for ?full=1 API requests).
+func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return nil, err
@@ -629,7 +810,14 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string) (*TaskDi
 		}
 	}
 
-	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat}, nil
+	var truncatedFiles []string
+	var originalStats map[string]FileChangeStats
+	if len(skipTruncate) == 0 || !skipTruncate[0] {
+		originalStats = countFileChanges(diffOut)
+		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
+	}
+
+	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat, TruncatedFiles: truncatedFiles, OriginalFileStats: originalStats}, nil
 }
 
 // GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
@@ -1054,4 +1242,5 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
+var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
 

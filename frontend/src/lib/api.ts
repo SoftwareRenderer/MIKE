@@ -929,10 +929,11 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
     return updateTaskMessageRaw(projectId, taskId, messageId, content);
 }
 
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }>; short_stat: string }> {
+export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }>; short_stat: string; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> }> {
     const params = new URLSearchParams();
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
+    if (options?.full) params.set('full', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
     const res = await apiFetch(url);
     if (!res.ok) throw await apiError(res, 'Failed to fetch diff');

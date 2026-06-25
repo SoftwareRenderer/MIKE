@@ -253,7 +253,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         try {
             const headRef = commitHash || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef });
-            checkpointDiffFiles = parseUnifiedDiff(result.diff).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/));
+            const truncatedSet = new Set(result.truncated_files || []);
+            const origStats = result.original_file_stats || {};
+            checkpointDiffFiles = parseUnifiedDiff(result.diff).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
+                ...f,
+                truncated: truncatedSet.has(f.path),
+                origAdded: origStats[f.path]?.added,
+                origRemoved: origStats[f.path]?.removed,
+            }));
             checkpointDiffUntracked = (result.untracked || []).filter(u => !u.path.split('/').pop()?.match(/\..*\.swp$/)).map(u => ({
                 path: u.path,
                 fileSize: u.file_size,
@@ -661,11 +668,22 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     }
 
-    type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
+    type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
 
     function updateDiff(data: DiffData) {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
-        diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path));
+        const truncatedSet = new Set(data.truncated_files || []);
+        const origStats = data.original_file_stats || {};
+        diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path)).map(f => {
+            const isTruncated = truncatedSet.has(f.path);
+            const stat = origStats[f.path];
+            return {
+                ...f,
+                truncated: isTruncated,
+                origAdded: stat?.added,
+                origRemoved: stat?.removed,
+            };
+        });
         untrackedFiles = (data.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
             path: u.path,
             fileSize: u.file_size,
@@ -700,6 +718,18 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         } catch (e) {
             diffFiles = [];
             untrackedFiles = [];
+        }
+    }
+
+    async function handleExpandDiff() {
+        if (!task || task.status === 'backlog') return;
+        try {
+            const headRef = diffTo === 'working' ? undefined : diffTo;
+            const baseRef = diffFrom || undefined;
+            const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef, full: true });
+            updateDiff(result);
+        } catch (e) {
+            // Silently fail
         }
     }
 
@@ -897,7 +927,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                             <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
                         </div>
                     {/if}
-                    <DiffViewer files={diffFiles} untracked={untrackedFiles} />
+                    <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} />
 
                     <!-- Checkpoint diff overlay -->
                     {#if checkpointDiffOpen}

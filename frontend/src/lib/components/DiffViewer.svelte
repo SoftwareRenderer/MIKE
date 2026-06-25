@@ -4,9 +4,7 @@
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
 
 
-    let props = $props();
-    let files = $derived(props.files || []);
-    let untracked = $derived(props.untracked || []);
+    let { files = [], untracked = [], onExpandFile }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile }>; onExpandFile?: (path: string) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Track which collapsed blocks are expanded
@@ -171,8 +169,8 @@
                     {/if}
                     <span class="diff-file-path" title={file.path}>{truncatePath(file.path)}</span>
                     <span class="diff-file-stats">
-                        <span class="diff-added">+{file.added}</span>
-                        <span class="diff-removed">-{file.removed}</span>
+                        <span class="diff-added">+{file.origAdded ?? file.added}</span>
+                        <span class="diff-removed">-{file.origRemoved ?? file.removed}</span>
                     </span>
                 </button>
                 {#if isFileExpanded}
@@ -221,7 +219,7 @@
                                             Hide {item.block.count} unmodified lines
                                         {:else}
                                             <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                             </svg>
                                             Show {item.block.count} unmodified lines
                                         {/if}
@@ -241,6 +239,19 @@
                                     {/if}
                                 {/if}
                             {/each}
+                            {#if file.truncated && onExpandFile}
+                                <button
+                                    type="button"
+                                    class="diff-expand-btn"
+                                    onclick={() => onExpandFile(file.path)}
+                                    title="Load full diff for this file"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                        <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    Show full diff
+                                </button>
+                            {/if}
                         </div>
                     {/if}
                 {/if}
@@ -454,5 +465,27 @@
         color: rgba(250,204,21,0.9);
         font-weight: 500;
         flex-shrink: 0;
+    }
+
+    /* Expand button for truncated files */
+    .diff-expand-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--color-surface-2);
+        border: none;
+        border-top: 1px dashed var(--color-border);
+        cursor: pointer;
+        font-size: 0.75rem;
+        color: var(--color-accent);
+        transition: background 0.1s ease;
+        font-family: inherit;
+    }
+    .diff-expand-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-accent-hover);
     }
 </style>

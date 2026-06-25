@@ -301,6 +301,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 
 	headRef := r.URL.Query().Get("head")
 	customBase := r.URL.Query().Get("base")
+	fullDiff := r.URL.Query().Get("full") == "1"
 
 	var baseRef string
 	if customBase != "" {
@@ -324,7 +325,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, proj
 		}
 	}
 
-	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
+	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef, fullDiff)
 	if err != nil {
 		// Worktree may not exist (e.g., after commit-and-done).
 		// Fall back to project repo if task has a branch.

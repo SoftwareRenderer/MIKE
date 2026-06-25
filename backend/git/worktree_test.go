@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/backend/config"
@@ -170,5 +171,135 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 	// The "fatal:" case only happens when git itself errors out
 	if baseRef == "fatal: Needed a single revision" {
 		t.Error("CreateWorktree should not return fatal: messages as baseRef")
+	}
+}
+
+func TestTruncateDiffLines_NoTruncationNeeded(t *testing.T) {
+	diff := `diff --git a/file.txt b/file.txt
+index 1234567..abcdef 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,4 @@
+ line1
++added1
+ line2
+ line3
++added2`
+	result, truncated := truncateDiffLines(diff, 60)
+	if len(truncated) != 0 {
+		t.Errorf("expected no truncated files, got %v", truncated)
+	}
+	if result != diff {
+		t.Error("expected diff to be unchanged")
+	}
+}
+
+func TestTruncateDiffLines_TruncatesLargeFile(t *testing.T) {
+	diff := `diff --git a/small.txt b/small.txt
+--- a/small.txt
++++ b/small.txt
+@@ -1,2 +1,4 @@
+ line1
++added1
++added2
+ line2
++added3
++added4
+diff --git a/large.txt b/large.txt
+--- a/large.txt
++++ b/large.txt
+@@ -1,2 +1,4 @@
+ line1
++h1-added1
++h1-added2
+ line2
++h1-added3
+@@ -10,2 +10,4 @@
+ line10
++h2-added1
++h2-added2
+ line11
++h2-added3
+@@ -20,2 +20,4 @@
+ line20
++h3-added1
++h3-added2
+ line21
++h3-added3`
+	result, truncated := truncateDiffLines(diff, 6)
+
+	// large.txt has 9 changes (> 6), should be truncated
+	if len(truncated) != 1 || truncated[0] != "large.txt" {
+		t.Errorf("expected [large.txt], got %v", truncated)
+	}
+
+	// small.txt should be fully present
+	if !strings.Contains(result, "added4") {
+		t.Error("expected small.txt changes to be fully present")
+	}
+
+	// large.txt: first hunk always kept (3 changes), second hunk fits (3+3=6), third dropped
+	if !strings.Contains(result, "h1-added3") {
+		t.Error("expected first hunk of large.txt")
+	}
+	if !strings.Contains(result, "h2-added3") {
+		t.Error("expected second hunk of large.txt (fits within limit)")
+	}
+	if strings.Contains(result, "h3-added1") {
+		t.Error("expected third hunk of large.txt to be truncated")
+	}
+
+	// Count @@ headers: small.txt(1) + large.txt(2) = 3 hunks
+	// Each hunk header has two @@ markers, so 6 total
+	hunkMarkers := strings.Count(result, "@@")
+	if hunkMarkers != 6 {
+		t.Errorf("expected 6 @@ markers (3 hunks), got %d", hunkMarkers)
+	}
+	// Third hunk should be fully absent
+	if strings.Contains(result, "h3-added") {
+		t.Error("expected third hunk to be truncated")
+	}
+}
+
+func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
+	var lines []string
+	lines = append(lines, "diff --git a/file.txt b/file.txt")
+	lines = append(lines, "--- a/file.txt")
+	lines = append(lines, "+++ b/file.txt")
+	lines = append(lines, "@@ -1,2 +1,12 @@")
+	lines = append(lines, " line1")
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, "+line"+string(rune('0'+i)))
+	}
+	lines = append(lines, " line2")
+	diff := "\n" + strings.Join(lines, "\n")
+
+	result, truncated := truncateDiffLines(diff, 6)
+
+	if len(truncated) != 1 || truncated[0] != "file.txt" {
+		t.Errorf("expected [file.txt], got %v", truncated)
+	}
+	// Hunk truncated to 6 changes, header updated
+	if !strings.Contains(result, "@@") {
+		t.Error("expected hunk header")
+	}
+	if !strings.Contains(result, "+line1") {
+		t.Error("expected first change line")
+	}
+	if !strings.Contains(result, "+line6") {
+		t.Error("expected 6th change line")
+	}
+	if strings.Contains(result, "+line:") {
+		t.Error("expected 7th+ change lines to be truncated")
+	}
+}
+
+func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
+	result, truncated := truncateDiffLines("", 60)
+	if result != "" {
+		t.Errorf("expected empty result, got %q", result)
+	}
+	if len(truncated) != 0 {
+		t.Errorf("expected no truncated files, got %v", truncated)
 	}
 }
