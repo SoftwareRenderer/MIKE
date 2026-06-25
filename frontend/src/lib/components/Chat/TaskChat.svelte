@@ -1549,14 +1549,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </button>
                     </div>
                 {/if}
-                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and mark task as done">
+                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
                     {#if queueStatus === 'queued'}
                         <span class="spinner-inline"></span> In queue...
                     {:else if queueStatus === 'processing' || isCommitting}
                         <span class="spinner-inline"></span> Committing...
                     {:else}
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        Commit and Mark as Done
+                        Commit and move to Done
                     {/if}
                 </button>
             </div>
@@ -1876,7 +1876,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         animation: spin 0.6s linear infinite;
     }
 
-    /* Review bar — Commit and Mark as Done */
+    /* Review bar — Commit and move to Done */
     .chat-review-bar {
         display: flex;
         align-items: center;

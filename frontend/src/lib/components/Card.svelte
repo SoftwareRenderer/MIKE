@@ -2,7 +2,7 @@
     import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone } from '$lib/api';
     import { fade } from 'svelte/transition';
 
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
@@ -454,7 +454,12 @@
         const nextIdx = (currentIdx + 1) % statuses.length;
         const nextStatus = statuses[nextIdx];
         try {
-            const updated = await moveTask(projectId, task.id, nextStatus);
+            let updated: Task;
+            if (nextStatus === 'done') {
+                updated = await commitAndDone(projectId, task.id);
+            } else {
+                updated = await moveTask(projectId, task.id, nextStatus);
+            }
             boardStore.update(b => {
                 if (!b) return b;
                 return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
@@ -683,9 +688,9 @@
                         type="button"
                         class="action-icon action-move"
                         onclick={cycleStatus}
-                        aria-label={`Move to ${statusLabels[nextStatus]}`}
-                        title={`Move to ${statusLabels[nextStatus]}`}
-                        style="color: {statusColors[nextStatus]}"
+                        aria-label={nextStatus === 'done' ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`}
+                        title={nextStatus === 'done' ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`}
+                        style="color: {nextStatus === 'done' ? '#3FB950' : statusColors[nextStatus]}"
                     >
                         {#if nextStatus === 'backlog'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -694,7 +699,7 @@
                         {:else if nextStatus === 'review'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                         {:else if nextStatus === 'done'}
-                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><line x1="4" y1="2" x2="4" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="2" r="2.5" fill="currentColor"/><circle cx="4" cy="14" r="2.5" fill="currentColor"/><line x1="12" y1="4" x2="12" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="14" r="2.5" fill="currentColor"/><path d="M12 4 C8 4, 7 2, 5.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
                         {/if}
                     </button>
                 {/if}
