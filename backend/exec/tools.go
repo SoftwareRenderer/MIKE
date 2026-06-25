@@ -402,7 +402,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
 		AutoCommit:              parent.AutoCommit,
 		AutoPR:                  parent.AutoPR,
-		PlanMode:                parent.PlanMode,
+		PlanMode:                false,
 		ParentTaskID:            actualParentID,
 		CreatedAt:               now,
 		UpdatedAt:               now,

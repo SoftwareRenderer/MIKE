@@ -153,8 +153,8 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	if child.AutoCommit != parent.AutoCommit {
 		t.Errorf("expected inherited auto_commit %v, got %v", parent.AutoCommit, child.AutoCommit)
 	}
-	if child.PlanMode != parent.PlanMode {
-		t.Errorf("expected inherited plan_mode %v, got %v", parent.PlanMode, child.PlanMode)
+	if child.PlanMode {
+		t.Errorf("expected plan_mode false for subtask, got %v", child.PlanMode)
 	}
 }
 
