@@ -188,6 +188,29 @@ func TestCreateWithoutGVisor(t *testing.T) {
 	}
 }
 
+func TestContainerRunning(t *testing.T) {
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		available: true,
+	}
+
+	// Empty map — no containers running
+	if sm.ContainerRunning("task-1") {
+		t.Error("expected ContainerRunning to return false for unknown task")
+	}
+
+	// Simulate an active container
+	sm.active["task-2"] = "sandbox-task-2"
+	if !sm.ContainerRunning("task-2") {
+		t.Error("expected ContainerRunning to return true for active task")
+	}
+
+	// Other tasks should still be false
+	if sm.ContainerRunning("task-3") {
+		t.Error("expected ContainerRunning to return false for non-active task")
+	}
+}
+
 func TestImageReady(t *testing.T) {
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {

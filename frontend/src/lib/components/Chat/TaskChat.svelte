@@ -264,7 +264,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_call': {
-                console.log('[TaskChat] tool_call event received:', event.data);
                 clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
@@ -283,7 +282,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     toolId: data.tool_id,
                     toolName: data.tool_name,
                     displayName: data.tool_display_name,
-                    args: data.args,
+                    args: data.args || {},
                     raw_args: data.raw_args,
                     sandbox: data.sandbox,
                     path: data.path,
@@ -431,18 +430,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'status': {
                 const data = event.data as { state: string; activity?: string };
                 if (data.state === 'pulling_image') {
-                    // Image is being pulled — show a system message
+                    // Image is being pulled — show ephemeral system message (not persisted)
                     const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
-                    createTaskMessage(projectId, taskId, 'system', `Pulling ${imgName}...`)
-                        .catch(() => {});
+                    entries = [...entries, { id: genId(), role: 'system', content: `Pulling ${imgName}...`, isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'building_image') {
-                    // Image is being built — show a system message
-                    createTaskMessage(projectId, taskId, 'system', 'Building sandbox image from Dockerfile...')
-                        .catch(() => {});
+                    // Image is being built — show ephemeral system message (not persisted)
+                    entries = [...entries, { id: genId(), role: 'system', content: 'Building sandbox image from Dockerfile...', isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'starting_container') {
-                    // Container is being created/started
-                    createTaskMessage(projectId, taskId, 'system', 'Starting sandbox container...')
-                        .catch(() => {});
+                    // Container is being created/started — show ephemeral system message (not persisted)
+                    entries = [...entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
                     // A new executor is starting (e.g., lazy-start after user follow-up).
                     // Clear pending tool calls and streaming state from any previous executor
@@ -473,10 +469,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             case 'build_progress': {
                 const data = event.data as { line: string };
-                // Append build/pull progress line as a system message
+                // Append build/pull progress line as ephemeral system message (not persisted)
                 if (data.line) {
-                    createTaskMessage(projectId, taskId, 'system', data.line)
-                        .catch(() => {});
+                    entries = [...entries, { id: genId(), role: 'system', content: data.line, isStreaming: false, createdAt: new Date().toISOString() }];
                 }
                 break;
             }
@@ -1364,9 +1359,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         connect();
         // Subscribe to task events from the app stream
         const unsubTaskEvent = taskEvent.subscribe((event) => {
-            if (event && (event.type === 'tool_call' || event.type === 'tool_result')) {
-                console.log('[TaskChat subscription] received:', event.type, 'task_id=', event.task_id, 'matches=', event.task_id === taskId);
-            }
             if (event && event.task_id === taskId) {
                 handleEvent({ type: event.type, data: event.data });
             }

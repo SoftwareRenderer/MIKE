@@ -1,6 +1,7 @@
 /** Shared tool args formatting for chat messages */
 
-export function formatToolArgs(toolName: string, args: Record<string, unknown>): string {
+export function formatToolArgs(toolName: string, args: Record<string, unknown> | null): string {
+    if (!args) return '';
     switch (toolName) {
         case 'bash':
             return `$ ${args.command as string}`;

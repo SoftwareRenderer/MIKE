@@ -519,17 +519,23 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if serverURL == PiSentinelURL {
 				piAgentDir = te.configStore.GetAgentConfigDir()
 			}
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
-			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
-			task.StatusState = "failed"
-			task.Status = "review"
-			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
-			te.store.UpdateTask(task)
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
-			return
-		}
-		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+			// Reuse existing container if it's already running from a previous executor (lazy-start).
+			// Only create a new container and send status if one doesn't exist.
+			if !te.sandboxMgr.ContainerRunning(task.ID) {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
+				if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
+					task.StatusState = "failed"
+					task.Status = "review"
+					task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
+					te.store.UpdateTask(task)
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
+					return
+				}
+				log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+			} else {
+				log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
+			}
 
 		// Build sandbox exec function
 		execFn = func(command string) (string, error) {
@@ -808,9 +814,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for i := priorLen; i < len(pendingToolCalls); i++ {
 					tc := pendingToolCalls[i]
 					if tc.ID != "" && tc.Function.Name != "" {
-						args := parseToolArgs(tc.Function.Arguments)
 						path := extractPathFromArgs(tc.Function.Arguments)
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+						// During streaming, args may be partial JSON (e.g. just "{").
+						// Send raw_args and let the frontend parse when complete.
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
 					}
 				}
 			}

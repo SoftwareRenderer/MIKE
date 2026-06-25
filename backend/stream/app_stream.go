@@ -97,15 +97,24 @@ type AppStreamManager struct {
 	// Lazy start handler — called when a user message arrives for a task with no active executor
 	lazyStartHandler LazyStartHandler
 	lazyMu           sync.RWMutex
+
+	// Per-task ring buffer for reconnect sync.
+	// When a client subscribes to a task, it gets the buffered events so it can
+	// catch up on tokens/tool_calls that were streamed while it was disconnected.
+	taskBufMu     sync.Mutex
+	taskBuffers   map[string][][]byte // task key ("projectID:taskID") -> ring buffer
+	taskBufSize   int
 }
 
 // NewAppStreamManager creates a new AppStreamManager.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
 	asm := &AppStreamManager{
-		clients:         make(map[*websocket.Conn]*clientState),
-		store:           store,
-		worktreeMgr:     worktreeMgr,
-		branchPollers:   make(map[string]context.CancelFunc),
+		clients:       make(map[*websocket.Conn]*clientState),
+		store:         store,
+		worktreeMgr:   worktreeMgr,
+		branchPollers: make(map[string]context.CancelFunc),
+		taskBuffers:   make(map[string][][]byte),
+		taskBufSize:   DefaultBufferSize,
 	}
 	// Initialize the filesystem watcher
 	asm.watcher, _ = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
@@ -225,6 +234,21 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	key := projectID + ":" + taskID
 	client.taskSub[key]++
 	asm.mu.Unlock()
+
+	// Send per-task buffer so the client can catch up on missed events
+	// (e.g., tokens streamed while the page was reloading).
+	buf := asm.getTaskBuffer(key)
+	if len(buf) > 0 {
+		go func() {
+			asm.writeMu.Lock()
+			defer asm.writeMu.Unlock()
+			for _, frame := range buf {
+				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+					return
+				}
+			}
+		}()
+	}
 }
 
 // unsubscribeTask removes a task subscription for a client.
@@ -320,6 +344,20 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 		"data":    event.Data,
 	}
 	asm.sendTaskPayload(projectID, taskID, payload)
+
+	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
+	// don't get stale tokens from a previous turn.
+	if event.Type == types.WSTypeStatus {
+		if state, ok := event.Data.(map[string]string)["state"]; ok {
+			if state == "stopped" || state == "failed" || state == "completed" ||
+				state == "awaiting_review" || state == "idle" || state == "cancelled" {
+				asm.clearTaskBuffer(projectID + ":" + taskID)
+			}
+		}
+	}
+	if event.Type == types.WSTypeComplete {
+		asm.clearTaskBuffer(projectID + ":" + taskID)
+	}
 }
 
 // sendTaskPayload sends a payload to all clients subscribed to a task.
@@ -347,8 +385,9 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload i
 	}
 	asm.writeMu.Unlock()
 
-	// Buffer for reconnect sync
+	// Buffer for reconnect sync (per-client and per-task)
 	asm.bufferRaw(frame)
+	asm.bufferTask(key, frame)
 }
 
 // BroadcastAll sends a raw message to ALL connected clients.
@@ -480,6 +519,48 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 	client.bufMu.Lock()
 	defer client.bufMu.Unlock()
 	return client.ringBuffer
+}
+
+// bufferTask adds a raw JSON frame to the per-task ring buffer.
+// Skips tool_call events because they carry partial (streaming) JSON args
+// that would cause parse errors on replay. The reconnecting client either
+// loads the final tool_calls from the DB or receives fresh events in real-time.
+func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
+	// Skip tool_call events — they have incomplete args during streaming
+	if strings.Contains(string(frame), `"event":"tool_call"`) {
+		return
+	}
+
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	buf, ok := asm.taskBuffers[taskKey]
+	if !ok {
+		buf = make([][]byte, 0, asm.taskBufSize)
+	}
+	if len(buf) >= asm.taskBufSize {
+		buf = buf[1:]
+	}
+	// Copy frame to avoid aliasing
+	frameCopy := make([]byte, len(frame))
+	copy(frameCopy, frame)
+	buf = append(buf, frameCopy)
+	asm.taskBuffers[taskKey] = buf
+}
+
+// getTaskBuffer returns and clears the per-task ring buffer.
+func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	buf := asm.taskBuffers[taskKey]
+	asm.taskBuffers[taskKey] = nil
+	return buf
+}
+
+// clearTaskBuffer removes the per-task ring buffer.
+func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	delete(asm.taskBuffers, taskKey)
 }
 
 // -- Diff poller --

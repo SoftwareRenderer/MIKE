@@ -464,6 +464,15 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	return nil
 }
 
+// ContainerRunning returns true if a sandbox container for the given task is
+// tracked in the active map (i.e., was created in the current server session).
+func (sm *SandboxManager) ContainerRunning(taskID string) bool {
+	sm.mu.Lock()
+	_, ok := sm.active[taskID]
+	sm.mu.Unlock()
+	return ok
+}
+
 // ImageReady checks if a container image is available locally.
 func (sm *SandboxManager) ImageReady(image string) bool {
 	if image == "" {

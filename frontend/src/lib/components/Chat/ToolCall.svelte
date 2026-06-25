@@ -122,7 +122,7 @@
                 <span class="tool-status error">Failed</span>
             {/if}
         </div>
-        {#if tc.toolName === 'edit_file' && tc.args.edits}
+        {#if tc.toolName === 'edit_file' && tc.args && tc.args.edits}
             <div class="edit-diff">
                 {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
                     {#each block.edits as line}
@@ -150,7 +150,7 @@
             {:else}
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
             {/if}
-        {:else if tc.toolName === 'task_complete' && tc.args.summary}
+        {:else if tc.toolName === 'task_complete' && tc.args && tc.args.summary}
             <pre class="tool-result tool-result-summary">{tc.args.summary as string}</pre>
         {:else if tc.result && tc.result.trim()}
             <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>

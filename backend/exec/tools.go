@@ -278,6 +278,10 @@ func parseToolArgs(s string) map[string]interface{} {
 				return result
 			}
 		}
+		// Don't log for clearly incomplete (streaming) JSON — e.g. just "{" or "{"path":"
+		if len(s) >= 1 && s[0] == '{' && s[len(s)-1] != '}' {
+			return result
+		}
 		log.Printf("[tool] failed to parse args: %v (raw: %q)", err, s)
 		return map[string]interface{}{"raw": s}
 	}
