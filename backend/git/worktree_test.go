@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -301,5 +302,139 @@ func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
 	}
 	if len(truncated) != 0 {
 		t.Errorf("expected no truncated files, got %v", truncated)
+	}
+}
+
+func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create worktree
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Create an untracked file with > 60 lines (all additions)
+	var lines []string
+	for i := 1; i <= 80; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	worktreePath, _ := wm.WorktreePath(taskID)
+	writeFile(t, worktreePath, "large-new-file.txt", content)
+
+	// Get diff (with truncation)
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Should have 1 untracked file
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+
+	untracked := result.Untracked[0]
+	if untracked.Path != "large-new-file.txt" {
+		t.Errorf("expected path large-new-file.txt, got %s", untracked.Path)
+	}
+	if !untracked.Truncated {
+		t.Error("expected untracked file to be truncated")
+	}
+	if untracked.OrigAdded != 80 {
+		t.Errorf("expected origAdded=80, got %d", untracked.OrigAdded)
+	}
+
+	// Truncated diff should have exactly 60 change lines
+	changeCount := 0
+	for _, line := range strings.Split(untracked.Diff, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			changeCount++
+		}
+	}
+	if changeCount != defaultMaxChangeLines {
+		t.Errorf("expected %d change lines in truncated diff, got %d", defaultMaxChangeLines, changeCount)
+	}
+
+	// Verify full diff is available via skipTruncate
+	resultFull, err := wm.GetTaskDiff(taskID, "", "", true)
+	if err != nil {
+		t.Fatalf("GetTaskDiff(full): %v", err)
+	}
+	if len(resultFull.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file in full diff, got %d", len(resultFull.Untracked))
+	}
+	if resultFull.Untracked[0].Truncated {
+		t.Error("expected full diff to NOT be truncated")
+	}
+	fullChangeCount := 0
+	for _, line := range strings.Split(resultFull.Untracked[0].Diff, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			fullChangeCount++
+		}
+	}
+	if fullChangeCount != 80 {
+		t.Errorf("expected 80 change lines in full diff, got %d", fullChangeCount)
+	}
+}
+
+func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	writeFile(t, worktreePath, "small-new-file.txt", "line1\nline2\nline3\n")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+
+	if result.Untracked[0].Truncated {
+		t.Error("expected small untracked file to NOT be truncated")
+	}
+}
+
+func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Write binary content (null bytes trigger isBinaryFile detection)
+	binaryContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00}
+	if err := os.WriteFile(filepath.Join(worktreePath, "binary-file.bin"), binaryContent, 0o644); err != nil {
+		t.Fatalf("write binary file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+
+	untracked := result.Untracked[0]
+	if untracked.Path != "binary-file.bin" {
+		t.Errorf("expected path binary-file.bin, got %s", untracked.Path)
+	}
+	if untracked.Diff != "" {
+		t.Error("expected binary file to have no diff content")
+	}
+	if untracked.FileSize == 0 {
+		t.Error("expected binary file to have FileSize set")
 	}
 }

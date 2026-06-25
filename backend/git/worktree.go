@@ -453,9 +453,12 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 
 // UntrackedFile holds the path and unified diff content for an untracked file.
 type UntrackedFile struct {
-	Path     string `json:"path"`
-	Diff     string `json:"diff"`
-	FileSize int64  `json:"file_size,omitempty"` // set when file is binary or >1MB (diff omitted)
+	Path      string `json:"path"`
+	Diff      string `json:"diff"`
+	FileSize  int64  `json:"file_size,omitempty"` // set when file is binary or >1MB (diff omitted)
+	Truncated bool   `json:"truncated,omitempty"`  // true when diff was truncated to maxChangeLines
+	OrigAdded int    `json:"orig_added,omitempty"` // original added count before truncation
+	OrigRemoved int  `json:"orig_removed,omitempty"` // original removed count before truncation
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
@@ -810,11 +813,33 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		}
 	}
 
+	doTruncate := len(skipTruncate) == 0 || !skipTruncate[0]
 	var truncatedFiles []string
 	var originalStats map[string]FileChangeStats
-	if len(skipTruncate) == 0 || !skipTruncate[0] {
+	if doTruncate {
 		originalStats = countFileChanges(diffOut)
 		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
+		// Also truncate untracked file diffs
+		for i := range untracked {
+			if untracked[i].Diff == "" {
+				continue
+			}
+			origStats := countFileChanges(untracked[i].Diff)
+			origAdded := 0
+			origRemoved := 0
+			if s, ok := origStats[untracked[i].Path]; ok {
+				origAdded = s.Added
+				origRemoved = s.Removed
+			}
+			totalChanges := origAdded + origRemoved
+			if totalChanges > defaultMaxChangeLines {
+				truncatedDiff, _ := truncateDiffLines(untracked[i].Diff, defaultMaxChangeLines)
+				untracked[i].Diff = truncatedDiff
+				untracked[i].Truncated = true
+				untracked[i].OrigAdded = origAdded
+				untracked[i].OrigRemoved = origRemoved
+			}
+		}
 	}
 
 	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat, TruncatedFiles: truncatedFiles, OriginalFileStats: originalStats}, nil

@@ -4,7 +4,7 @@
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
 
 
-    let { files = [], untracked = [], onExpandFile }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile }>; onExpandFile?: (path: string) => void } = $props();
+    let { files = [], untracked = [], onExpandFile, onExpandUntracked }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Track which collapsed blocks are expanded
@@ -73,7 +73,7 @@
                         </span>
                     {:else}
                         <span class="diff-file-stats">
-                            <span class="diff-added">+{ufile.added}</span>
+                            <span class="diff-added">+{entry.origAdded ?? ufile.added}</span>
                         </span>
                     {/if}
                     <span class="diff-untracked-badge">untracked</span>
@@ -145,6 +145,19 @@
                                 {/if}
                             {/each}
                         </div>
+                    {/if}
+                    {#if entry.truncated && onExpandUntracked}
+                        <button
+                            type="button"
+                            class="diff-expand-btn"
+                            onclick={() => onExpandUntracked(entry.path)}
+                            title="Load full diff for this file"
+                        >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            Show full diff
+                        </button>
                     {/if}
                 {/if}
             </section>
