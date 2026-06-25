@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
 
@@ -66,6 +67,45 @@ type PiEvent struct {
 	// Extension UI
 	ExtMethod string `json:"method"` // from extension_ui_request
 	ExtID     string `json:"-"`      // from extension_ui_request (id field)
+}
+
+// NewClientInContainer creates a new Pi RPC client that runs inside a sandbox container.
+// It uses the sandbox manager's StartProcess to run `pi --mode rpc` via `podman exec`.
+// The working directory and environment are set by the container (not passed here).
+// sandboxMgr is the SandboxManager, taskID identifies the container.
+// sessionName sets the display name for the Pi session (--name flag).
+func NewClientInContainer(sandboxMgr *sandbox.SandboxManager, taskID, sessionName string) (*Client, error) {
+	c := &Client{
+		sessionName: sessionName,
+		eventChan:   make(chan PiEvent, 64),
+		done:        make(chan struct{}),
+	}
+
+	// Build command arguments
+	args := []string{"--mode", "rpc"}
+	if sessionName != "" {
+		args = append(args, "--name", sessionName)
+	}
+
+	// Start pi inside the container via podman exec
+	ph, err := sandboxMgr.StartProcess(taskID, "pi", args)
+	if err != nil {
+		return nil, fmt.Errorf("start pi in container: %w", err)
+	}
+
+	c.cmd = ph.Cmd
+	c.stdin = ph.Stdin
+	c.stdout = ph.Stdout
+
+	c.stdoutBuf = bufio.NewScanner(c.stdout)
+	buf := make([]byte, 0, 64*1024)
+	c.stdoutBuf.Buffer(buf, 1024*1024)
+
+	// Start stdout reader goroutine
+	go c.readEvents()
+
+	log.Printf("[pi] client started in container (pid=%d, session=%s)", c.cmd.Process.Pid, sessionName)
+	return c, nil
 }
 
 // NewClient creates a new Pi RPC client. Spawns `pi --mode rpc` in the given working directory.
@@ -237,6 +277,7 @@ func (c *Client) QueryModel(ctx context.Context) string {
 }
 
 // Close gracefully shuts down the Pi subprocess.
+// Sends SIGTERM first, then SIGKILL after a 3s timeout.
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -258,9 +299,16 @@ func (c *Client) Close() {
 	case err := <-done:
 		log.Printf("[pi] client closed (pid=%d, err=%v)", c.PID(), err)
 	case <-time.After(3 * time.Second):
-		log.Printf("[pi] close timeout, killing pid=%d", c.PID())
-		c.cmd.Process.Kill()
-		<-done
+		log.Printf("[pi] close timeout, sending SIGTERM to pid=%d", c.PID())
+		c.cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case err := <-done:
+			log.Printf("[pi] client closed after SIGTERM (pid=%d, err=%v)", c.PID(), err)
+		case <-time.After(2 * time.Second):
+			log.Printf("[pi] SIGTERM timeout, sending SIGKILL to pid=%d", c.PID())
+			c.cmd.Process.Kill()
+			<-done
+		}
 	}
 
 	close(c.eventChan)

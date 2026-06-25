@@ -1,8 +1,10 @@
 package sandbox
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -25,7 +27,8 @@ const (
 	// SandboxMountPath is where the worktree is bind-mounted inside the container.
 	SandboxMountPath = "/worktree"
 	// PiConfigMount is where ~/.pi/agent/ is bind-mounted inside the container (for Pi agent tasks).
-	PiConfigMount = "/pi-config"
+	// Mounted at /root/.pi/agent so Pi finds it at its default config location.
+	PiConfigMount = "/root/.pi/agent"
 	// KeepAliveTimeout is how long to wait for container cleanup.
 	KeepAliveTimeout = 30 * time.Second
 )
@@ -168,6 +171,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
 	}
 	// Pi agent config mount (only for Pi tasks)
+	// Mounted at /root/.pi/agent so Pi finds it at its default config location
 	if piAgentDir != "" {
 		absPiDir, err := filepath.Abs(piAgentDir)
 		if err != nil {
@@ -175,7 +179,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		}
 		createArgs = append(createArgs,
 			"-v", absPiDir+":"+PiConfigMount+":rprivate,rw",
-			"-e", "PI_CODING_AGENT_DIR="+PiConfigMount,
+			"-e", "HOME=/root",
 		)
 		log.Printf("[sandbox] task=%s mounting pi agent dir %s at %s", taskID, absPiDir, PiConfigMount)
 	}
@@ -255,6 +259,14 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 	return string(out), nil
 }
 
+// ProcessHandle holds a running process inside the sandbox (no PTY).
+// Used for JSONL-based processes like Pi Coding Agent.
+type ProcessHandle struct {
+	Cmd    *exec.Cmd
+	Stdin  io.WriteCloser
+	Stdout io.ReadCloser
+}
+
 // ShellProcess holds a running shell process inside the sandbox.
 type ShellProcess struct {
 	Cmd  *exec.Cmd
@@ -266,7 +278,7 @@ type ShellProcess struct {
 // with the PTY master file descriptor for I/O relay.
 // The caller is responsible for calling Close() when done.
 func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
-	return sm.startShell(taskID, false, "", "", false, 0)
+	return sm.startShell(taskID, false, "", "", false, 0, "")
 }
 
 // StartShellWithCreate starts an interactive shell, creating the sandbox container
@@ -276,11 +288,12 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int) (*ShellProcess, error) {
-	return sm.startShell(taskID, true, worktreePath, baseImage, networkIsolation, memoryLimit)
+// If piAgentDir is non-empty, the Pi config directory is bind-mounted.
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
+	return sm.startShell(taskID, true, worktreePath, baseImage, networkIsolation, memoryLimit, piAgentDir)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int) (*ShellProcess, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	sm.mu.Unlock()
@@ -290,7 +303,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 			return nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation, memoryLimit, ""); err != nil {
+		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			return nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()
@@ -333,6 +346,21 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	return sp, nil
 }
 
+// Close terminates the process handle and cleans up pipes.
+func (ph *ProcessHandle) Close() error {
+	if ph.Stdin != nil {
+		_ = ph.Stdin.Close()
+	}
+	if ph.Stdout != nil {
+		_ = ph.Stdout.Close()
+	}
+	if ph.Cmd != nil && ph.Cmd.Process != nil {
+		_ = ph.Cmd.Process.Kill()
+		_ = ph.Cmd.Wait()
+	}
+	return nil
+}
+
 // Close terminates the shell process and cleans up the PTY.
 func (sp *ShellProcess) Close() error {
 	if sp.Ptmx != nil {
@@ -343,6 +371,73 @@ func (sp *ShellProcess) Close() error {
 		_ = sp.Cmd.Wait()
 	}
 	return nil
+}
+
+// StartProcess starts a non-interactive process inside the task's sandbox container.
+// Unlike StartShell, this does not allocate a PTY — it uses plain stdin/stdout pipes.
+// This is suitable for JSONL-based protocols like the Pi Coding Agent RPC mode.
+// The caller is responsible for calling Close() on the returned ProcessHandle when done.
+func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*ProcessHandle, error) {
+	sm.mu.Lock()
+	containerName, ok := sm.active[taskID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("no sandbox container for task %s", taskID)
+	}
+
+	// Build exec arguments: -i keeps STDIN open, no -t (no PTY)
+	execArgs := []string{
+		"exec", "-i",
+		"-w", SandboxMountPath,
+		containerName,
+		command,
+	}
+	execArgs = append(execArgs, args...)
+
+	cmd := exec.Command("podman", execArgs...)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
+	}
+	// Merge stderr into logs (goes to parent's stderr)
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		return nil, fmt.Errorf("start process in container: %w", err)
+	}
+
+	ph := &ProcessHandle{
+		Cmd:    cmd,
+		Stdin:  stdin,
+		Stdout: stdout,
+	}
+
+	log.Printf("[sandbox] task=%s started process %q in container %s (pid=%d)", taskID, command, containerName, cmd.Process.Pid)
+	return ph, nil
+}
+
+// PiAvailable checks if the `pi` binary is available inside the task's sandbox container.
+// Returns true if `which pi` succeeds inside the container.
+func (sm *SandboxManager) PiAvailable(taskID string) bool {
+	sm.mu.Lock()
+	containerName, ok := sm.active[taskID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	_, err := sm.podmanExec("exec", containerName, "which", "pi")
+	return err == nil
 }
 
 // Stop removes the sandbox container for a task.
@@ -380,13 +475,45 @@ func (sm *SandboxManager) ImageReady(image string) bool {
 
 // PullImage downloads a container image. Blocks until the pull completes.
 func (sm *SandboxManager) PullImage(image string) error {
+	return sm.PullImageWithProgress(image, nil)
+}
+
+// PullImageWithProgress downloads a container image, streaming progress lines via onProgress.
+// onProgress is called for each line of output (nil means no callback).
+func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(line string)) error {
 	if image == "" {
 		image = BaseImage
 	}
 	log.Printf("[sandbox] pulling image %s", image)
-	out, err := sm.podmanExec("pull", image)
-	if err != nil {
-		return fmt.Errorf("pull image %s: %w (%s)", image, err, out)
+
+	c := exec.Command("podman", "pull", image)
+	// Merge stdout+stderr into a single pipe for streaming
+	pr, pw := io.Pipe()
+	c.Stdout = pw
+	c.Stderr = pw
+
+	if err := c.Start(); err != nil {
+		pw.Close()
+		pr.Close()
+		return fmt.Errorf("start pull: %w", err)
+	}
+
+	// Stream output line by line
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if onProgress != nil {
+				onProgress(line)
+			}
+			log.Printf("[sandbox] pull: %s", line)
+		}
+	}()
+
+	waitErr := c.Wait()
+	pw.Close() // signal EOF to reader goroutine
+	if waitErr != nil {
+		return fmt.Errorf("pull image %s: %w", image, waitErr)
 	}
 	log.Printf("[sandbox] image %s pulled", image)
 	return nil
@@ -407,6 +534,12 @@ func ProjectImageName(projectName string) string {
 // project-specific name. The Dockerfile is copied to a temp directory for the build.
 // The temp directory is cleaned up after the build completes.
 func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
+	return sm.BuildImageWithProgress(projectName, dockerfilePath, nil)
+}
+
+// BuildImageWithProgress builds a container image, streaming progress lines via onProgress.
+// onProgress is called for each line of output (nil means no callback).
+func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error {
 	if !sm.available {
 		return fmt.Errorf("gVisor not available (runsc not installed)")
 	}
@@ -434,11 +567,36 @@ func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
 	// Remove any existing image with the same name
 	_, _ = sm.podmanExec("rmi", imageName) // best-effort
 
-	// Build the image
+	// Build the image with streaming output
 	log.Printf("[sandbox] project=%s building image %s from %s", projectName, imageName, dockerfilePath)
-	out, err := sm.podmanExec("build", "-t", imageName, tmpDir)
-	if err != nil {
-		return fmt.Errorf("build image %s: %w (%s)", imageName, err, out)
+	c := exec.Command("podman", "build", "-t", imageName, tmpDir)
+	// Merge stdout+stderr into a single pipe for streaming
+	pr, pw := io.Pipe()
+	c.Stdout = pw
+	c.Stderr = pw
+
+	if err := c.Start(); err != nil {
+		pw.Close()
+		pr.Close()
+		return fmt.Errorf("start build: %w", err)
+	}
+
+	// Stream output line by line
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if onProgress != nil {
+				onProgress(line)
+			}
+			log.Printf("[sandbox] build: %s", line)
+		}
+	}()
+
+	waitErr := c.Wait()
+	pw.Close() // signal EOF to reader goroutine
+	if waitErr != nil {
+		return fmt.Errorf("build image %s: %w", imageName, waitErr)
 	}
 	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)
 	return nil

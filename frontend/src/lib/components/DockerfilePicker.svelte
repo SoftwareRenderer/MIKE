@@ -28,7 +28,7 @@
         currentPath = path;
         selectedFile = null;
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}`);
+                        const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1`);
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.error || 'Failed to read directory');

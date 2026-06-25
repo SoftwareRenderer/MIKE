@@ -333,7 +333,7 @@
                                 <path d="M2 2h4l1.5 1.5V12H2V2z" stroke="currentColor" stroke-width="1.2" fill="none"/>
                                 <path d="M6.5 2H12V12H6.5V2z" stroke="currentColor" stroke-width="1.2" fill="none"/>
                             </svg>
-                            {getDockerfileName(sandboxDockerfilePath)}
+                            <span class="dockerfile-path-text">{sandboxDockerfilePath}</span>
                         </span>
                     {:else}
                         <span class="dockerfile-path-placeholder">No Dockerfile selected</span>
@@ -694,6 +694,13 @@
         font-size: 0.75rem;
         font-family: var(--font-mono, monospace);
         overflow: hidden;
+        min-width: 0;
+    }
+    .dockerfile-path-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         min-width: 0;
     }
 

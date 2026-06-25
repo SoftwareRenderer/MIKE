@@ -85,15 +85,22 @@ type Provider struct {
 	Models          []ModelConfig `json:"models"`
 	Concurrency     int           `json:"concurrency"`
 	DefaultModel    string        `json:"default_model"`
+	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
 	InputPrice      float64       `json:"input_price"`      // USD per 1M input (non-cached) tokens
 	OutputPrice     float64       `json:"output_price"`     // USD per 1M output tokens
 	CacheReadPrice  float64       `json:"cache_read_price"` // USD per 1M cache-read tokens
 	CacheWritePrice float64       `json:"cache_write_price"` // USD per 1M cache-write tokens (overrides input_price when set)
 }
 
-// IsPi returns true if this provider is a Pi agent (kind == "pi").
+// IsAgent returns true if this provider is any coding agent (not a standard LLM).
+// Agents are identified by having a non-LLM kind.
+func (p *Provider) IsAgent() bool {
+	return p.EffectiveKind() != ProviderKindLLM
+}
+
+// IsPi returns true if this provider is a Pi coding agent.
 func (p *Provider) IsPi() bool {
-	return p.Kind == ProviderKindPi
+	return p.Kind == ProviderKindPi || p.URL == "pi://agent"
 }
 
 // EffectiveKind returns the provider kind, defaulting to "llm" for backward compatibility.

@@ -22,6 +22,7 @@ const (
 	WSTypeCheckpointPending  WSMessageType = "git_checkpoint_pending"
 	WSTypeCheckpointComplete WSMessageType = "git_checkpoint_complete"
 	WSTypeMergeResolution    WSMessageType = "merge_resolution"
+	WSTypeBuildProgress      WSMessageType = "build_progress"
 )
 
 // StreamEvent carries a typed payload to broadcast.

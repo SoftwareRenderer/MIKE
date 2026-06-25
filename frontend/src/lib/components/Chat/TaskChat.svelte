@@ -411,6 +411,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
                     createTaskMessage(projectId, taskId, 'system', `Pulling ${imgName}...`)
                         .catch(() => {});
+                } else if (data.state === 'building_image') {
+                    // Image is being built — show a system message
+                    createTaskMessage(projectId, taskId, 'system', 'Building sandbox image from Dockerfile...')
+                        .catch(() => {});
+                } else if (data.state === 'starting_container') {
+                    // Container is being created/started
+                    createTaskMessage(projectId, taskId, 'system', 'Starting sandbox container...')
+                        .catch(() => {});
                 } else if (data.state === 'running') {
                     // A new executor is starting (e.g., lazy-start after user follow-up).
                     // Clear pending tool calls and streaming state from any previous executor
@@ -436,6 +444,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
                     // Executor finished — clear streaming state
                     markNotStreaming();
+                }
+                break;
+            }
+            case 'build_progress': {
+                const data = event.data as { line: string };
+                // Append build/pull progress line as a system message
+                if (data.line) {
+                    createTaskMessage(projectId, taskId, 'system', data.line)
+                        .catch(() => {});
                 }
                 break;
             }

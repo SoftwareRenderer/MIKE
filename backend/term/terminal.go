@@ -119,12 +119,14 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 				imageToUse = sandbox.BaseImage
 			}
 		}
+		// Mount agent config dir if any coding agent is configured in Kanban
+		piAgentDir := tm.cfgStore.GetAgentConfigDir()
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation, memoryLimit)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)
@@ -356,7 +358,10 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 			if sandboxDockerfilePath != "" {
 				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Building sandbox image from Dockerfile...\n"})
 				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
-				if buildErr := tm.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); buildErr != nil {
+				if buildErr := tm.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
+					progressMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: line + "\n"})
+					_ = conn.Write(ctx, websocket.MessageText, progressMsg)
+				}); buildErr != nil {
 					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to build image: " + buildErr.Error() + "\n"})
 					_ = conn.Write(ctx, websocket.MessageText, errMsg)
 					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
@@ -366,7 +371,10 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 			} else {
 				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Pulling " + imageToUse + "...\n"})
 				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
-				if pullErr := tm.sandboxMgr.PullImage(imageToUse); pullErr != nil {
+				if pullErr := tm.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
+					progressMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: line + "\n"})
+					_ = conn.Write(ctx, websocket.MessageText, progressMsg)
+				}); pullErr != nil {
 					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to pull image: " + pullErr.Error() + "\n"})
 					_ = conn.Write(ctx, websocket.MessageText, errMsg)
 					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
@@ -375,6 +383,12 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 				}
 			}
 		}
+	}
+
+	// Notify user before container creation (can take several seconds)
+	if sandboxEnabled {
+		statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Starting sandbox container..."})
+		_ = conn.Write(ctx, websocket.MessageText, statusMsg)
 	}
 
 	session, err := tm.getOrCreate(sessionKey, taskID, worktreePath, projectID)
@@ -387,9 +401,10 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Relay ready message
-	readyMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "\u001b[2J\u001b[H"}) // clear screen
-	_ = conn.Write(ctx, websocket.MessageText, readyMsg)
+	// Shell is ready — switch to normal I/O relay. Status messages remain visible.
+	// Send a newline so shell output starts on a fresh line at column 0.
+	newlineMsg, _ := json.Marshal(types.TerminalMessage{Type: "output", Data: "\r\n"})
+	_ = conn.Write(ctx, websocket.MessageText, newlineMsg)
 
 	// Switch to normal I/O relay
 	session.mu.Lock()

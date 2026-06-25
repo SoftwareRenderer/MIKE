@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -304,6 +305,100 @@ func TestProjectImageName(t *testing.T) {
 	name3 := ProjectImageName("my/project")
 	if name3 != "sandbox-my-project" {
 		t.Fatalf("unexpected image name with slashes: %q", name3)
+	}
+}
+
+func TestPiAvailable(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-pi-available-task"
+
+	err := sm.Create(taskID, dir, "", false, 0, "")
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// `pi` binary likely doesn't exist in the default ubuntu image
+	// Just verify the check doesn't panic and returns a boolean
+	available := sm.PiAvailable(taskID)
+	t.Logf("pi available in container: %v", available)
+
+	// Test with non-existent task
+	if sm.PiAvailable("nonexistent-task") {
+		t.Error("expected PiAvailable to return false for non-existent task")
+	}
+}
+
+func TestStartProcess(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-startprocess-task"
+
+	err := sm.Create(taskID, dir, "", false, 0, "")
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Start a simple process that reads from stdin and echoes to stdout
+	ph, err := sm.StartProcess(taskID, "cat", nil)
+	if err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	defer ph.Close()
+
+	// Write to stdin
+	testInput := []byte("hello from process")
+	n, err := ph.Stdin.Write(testInput)
+	if err != nil {
+		t.Fatalf("write to stdin: %v", err)
+	}
+	if n != len(testInput) {
+		t.Fatalf("short write: wrote %d, expected %d", n, len(testInput))
+	}
+
+	// Close stdin to signal EOF
+	ph.Stdin.Close()
+
+	// Read from stdout
+	output, err := io.ReadAll(ph.Stdout)
+	if err != nil {
+		t.Fatalf("read from stdout: %v", err)
+	}
+	if string(output) != string(testInput) {
+		t.Fatalf("unexpected output: %q (expected %q)", string(output), string(testInput))
+	}
+
+	// Close stdout
+	ph.Stdout.Close()
+
+	// Wait for process to exit
+	_ = ph.Cmd.Wait()
+}
+
+func TestStartProcess_NonexistentTask(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	// Try to start a process in a non-existent container
+	_, err := sm.StartProcess("nonexistent-task", "echo", []string{"hello"})
+	if err == nil {
+		t.Fatal("expected error for non-existent task")
 	}
 }
 

@@ -274,6 +274,7 @@
             display_name: 'Pi Coding Agent',
             kind: 'pi',
             url: PI_SENTINEL_URL,
+            agent_config_dir: '~/.pi/agent',
             api_key: '',
             models: [],
             concurrency: 1,

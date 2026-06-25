@@ -448,7 +448,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			imageToUse = sandbox.ProjectImageName(projectName)
 			if !te.sandboxMgr.ImageReadyForProject(projectName) {
 				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
-				if err := te.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); err != nil {
+				if err := te.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
+					b.Send(types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+				}); err != nil {
 					task.StatusState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to build sandbox image: %v", err)
@@ -466,7 +468,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			if !te.sandboxMgr.ImageReady(imageToUse) {
 				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
-				if err := te.sandboxMgr.PullImage(imageToUse); err != nil {
+				if err := te.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
+					b.Send(types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+				}); err != nil {
 					task.StatusState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
@@ -477,12 +481,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 		}
-		// Determine if Pi agent dir should be mounted (only for Pi tasks)
+		// Determine if agent config dir should be mounted (only for agent tasks)
 			piAgentDir := ""
 			if serverURL == PiSentinelURL {
-				homeDir, _ := os.UserHomeDir()
-				piAgentDir = filepath.Join(homeDir, ".pi", "agent")
+				piAgentDir = te.configStore.GetAgentConfigDir()
 			}
+			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
 			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			task.StatusState = "failed"
 			task.Status = "review"
@@ -517,7 +521,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 	// Check if this task uses Pi agent
 	if serverURL == PiSentinelURL {
+		log.Printf("[exec] task=%s detected Pi agent (url=%s), calling executeTaskWithPi", task.ID, serverURL)
 		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, b, userMsgChan, sandboxEnabled)
+		log.Printf("[exec] task=%s executeTaskWithPi returned", task.ID)
 		return
 	}
 
@@ -1594,21 +1600,42 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		te.taskMu.Unlock()
 	}()
 
-	// Determine working directory and environment for Pi
-	cwd := worktreePath
-	var env []string
-
-	if sandboxEnabled {
-		// Pi runs inside the sandbox
-		// ~/.pi/agent/ is bind-mounted at /pi-config (handled by sandbox manager)
-		cwd = sandbox.SandboxMountPath
-		env = append(env, "PI_CODING_AGENT_DIR=/pi-config")
-	}
-
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
 
-	// Create Pi client
-	client, err := pi.NewClient(cwd, sessionName, env)
+	var client *pi.Client
+	var err error
+
+	if sandboxEnabled {
+		// Pre-flight: check if pi binary exists in the container
+		if !te.sandboxMgr.PiAvailable(task.ID) {
+			task.StatusState = "failed"
+			task.Status = "review"
+			task.Output = "Pi Coding Agent binary not found in sandbox container. Ensure the container image includes the `pi` binary."
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(b, task.ID, "pi binary not found in container", "pi_not_available")
+			return
+		}
+
+		log.Printf("[pi] task=%s creating client in container (session=%s)", task.ID, sessionName)
+		client, err = pi.NewClientInContainer(te.sandboxMgr, task.ID, sessionName)
+	} else {
+		// Pi runs on the host — point it at its config directory
+		cwd := worktreePath
+		var env []string
+		agentDir := te.configStore.GetAgentConfigDir()
+		if agentDir == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				agentDir = filepath.Join(homeDir, ".pi", "agent")
+			}
+		}
+		if agentDir != "" {
+			env = append(env, "PI_CODING_AGENT_DIR="+agentDir)
+		}
+		log.Printf("[pi] task=%s creating client (cwd=%s, session=%s)", task.ID, cwd, sessionName)
+		client, err = pi.NewClient(cwd, sessionName, env)
+	}
+
 	if err != nil {
 		task.StatusState = "failed"
 		task.Status = "review"
@@ -1620,7 +1647,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	}
 	defer client.Close()
 
-	log.Printf("[pi] task=%s client started (pid=%d, cwd=%s)", task.ID, client.PID(), cwd)
+	log.Printf("[pi] task=%s client started (pid=%d)", task.ID, client.PID())
 
 	// Discover the active model
 	modelCtx, modelCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1655,6 +1682,90 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
 		return
+	}
+
+	// Validate Pi startup: wait for agent_start event within a timeout.
+	// The prompt "response" event only confirms Pi accepted the prompt.
+	// agent_start confirms Pi actually began processing (connected to LLM, etc.).
+	// Without this, a hung Pi process would leave the UI stuck on "Awaiting LLM..." forever.
+	startupTimeout := 30 * time.Second
+	startupDeadline := time.Now().Add(startupTimeout)
+	startupValidated := false
+	for !startupValidated {
+		// Check if timeout has elapsed
+		if time.Now().After(startupDeadline) {
+			log.Printf("[pi] task=%s startup timeout (no agent_start within %v)", task.ID, startupTimeout)
+			client.Abort(ctx)
+			task.StatusState = "failed"
+			task.Status = "review"
+			task.Output = "Pi Coding Agent failed to start (timeout waiting for agent)"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(b, task.ID, "Pi failed to start within 30s", "pi_startup_timeout")
+			return
+		}
+
+		remaining := startupDeadline.Sub(time.Now())
+		timer := time.NewTimer(remaining)
+
+		select {
+		case event, ok := <-client.EventChan():
+			timer.Stop()
+			if !ok {
+				// Channel closed — Pi process exited
+				log.Printf("[pi] task=%s event channel closed during startup", task.ID)
+				client.Abort(ctx)
+				task.StatusState = "failed"
+				task.Status = "review"
+				task.Output = "Pi Coding Agent process exited unexpectedly"
+				te.store.UpdateTask(task)
+				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(b, task.ID, "Pi process exited", "pi_process_exited")
+				return
+			}
+			log.Printf("[pi] task=%s startup event: %s", task.ID, event.Type)
+			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
+				b.Send(streamEvent)
+			}
+			switch event.Type {
+			case "agent_start":
+				// Pi has started processing — startup validated
+				startupValidated = true
+			case "agent_end":
+				// Pi ended immediately after prompt — treat as failure
+				task.StatusState = "failed"
+				task.Status = "review"
+				task.Output = "Pi Coding Agent ended immediately after starting"
+				te.store.UpdateTask(task)
+				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(b, task.ID, "Pi ended immediately", "pi_ended_immediately")
+				return
+			case "response":
+				if !event.Success && event.Error != "" && event.Command == "prompt" {
+					// Prompt was rejected by Pi
+					task.StatusState = "failed"
+					task.Status = "review"
+					task.Output = fmt.Sprintf("Pi rejected prompt: %s", event.Error)
+					te.store.UpdateTask(task)
+					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(b, task.ID, event.Error, "pi_prompt_rejected")
+					return
+				}
+				// Prompt accepted (response success) — keep waiting for agent_start
+			default:
+				// Other events (turn_start, message_start, etc.) — keep waiting
+				}
+		case <-ctx.Done():
+			timer.Stop()
+			task.StatusState = "stopped"
+			task.Status = "review"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			return
+		case <-timer.C:
+			// Timeout — handled by the check at the top of the loop
+		}
 	}
 
 	// Event loop
