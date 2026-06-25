@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -17,6 +18,14 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+// toolCallMarker is the JSON substring used to identify tool_call events in buffered frames.
+var toolCallMarker = []byte(`"event":"tool_call"`)
+
+// bytesContains is a simple bytes.Contains that avoids []byte→string allocation.
+func bytesContains(haystack, needle []byte) bool {
+	return bytes.Contains(haystack, needle)
+}
 
 const (
 	// DefaultBufferSize is the default ring buffer size per connection.
@@ -527,7 +536,7 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 // loads the final tool_calls from the DB or receives fresh events in real-time.
 func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	// Skip tool_call events — they have incomplete args during streaming
-	if strings.Contains(string(frame), `"event":"tool_call"`) {
+	if bytesContains(frame, toolCallMarker) {
 		return
 	}
 

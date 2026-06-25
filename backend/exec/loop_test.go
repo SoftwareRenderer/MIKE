@@ -494,10 +494,10 @@ func TestPromptPath_SandboxDisabled(t *testing.T) {
 	}
 }
 
-// --- extractLastTurns Tests ---
+// --- ExtractLastTurns Tests ---
 
 func TestExtractLastTurns_Empty(t *testing.T) {
-	result := extractLastTurns(nil, 3)
+	result := ExtractLastTurns(nil, 3)
 	if len(result) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(result))
 	}
@@ -507,7 +507,7 @@ func TestExtractLastTurns_SystemOnly(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "You are a helpful assistant"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	if len(result) != 0 {
 		t.Errorf("expected 0 messages (system skipped), got %d", len(result))
 	}
@@ -519,7 +519,7 @@ func TestExtractLastTurns_SingleTurn(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	if len(result) != 2 {
 		t.Errorf("expected 2 messages, got %d", len(result))
 	}
@@ -538,7 +538,7 @@ func TestExtractLastTurns_ThreeTurns(t *testing.T) {
 		{Role: "user", Content: "Turn 3 user"},
 		{Role: "assistant", Content: "Turn 3 assistant"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	if len(result) != 6 {
 		t.Errorf("expected 6 messages (3 turns), got %d", len(result))
 	}
@@ -562,7 +562,7 @@ func TestExtractLastTurns_MoreThanThreeTurns(t *testing.T) {
 		{Role: "user", Content: "Turn 5"},
 		{Role: "assistant", Content: "A5"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	if len(result) != 6 {
 		t.Errorf("expected 6 messages (last 3 turns), got %d", len(result))
 	}
@@ -588,7 +588,7 @@ func TestExtractLastTurns_WithToolCalls(t *testing.T) {
 		{Role: "user", Content: "Thanks"},
 		{Role: "assistant", Content: "You're welcome"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	// Should have 2 turns (turn 1 with tool calls, turn 2)
 	if len(result) < 4 {
 		t.Errorf("expected at least 4 messages, got %d", len(result))
@@ -602,21 +602,21 @@ func TestExtractLastTurns_IncompleteTurn(t *testing.T) {
 		{Role: "assistant", Content: "A1"},
 		{Role: "user", Content: "Turn 2 (no response yet)"},
 	}
-	result := extractLastTurns(messages, 3)
+	result := ExtractLastTurns(messages, 3)
 	// Should include the incomplete turn
 	if len(result) != 3 {
 		t.Errorf("expected 3 messages (1 full turn + 1 incomplete), got %d", len(result))
 	}
 }
 
-// --- formatConversationTurns Tests ---
+// --- FormatConversationTurns Tests ---
 
 func TestFormatConversationTurns_Basic(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there"},
 	}
-	result := formatConversationTurns(messages)
+	result := FormatConversationTurns(messages)
 	if result != "User: Hello\n\nAssistant: Hi there\n\n" {
 		t.Errorf("unexpected output: %q", result)
 	}
@@ -630,7 +630,7 @@ func TestFormatConversationTurns_WithToolResult(t *testing.T) {
 		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
 		{Role: "tool", Content: "file contents"},
 	}
-	result := formatConversationTurns(messages)
+	result := FormatConversationTurns(messages)
 	if result == "" {
 		t.Error("expected non-empty output")
 	}
@@ -647,7 +647,7 @@ func TestFormatConversationTurns_TruncatesLongToolResults(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "tool", Content: longContent},
 	}
-	result := formatConversationTurns(messages)
+	result := FormatConversationTurns(messages)
 	// Output should be: "[Tool result]" + 500 chars + "..." + "\n\n" = ~511 chars
 	// Full content would be: "[Tool result]" + 600 chars + "\n\n" = ~613 chars
 	if len(result) > 520 {

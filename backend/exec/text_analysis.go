@@ -6,6 +6,9 @@ import (
 	"unicode"
 )
 
+var spaceRe = regexp.MustCompile(`\s+`)
+var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
+
 // phraseDetector tracks sentences/phrases seen within a single streaming response
 // to detect exact repetition in real-time.
 type phraseDetector struct {
@@ -136,7 +139,6 @@ func normalizePhrase(s string) string {
 	// Trim trailing punctuation
 	s = strings.TrimRight(s, ".,!?;:")
 	// Collapse internal whitespace
-	spaceRe := regexp.MustCompile(`\s+`)
 	s = spaceRe.ReplaceAllString(s, " ")
 	return s
 }
@@ -172,8 +174,7 @@ func (d *loopDetector) detectTextLoop() bool {
 
 // wordSet tokenizes text into a set of meaningful words (lowercased, stop words removed).
 func wordSet(text string) map[string]bool {
-	tokenRe := regexp.MustCompile(`[a-zA-Z]{2,}`)
-	matches := tokenRe.FindAllString(text, -1)
+	matches := wordTokenRe.FindAllString(text, -1)
 
 	words := make(map[string]bool)
 	for _, m := range matches {
