@@ -540,14 +540,10 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 }
 
 // bufferTask adds a raw JSON frame to the per-task ring buffer.
-// Skips tool_call events because they carry partial (streaming) JSON args
-// that would cause parse errors on replay. The reconnecting client either
-// loads the final tool_calls from the DB or receives fresh events in real-time.
+// For tool_call events, keeps only the last delta per tool_id (replaces earlier
+// deltas) so the reconnecting client gets the final tool_call state without
+// duplicates. Non-tool_call events are appended normally.
 func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
-	// Skip tool_call events — they have incomplete args during streaming
-	if bytesContains(frame, toolCallMarker) {
-		return
-	}
 	// Skip large frames to prevent memory exhaustion
 	if len(frame) > maxFrameBufferSize {
 		return
@@ -559,6 +555,15 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	if !ok {
 		buf = make([][]byte, 0, asm.taskBufSize)
 	}
+
+	// For tool_call events, replace any existing frame with the same tool_id
+	// so only the last delta is kept (avoids duplicate tool calls on replay).
+	if bytesContains(frame, toolCallMarker) {
+		if toolID := extractToolID(frame); toolID != "" {
+			buf = removeFrameWithToolID(buf, toolID)
+		}
+	}
+
 	if len(buf) >= asm.taskBufSize {
 		buf = buf[1:]
 	}
@@ -569,13 +574,54 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	asm.taskBuffers[taskKey] = buf
 }
 
-// getTaskBuffer returns and clears the per-task ring buffer.
+// extractToolID extracts the tool_id from a task_event frame containing a tool_call event.
+func extractToolID(frame []byte) string {
+	var parsed struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(frame, &parsed); err != nil {
+		return ""
+	}
+	var data struct {
+		ToolID string `json:"tool_id"`
+	}
+	if err := json.Unmarshal(parsed.Data, &data); err != nil {
+		return ""
+	}
+	return data.ToolID
+}
+
+// removeFrameWithToolID removes any frame from buf that contains the given tool_id.
+func removeFrameWithToolID(buf [][]byte, toolID string) [][]byte {
+	filtered := make([][]byte, 0, len(buf))
+	for _, f := range buf {
+		if !frameHasToolID(f, toolID) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
+}
+
+// frameHasToolID checks if a task_event frame contains a tool_call with the given tool_id.
+func frameHasToolID(frame []byte, toolID string) bool {
+	if toolID == "" {
+		return false
+	}
+	// Fast path: check if the tool_id appears in the raw JSON
+	return bytesContains(frame, []byte(`"tool_id":"`+toolID+`"`))
+}
+
+// getTaskBuffer returns the per-task ring buffer without clearing it.
+// The buffer is cleared only on complete/terminal status events (bufferTask).
+// This allows multiple clients (or reconnections) to receive the buffer.
 func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	buf := asm.taskBuffers[taskKey]
-	asm.taskBuffers[taskKey] = nil
-	return buf
+	// Copy so concurrent access is safe
+	result := make([][]byte, len(buf))
+	copy(result, buf)
+	return result
 }
 
 // clearTaskBuffer removes the per-task ring buffer.

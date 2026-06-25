@@ -4,6 +4,7 @@
     import type { StreamEvent, Provider, Thread } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent, taskDiffStats as taskDiffStatsStore } from '$lib/store';
+    import { getAppStreamRef } from '$lib/stream-ref';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -278,16 +279,28 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     entry.content = '';
                 }
                 if (!entry.toolCalls) entry.toolCalls = [];
-                entry.toolCalls.push({
-                    toolId: data.tool_id,
-                    toolName: data.tool_name,
-                    displayName: data.tool_display_name,
-                    args: data.args || {},
-                    raw_args: data.raw_args,
-                    sandbox: data.sandbox,
-                    path: data.path,
-                    isPending: true
-                });
+                // Dedup: if a tool_call with this tool_id already exists (from buffer replay
+                // of an earlier streaming delta), update it in-place instead of pushing a duplicate.
+                const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
+                if (existing) {
+                    existing.toolName = data.tool_name;
+                    existing.displayName = data.tool_display_name;
+                    existing.args = data.args || {};
+                    existing.raw_args = data.raw_args;
+                    existing.sandbox = data.sandbox;
+                    existing.path = data.path;
+                } else {
+                    entry.toolCalls.push({
+                        toolId: data.tool_id,
+                        toolName: data.tool_name,
+                        displayName: data.tool_display_name,
+                        args: data.args || {},
+                        raw_args: data.raw_args,
+                        sandbox: data.sandbox,
+                        path: data.path,
+                        isPending: true
+                    });
+                }
                 entry.isStreaming = true;
                 activeToolCalls.set(data.tool_id, { entryId: entry.id });
                 scroll();
@@ -636,8 +649,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             checkpointCommitHashes = hashes;
 
-            // Filter out title generation messages (invisible, used for stats only)
-            entries = messages.filter(m => m.role !== 'title').map(m => {
+            // Build entries from DB messages
+            const dbEntries = messages.filter(m => m.role !== 'title').map(m => {
                 const base = { threadId: m.thread_id || undefined };
                 // Restore error entries from persisted data
                 if (m.role === 'error') {
@@ -691,7 +704,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 };
             });
             // Merge toolCalls entries into the preceding assistant entry
-            entries = mergeToolCallsIntoAssistant(entries);
+            const mergedDbEntries = mergeToolCallsIntoAssistant(dbEntries);
+            // Merge with existing entries (e.g., from buffer replay).
+            // DB entries have backend UUIDs; buffer entries have random genId() IDs.
+            // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
+            const dbIds = new Set(messages.map(m => m.id));
+            const existingNonDb = entries.filter(e => !dbIds.has(e.id));
+            entries = [...mergedDbEntries, ...existingNonDb];
             // Restore context usage from the last assistant message
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
             if (lastAssistant?.stats?.prompt_tokens) {
@@ -1340,7 +1359,31 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 }
             }
         }
+        // 1. Set up task event handler FIRST (before subscribing to task).
+        const unsubTaskEvent = taskEvent.subscribe((event) => {
+            if (event && event.task_id === taskId) {
+                handleEvent({ type: event.type, data: event.data });
+            }
+        });
+
+        // 2. Subscribe to this task directly (triggers buffer replay from server).
+        // Handler is already set up above, so buffer events won't be missed.
+        // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
+        const stream = getAppStreamRef();
+        if (stream) {
+            stream.subscribeTask(projectId, taskId);
+        }
+
+        // 3. If task is actively streaming, pause for buffer replay to arrive.
+        // Buffer events travel: server WS → onTaskEvent → taskEvent.set → handleEvent.
+        // For idle/completed tasks, no buffer exists so no delay needed.
+        if (taskStatus === 'in_progress' || taskStatus === 'review') {
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+        // 4. Load history from DB (merges with buffer entries via ID-based dedup).
         await loadHistory();
+
         // Override model selection with task-specific values if set
         try {
             const task = await (await import('$lib/api')).getTask(projectId, taskId);
@@ -1357,12 +1400,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Task may not exist yet
         }
         connect();
-        // Subscribe to task events from the app stream
-        const unsubTaskEvent = taskEvent.subscribe((event) => {
-            if (event && event.task_id === taskId) {
-                handleEvent({ type: event.type, data: event.data });
-            }
-        });
         // Scroll to bottom after history is loaded and DOM has rendered.
         // scroll() uses requestAnimationFrame internally so the DOM update is ready.
         scroll();

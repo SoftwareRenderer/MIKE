@@ -8,6 +8,7 @@ import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
+    import { setAppStreamRef } from '$lib/stream-ref';
     let TerminalPanelComponent = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
@@ -346,6 +347,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         setOfflineStatus(!connected);
                     },
                 });
+                // Expose appStream so TaskChat can subscribe after handler setup
+                setAppStreamRef(appStream);
                 await loadAppData();
             }
         } catch (e) {
@@ -822,7 +825,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         left: 0;
         right: 0;
         z-index: 10001;
-        background: #44403c;
+        background: #552d00;
         color: #d6d3d1;
         text-align: center;
         padding: 6px 16px;
