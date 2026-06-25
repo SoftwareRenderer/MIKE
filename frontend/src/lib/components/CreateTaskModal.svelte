@@ -49,6 +49,7 @@
     // $configStore syntax auto-subscribes to store changes
     let cfg = $state(null);
     const unsubConfig = configStore.subscribe(val => { cfg = val; });
+    let configLoaded = $state(false);
     $effect(() => {
         if (cfg?.providers) {
             providers = cfg.providers;
@@ -65,6 +66,11 @@
                     selectedModel = _getModelName(firstProvider.models[0]);
                 }
             }
+        }
+        // Set default plan mode from config on first load only
+        if (cfg && !configLoaded) {
+            configLoaded = true;
+            planMode = cfg.default_plan_mode ?? false;
         }
     });
 

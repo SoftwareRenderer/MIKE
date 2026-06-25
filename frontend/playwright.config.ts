@@ -50,7 +50,7 @@ export default defineConfig({
       },
       // Config-modifying suites run on isolated server (port 3001, own DB)
       // Serialized to avoid races between suites that modify shared config
-      testMatch: ['**/model-selector.spec.ts', '**/settings-redesign.spec.ts', '**/debug-cards.spec.ts', '**/settings-model-delete.spec.ts', '**/settings-reasoning-effort.spec.ts', '**/reasoning-effort.spec.ts', '**/sandbox-toggle.spec.ts', '**/sandbox-tool-calls.spec.ts'],
+      testMatch: ['**/model-selector.spec.ts', '**/settings-redesign.spec.ts', '**/debug-cards.spec.ts', '**/settings-model-delete.spec.ts', '**/settings-reasoning-effort.spec.ts', '**/reasoning-effort.spec.ts', '**/sandbox-toggle.spec.ts', '**/sandbox-tool-calls.spec.ts', '**/default-plan-mode.spec.ts'],
       fullyParallel: false,
       workers: 1,
     },
