@@ -147,7 +147,45 @@ export function __debugOfflineStatus(): boolean {
     return isOffline;
 }
 
-/** Replay all queued actions in order. Stops on first failure. */
+/** Flush queued actions via HTTP immediately (e.g., on page load). Independent of WebSocket state. */
+export async function flushQueueNow(): Promise<void> {
+    if (flushPromise) return flushPromise;
+    if (actionQueue.length === 0) return;
+
+    flushPromise = (async () => {
+        const idMap = new Map<string, string>();
+        const resolvedTasks = new Map<string, any>();
+
+        while (actionQueue.length > 0) {
+            const action = actionQueue[0];
+            try {
+                const result = await executeQueuedAction(action, idMap);
+                if (action.type === 'createTask' && result && action.params.taskData?.id) {
+                    const optId = action.params.taskData.id;
+                    idMap.set(optId, result.id);
+                    resolvedTasks.set(optId, result);
+                }
+                if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
+                    action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
+                    action.type === 'commitAndDone' || action.type === 'updateTask')) {
+                    resolvedTasks.set(result.id, result);
+                }
+                actionQueue.shift();
+                saveQueue();
+            } catch (e) {
+                console.error('[Queue] Failed to flush action, skipping:', action.type, e);
+                actionQueue.shift();
+                saveQueue();
+            }
+        }
+
+        notifyQueueFlushed([], resolvedTasks);
+        flushPromise = null;
+    })();
+    return flushPromise;
+}
+
+/** Replay all queued actions in order. Triggered on WebSocket reconnect. */
 async function flushQueue() {
     if (flushPromise) return flushPromise;
     if (actionQueue.length === 0) return;
@@ -674,10 +712,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
 
     let hasConnectedOnce = false;
 
-    function connect(sync = false) {
+    function connect() {
         if (isClosed) return;
-        const syncParam = sync ? '?sync=1' : '';
-        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream${syncParam}`);
+        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream`);
         currentWs = ws;
 
         ws.onopen = () => {
@@ -740,7 +777,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             callbacks.onConnected?.(false);
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
             reconnectAttempts++;
-            reconnectTimer = setTimeout(() => connect(true), delay);
+            reconnectTimer = setTimeout(() => connect(), delay);
         };
 
         ws.onerror = () => {

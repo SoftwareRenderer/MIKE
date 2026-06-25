@@ -127,4 +127,60 @@ test.describe('Offline Action Queue', () => {
     });
     expect(queueAfterRefresh).toBe(0);
   });
+
+  test('should immediately reconnect and flush queue after page refresh', async ({ page }) => {
+    test.setTimeout(60000);
+
+    // beforeEach already injected WS tracker
+    await expect(page.locator('.reconnecting-banner')).not.toBeVisible({ timeout: 10000 });
+
+    await createAndOpenTask(page, `immediate reconnect test ${Date.now()}`);
+    const chatReady = await waitForChatForm(page);
+    if (!chatReady) test.skip();
+    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
+
+    // Disconnect WebSocket
+    await page.evaluate(() => {
+      const wss = (window as any).__webSockets as WebSocket[];
+      for (const ws of wss) {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+      }
+    });
+    await expect(page.locator('.reconnecting-banner')).toBeVisible({ timeout: 10000 });
+
+    // Send a message while offline (queues it)
+    const chatTextarea = page.locator('textarea[placeholder*="message"]');
+    await chatTextarea.fill('immediate reconnect message');
+    await chatTextarea.press('Enter');
+    await expect(page.locator('.chat-message.user').last()).toBeVisible({ timeout: 5000 });
+
+    // Verify queue is persisted
+    const queueBeforeRefresh = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('kanban-offline-queue');
+        return raw ? JSON.parse(raw).length : 0;
+      } catch { return -1; }
+    });
+    expect(queueBeforeRefresh).toBeGreaterThan(0);
+
+    // Refresh the page — simulates returning after extended offline time
+    await page.reload();
+    // After reload, page may be in task detail or home view
+    await page.waitForSelector('.task-detail-page', { timeout: 10000 }).catch(async () => {
+      await page.waitForSelector('.project-item', { timeout: 10000 });
+    });
+
+    // Banner should appear briefly (WS connecting) then disappear promptly
+    // The queue should flush via HTTP (flushQueueNow) without waiting for WS
+    await expect(page.locator('.reconnecting-banner')).not.toBeVisible({ timeout: 15000 });
+
+    // Queue should be empty (flushed via HTTP on page load)
+    const queueAfterRefresh = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('kanban-offline-queue');
+        return raw ? JSON.parse(raw).length : 0;
+      } catch { return -1; }
+    });
+    expect(queueAfterRefresh).toBe(0);
+  });
 });

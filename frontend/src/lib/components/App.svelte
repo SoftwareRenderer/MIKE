@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, onQueueFlushed } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -204,6 +204,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         try {
             // Restore offline action queue from localStorage
             loadQueue();
+            // Flush queued actions via HTTP immediately (don't wait for WebSocket to connect)
+            flushQueueNow();
             // After offline queue is flushed, replace optimistic tasks with real ones from HTTP responses
             onQueueFlushed((optimisticIds, resolvedTasks) => {
                 // Replace optimistic tasks with their latest real state
