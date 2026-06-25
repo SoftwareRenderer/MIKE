@@ -784,14 +784,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         }
 
         :global(.action-btn),
-        :global(.btn-icon),
         :global(.icon-btn),
         :global(.toggle-btn),
         :global(.close-btn),
         :global(.btn-back),
         :global(.btn-send),
-        :global(.btn-stop),
-        :global(.btn-icon-sm) {
+        :global(.btn-stop) {
             min-width: 44px;
             min-height: 44px;
         }

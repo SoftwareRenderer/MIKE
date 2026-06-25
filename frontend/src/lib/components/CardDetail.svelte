@@ -738,14 +738,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 </div>
             </div>
             <div class="header-actions">
-                <button class="btn-icon" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <button class="icon-btn" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                         <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
-                <button class="btn-icon" onclick={handleDelete} aria-label="Delete task" title="Delete task">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <button class="icon-btn" onclick={handleDelete} aria-label="Delete task" title="Delete task">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
@@ -1009,24 +1009,27 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .header-actions {
         display: flex;
         align-items: center;
-        gap: 2px;
+        gap: 8px;
     }
-    .btn-icon,
-    .btn-icon-sm {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        display: flex;
+    .icon-btn {
+        padding: 6px 12px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        font-size: 0.875rem;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
+        border: none;
+        cursor: pointer;
+        color: inherit;
     }
-    .btn-icon { padding: 6px; }
-    .btn-icon-sm { padding: 2px; }
-    .btn-icon:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
-    .btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
-    .btn-icon:disabled:hover { background: none; color: var(--color-text-secondary); }
+    .icon-btn:hover:not(:disabled) {
+        background: var(--color-accent);
+    }
+    .icon-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
     .columns {
         display: flex;
         flex: 1;
@@ -1378,8 +1381,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .column-diff {
         min-width: 0;
     }
-    .btn-icon-sm:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
-    .btn-icon-sm:disabled { opacity: 0.4; cursor: not-allowed; }
     .diff-content {
         flex: 1;
         display: flex;
