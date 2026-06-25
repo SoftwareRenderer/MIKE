@@ -189,7 +189,8 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 	b.add(conn)
 	defer b.remove(conn)
 
-	// Ping/pong keepalive to prevent proxy timeouts
+	// Ping/pong keepalive to prevent proxy timeouts.
+	// done channel signals both the pinger and the sync-buffer goroutine to stop.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -207,15 +208,22 @@ func (sm *StreamManager) HandleStream(w http.ResponseWriter, r *http.Request, ta
 		}
 	}()
 
-	// Send buffered events on reconnect
+	// Send buffered events on reconnect (async so read loop starts immediately).
 	if msg := r.URL.Query().Get("sync"); msg != "" {
-		buf := b.getBuffer(0)
-		for _, m := range buf {
-			frame, _ := json.Marshal(m)
-			if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
-				return
+		go func() {
+			buf := b.getBuffer(0)
+			for _, m := range buf {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				frame, _ := json.Marshal(m)
+				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+					return
+				}
 			}
-		}
+		}()
 	}
 
 	// Keep reading to detect client close.

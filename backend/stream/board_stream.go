@@ -379,41 +379,11 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 		bsm.startPoller(projectID)
 	}
 
-	// Send initial diff for all tasks in this project
-	if bsm.store != nil && bsm.worktreeMgr != nil {
-		tasks, err := bsm.store.GetTasksByProject(projectID)
-		if err == nil {
-			for _, task := range tasks {
-				baseRef := bsm.getDiffBaseline(task)
-				if diffResult, err := bsm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-					untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
-					for i, u := range diffResult.Untracked {
-						untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
-					}
-					bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
-				}
-			}
-		}
-	}
-
-	// Send initial branch to this client
-	if bsm.worktreeMgr != nil {
-		branch, _ := bsm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-		branch = strings.TrimSpace(branch)
-		if branch != "" {
-			msg, _ := json.Marshal(map[string]interface{}{
-				"type":   "project_branch",
-				"branch": branch,
-			})
-			bsm.writeMu.Lock()
-			conn.Write(context.Background(), websocket.MessageText, msg)
-			bsm.writeMu.Unlock()
-		}
-	}
-
-	// Ping/pong keepalive to prevent proxy timeouts
+	// Ping/pong keepalive to prevent proxy timeouts.
+	// done channel signals both the pinger and the initial-data goroutine to stop.
 	done := make(chan struct{})
 	defer close(done)
+
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -428,6 +398,46 @@ func (bsm *BoardStreamManager) HandleStream(w http.ResponseWriter, r *http.Reque
 				}
 			case <-done:
 				return
+			}
+		}
+	}()
+
+	// Send initial data in a goroutine so the read loop starts immediately.
+	// This lets the connection process client pings and detect disconnects
+	// even while git diffs are being computed.
+	go func() {
+		if bsm.store != nil && bsm.worktreeMgr != nil {
+			tasks, err := bsm.store.GetTasksByProject(projectID)
+			if err == nil {
+				for _, task := range tasks {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					baseRef := bsm.getDiffBaseline(task)
+					if diffResult, err := bsm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+						untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+						for i, u := range diffResult.Untracked {
+							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+						}
+						bsm.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+					}
+				}
+			}
+		}
+
+		if bsm.worktreeMgr != nil {
+			branch, _ := bsm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+			branch = strings.TrimSpace(branch)
+			if branch != "" {
+				msg, _ := json.Marshal(map[string]interface{}{
+					"type":   "project_branch",
+					"branch": branch,
+				})
+				bsm.writeMu.Lock()
+				conn.Write(context.Background(), websocket.MessageText, msg)
+				bsm.writeMu.Unlock()
 			}
 		}
 	}()
