@@ -117,7 +117,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{tc.toolName === 'task_complete' ? 'Writing Summary' : 'Writing'}{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}
@@ -151,7 +151,7 @@
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
             {/if}
         {:else if tc.toolName === 'task_complete' && tc.args && tc.args.summary}
-            <pre class="tool-result tool-result-summary">{tc.args.summary as string}</pre>
+            <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
         {:else if tc.result && tc.result.trim()}
             <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
         {/if}
@@ -236,8 +236,13 @@
     .tool-result-error { color: var(--color-status-red); }
     .tool-result-summary {
         font-family: inherit;
-        color: var(--color-text-secondary);
-        font-style: italic;
+        font-size: 1rem;
+        line-height: 1.875rem;
+        color: var(--color-text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: none;
+        overflow-y: visible;
     }
     .tool-create-task {
         display: flex;
