@@ -22,6 +22,11 @@ import (
 // toolCallMarker is the JSON substring used to identify tool_call events in buffered frames.
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
+// maxFrameBufferSize is the maximum size of a single frame to buffer.
+// Frames larger than this (e.g., tool_result with large output, full diffs)
+// are skipped to prevent ring buffers from consuming excessive memory.
+const maxFrameBufferSize = 256 * 1024 // 256KB
+
 // bytesContains is a simple bytes.Contains that avoids []byte→string allocation.
 func bytesContains(haystack, needle []byte) bool {
 	return bytes.Contains(haystack, needle)
@@ -504,7 +509,11 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 // -- Ring buffer --
 
 // bufferRaw adds a raw JSON frame to all clients' ring buffers.
+// Skips frames larger than maxFrameBufferSize to prevent memory exhaustion.
 func (asm *AppStreamManager) bufferRaw(frame []byte) {
+	if len(frame) > maxFrameBufferSize {
+		return
+	}
 	asm.mu.RLock()
 	defer asm.mu.RUnlock()
 	for _, client := range asm.clients {
@@ -537,6 +546,10 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	// Skip tool_call events — they have incomplete args during streaming
 	if bytesContains(frame, toolCallMarker) {
+		return
+	}
+	// Skip large frames to prevent memory exhaustion
+	if len(frame) > maxFrameBufferSize {
 		return
 	}
 

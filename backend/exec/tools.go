@@ -44,7 +44,19 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
+		// Truncate large files to prevent excessive memory usage in WebSocket frames.
+		// The LLM doesn't need the full content of huge files; the truncation notice
+		// informs it that more content exists beyond what was returned.
+		const maxReadSize = 50 * 1024 // 50KB
+		truncated := false
+		if len(data) > maxReadSize {
+			data = data[:maxReadSize]
+			truncated = true
+		}
 		content := string(data)
+		if truncated {
+			content += "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
+		}
 		// Apply offset/limit if provided
 		if offset, ok := args["offset"].(float64); ok && int(offset) > 0 {
 			lines := strings.Split(content, "\n")
@@ -211,6 +223,12 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 
 		if err != nil {
 			return fmt.Sprintf("Failed: %v\n%s", err, out), false
+		}
+		// Truncate large outputs to prevent excessive memory usage in WebSocket frames.
+		// The truncation notice informs the LLM that more output exists.
+		const maxOutputSize = 50 * 1024 // 50KB
+		if len(out) > maxOutputSize {
+			out = out[:maxOutputSize] + "\n\n... (output truncated at 50KB) ..."
 		}
 		return out, true
 	case "task_complete":
