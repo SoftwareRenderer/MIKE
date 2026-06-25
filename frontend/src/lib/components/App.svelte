@@ -2,7 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -84,6 +84,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let cfg: Config | null = $state(null);
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
+    let wsConnected = $state(false);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, string> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
@@ -201,6 +202,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     async function loadAppData() {
         try {
+            // Restore offline action queue from localStorage
+            loadQueue();
             const projs = await getProjects();
             projects = projs || [];
             projectsStore.set(projects);
@@ -307,6 +310,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             taskEvent.set({ task_id, ...event });
                         }
+                    },
+                    onConnected: (connected) => {
+                        wsConnected = connected;
+                        setOfflineStatus(!connected);
                     },
                 });
                 await loadAppData();
@@ -535,7 +542,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         await loadAppData();
     }} />
 {:else}
-<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal}>
+<!-- WebSocket reconnecting banner -->
+{#if !wsConnected}
+    <div class="reconnecting-banner" role="status" aria-live="polite">
+        <span class="reconnecting-spinner"></span>
+        Reconnecting... Changes queued.
+    </div>
+{/if}
+<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal} class:ws-disconnected={!wsConnected}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -547,7 +561,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
         <div class="sidebar-header">
-            <h2 class:collapsed>Kanban</h2>
+            <h2 class:collapsed>Projects</h2>
             {#if isMobile}
                 <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
             {:else}
@@ -765,6 +779,53 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 </svelte:head>
 
 <style>
+    /* -- Reconnecting banner -- */
+    .reconnecting-banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10001;
+        background: #44403c;
+        color: #d6d3d1;
+        text-align: center;
+        padding: 6px 16px;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        animation: slide-down 0.2s ease-out;
+    }
+    .reconnecting-spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(214, 211, 209, 0.3);
+        border-top-color: #d6d3d1;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+    @keyframes slide-down {
+        from {
+            transform: translateY(-100%);
+        }
+        to {
+            transform: translateY(0);
+        }
+    }
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+    /* Shift app content down when banner is visible */
+    .app.ws-disconnected {
+        padding-top: 30px;
+    }
+
     /* -- Global mobile styles -- */
     @media (max-width: 768px) {
         :global(input),

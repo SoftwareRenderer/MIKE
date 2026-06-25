@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import ChatForm from './ChatForm.svelte';
@@ -53,6 +53,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             duration: number;
         };
         createdAt?: string;
+        queued?: boolean; // true if message is queued (sent while offline)
     }
 
     type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> };
@@ -908,7 +909,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const updated = await moveTask(projectId, taskId, 'in_progress');
                 boardStore.update(b => {
                     if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                    const existing = b.tasks.find(t => t.id === taskId);
+                    const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
                 });
             } catch (e) {
                 showToast(String(e));
@@ -918,7 +921,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         // Remove all error entries (cleared by next user action)
         entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
-        entries = [...entries, { id: genId(), role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString() }];
+        const entryId = genId();
+        const isOfflineNow = getOfflineStatus();
+        entries = [...entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
         // Don't pre-create — let the first token/tool_call event create the assistant entry
         lastSentMessage = msg;
         // Send with model info for lazy-start
@@ -1018,7 +1023,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const updated = await startTask(projectId, taskId);
                 boardStore.update(b => {
                     if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                    const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
+                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
                 });
             } catch (e) {
                 showToast(String(e), 'error');
@@ -1035,7 +1041,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const updated = await startTask(projectId, taskId);
             boardStore.update(b => {
                 if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
+                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
             });
         } catch (e) {
             showToast(String(e), 'error');
@@ -1075,7 +1082,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
             boardStore.update(b => {
                 if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
+                const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
+                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
             });
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
@@ -1373,6 +1381,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     onDestroy(() => {
         destroyed = true;
         if (inputTimeout) clearTimeout(inputTimeout);
+        unsubQueue?.();
+    });
+
+    // Clear queued flags when queue changes (actions flushed)
+    let unsubQueue: (() => void) | null = null;
+    onMount(() => {
+        unsubQueue = onQueueChanged(() => {
+            // When queue changes, check if any queued messages have been flushed
+            // Clear queued flag for messages that are no longer in the queue
+            for (const entry of entries) {
+                if (entry.queued) {
+                    entry.queued = false;
+                }
+            }
+        });
     });
 </script>
 
@@ -1478,7 +1501,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </div>
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} queued={entry.queued || false} />
                 {/if}
             {/each}
         {/if}

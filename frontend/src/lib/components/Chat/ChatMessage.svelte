@@ -35,9 +35,10 @@
         isFirstUserMessage?: boolean;
         taskStatus?: string;
         onNavigateTask?: (taskId: string) => void;
+        queued?: boolean; // true if message is pending (sent while offline)
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false }: Props = $props();
 
     let reasoningUserToggled = $state(false);
     let reasoningUserValue = $state(false);
@@ -290,6 +291,14 @@
                 {/if}
                 <div class="message-bubble">
                     <div class="message-text">{@html userHtml}</div>
+                    {#if queued}
+                        <span class="queued-indicator" title="Queued (will send when reconnected)">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                        </span>
+                    {/if}
                 </div>
                 <div class="message-actions user-actions">
                     {#if timestampInfo.display}
@@ -437,6 +446,16 @@
         background: color-mix(in srgb, var(--color-accent) 8%, transparent);
         border-radius: 1.125rem;
         padding: 8px 14px;
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+    }
+    .queued-indicator {
+        flex-shrink: 0;
+        color: var(--color-text-tertiary);
+        opacity: 0.7;
+        display: flex;
+        align-items: center;
     }
     .assistant .message-bubble {
         max-width: 100%;

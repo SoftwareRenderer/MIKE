@@ -2,10 +2,21 @@
     import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, onQueueChanged } from '$lib/api';
     import { fade } from 'svelte/transition';
+    import { onMount, onDestroy } from 'svelte';
 
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
+
+    // Track if this task has queued offline actions (for diagonal fade effect)
+    let taskHasQueuedActions = $state(false);
+    function checkQueuedActions() {
+        taskHasQueuedActions = getQueuedTaskIds().has(task.id);
+    }
+    onMount(() => {
+        checkQueuedActions();
+        return onQueueChanged(() => checkQueuedActions());
+    });
 
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
@@ -425,10 +436,9 @@
         if (!projectId) return;
         try {
             const updated = await stopTask(projectId, task.id);
-            boardStore.update(b => {
-                if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
-            });
+            // Apply optimistic update to task object
+            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
+            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
         } catch (err) {
             console.error('Failed to pause task:', err);
         }
@@ -439,10 +449,8 @@
         if (!projectId) return;
         try {
             const updated = await resumeTask(projectId, task.id);
-            boardStore.update(b => {
-                if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
-            });
+            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
+            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
         } catch (err) {
             console.error('Failed to resume task:', err);
         }
@@ -461,10 +469,8 @@
             } else {
                 updated = await moveTask(projectId, task.id, nextStatus);
             }
-            boardStore.update(b => {
-                if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) };
-            });
+            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
+            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
         } catch (err) {
             console.error('Failed to move task:', err);
         }
@@ -537,6 +543,7 @@
     class:is-expanded={expanded}
     class:is-subtask={inline && !!task.parent_task_id}
     class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id}
+    class:queued={taskHasQueuedActions}
     data-task-id={task.id}
     draggable={!isMobile}
     onmousedown={handleMouseDown}
@@ -845,6 +852,26 @@
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;
+    }
+    /* Diagonal fade overlay for tasks with queued offline actions */
+    .card.queued::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+            135deg,
+            transparent 0%,
+            transparent 35%,
+            rgba(0, 0, 0, 0.25) 65%,
+            rgba(0, 0, 0, 0.5) 100%
+        );
+        pointer-events: none;
+        z-index: 1;
+    }
+    .card.queued > * {
+        position: relative;
+        z-index: 2;
     }
     .card.has-children:not(.is-subtask) {
         border-left: 3px solid var(--column-color, var(--color-border));

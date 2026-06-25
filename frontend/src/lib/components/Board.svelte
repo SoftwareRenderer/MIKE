@@ -172,10 +172,17 @@
             const willConsolidate = task.parent_task_id &&
                 tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
-                boardStore.update(b => {
-                    if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
-                });
+                // When offline, updated is a partial optimistic result — merge with existing task
+                const merged = (updated as any).queued
+                    ? { ...task, ...updated }
+                    : updated;
+                // Update tasks array directly (Board renders from this prop, not boardStore)
+                const idx = tasks.findIndex(t => t.id === taskId);
+                if (idx !== -1) {
+                    tasks[idx] = merged;
+                }
+                // Also sync boardStore
+                boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
             }
         } catch (e) {
             console.error('Failed to move task:', e);

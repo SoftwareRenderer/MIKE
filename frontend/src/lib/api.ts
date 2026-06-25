@@ -1,5 +1,264 @@
 const API_BASE = '/api';
 
+/** Generate a unique ID. Falls back to timestamp-based ID if crypto.randomUUID is unavailable. */
+function generateId(): string {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// =============================================================================
+// Offline Action Queue
+// =============================================================================
+// Queues write operations when the WebSocket is disconnected.
+// Persists to localStorage so actions survive page refresh.
+// On reconnect, actions are replayed in order.
+// =============================================================================
+
+const QUEUE_KEY = 'kanban-offline-queue';
+
+export interface QueuedAction {
+    id: string;
+    type: string;
+    params: Record<string, any>;
+    timestamp: number;
+}
+
+let isOffline = false;
+let actionQueue: QueuedAction[] = [];
+let flushPromise: Promise<void> | null = null;
+let queueChangeCallbacks: Array<() => void> = [];
+
+/** Check if the app is currently offline (WebSocket disconnected). */
+export function getOfflineStatus(): boolean {
+    return isOffline;
+}
+
+/** Set offline state. Triggers automatic flush when transitioning to online. */
+export function setOfflineStatus(offline: boolean) {
+    isOffline = offline;
+    if (!offline && actionQueue.length > 0) {
+        flushQueue();
+    }
+}
+
+/** Register a callback fired when the queue changes (enqueue/dequeue/flush). */
+export function onQueueChanged(callback: () => void) {
+    queueChangeCallbacks.push(callback);
+    return () => {
+        queueChangeCallbacks = queueChangeCallbacks.filter(cb => cb !== callback);
+    };
+}
+
+function notifyQueueChanged() {
+    for (const cb of queueChangeCallbacks) {
+        try { cb(); } catch { /* ignore */ }
+    }
+}
+
+/** Load queue from localStorage. */
+export function loadQueue(): QueuedAction[] {
+    try {
+        if (typeof localStorage === 'undefined') return [];
+        const raw = localStorage.getItem(QUEUE_KEY);
+        if (raw) {
+            actionQueue = JSON.parse(raw) as QueuedAction[];
+            return actionQueue;
+        }
+    } catch { /* ignore */ }
+    return [];
+}
+
+/** Save queue to localStorage. */
+function saveQueue() {
+    try {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(QUEUE_KEY, JSON.stringify(actionQueue));
+        }
+    } catch { /* ignore */ }
+    notifyQueueChanged();
+}
+
+/** Add an action to the queue and persist. */
+export function enqueueAction(action: Omit<QueuedAction, 'id' | 'timestamp'>): QueuedAction {
+    const item: QueuedAction = {
+        ...action,
+        id: generateId(),
+        timestamp: Date.now(),
+    };
+    actionQueue.push(item);
+    saveQueue();
+    return item;
+}
+
+/** Remove a specific action from the queue. */
+function removeAction(id: string) {
+    actionQueue = actionQueue.filter(a => a.id !== id);
+    saveQueue();
+}
+
+/** Get set of task IDs that have pending queued actions. */
+export function getQueuedTaskIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const action of actionQueue) {
+        if (action.params.taskId) ids.add(action.params.taskId);
+    }
+    return ids;
+}
+
+/** Get current queue length. */
+export function getQueueLength(): number {
+    return actionQueue.length;
+}
+
+/** Debug: expose offline status for testing. */
+export function __debugOfflineStatus(): boolean {
+    return isOffline;
+}
+
+/** Replay all queued actions in order. Stops on first failure. */
+async function flushQueue() {
+    if (flushPromise) return flushPromise;
+    if (actionQueue.length === 0) return;
+
+    flushPromise = (async () => {
+        const wasOffline = isOffline;
+        // Temporarily set online so raw functions execute directly
+        isOffline = false;
+        let hadFailure = false;
+
+        while (actionQueue.length > 0 && !hadFailure) {
+            const action = actionQueue[0];
+            try {
+                await executeQueuedAction(action);
+                actionQueue.shift();
+                saveQueue();
+            } catch (e) {
+                console.error('[Queue] Failed to flush action:', action.type, e);
+                hadFailure = true;
+            }
+        }
+
+        // If we had a failure, re-set offline so new actions are queued
+        if (hadFailure) {
+            isOffline = true;
+        } else {
+            isOffline = wasOffline;
+        }
+        flushPromise = null;
+    })();
+    return flushPromise;
+}
+
+/** Execute a single queued action by type. */
+async function executeQueuedAction(action: QueuedAction): Promise<void> {
+    const p = action.params;
+    switch (action.type) {
+        case 'sendTaskMessage':
+            await sendTaskMessageRaw(p.projectId, p.taskId, p.content, p.modelName, p.serverUrl, p.attachments);
+            break;
+        case 'createTaskMessage':
+            await createTaskMessageRaw(p.projectId, p.taskId, p.role, p.content);
+            break;
+        case 'deleteTaskMessagesAfter':
+            await deleteTaskMessagesAfterRaw(p.projectId, p.taskId, p.messageId, p.regenerate);
+            break;
+        case 'deleteTaskMessage':
+            await deleteTaskMessageRaw(p.projectId, p.taskId, p.messageId);
+            break;
+        case 'updateTaskMessage':
+            await updateTaskMessageRaw(p.projectId, p.taskId, p.messageId, p.content);
+            break;
+        case 'createTask':
+            await createTaskRaw(p.projectId, p.taskData);
+            break;
+        case 'updateTask':
+            await updateTaskRaw(p.projectId, p.taskId, p.taskData);
+            break;
+        case 'deleteTask':
+            await deleteTaskRaw(p.projectId, p.taskId);
+            break;
+        case 'moveTask':
+            await moveTaskRaw(p.projectId, p.taskId, p.status);
+            break;
+        case 'commitAndDone':
+            await commitAndDoneRaw(p.projectId, p.taskId);
+            break;
+        case 'clearDoneTasks':
+            await clearDoneTasksRaw(p.projectId);
+            break;
+        case 'startTask':
+            await startTaskRaw(p.projectId, p.taskId);
+            break;
+        case 'startSubtask':
+            await startSubtaskRaw(p.projectId, p.taskId);
+            break;
+        case 'stopTask':
+            await stopTaskRaw(p.projectId, p.taskId);
+            break;
+        case 'retryTask':
+            await retryTaskRaw(p.projectId, p.taskId);
+            break;
+        case 'resumeTask':
+            await resumeTaskRaw(p.projectId, p.taskId);
+            break;
+        case 'reorderTasks':
+            await reorderTasksRaw(p.projectId, p.reorders);
+            break;
+        case 'createProject':
+            await createProjectRaw(p.path, p.sandboxEnabled);
+            break;
+        case 'updateProject':
+            await updateProjectRaw(p.id, p.updates);
+            break;
+        case 'deleteProject':
+            await deleteProjectRaw(p.id);
+            break;
+        case 'switchTaskThread':
+            await switchTaskThreadRaw(p.projectId, p.taskId, p.threadId);
+            break;
+        case 'forkTaskThread':
+            await forkTaskThreadRaw(p.projectId, p.taskId, p.fromThreadId, p.fromMessageId, p.newContent);
+            break;
+        case 'deleteTaskThread':
+            await deleteTaskThreadRaw(p.projectId, p.taskId, p.threadId);
+            break;
+        case 'resetWorktree':
+            await resetWorktreeRaw(p.projectId, p.taskId, p.commitHash);
+            break;
+        case 'updateConfig':
+            await updateConfigRaw(p.config);
+            break;
+        case 'createDependency':
+            await createDependencyRaw(p.projectId, p.taskId, p.childTaskId, p.autoStart);
+            break;
+        case 'createReviewComment':
+            await createReviewCommentRaw(p.projectId, p.taskId, p.filePath, p.lineNum, p.comment);
+            break;
+        case 'resetProjectStats':
+            await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
+            break;
+        case 'buildSandboxImage':
+            await buildSandboxImageRaw(p.id);
+            break;
+        case 'reloadPrompts':
+            await reloadPromptsRaw();
+            break;
+        default:
+            console.warn('[Queue] Unknown action type:', action.type);
+    }
+}
+
+/**
+ * Helper: enqueue an action and return an optimistic result.
+ * Returns the queued action's ID for tracking.
+ */
+function queueWrite<T>(type: string, params: Record<string, any>, optimistic: T): T & { queued: true; actionId: string } {
+    const queued = enqueueAction({ type, params });
+    return { ...(optimistic as any), queued: true, actionId: queued.id } as T & { queued: true; actionId: string };
+}
+
 /** CSRF token, set on login or session check. Held in memory only. */
 let csrfToken: string = '';
 
@@ -80,14 +339,18 @@ export async function getProjectStats(projectId: string): Promise<ProjectStats> 
     return res.json();
 }
 
-export async function resetProjectStats(projectId: string, modelName: string, providerName?: string): Promise<void> {
+export async function resetProjectStatsRaw(projectId: string, modelName: string, providerName?: string): Promise<void> {
     const params = new URLSearchParams({ model_name: modelName });
     if (providerName) params.set('provider_name', providerName);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to reset stats');
 }
+export async function resetProjectStats(projectId: string, modelName: string, providerName?: string): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'resetProjectStats', params: { projectId, modelName, providerName } }); return; }
+    return resetProjectStatsRaw(projectId, modelName, providerName);
+}
 
-export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
+async function createProjectRaw(path: string, sandboxEnabled = false): Promise<Project> {
     const body: Record<string, unknown> = { path, sandbox_enabled: sandboxEnabled };
     if (sandboxEnabled) {
         body.sandbox_network_isolation = true;
@@ -100,8 +363,12 @@ export async function createProject(path: string, sandboxEnabled = false): Promi
     if (!res.ok) throw await apiError(res, 'Failed to create project');
     return res.json();
 }
+export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
+    if (isOffline) { return queueWrite('createProject', { path, sandboxEnabled }, { id: '', name: path, path, sandbox_enabled: sandboxEnabled }); }
+    return createProjectRaw(path, sandboxEnabled);
+}
 
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
+async function updateProjectRaw(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -110,18 +377,30 @@ export async function updateProject(id: string, updates: { name?: string; sandbo
     if (!res.ok) throw await apiError(res, 'Failed to update project');
     return res.json();
 }
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
+    if (isOffline) { return queueWrite('updateProject', { id, updates }, { id, ...updates }); }
+    return updateProjectRaw(id, updates);
+}
 
-export async function buildSandboxImage(id: string): Promise<{ status: string; image: string; project: string }> {
+async function buildSandboxImageRaw(id: string): Promise<{ status: string; image: string; project: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${id}/sandbox/build`, {
         method: 'POST',
     });
     if (!res.ok) throw await apiError(res, 'Failed to build sandbox image');
     return res.json();
 }
+export async function buildSandboxImage(id: string): Promise<{ status: string; image: string; project: string }> {
+    if (isOffline) { return queueWrite('buildSandboxImage', { id }, { status: 'queued', image: '', project: id }); }
+    return buildSandboxImageRaw(id);
+}
 
-export async function deleteProject(id: string): Promise<void> {
+async function deleteProjectRaw(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to delete project');
+}
+export async function deleteProject(id: string): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'deleteProject', params: { id } }); return; }
+    return deleteProjectRaw(id);
 }
 
 // -- Board endpoints --
@@ -131,7 +410,7 @@ export async function getBoard(projectId: string): Promise<Board> {
     return res.json();
 }
 
-export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> {
+async function reorderTasksRaw(projectId: string, reorders: ReorderRequest[]): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/reorder`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -139,9 +418,13 @@ export async function reorderTasks(projectId: string, reorders: ReorderRequest[]
     });
     if (!res.ok) throw await apiError(res, 'Failed to reorder tasks');
 }
+export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'reorderTasks', params: { projectId, reorders } }); return; }
+    return reorderTasksRaw(projectId, reorders);
+}
 
 // -- Task CRUD endpoints --
-export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
+async function createTaskRaw(projectId: string, task: Partial<Task>): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,6 +433,10 @@ export async function createTask(projectId: string, task: Partial<Task>): Promis
     if (!res.ok) throw await apiError(res, 'Failed to create task');
     return res.json();
 }
+export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
+    if (isOffline) { const id = generateId(); return queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: 'backlog', created_at: new Date().toISOString() }); }
+    return createTaskRaw(projectId, task);
+}
 
 export async function getTask(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
@@ -157,7 +444,7 @@ export async function getTask(projectId: string, taskId: string): Promise<Task> 
     return res.json();
 }
 
-export async function updateTask(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
+async function updateTaskRaw(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -166,13 +453,21 @@ export async function updateTask(projectId: string, taskId: string, task: Partia
     if (!res.ok) throw await apiError(res, 'Failed to update task');
     return res.json();
 }
+export async function updateTask(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
+    if (isOffline) { return queueWrite('updateTask', { projectId, taskId, taskData: task }, { id: taskId, ...task }); }
+    return updateTaskRaw(projectId, taskId, task);
+}
 
-export async function deleteTask(projectId: string, taskId: string): Promise<void> {
+async function deleteTaskRaw(projectId: string, taskId: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to delete task');
 }
+export async function deleteTask(projectId: string, taskId: string): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'deleteTask', params: { projectId, taskId } }); return; }
+    return deleteTaskRaw(projectId, taskId);
+}
 
-export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
+async function moveTaskRaw(projectId: string, taskId: string, status: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,50 +476,82 @@ export async function moveTask(projectId: string, taskId: string, status: string
     if (!res.ok) throw await apiError(res, 'Failed to move task');
     return res.json();
 }
+export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
+    if (isOffline) { return queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status }); }
+    return moveTaskRaw(projectId, taskId, status);
+}
 
-export async function commitAndDone(projectId: string, taskId: string): Promise<Task> {
+async function commitAndDoneRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit`, {
         method: 'POST',
     });
     if (!res.ok) throw await apiError(res, 'Failed to commit and mark as done');
     return res.json();
 }
+export async function commitAndDone(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done' }); }
+    return commitAndDoneRaw(projectId, taskId);
+}
 
-export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
+async function clearDoneTasksRaw(projectId: string): Promise<{ deleted: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to clear done tasks');
     return res.json();
 }
+export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
+    if (isOffline) { enqueueAction({ type: 'clearDoneTasks', params: { projectId } }); return { deleted: 0 }; }
+    return clearDoneTasksRaw(projectId);
+}
 
 // -- Task execution endpoints --
-export async function startTask(projectId: string, taskId: string): Promise<Task> {
+async function startTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to start task');
     return res.json();
 }
+export async function startTask(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('startTask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
+    return startTaskRaw(projectId, taskId);
+}
 
-export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
+async function startSubtaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start-subtask`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to start subtask');
     return res.json();
 }
+export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('startSubtask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
+    return startSubtaskRaw(projectId, taskId);
+}
 
-export async function stopTask(projectId: string, taskId: string): Promise<Task> {
+async function stopTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to stop task');
     return res.json();
 }
+export async function stopTask(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('stopTask', { projectId, taskId }, { id: taskId, status_state: 'idle' }); }
+    return stopTaskRaw(projectId, taskId);
+}
 
-export async function retryTask(projectId: string, taskId: string): Promise<Task> {
+async function retryTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to retry task');
     return res.json();
 }
+export async function retryTask(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('retryTask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
+    return retryTaskRaw(projectId, taskId);
+}
 
-export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
+async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to resume task');
     return res.json();
+}
+export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
+    if (isOffline) { return queueWrite('resumeTask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
+    return resumeTaskRaw(projectId, taskId);
 }
 
 // App stream - single WebSocket for all real-time events
@@ -238,6 +565,7 @@ export interface AppStreamCallbacks {
     onTaskDeleted?: (task_id: string) => void;
     onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void;
     onTaskEvent?: (task_id: string, event: StreamEvent) => void; // task-scoped events (tokens, tool calls, etc.)
+    onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
 }
 
 export interface AppStream {
@@ -278,6 +606,8 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         pendingMessages.length = 0;
     }
 
+    let hasConnectedOnce = false;
+
     function connect(sync = false) {
         if (isClosed) return;
         const syncParam = sync ? '?sync=1' : '';
@@ -286,6 +616,8 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
 
         ws.onopen = () => {
             reconnectAttempts = 0;
+            hasConnectedOnce = true;
+            callbacks.onConnected?.(true);
             // Flush pending messages first
             flushPending();
             // Re-subscribe to all previously subscribed projects/tasks
@@ -338,6 +670,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         ws.onclose = () => {
             currentWs = null;
             if (isClosed) return;
+            if (hasConnectedOnce) {
+                callbacks.onConnected?.(false);
+            }
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
             reconnectAttempts++;
             reconnectTimer = setTimeout(() => connect(true), delay);
@@ -382,7 +717,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
 }
 
 /** Send a user message via HTTP POST. Triggers executor and returns the created message. */
-export async function sendTaskMessage(
+async function sendTaskMessageRaw(
     projectId: string,
     taskId: string,
     content: string,
@@ -404,6 +739,20 @@ export async function sendTaskMessage(
     if (!res.ok) throw await apiError(res, 'Failed to send message');
     return res.json();
 }
+export async function sendTaskMessage(
+    projectId: string,
+    taskId: string,
+    content: string,
+    modelName?: string,
+    serverUrl?: string,
+    attachments?: Array<{ mimeType: string; data: string }>
+): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
+    if (isOffline) {
+        const id = generateId();
+        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments }, { id, role: 'user', content });
+    }
+    return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments);
+}
 
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
@@ -411,7 +760,7 @@ export async function getTaskMessages(projectId: string, taskId: string): Promis
     return res.json();
 }
 
-export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
+async function createTaskMessageRaw(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -420,8 +769,15 @@ export async function createTaskMessage(projectId: string, taskId: string, role:
     if (!res.ok) throw await apiError(res, 'Failed to create message');
     return res.json();
 }
+export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
+    if (isOffline) {
+        const id = generateId();
+        return queueWrite('createTaskMessage', { projectId, taskId, role, content }, { id, task_id: taskId, thread_id: '', role, content, created_at: new Date().toISOString() });
+    }
+    return createTaskMessageRaw(projectId, taskId, role, content);
+}
 
-export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
+async function deleteTaskMessagesAfterRaw(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -429,15 +785,23 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
     });
     if (!res.ok) throw await apiError(res, 'Failed to delete messages');
 }
+export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'deleteTaskMessagesAfter', params: { projectId, taskId, messageId, regenerate } }); return; }
+    return deleteTaskMessagesAfterRaw(projectId, taskId, messageId, regenerate);
+}
 
 /** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. */
-export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
+async function deleteTaskMessageRaw(projectId: string, taskId: string, messageId: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId, delete_single: true }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to delete message');
+}
+export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'deleteTaskMessage', params: { projectId, taskId, messageId } }); return; }
+    return deleteTaskMessageRaw(projectId, taskId, messageId);
 }
 
 /** Regenerate from a message: deletes it and all messages after it. Alias for deleteTaskMessagesAfter. */
@@ -450,13 +814,17 @@ export async function checkMessageDelete(projectId: string, taskId: string, mess
     return res.json();
 }
 
-export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
+async function updateTaskMessageRaw(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to update message');
+}
+export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
+    if (isOffline) { enqueueAction({ type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } }); return; }
+    return updateTaskMessageRaw(projectId, taskId, messageId, content);
 }
 
 export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }>; short_stat: string }> {
@@ -475,7 +843,7 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
     return res.json();
 }
 
-export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
+async function resetWorktreeRaw(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/reset-worktree`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -484,14 +852,22 @@ export async function resetWorktree(projectId: string, taskId: string, commitHas
     if (!res.ok) throw await apiError(res, 'Failed to reset worktree');
     return res.json();
 }
+export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
+    if (isOffline) { enqueueAction({ type: 'resetWorktree', params: { projectId, taskId, commitHash } }); return { status: 'queued' }; }
+    return resetWorktreeRaw(projectId, taskId, commitHash);
+}
 
 // -- Prompt endpoints --
-export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
+async function reloadPromptsRaw(): Promise<{ status: string; message: string; files: string[] }> {
     const res = await apiFetch(`${API_BASE}/prompts/reload`, {
         method: 'POST',
     });
     if (!res.ok) throw await apiError(res, 'Failed to reload prompts');
     return res.json();
+}
+export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
+    if (isOffline) { enqueueAction({ type: 'reloadPrompts', params: {} }); return { status: 'queued', message: '', files: [] }; }
+    return reloadPromptsRaw();
 }
 
 // -- Configuration endpoints --
@@ -501,7 +877,7 @@ export async function getConfig(): Promise<Config> {
     return res.json();
 }
 
-export async function updateConfig(config: Config): Promise<Config> {
+async function updateConfigRaw(config: Config): Promise<Config> {
     const res = await apiFetch(`${API_BASE}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -509,6 +885,10 @@ export async function updateConfig(config: Config): Promise<Config> {
     });
     if (!res.ok) throw await apiError(res, 'Failed to update config');
     return res.json();
+}
+export async function updateConfig(config: Config): Promise<Config> {
+    if (isOffline) { enqueueAction({ type: 'updateConfig', params: { config } }); return config; }
+    return updateConfigRaw(config);
 }
 
 export async function testConnection(llamaServerUrl: string, modelName: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
@@ -569,7 +949,7 @@ export async function getDependencies(projectId: string, taskId: string): Promis
     return res.json();
 }
 
-export async function createDependency(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
+async function createDependencyRaw(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -577,6 +957,13 @@ export async function createDependency(projectId: string, taskId: string, childT
     });
     if (!res.ok) throw await apiError(res, 'Failed to create dependency');
     return res.json();
+}
+export async function createDependency(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
+    if (isOffline) {
+        const id = generateId();
+        return queueWrite('createDependency', { projectId, taskId, childTaskId, autoStart }, { id, task_id: taskId, child_task_id: childTaskId, auto_start: autoStart });
+    }
+    return createDependencyRaw(projectId, taskId, childTaskId, autoStart);
 }
 
 // -- Review comment endpoints --
@@ -586,7 +973,7 @@ export async function getReviewComments(projectId: string, taskId: string): Prom
     return res.json();
 }
 
-export async function createReviewComment(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
+async function createReviewCommentRaw(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -594,6 +981,13 @@ export async function createReviewComment(projectId: string, taskId: string, fil
     });
     if (!res.ok) throw await apiError(res, 'Failed to create review comment');
     return res.json();
+}
+export async function createReviewComment(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
+    if (isOffline) {
+        const id = generateId();
+        return queueWrite('createReviewComment', { projectId, taskId, filePath, lineNum, comment }, { id, task_id: taskId, file_path: filePath, line_num: lineNum, comment, resolved: false, created_at: new Date().toISOString() });
+    }
+    return createReviewCommentRaw(projectId, taskId, filePath, lineNum, comment);
 }
 
 // -- Git endpoints --
@@ -617,7 +1011,7 @@ export async function getTaskThreads(projectId: string, taskId: string): Promise
     return res.json();
 }
 
-export async function switchTaskThread(projectId: string, taskId: string, threadId: string): Promise<Thread> {
+async function switchTaskThreadRaw(projectId: string, taskId: string, threadId: string): Promise<Thread> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/switch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -626,8 +1020,14 @@ export async function switchTaskThread(projectId: string, taskId: string, thread
     if (!res.ok) throw await apiError(res, 'Failed to switch thread');
     return res.json();
 }
+export async function switchTaskThread(projectId: string, taskId: string, threadId: string): Promise<Thread> {
+    if (isOffline) {
+        return queueWrite('switchTaskThread', { projectId, taskId, threadId }, { id: threadId, task_id: taskId, is_active: true, created_at: new Date().toISOString() });
+    }
+    return switchTaskThreadRaw(projectId, taskId, threadId);
+}
 
-export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
+async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
     const body: Record<string, string> = { from_thread_id: fromThreadId, from_message_id: fromMessageId };
     if (newContent) body.new_content = newContent;
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
@@ -638,8 +1038,15 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
     if (!res.ok) throw await apiError(res, 'Failed to fork thread');
     return res.json();
 }
+export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
+    if (isOffline) {
+        const id = generateId();
+        return queueWrite('forkTaskThread', { projectId, taskId, fromThreadId, fromMessageId, newContent }, { id, task_id: taskId, is_active: true, created_at: new Date().toISOString() });
+    }
+    return forkTaskThreadRaw(projectId, taskId, fromThreadId, fromMessageId, newContent);
+}
 
-export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
+async function deleteTaskThreadRaw(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -647,6 +1054,10 @@ export async function deleteTaskThread(projectId: string, taskId: string, thread
     });
     if (!res.ok) throw await apiError(res, 'Failed to delete thread');
     return res.json();
+}
+export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
+    if (isOffline) { enqueueAction({ type: 'deleteTaskThread', params: { projectId, taskId, threadId } }); return { status: 'queued' }; }
+    return deleteTaskThreadRaw(projectId, taskId, threadId);
 }
 
 // -- Terminal --
