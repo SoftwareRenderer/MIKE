@@ -204,11 +204,19 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         try {
             // Restore offline action queue from localStorage
             loadQueue();
-            // After offline queue is flushed, remove optimistic tasks (real ones arrive via WebSocket)
-            onQueueFlushed((optimisticIds) => {
-                const idSet = new Set(optimisticIds);
-                tasks = tasks.filter(t => !idSet.has(t.id));
-                boardStore.update(b => b ? { ...b, tasks: tasks.filter(t => !idSet.has(t.id)) } : b);
+            // After offline queue is flushed, replace optimistic tasks with real ones from HTTP responses
+            onQueueFlushed((optimisticIds, resolvedTasks) => {
+                // Replace optimistic tasks with their latest real state
+                // resolvedTasks has: optimisticId → createTask result, AND realId → latest update (start/move/etc.)
+                tasks = tasks.map(t => {
+                    // First: optimisticId → real task from createTask
+                    const created = resolvedTasks.get(t.id);
+                    if (!created) return t;
+                    // Then: realId → latest state from subsequent actions (start, move, etc.)
+                    const latest = resolvedTasks.get(created.id);
+                    return latest || created;
+                });
+                boardStore.update(b => b ? { ...b, tasks } : b);
             });
             const projs = await getProjects();
             projects = projs || [];

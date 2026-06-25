@@ -494,7 +494,17 @@
             // Fallback refresh in case WebSocket is disconnected
             onRefreshBoard?.();
         } catch (err) {
-            showToast('Failed to delete task: ' + String(err), 'error');
+            // If task has queued actions (optimistic ID), server may not know about it.
+            // Remove from UI anyway and let the queue handle cleanup.
+            if (getQueuedTaskIds().has(task.id)) {
+                boardStore.update(b => {
+                    if (!b) return b;
+                    return { ...b, tasks: b.tasks.filter(t => t.id !== task.id) };
+                });
+                onRefreshBoard?.();
+            } else {
+                showToast('Failed to delete task: ' + String(err), 'error');
+            }
         }
     }
 

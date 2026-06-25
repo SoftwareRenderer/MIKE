@@ -29,7 +29,7 @@ let isOffline = false;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
 let queueChangeCallbacks: Array<() => void> = [];
-let queueFlushedCallbacks: Array<(optimisticTaskIds: string[]) => void> = [];
+let queueFlushedCallbacks: Array<(optimisticTaskIds: string[], resolvedTasks: Map<string, any>) => void> = [];
 
 /** Check if the app is currently offline (WebSocket disconnected). */
 export function getOfflineStatus(): boolean {
@@ -58,17 +58,17 @@ function notifyQueueChanged() {
     }
 }
 
-/** Register a callback fired when the queue finishes flushing. Receives list of optimistic task IDs that were created offline. */
-export function onQueueFlushed(callback: (optimisticTaskIds: string[]) => void): () => void {
+/** Register a callback fired when the queue finishes flushing. Receives map of optimistic ID → real Task. */
+export function onQueueFlushed(callback: (optimisticTaskIds: string[], resolvedTasks: Map<string, any>) => void): () => void {
     queueFlushedCallbacks.push(callback);
     return () => {
         queueFlushedCallbacks = queueFlushedCallbacks.filter(cb => cb !== callback);
     };
 }
 
-function notifyQueueFlushed(optimisticTaskIds: string[]) {
+function notifyQueueFlushed(optimisticTaskIds: string[], resolvedTasks: Map<string, any>) {
     for (const cb of queueFlushedCallbacks) {
-        try { cb(optimisticTaskIds); } catch { /* ignore */ }
+        try { cb(optimisticTaskIds, resolvedTasks); } catch { /* ignore */ }
     }
 }
 
@@ -156,89 +156,99 @@ async function flushQueue() {
         const wasOffline = isOffline;
         // Temporarily set online so raw functions execute directly
         isOffline = false;
-        let hadFailure = false;
-        // Collect optimistic task IDs from createTask actions
-        const optimisticTaskIds: string[] = [];
+        // Map optimistic task IDs → real Task objects (resolved during flush)
+        const idMap = new Map<string, string>();
+        const resolvedTasks = new Map<string, any>();
 
-        while (actionQueue.length > 0 && !hadFailure) {
+        while (actionQueue.length > 0) {
             const action = actionQueue[0];
             try {
-                if (action.type === 'createTask' && action.params.taskData?.id) {
-                    optimisticTaskIds.push(action.params.taskData.id);
+                const result = await executeQueuedAction(action, idMap);
+                // If createTask returned a real task, map optimistic ID → real ID
+                if (action.type === 'createTask' && result && action.params.taskData?.id) {
+                    const optId = action.params.taskData.id;
+                    idMap.set(optId, result.id);
+                    resolvedTasks.set(optId, result);
                 }
-                await executeQueuedAction(action);
+                // Track latest state of tasks modified by other actions (start, move, etc.)
+                if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
+                    action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
+                    action.type === 'commitAndDone' || action.type === 'updateTask')) {
+                    resolvedTasks.set(result.id, result);
+                }
                 actionQueue.shift();
                 saveQueue();
             } catch (e) {
-                console.error('[Queue] Failed to flush action:', action.type, e);
-                hadFailure = true;
+                console.error('[Queue] Failed to flush action, skipping:', action.type, e);
+                // Skip failed action — don't block remaining actions or re-set offline
+                actionQueue.shift();
+                saveQueue();
             }
         }
 
-        // If we had a failure, re-set offline so new actions are queued
-        if (hadFailure) {
-            isOffline = true;
-        } else {
-            isOffline = wasOffline;
-            // Notify listeners with optimistic task IDs so they can be removed
-            notifyQueueFlushed(optimisticTaskIds);
-        }
+        // If we had a failure, keep failed actions in queue for next retry.
+        // Don't set isOffline=true — the WebSocket is connected, so new actions should go through.
+        isOffline = wasOffline;
+        // Notify listeners with resolved tasks so they can replace optimistic ones
+        notifyQueueFlushed([], resolvedTasks);
         flushPromise = null;
     })();
     return flushPromise;
 }
 
-/** Execute a single queued action by type. */
-async function executeQueuedAction(action: QueuedAction): Promise<void> {
+/** Execute a single queued action by type. Resolves optimistic task IDs via idMap. */
+async function executeQueuedAction(action: QueuedAction, idMap: Map<string, string>): Promise<any> {
     const p = action.params;
+    // Resolve optimistic task ID → real task ID
+    const resolveId = (taskId: string) => idMap.get(taskId) || taskId;
+    const taskId = resolveId(p.taskId);
     switch (action.type) {
         case 'sendTaskMessage':
-            await sendTaskMessageRaw(p.projectId, p.taskId, p.content, p.modelName, p.serverUrl, p.attachments);
+            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments);
             break;
         case 'createTaskMessage':
-            await createTaskMessageRaw(p.projectId, p.taskId, p.role, p.content);
+            await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
             break;
         case 'deleteTaskMessagesAfter':
-            await deleteTaskMessagesAfterRaw(p.projectId, p.taskId, p.messageId, p.regenerate);
+            await deleteTaskMessagesAfterRaw(p.projectId, taskId, p.messageId, p.regenerate);
             break;
         case 'deleteTaskMessage':
-            await deleteTaskMessageRaw(p.projectId, p.taskId, p.messageId);
+            await deleteTaskMessageRaw(p.projectId, taskId, p.messageId);
             break;
         case 'updateTaskMessage':
-            await updateTaskMessageRaw(p.projectId, p.taskId, p.messageId, p.content);
+            await updateTaskMessageRaw(p.projectId, taskId, p.messageId, p.content);
             break;
         case 'createTask':
-            await createTaskRaw(p.projectId, p.taskData);
-            break;
+            return createTaskRaw(p.projectId, p.taskData);
         case 'updateTask':
-            await updateTaskRaw(p.projectId, p.taskId, p.taskData);
+            await updateTaskRaw(p.projectId, taskId, p.taskData);
             break;
         case 'deleteTask':
-            await deleteTaskRaw(p.projectId, p.taskId);
+            await deleteTaskRaw(p.projectId, taskId);
             break;
         case 'moveTask':
-            await moveTaskRaw(p.projectId, p.taskId, p.status);
+            await moveTaskRaw(p.projectId, taskId, p.status);
             break;
         case 'commitAndDone':
-            await commitAndDoneRaw(p.projectId, p.taskId);
+            await commitAndDoneRaw(p.projectId, taskId);
             break;
         case 'clearDoneTasks':
             await clearDoneTasksRaw(p.projectId);
             break;
         case 'startTask':
-            await startTaskRaw(p.projectId, p.taskId);
+            await startTaskRaw(p.projectId, taskId);
             break;
         case 'startSubtask':
-            await startSubtaskRaw(p.projectId, p.taskId);
+            await startSubtaskRaw(p.projectId, taskId);
             break;
         case 'stopTask':
-            await stopTaskRaw(p.projectId, p.taskId);
+            await stopTaskRaw(p.projectId, taskId);
             break;
         case 'retryTask':
-            await retryTaskRaw(p.projectId, p.taskId);
+            await retryTaskRaw(p.projectId, taskId);
             break;
         case 'resumeTask':
-            await resumeTaskRaw(p.projectId, p.taskId);
+            await resumeTaskRaw(p.projectId, taskId);
             break;
         case 'reorderTasks':
             await reorderTasksRaw(p.projectId, p.reorders);
@@ -253,25 +263,25 @@ async function executeQueuedAction(action: QueuedAction): Promise<void> {
             await deleteProjectRaw(p.id);
             break;
         case 'switchTaskThread':
-            await switchTaskThreadRaw(p.projectId, p.taskId, p.threadId);
+            await switchTaskThreadRaw(p.projectId, taskId, p.threadId);
             break;
         case 'forkTaskThread':
-            await forkTaskThreadRaw(p.projectId, p.taskId, p.fromThreadId, p.fromMessageId, p.newContent);
+            await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent);
             break;
         case 'deleteTaskThread':
-            await deleteTaskThreadRaw(p.projectId, p.taskId, p.threadId);
+            await deleteTaskThreadRaw(p.projectId, taskId, p.threadId);
             break;
         case 'resetWorktree':
-            await resetWorktreeRaw(p.projectId, p.taskId, p.commitHash);
+            await resetWorktreeRaw(p.projectId, taskId, p.commitHash);
             break;
         case 'updateConfig':
             await updateConfigRaw(p.config);
             break;
         case 'createDependency':
-            await createDependencyRaw(p.projectId, p.taskId, p.childTaskId, p.autoStart);
+            await createDependencyRaw(p.projectId, taskId, p.childTaskId, p.autoStart);
             break;
         case 'createReviewComment':
-            await createReviewCommentRaw(p.projectId, p.taskId, p.filePath, p.lineNum, p.comment);
+            await createReviewCommentRaw(p.projectId, taskId, p.filePath, p.lineNum, p.comment);
             break;
         case 'resetProjectStats':
             await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
