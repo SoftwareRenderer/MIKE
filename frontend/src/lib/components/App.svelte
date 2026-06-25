@@ -137,6 +137,19 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         return () => unsub.forEach(u => u());
     });
 
+    // Manage task-level WebSocket subscription for real-time streaming events.
+    // Subscribes when a task is selected, unsubscribes on switch/close.
+    $effect(() => {
+        const task = selectedTaskVal;
+        const project = currentProject;
+        const stream = appStream;
+        if (!stream || !project || !task) return;
+        stream.subscribeTask(project.id, task.id);
+        return () => {
+            stream.unsubscribeTask(project.id, task.id);
+        };
+    });
+
     // Handle browser back/forward
     function handlePopState() {
         const params = new URLSearchParams(location.search);
@@ -362,9 +375,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         if (currentProject && appStream) {
             appStream.unsubscribeProject(currentProject.id);
         }
-        if (selectedTaskVal && appStream) {
-            appStream.unsubscribeTask(currentProject?.id || '', selectedTaskVal.id);
-        }
+        // Task unsubscribe is handled by the $effect cleanup when selectedTaskVal changes
     }
 
     async function refreshBoard() {

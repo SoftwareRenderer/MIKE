@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"kanban/backend/types"
+
+	"github.com/coder/websocket"
 )
 
 // assertFlatJSON verifies that a JSON frame is flat (no double-encoded data field).
@@ -288,5 +290,102 @@ func TestClientParseTaskEvent(t *testing.T) {
 	}
 	if dataMap["text"] != "hello" {
 		t.Fatalf("client expects msg.data.text=hello, got %v", dataMap["text"])
+	}
+}
+
+// TestTaskEventDelivery verifies that task event delivery is gated by
+// task subscription (taskSub key exists with count > 0).
+// We test the subscription filtering logic via hasTaskSubscribers,
+// which uses the same key-based lookup as sendTaskPayload.
+func TestTaskEventDelivery(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+
+	// Create unique fake connection pointers
+	connA := (*websocket.Conn)(new(websocket.Conn))
+	connB := (*websocket.Conn)(new(websocket.Conn))
+	connC := (*websocket.Conn)(new(websocket.Conn))
+
+	projectID := "test-project"
+	taskID := "test-task"
+
+	// Set up client states directly (subscribe/unsubscribe are unexported)
+	asm.mu.Lock()
+
+	// Client A: subscribed to the target task
+	asm.clients[connA] = &clientState{
+		conn:       connA,
+		projectSub: map[string]int{projectID: 1},
+		taskSub:    map[string]int{projectID + ":" + taskID: 1},
+		bufSize:    DefaultBufferSize,
+	}
+
+	// Client B: subscribed to project but NOT to the task
+	asm.clients[connB] = &clientState{
+		conn:       connB,
+		projectSub: map[string]int{projectID: 1},
+		taskSub:    map[string]int{},
+		bufSize:    DefaultBufferSize,
+	}
+
+	// Client C: subscribed to a DIFFERENT task
+	asm.clients[connC] = &clientState{
+		conn:       connC,
+		projectSub: map[string]int{projectID: 1},
+		taskSub:    map[string]int{projectID + ":" + "other-task": 1},
+		bufSize:    DefaultBufferSize,
+	}
+
+	asm.mu.Unlock()
+
+	// 1. hasTaskSubscribers returns true when at least one client is subscribed
+	if !asm.hasTaskSubscribers(projectID, taskID) {
+		t.Fatal("expected hasTaskSubscribers=true for subscribed task")
+	}
+
+	// 2. hasTaskSubscribers returns false for a task with no subscribers
+	if asm.hasTaskSubscribers(projectID, "nonexistent-task") {
+		t.Fatal("expected hasTaskSubscribers=false for nonexistent task")
+	}
+
+	// 3. hasTaskSubscribers returns false for a different project
+	if asm.hasTaskSubscribers("other-project", taskID) {
+		t.Fatal("expected hasTaskSubscribers=false for different project")
+	}
+
+	// 4. After removing the subscription, hasTaskSubscribers returns false
+	asm.mu.Lock()
+	key := projectID + ":" + taskID
+	delete(asm.clients[connA].taskSub, key)
+	asm.mu.Unlock()
+
+	if asm.hasTaskSubscribers(projectID, taskID) {
+		t.Fatal("expected hasTaskSubscribers=false after unsubscribe")
+	}
+
+	// 5. Re-subscribe and verify multi-tab support (count > 1)
+	asm.mu.Lock()
+	asm.clients[connA].taskSub[key] = 2 // two tabs subscribed
+	asm.mu.Unlock()
+
+	if !asm.hasTaskSubscribers(projectID, taskID) {
+		t.Fatal("expected hasTaskSubscribers=true with count=2")
+	}
+
+	// Unsubscribe once — should still have subscribers (count=1)
+	asm.mu.Lock()
+	asm.clients[connA].taskSub[key]--
+	asm.mu.Unlock()
+
+	if !asm.hasTaskSubscribers(projectID, taskID) {
+		t.Fatal("expected hasTaskSubscribers=true after one unsubscribe (count=1)")
+	}
+
+	// Unsubscribe again — should have no subscribers
+	asm.mu.Lock()
+	delete(asm.clients[connA].taskSub, key)
+	asm.mu.Unlock()
+
+	if asm.hasTaskSubscribers(projectID, taskID) {
+		t.Fatal("expected hasTaskSubscribers=false after second unsubscribe")
 	}
 }
