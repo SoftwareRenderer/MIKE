@@ -135,7 +135,7 @@ test.describe('Task Chat', () => {
     await openTaskNoChat(page);
 
     // Delete button should always be visible
-    const deleteButton = page.locator('.header-actions .btn-icon').last();
+    const deleteButton = page.locator('.header-actions .icon-btn').last();
     await expect(deleteButton).toBeVisible();
   });
 

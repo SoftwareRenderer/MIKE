@@ -32,7 +32,7 @@ test.describe('Task Actions', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Delete button should be visible
-    const deleteButton = page.locator('.btn-icon[aria-label="Delete task"]');
+    const deleteButton = page.locator('.icon-btn[aria-label="Delete task"]');
     await expect(deleteButton).toBeVisible();
   });
 
@@ -43,7 +43,7 @@ test.describe('Task Actions', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Click delete button to trigger confirmation dialog
-    await page.click('.btn-icon[aria-label="Delete task"]');
+    await page.click('.icon-btn[aria-label="Delete task"]');
 
     // Wait for confirmation dialog and accept
     await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
@@ -60,7 +60,7 @@ test.describe('Task Actions', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Click delete button to trigger confirmation dialog
-    await page.click('.btn-icon[aria-label="Delete task"]');
+    await page.click('.icon-btn[aria-label="Delete task"]');
 
     // Wait for confirmation dialog and cancel
     await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
