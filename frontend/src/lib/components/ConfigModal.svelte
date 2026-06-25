@@ -846,6 +846,15 @@
                         </div>
                     {/each}
                 </div>
+                {#if providers.length > 0 && !providers.some(p => p.kind === 'llm')}
+                    <div class="no-llm-warning">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                            <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                        <span>No LLM provider configured. An LLM provider is required for <strong>commit label generation</strong> and <strong>automatic merge conflict resolution</strong>.</span>
+                    </div>
+                {/if}
                 {#if providers.length === 0}
                     <div class="providers-empty">
                         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" class="empty-icon">
@@ -1385,6 +1394,26 @@
         border-radius: 3px;
         font-family: var(--font-mono, monospace);
         font-size: 0.75rem;
+    }
+    .no-llm-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        margin-top: 10px;
+        padding: 8px 10px;
+        background: rgba(210, 153, 34, 0.08);
+        border: 1px solid rgba(210, 153, 34, 0.25);
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        color: #d29922;
+        line-height: 1.4;
+    }
+    .no-llm-warning svg {
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+    .no-llm-warning strong {
+        color: #e3b341;
     }
 
     /* Provider actions (right side of header) */

@@ -117,7 +117,7 @@ export const PI_SENTINEL_URL = 'pi://agent';
 
 /** Check if a provider is a Pi agent. */
 export function isAgentProvider(p: Provider): boolean {
-    return p.kind === 'pi';
+    return p.kind !== 'llm';
 }
 
 export interface TaskDependency {
