@@ -299,12 +299,6 @@ func TestDeleteProjectWithData(t *testing.T) {
 		t.Fatalf("create review: %v", err)
 	}
 
-	// Create home agent messages for proj-1
-	homeMsg := newHomeAgentMessage("home-1", "proj-1", "assistant", "home agent msg")
-	if err := s.CreateHomeAgentMessage(homeMsg); err != nil {
-		t.Fatalf("create home agent message: %v", err)
-	}
-
 	// --- Delete proj-1 ---
 	if err := s.DeleteProjectWithData("proj-1"); err != nil {
 		t.Fatalf("delete project with data: %v", err)
@@ -366,15 +360,6 @@ func TestDeleteProjectWithData(t *testing.T) {
 	}
 	if len(reviews) != 0 {
 		t.Fatalf("expected 0 reviews, got %d", len(reviews))
-	}
-
-	// Verify home agent messages are gone
-	homeMsgs, err := s.GetHomeAgentMessages("proj-1")
-	if err != nil {
-		t.Fatalf("get home agent messages: %v", err)
-	}
-	if len(homeMsgs) != 0 {
-		t.Fatalf("expected 0 home agent messages, got %d", len(homeMsgs))
 	}
 
 	// Verify token stats are gone

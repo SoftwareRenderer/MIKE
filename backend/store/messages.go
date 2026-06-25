@@ -168,42 +168,6 @@ func (s *Store) GetMessageCreatedAt(messageID string) (*time.Time, error) {
 	return &t, nil
 }
 
-// CreateHomeAgentMessage inserts a home agent message.
-func (s *Store) CreateHomeAgentMessage(m *types.HomeAgentMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(
-		`INSERT INTO home_agent_messages (id, project_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-		m.ID, m.ProjectID, m.Role, m.Content, m.CreatedAt.Format(time.RFC3339),
-	)
-	return err
-}
-
-// GetHomeAgentMessages retrieves all home agent messages for a project.
-func (s *Store) GetHomeAgentMessages(projectID string) ([]types.HomeAgentMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, project_id, role, content, created_at FROM home_agent_messages WHERE project_id = ? ORDER BY created_at ASC`,
-		projectID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	messages := []types.HomeAgentMessage{}
-	for rows.Next() {
-		var m types.HomeAgentMessage
-		var createdAt string
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Role, &m.Content, &createdAt); err != nil {
-			return nil, err
-		}
-		m.CreatedAt = scanTime(createdAt)
-		messages = append(messages, m)
-	}
-	return messages, rows.Err()
-}
-
 // UpdateTaskMessageCommitHash updates the git_commit_hash of a message.
 func (s *Store) UpdateTaskMessageCommitHash(messageID, hash string) error {
 	s.mu.Lock()

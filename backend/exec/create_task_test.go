@@ -30,11 +30,11 @@ func testStore(t *testing.T) *store.Store {
 func newTestExecutor(t *testing.T) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
-	boardStreamMgr := stream.NewBoardStreamManager(s, nil)
+	appStreamMgr := stream.NewAppStreamManager(s, nil)
 	return &TaskExecutor{
-		store:          s,
-		boardStreamMgr: boardStreamMgr,
-		configStore:    &config.ConfigStore{},
+		store:        s,
+		appStreamMgr: appStreamMgr,
+		configStore:  &config.ConfigStore{},
 	}
 }
 

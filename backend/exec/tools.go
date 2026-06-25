@@ -444,7 +444,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 	}
 
 	// Broadcast the new task to the frontend
-	te.boardStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
+	te.appStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
 
 	if actualParentID != "" {
 		log.Printf("[create_task] task=%s created subtask %s (parent=%s): %q", parent.ID, newTaskID, actualParentID, title)

@@ -1,12 +1,12 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast } from '$lib/store';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createBoardStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken } from '$lib/api';
 import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
-    import type { Project, Task, Config } from '$lib/types';
+    import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     let TerminalPanelComponent = $state(null);
     let terminalLoading = $state(false);
@@ -83,7 +83,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let tasks: Task[] = $state([]);
     let cfg: Config | null = $state(null);
     let collapsed = $state(false);
-    let boardStream: ReturnType<typeof createBoardStream> | null = $state(null);
+    let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, string> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
@@ -220,6 +220,82 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             if (isAuthenticated) {
                 // Extract CSRF token from session response
                 if (authData.csrf_token) setCsrfToken(authData.csrf_token);
+                // Create app-level WebSocket stream
+                appStream = createAppStream({
+                    onProjectCounts: (counts) => {
+                        projectCounts = counts;
+                    },
+                    onRefresh: () => refreshBoard(),
+                    onDiffStats: (task_id, short_stat, untracked_n, untracked_lines) => {
+                        const stat = short_stat || '';
+                        const fileMatch = stat.match(/(\d+) file\w* changed/);
+                        const insMatch = stat.match(/(\d+) insertion\w*/);
+                        const delMatch = stat.match(/(\d+) deletion\w*/);
+                        const trackedFiles = fileMatch ? parseInt(fileMatch[1]) : 0;
+                        const untracked = untracked_n || 0;
+                        const totalFiles = trackedFiles + untracked;
+                        const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
+                        const deletions = delMatch ? parseInt(delMatch[1]) : 0;
+                        if (totalFiles > 0) {
+                            taskDiffStatsStore.update(map => {
+                                map[task_id] = { files: totalFiles, additions, deletions };
+                                return map;
+                            });
+                        } else {
+                            taskDiffStatsStore.update(map => {
+                                delete map[task_id];
+                                return map;
+                            });
+                        }
+                    },
+                    onDiff: (task_id, diff, untracked) => {
+                        taskDiffStore.update(map => {
+                            if (diff || untracked.length > 0) {
+                                map[task_id] = { diff, untracked };
+                            } else {
+                                delete map[task_id];
+                            }
+                            return map;
+                        });
+                    },
+                    onBranch: (branch) => {
+                        currentBranch = branch;
+                    },
+                    onTaskUpdated: (updatedTask: Task) => {
+                        const idx = tasks.findIndex(t => t.id === updatedTask.id);
+                        if (idx !== -1) {
+                            tasks[idx] = updatedTask;
+                        } else {
+                            tasks.push(updatedTask);
+                        }
+                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
+                            selectedTaskVal = updatedTask;
+                            selectedTask.set(updatedTask);
+                        }
+                    },
+                    onTaskDeleted: (task_id: string) => {
+                        const idx = tasks.findIndex(t => t.id === task_id);
+                        if (idx !== -1) {
+                            tasks.splice(idx, 1);
+                            boardStore.update(b => b ? { ...b, tasks } : b);
+                        }
+                        if (selectedTaskVal && selectedTaskVal.id === task_id) {
+                            clearTaskDetail();
+                        }
+                    },
+                    onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
+                        if (currentProject) {
+                            commitQueueStatus.update(map => ({ ...map, [currentProject.id]: { taskID: task_id, status } }));
+                        }
+                    },
+                    onTaskEvent: (task_id: string, event: StreamEvent) => {
+                        // Forward task events to the task event store for TaskStream to consume
+                        if (selectedTaskVal && selectedTaskVal.id === task_id) {
+                            taskEvent.set({ task_id, ...event });
+                        }
+                    },
+                });
                 await loadAppData();
             }
         } catch (e) {
@@ -229,6 +305,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     onDestroy(() => {
         disconnectBoardStream();
+        if (appStream) {
+            appStream.close();
+            appStream = null;
+        }
         if (urlPollTimer) clearInterval(urlPollTimer);
     });
 
@@ -279,9 +359,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     }
 
     function disconnectBoardStream() {
-        if (boardStream) {
-            boardStream.close();
-            boardStream = null;
+        if (currentProject && appStream) {
+            appStream.unsubscribeProject(currentProject.id);
+        }
+        if (selectedTaskVal && appStream) {
+            appStream.unsubscribeTask(currentProject?.id || '', selectedTaskVal.id);
         }
     }
 
@@ -331,69 +413,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             boardStore.set(b);
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
-            // Connect board stream for real-time updates
-            boardStream = createBoardStream(p.id, () => refreshBoard(), (counts) => {
-                projectCounts = counts;
-            }, (task_id, short_stat, untracked_n, untracked_lines) => {
-                const stat = short_stat || '';
-                const fileMatch = stat.match(/(\d+) file\w* changed/);
-                const insMatch = stat.match(/(\d+) insertion\w*/);
-                const delMatch = stat.match(/(\d+) deletion\w*/);
-                const trackedFiles = fileMatch ? parseInt(fileMatch[1]) : 0;
-                const untracked = untracked_n || 0;
-                const totalFiles = trackedFiles + untracked;
-                const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
-                const deletions = delMatch ? parseInt(delMatch[1]) : 0;
-                if (totalFiles > 0) {
-                    taskDiffStatsStore.update(map => {
-                        map[task_id] = { files: totalFiles, additions, deletions };
-                        return map;
-                    });
-                } else {
-                    taskDiffStatsStore.update(map => {
-                        delete map[task_id];
-                        return map;
-                    });
-                }
-            }, (task_id, diff, untracked) => {
-                taskDiffStore.update(map => {
-                    if (diff || untracked.length > 0) {
-                        map[task_id] = { diff, untracked };
-                    } else {
-                        delete map[task_id];
-                    }
-                    return map;
-                });
-            }, (branch) => {
-                currentBranch = branch;
-            }, (updatedTask: Task) => {
-                const idx = tasks.findIndex(t => t.id === updatedTask.id);
-                if (idx !== -1) {
-                    tasks[idx] = updatedTask;
-                } else {
-                    tasks.push(updatedTask);
-                }
-                // Update board store with the local tasks array reference
-                boardStore.update(b => b ? { ...b, tasks } : b);
-                // Update selected task if it's the one that changed
-                if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
-                    selectedTaskVal = updatedTask;
-                    selectedTask.set(updatedTask);
-                }
-            }, (task_id: string) => {
-                // Task deleted - remove from list
-                const idx = tasks.findIndex(t => t.id === task_id);
-                if (idx !== -1) {
-                    tasks.splice(idx, 1);
-                    boardStore.update(b => b ? { ...b, tasks } : b);
-                }
-                // Close task detail if it's the deleted task
-                if (selectedTaskVal && selectedTaskVal.id === task_id) {
-                    clearTaskDetail();
-                }
-            }, (task_id: string, status: 'queued' | 'processing') => {
-                commitQueueStatus.update(map => ({ ...map, [p.id]: { taskID: task_id, status } }));
-            });
+            // Subscribe to project for real-time updates
+            if (appStream) {
+                appStream.subscribeProject(p.id);
+            }
         } catch (e) {
             console.error('Failed to load board:', e);
         }

@@ -11,7 +11,7 @@ import (
 var (
 	reProjectByID          = regexp.MustCompile(`^/api/projects/([^/]+)$`)
 	reProjectBoard         = regexp.MustCompile(`^/api/projects/([^/]+)/board$`)
-	reProjectBoardWS       = regexp.MustCompile(`^/api/projects/([^/]+)/board/stream$`)
+	reAppStream            = regexp.MustCompile(`^/api/stream$`)
 	reProjectTasks         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks$`)
 	reProjectTaskByID      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)$`)
 	reTaskMove             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/move$`)
@@ -21,7 +21,6 @@ var (
 	reTaskRetry            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/retry$`)
 	reTaskResume           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
 	reTaskSend             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/send$`)
-	reTaskStream           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stream$`)
 	reTaskDiff             = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
 	reTaskCommits          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commits$`)
 	reTaskResetWorktree    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/reset-worktree$`)
@@ -42,9 +41,6 @@ var (
 	reProjectGitCheckout   = regexp.MustCompile(`^/api/projects/([^/]+)/git/checkout$`)
 	reProjectGitPull       = regexp.MustCompile(`^/api/projects/([^/]+)/git/pull$`)
 	reProjectGitPush       = regexp.MustCompile(`^/api/projects/([^/]+)/git/push$`)
-	reProjectHomeAgentMsg  = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/message$`)
-	reProjectHomeAgentMsgs = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/messages$`)
-	reProjectHomeAgentStream = regexp.MustCompile(`^/api/projects/([^/]+)/home-agent/stream$`)
 	reProjectStats         = regexp.MustCompile(`^/api/projects/([^/]+)/stats$`)
 	reProjectSandboxBuild  = regexp.MustCompile(`^/api/projects/([^/]+)/sandbox/build$`)
 	reProjectTerminal      = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
@@ -71,6 +67,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
+	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
 	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
@@ -123,11 +120,6 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if m := reProjectBoardWS.FindStringSubmatch(path); m != nil {
-		s.boardStreamMgr.HandleStream(w, r, m[1])
-		return
-	}
-
 	if m := reProjectBoard.FindStringSubmatch(path); m != nil {
 		s.boardHandler.HandleGetBoard(w, r, m[1])
 		return
@@ -173,10 +165,6 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 
 	if m := reTaskSend.FindStringSubmatch(path); m != nil {
 		s.executor.HandleSend(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskStream.FindStringSubmatch(path); m != nil {
-		s.executor.HandleStream(w, r, m[1], m[2])
 		return
 	}
 	if m := reTaskDiff.FindStringSubmatch(path); m != nil {
@@ -280,19 +268,6 @@ func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := reProjectGitPush.FindStringSubmatch(path); m != nil {
 		s.gitHandler.HandlePush(w, r, m[1])
-		return
-	}
-
-	if m := reProjectHomeAgentMsg.FindStringSubmatch(path); m != nil {
-		s.homeAgentMgr.HandleMessage(w, r, m[1])
-		return
-	}
-	if m := reProjectHomeAgentMsgs.FindStringSubmatch(path); m != nil {
-		s.homeAgentMgr.HandleMessages(w, r, m[1])
-		return
-	}
-	if m := reProjectHomeAgentStream.FindStringSubmatch(path); m != nil {
-		s.homeAgentMgr.HandleStream(w, r, m[1])
 		return
 	}
 

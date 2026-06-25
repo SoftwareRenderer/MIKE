@@ -51,11 +51,6 @@ type UpdateReviewCommentRequest struct {
 	Resolved *bool   `json:"resolved"`
 }
 
-// CreateHomeAgentMessageRequest is the request body for sending a home agent message.
-type CreateHomeAgentMessageRequest struct {
-	Content string `json:"content"`
-}
-
 // GitLogRequest is the request body for git log.
 type GitLogRequest struct {
 	Branch string `json:"branch,omitempty"`

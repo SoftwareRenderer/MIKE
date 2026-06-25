@@ -129,9 +129,8 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 			s.resetWorktreeToCommit(taskID, lastCommit)
 			s.broadcastTaskDiff(taskID)
 			// Broadcast updated task so frontend has new currentThreadID before diff loads
-			s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
-			b := s.executor.GetOrCreateStream(taskID)
-			b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
+			s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+			s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
 		} else {
 			// No fork threads affected, but messages were deleted.
 			// Reset file state to match remaining conversation in active thread.
@@ -582,7 +581,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	}
 	task, _ = s.store.GetTask(projectID, taskID)
 	if task != nil {
-		s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -650,10 +649,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
-	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	// Broadcast thread_switch event to WebSocket clients
-	b := s.executor.GetOrCreateStream(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
+	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the new thread's branch
 	s.broadcastTaskDiff(taskID)
 	JSONResponse(w, http.StatusOK, thread)
@@ -770,10 +768,9 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
-	s.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	// Broadcast thread_switch event
-	b := s.executor.GetOrCreateStream(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
+	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the forked branch
 	s.broadcastTaskDiff(taskID)
 	JSONResponse(w, http.StatusCreated, newThread)
@@ -871,6 +868,5 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 	if err != nil {
 		return
 	}
-	b := s.executor.GetOrCreateStream(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
+	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
 }

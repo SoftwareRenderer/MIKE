@@ -14,12 +14,12 @@ import (
 // BoardHandler handles board-level operations.
 type BoardHandler struct {
 	store          *store.Store
-	boardStreamMgr *stream.BoardStreamManager
+	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 }
 
 // NewBoardHandler creates a new BoardHandler.
-func NewBoardHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore) *BoardHandler {
+func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore) *BoardHandler {
 	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore}
 }
 

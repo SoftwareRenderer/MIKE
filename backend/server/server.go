@@ -28,12 +28,11 @@ type Server struct {
 	projectHandler *managers.ProjectHandler
 	taskHandler    *managers.TaskHandler
 	boardHandler   *managers.BoardHandler
-	boardStreamMgr *stream.BoardStreamManager
+	appStreamMgr   *stream.AppStreamManager
 	depHandler     *managers.DependencyHandler
 	reviewHandler  *managers.ReviewHandler
 	gitHandler     *managers.GitHandler
 	executor       *exec.TaskExecutor
-	homeAgentMgr   *managers.HomeAgentHandler
 	terminalMgr    *term.TerminalManager
 	sandboxMgr     *sandbox.SandboxManager
 	mux            *http.ServeMux
@@ -78,17 +77,16 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	sessionCookieSecure = os.Getenv("KANBAN_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
-	s.boardStreamMgr = stream.NewBoardStreamManager(store, worktreeMgr)
-	s.boardHandler = managers.NewBoardHandler(store, s.boardStreamMgr, cfgStore)
+	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
+	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore)
 	s.sandboxMgr = sandbox.NewSandboxManager()
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr)
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.boardStreamMgr, worktreeMgr, s.sandboxMgr)
-	s.taskHandler = managers.NewTaskHandler(store, s.boardStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
+	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr)
+	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
-	s.homeAgentMgr = managers.NewHomeAgentHandler(store, cfgStore)
 
 	// Run garbage collector on startup
 	dryRun := os.Getenv("KANBAN_GC_DRY_RUN") == "1"

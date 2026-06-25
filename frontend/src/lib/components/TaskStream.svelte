@@ -3,7 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamSection } from '$lib/types';
     import { getToolDisplayName } from '$lib/types';
-    import { createTaskStream } from '$lib/api';
+    import { taskEvent } from '$lib/store';
     import StreamSectionComp from './StreamSection.svelte';
     import StreamActions from './StreamActions.svelte';
 
@@ -16,7 +16,6 @@
     let showRaw = $state(false);
     let rawFrames: string[] = $state([]);
     let tokenStats = $state({ prompt: 0, completed: 0, total: 0, duration: 0 });
-    let ws: WebSocket | null = null;
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
     let prevScrollHeight = $state(0);
@@ -189,16 +188,19 @@
     }
 
     onMount(() => {
-        ws = createTaskStream(projectId, taskId, (event) => {
-            rawFrames.push(JSON.stringify(event));
-            handleEvent(event);
+        connecting = false;
+        connected = true;
+        const unsub = taskEvent.subscribe((event) => {
+            if (event && event.task_id === taskId) {
+                rawFrames.push(JSON.stringify(event));
+                handleEvent({ type: event.type, data: event.data });
+            }
         });
-        ws.onopen = () => { connecting = false; connected = true; };
-        ws.onclose = () => { connected = false; };
+        return () => unsub();
     });
 
     onDestroy(() => {
-        if (ws) ws.close();
+        connected = false;
     });
 </script>
 

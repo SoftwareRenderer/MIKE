@@ -414,11 +414,11 @@ func buildHint(loopType LoopType, target string) string {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
-			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
@@ -438,8 +438,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "gVisor not available", "sandbox_unavailable")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "gVisor not available", "sandbox_unavailable")
 			return
 		}
 		// Determine image to use: Dockerfile build takes precedence over pre-built image
@@ -447,16 +447,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		if sandboxDockerfilePath != "" {
 			imageToUse = sandbox.ProjectImageName(projectName)
 			if !te.sandboxMgr.ImageReadyForProject(projectName) {
-				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
 				if err := te.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
-					b.Send(types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
 				}); err != nil {
 					task.StatusState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to build sandbox image: %v", err)
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image build failed: %v", err), "image_build_failed")
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, fmt.Sprintf("Image build failed: %v", err), "image_build_failed")
 					return
 				}
 			}
@@ -467,16 +467,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				imageToUse = sandbox.BaseImage
 			}
 			if !te.sandboxMgr.ImageReady(imageToUse) {
-				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
 				if err := te.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
-					b.Send(types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
 				}); err != nil {
 					task.StatusState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(b, task.ID, fmt.Sprintf("Image pull failed: %v", err), "image_pull_failed")
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, fmt.Sprintf("Image pull failed: %v", err), "image_pull_failed")
 					return
 				}
 			}
@@ -486,14 +486,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if serverURL == PiSentinelURL {
 				piAgentDir = te.configStore.GetAgentConfigDir()
 			}
-			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
 			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			task.StatusState = "failed"
 			task.Status = "review"
 			task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
 			return
 		}
 		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
@@ -522,7 +522,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	// Check if this task uses Pi agent
 	if serverURL == PiSentinelURL {
 		log.Printf("[exec] task=%s detected Pi agent (url=%s), calling executeTaskWithPi", task.ID, serverURL)
-		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, b, userMsgChan, sandboxEnabled)
+		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, userMsgChan, sandboxEnabled)
 		log.Printf("[exec] task=%s executeTaskWithPi returned", task.ID)
 		return
 	}
@@ -652,8 +652,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
 		default:
 		}
@@ -723,7 +723,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				case <-tick.C:
 					pos := te.gate.Position(serverURL)
 					est := te.gate.EstimateWait(serverURL)
-					b.Send(types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]interface{}{
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]interface{}{
 						"position":             pos,
 						"estimated_wait_seconds": est,
 					}})
@@ -738,8 +738,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "Task stopped while waiting for LLM slot", "stopped")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Task stopped while waiting for LLM slot", "stopped")
 			return
 		}
 		close(queueDone)
@@ -755,15 +755,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
 				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 					reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-					b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
 				}
 				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 					assistantContent.WriteString(*choice.Delta.Content)
-					b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 					// Real-time phrase repetition detection
 					if loopType := detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
 						log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
-						b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
 					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
@@ -783,10 +783,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
 						if choice.Delta.ReasoningContent != nil {
 							reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-							b.Send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
 						}
 						if choice.Delta.Content != nil {
-							b.Send(types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 						}
 					})
 					if streamErr == nil {
@@ -808,7 +808,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			return
 		case <-streamDone:
 			// Stream completed normally (or all retries exhausted)
@@ -888,7 +888,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 
 			// Notify frontend that response was cancelled.
-			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "cancelled", "activity": "Response cancelled, processing new message"}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "cancelled", "activity": "Response cancelled, processing new message"}})
 
 			continue
 		}
@@ -896,7 +896,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 		if streamErr != nil {
 			log.Printf("[connect] task=%s connection failed: %v, retrying...", task.ID, streamErr)
-			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Connection failed: %v, retrying...", streamErr)}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Connection failed: %v, retrying...", streamErr)}})
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -941,8 +941,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
-				b.Send(types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
-				b.Send(types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": args, "raw_args": tc.Function.Arguments, "sandbox": isSandboxed}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
 				tcJSON, _ := json.Marshal(map[string]interface{}{
@@ -1003,7 +1003,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task.Status = "review"
 					}
 					te.store.UpdateTask(task)
-					b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 						"state": task.StatusState,
 						"assistant_message_id": assistantMsgID,
 						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
@@ -1011,7 +1011,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"prompt_ms": promptMs, "predicted_ms": predictedMs,
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 					// Broadcast diff so the frontend updates the diff panel
 					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
@@ -1019,7 +1019,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						for i, u := range diffResult.Untracked {
 							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
 						}
-						te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+						te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
@@ -1033,8 +1033,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				task.StatusState = "failed"
 				task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 				te.store.UpdateTask(task)
-				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(b, task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
 				return
 			}
 
@@ -1072,8 +1072,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					task.StatusState = "failed"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
 					return
 				}
 				// Extract target for hint message
@@ -1087,7 +1087,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				detector.hintCount++
 				detector.reset()
 				// Notify frontend
-				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 			}
 
 			pendingToolCalls = nil
@@ -1095,7 +1095,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			reasoningContent.Reset()
 
 			// Auto-commit file changes as a checkpoint
-			te.createCheckpoint(task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, messages, b, sandboxEnabled)
+			te.createCheckpoint(projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, messages, sandboxEnabled)
 
 			// Broadcast updated diff stats to board viewers
 			thread, _ := te.store.GetThread(task.CurrentThreadID)
@@ -1109,7 +1109,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for i, u := range diffResult.Untracked {
 					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
 				}
-				te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
@@ -1148,8 +1148,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					task.Status = "review"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(b, task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
 					return
 				}
 				hint := buildHint(loopType, "")
@@ -1159,7 +1159,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				detector.reset()
 				task.StatusState = "running"
 				te.store.UpdateTask(task)
-				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 				continue
 			}
 
@@ -1178,14 +1178,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				task.StatusState = "running"
 				te.store.UpdateTask(task)
-				b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				continue
 			default:
 			}
 			task.Status = "review"
 			task.StatusState = "idle"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			// Broadcast diff so the frontend updates the diff panel
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
@@ -1193,9 +1193,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for i, u := range diffResult.Untracked {
 					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
 				}
-				te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
-			b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
 				"cache_tokens": cacheTokens,
@@ -1226,7 +1226,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						Content:  compressResult.summary,
 						CreatedAt: time.Now().UTC(),
 					})
-					b.Send(types.StreamEvent{Type: "compression", Data: map[string]string{"summary": compressResult.summary}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "compression", Data: map[string]string{"summary": compressResult.summary}})
 					log.Printf("[compress] task=%s compressed context: %d messages -> %d messages", task.ID, compressResult.oldLen, len(messages))
 				}
 			}
@@ -1241,8 +1241,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
@@ -1257,26 +1257,25 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			task.StatusState = "running"
 			te.store.UpdateTask(task)
-			b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 		}
 	}
 }
 
 // sendAndPersistError sends an error event via WebSocket and persists it to the database.
-func (te *TaskExecutor) sendAndPersistError(b *stream.Broadcaster, taskID, message, code string) {
-	// Get the task to find its current thread
-		task, _ := te.store.GetTaskByTaskID(taskID)
-		errMsg := &types.TaskMessage{
-			ID: uuid.New().String(), TaskID: taskID, Role: "error",
-			Content: fmt.Sprintf("[%s] %s", code, message), CreatedAt: time.Now(),
-		}
-		if task != nil {
-			errMsg.ThreadID = task.CurrentThreadID
-		}
+func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
+	task, _ := te.store.GetTaskByTaskID(taskID)
+	errMsg := &types.TaskMessage{
+		ID: uuid.New().String(), TaskID: taskID, Role: "error",
+		Content: fmt.Sprintf("[%s] %s", code, message), CreatedAt: time.Now(),
+	}
+	if task != nil {
+		errMsg.ThreadID = task.CurrentThreadID
+		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeError, Data: map[string]string{"message": message, "code": code}})
+	}
 	if err := te.store.CreateTaskMessage(errMsg); err != nil {
 		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
 	}
-	b.Send(types.StreamEvent{Type: types.WSTypeError, Data: map[string]string{"message": message, "code": code}})
 }
 
 func (te *TaskExecutor) gitRun(dir string, args ...string) error {
@@ -1396,7 +1395,7 @@ func isSandboxableTool(name string) bool {
 // Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
 // from the working tree — files stay visible in the filesystem.
 // Runs the LLM labeler in a goroutine so it does not block the main execution loop.
-func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assistantMsgID string, messages []types.ChatMessage, b *stream.Broadcaster, sandboxEnabled bool) {
+func (te *TaskExecutor) createCheckpoint(projectID, taskID, worktreePath, threadID, assistantMsgID string, messages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
 	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {
@@ -1404,7 +1403,7 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 	}
 
 	// Send pending event to frontend
-	b.Send(types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
 	// Run stash + LLM labeler in background (non-blocking)
 	go func() {
@@ -1459,7 +1458,7 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 
 		if stashErr != nil {
 			log.Printf("[checkpoint] task=%s stash failed: %v", taskID, stashErr)
-			b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
 				"label":       label,
@@ -1473,7 +1472,7 @@ func (te *TaskExecutor) createCheckpoint(taskID, worktreePath, threadID, assista
 		}
 
 		// Send complete event to frontend
-		b.Send(types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 			"message_id":  assistantMsgID,
 			"commit_hash": stashHash,
 			"label":       label,
@@ -1589,11 +1588,11 @@ func formatConversationTurns(messages []types.ChatMessage) string {
 // executeTaskWithPi runs the task using Pi agent via RPC mode.
 // Pi handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, b *stream.Broadcaster, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
-			te.sendAndPersistError(b, task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
 		te.taskMu.Lock()
 		delete(te.tasks, task.ID)
@@ -1612,8 +1611,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Pi Coding Agent binary not found in sandbox container. Ensure the container image includes the `pi` binary."
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "pi binary not found in container", "pi_not_available")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "pi binary not found in container", "pi_not_available")
 			return
 		}
 
@@ -1641,8 +1640,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to start Pi Coding Agent: %v", err)
 		te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
 		return
 	}
 	defer client.Close()
@@ -1670,7 +1669,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		})
 	}
 
-	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
 
 	// Send initial prompt to Pi
 	err = client.Prompt(ctx, task.Prompt)
@@ -1679,8 +1678,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to send prompt to Pi: %v", err)
 		te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
 		return
 	}
 
@@ -1700,8 +1699,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Pi Coding Agent failed to start (timeout waiting for agent)"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "Pi failed to start within 30s", "pi_startup_timeout")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Pi failed to start within 30s", "pi_startup_timeout")
 			return
 		}
 
@@ -1719,13 +1718,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				task.Status = "review"
 				task.Output = "Pi Coding Agent process exited unexpectedly"
 				te.store.UpdateTask(task)
-				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(b, task.ID, "Pi process exited", "pi_process_exited")
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, "Pi process exited", "pi_process_exited")
 				return
 			}
 			log.Printf("[pi] task=%s startup event: %s", task.ID, event.Type)
 			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
-				b.Send(streamEvent)
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {
 			case "agent_start":
@@ -1737,8 +1736,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				task.Status = "review"
 				task.Output = "Pi Coding Agent ended immediately after starting"
 				te.store.UpdateTask(task)
-				te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(b, task.ID, "Pi ended immediately", "pi_ended_immediately")
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, "Pi ended immediately", "pi_ended_immediately")
 				return
 			case "response":
 				if !event.Success && event.Error != "" && event.Command == "prompt" {
@@ -1747,8 +1746,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Pi rejected prompt: %s", event.Error)
 					te.store.UpdateTask(task)
-					te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(b, task.ID, event.Error, "pi_prompt_rejected")
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, event.Error, "pi_prompt_rejected")
 					return
 				}
 				// Prompt accepted (response success) — keep waiting for agent_start
@@ -1761,7 +1760,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			return
 		case <-timer.C:
 			// Timeout — handled by the check at the top of the loop
@@ -1782,8 +1781,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(b, task.ID, "Task stopped", "stopped")
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
 
 		case event, ok := <-client.EventChan():
@@ -1796,7 +1795,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 			// Stream the event to frontend
 			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
-				b.Send(streamEvent)
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 
 			switch event.Type {
@@ -1865,7 +1864,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			case "response":
 				if !event.Success && event.Error != "" && event.Command == "prompt" {
 					log.Printf("[pi] task=%s prompt response error: %s", task.ID, event.Error)
-					te.sendAndPersistError(b, task.ID, event.Error, "pi_rpc_error")
+					te.sendAndPersistError(task.ID, event.Error, "pi_rpc_error")
 				}
 			}
 
@@ -1903,14 +1902,14 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		te.store.UpdateTask(task)
 
 		// Broadcast complete event
-		b.Send(types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
 			"state":    task.StatusState,
 			"summary":  "Pi Coding Agent finished",
 			"model_name": client.ModelName(),
 			"duration": duration.Milliseconds(),
 		}})
 
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 		// Broadcast diff
 		baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
@@ -1919,7 +1918,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			for i, u := range diffResult.Untracked {
 				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
 			}
-			te.boardStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+			te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 		}
 
 		// Auto-start next sibling if subtask

@@ -176,7 +176,6 @@ func (s *Store) DeleteProjectWithData(id string) error {
 	_, _ = s.db.Exec(`DELETE FROM tasks WHERE project_id = ?`, id)
 
 	// Delete project-level data (FK to projects)
-	_, _ = s.db.Exec(`DELETE FROM home_agent_messages WHERE project_id = ?`, id)
 	_, _ = s.db.Exec(`DELETE FROM project_token_stats WHERE project_id = ?`, id)
 	_, _ = s.db.Exec(`DELETE FROM project_token_tasks WHERE project_id = ?`, id)
 

@@ -30,7 +30,6 @@ func (s *Store) ResetData() error {
 	// Clear in reverse dependency order to respect foreign keys
 	tables := []string{
 		"task_messages",
-		"home_agent_messages",
 		"review_comments",
 		"task_dependencies",
 		"tasks",

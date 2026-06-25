@@ -162,15 +162,6 @@ type ReviewComment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// HomeAgentMessage represents a message in the home agent conversation.
-type HomeAgentMessage struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 // GitCommit represents a git commit in the log.
 type GitCommit struct {
 	Hash    string `json:"hash"`

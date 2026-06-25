@@ -27,10 +27,9 @@ import (
 type TaskExecutor struct {
 	store          *store.Store
 	configStore    *config.ConfigStore
-	boardStreamMgr *stream.BoardStreamManager
+	appStreamMgr   *stream.AppStreamManager
 	worktreeMgr    *git.WorktreeManager
 	sandboxMgr     *sandbox.SandboxManager
-	streamMgr      *stream.StreamManager
 	gate           *ConcurrencyGate
 	taskMu         sync.Mutex
 	tasks          map[string]*executionState
@@ -64,18 +63,25 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, boardStreamMgr *stream.BoardStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager) *TaskExecutor {
 	te := &TaskExecutor{
 		store:          store,
 		configStore:    configStore,
-		boardStreamMgr: boardStreamMgr,
+		appStreamMgr:   appStreamMgr,
 		worktreeMgr:    worktreeMgr,
 		sandboxMgr:     sandboxMgr,
 		gate:           NewConcurrencyGate(),
 		tasks:          make(map[string]*executionState),
 	}
-	te.streamMgr = stream.NewStreamManager(store, te.worktreeMgr, te.boardStreamMgr)
-	te.streamMgr.SetLazyStartHandler(te.handleLazyStart)
+	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
+	te.appStreamMgr.SetUserMessageHandler(func(um stream.AppStreamUserMessage) {
+		te.forwardUserMessage(um.ProjectID, um.TaskID, stream.UserMessage{
+			Content:     um.Content,
+			ModelName:   um.ModelName,
+			ServerURL:   um.ServerURL,
+			Attachments: um.Attachments,
+		})
+	})
 	return te
 }
 
@@ -97,7 +103,7 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 	}
 	log.Printf("[start] task=%s started", taskID)
 	task, _ := te.store.GetTask(projectID, taskID)
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -112,7 +118,7 @@ func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	task, _ := te.store.GetTask(projectID, taskID)
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -127,7 +133,7 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	task, _ := te.store.GetTask(projectID, taskID)
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
@@ -138,21 +144,6 @@ func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request, pro
 		return
 	}
 	te.HandleRetry(w, r, projectID, taskID)
-}
-
-// HandleStream handles WebSocket stream for task output.
-func (te *TaskExecutor) HandleStream(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
-	te.streamMgr.HandleStream(w, r, taskID)
-}
-
-// RemoveStream removes and closes the broadcaster for a task.
-func (te *TaskExecutor) RemoveStream(taskID string) {
-	te.streamMgr.Remove(taskID)
-}
-
-// GetOrCreateStream returns the broadcaster for a task, creating it if needed.
-func (te *TaskExecutor) GetOrCreateStream(taskID string) *stream.Broadcaster {
-	return te.streamMgr.GetOrCreate(taskID)
 }
 
 // HandleSend accepts a user message via HTTP POST and triggers task execution.
@@ -186,7 +177,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, proje
 		task.StatusState = "idle"
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
+		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 	}
 
 	// Check for duplicate (same content as last user message in thread)
@@ -232,21 +223,16 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, proje
 			echoData["attachments"] = atts
 		}
 	}
-	b := te.streamMgr.GetOrCreate(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
+	// Broadcast user_message echo to task subscribers
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
 
 	// Forward to executor or lazy-start
-	handler := b.GetUserMessageHandler()
-	if handler != nil {
-		handler(stream.UserMessage{
-			Content:     req.Content,
-			ModelName:   req.ModelName,
-			ServerURL:   req.LlamaServerURL,
-			Attachments: req.Attachments,
-		})
-	} else {
-		go te.handleLazyStart(projectID, taskID, req.Content, req.ModelName, req.LlamaServerURL)
-	}
+	te.forwardUserMessage(projectID, taskID, stream.UserMessage{
+		Content:     req.Content,
+		ModelName:   req.ModelName,
+		ServerURL:   req.LlamaServerURL,
+		Attachments: req.Attachments,
+	})
 
 	// Return the message
 	result := map[string]interface{}{
@@ -302,7 +288,7 @@ func (te *TaskExecutor) ResetForTest() {
 		state.cancel()
 		delete(te.tasks, taskID)
 	}
-	te.streamMgr.ResetForTest()
+	te.appStreamMgr.ResetForTest()
 }
 
 
@@ -462,8 +448,8 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 		return fmt.Errorf("update parent: %w", err)
 	}
 
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, parent)
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, subtask)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, subtask)
 
 	// Start the subtask executor
 
@@ -535,7 +521,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		} else {
 			started, _ := te.store.GetTaskByTaskID(parent.ID)
 			if started != nil {
-				te.boardStreamMgr.BroadcastTaskUpdated(projectID, started)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, started)
 			}
 		}
 		return nil
@@ -569,7 +555,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 			if err := te.store.UpdateTask(task); err != nil {
 				return fmt.Errorf("reset stale state: %w", err)
 			}
-			te.boardStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
+			te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 		} else {
 			return fmt.Errorf("task already running")
 		}
@@ -623,21 +609,13 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		return nil
 	}
 
-	b := te.streamMgr.GetOrCreate(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
 	te.taskMu.Unlock()
-
-	b.SetUserMessageHandler(func(um stream.UserMessage) {
-		select {
-		case userMsgChan <- um:
-		default:
-		}
-	})
 
 	// Check if project has sandbox enabled
 	project, projErr := te.store.GetProject(projectID)
@@ -650,7 +628,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	sandboxDockerfilePath := project.SandboxDockerfilePath
 	memoryLimit := project.SandboxMemoryLimit
 
-	go te.executeTask(ctx, task, projectID, project.Name, worktreePath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
+	go te.executeTask(ctx, task, projectID, project.Name, worktreePath, serverURL, modelName, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -662,11 +640,24 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	}
 	state.cancel()
 	delete(te.tasks, taskID)
-	// Clear the user message handler so the next message triggers lazy-start
-	// instead of being silently dropped by a stale handler.
-	b := te.streamMgr.GetOrCreate(taskID)
-	b.SetUserMessageHandler(nil)
 	return nil
+}
+
+// forwardUserMessage forwards a user message to the running executor or lazy-starts one.
+func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.UserMessage) {
+	te.taskMu.Lock()
+	state, exists := te.tasks[taskID]
+	if exists {
+		select {
+		case state.userMsgChan <- um:
+		default:
+			log.Printf("[user-msg] task=%s channel full, dropping message", taskID)
+		}
+		te.taskMu.Unlock()
+		return
+	}
+	te.taskMu.Unlock()
+	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL)
 }
 
 // StopSandbox removes the sandbox container for a task (called on task deletion).
@@ -716,8 +707,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		}
 	}
 
-	b := te.streamMgr.GetOrCreate(taskID)
-
 	if serverURL == "" {
 		serverURL = task.LlamaServerURL
 	}
@@ -727,8 +716,8 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.Status = "review"
 		task.Output = "LLM server URL not configured"
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(b, task.ID, "LLM server URL not configured", "no_server_configured")
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, "LLM server URL not configured", "no_server_configured")
 		return
 	}
 
@@ -746,8 +735,8 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to create worktree: %v", err)
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(b, task.ID, fmt.Sprintf("Worktree creation failed: %v", err), "worktree_failed")
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, fmt.Sprintf("Worktree creation failed: %v", err), "worktree_failed")
 		return
 	}
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, wtPath)
@@ -756,22 +745,15 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	task.Status = "in_progress"
 	task.BaseRef = baseRef
 	_ = te.store.UpdateTask(task)
-	te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
-	b.Send(types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
 	te.taskMu.Unlock()
-
-	b.SetUserMessageHandler(func(um stream.UserMessage) {
-		select {
-		case userMsgChan <- um:
-		default:
-		}
-	})
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
@@ -783,8 +765,8 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to load project: %v", projErr)
 		_ = te.store.UpdateTask(task)
-		te.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(b, task.ID, "Failed to load project", "project_not_found")
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, "Failed to load project", "project_not_found")
 		return
 	}
 	sandboxEnabled := project.SandboxEnabled
@@ -793,7 +775,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	sandboxDockerfilePath := project.SandboxDockerfilePath
 	memoryLimit := project.SandboxMemoryLimit
 
-	go te.executeTask(ctx, task, projectID, project.Name, wtPath, serverURL, modelName, b, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
+	go te.executeTask(ctx, task, projectID, project.Name, wtPath, serverURL, modelName, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
 }
 
 // -- Helper functions --

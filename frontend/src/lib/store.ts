@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { Project, Board, Config, Task } from './types';
+import type { Project, Board, Config, Task, StreamEvent } from './types';
 
 export const projects = writable<Project[]>([]);
 export const selectedProject = writable<Project | null>(null);
@@ -8,6 +8,9 @@ export const board = writable<Board | null>(null);
 export const selectedTask = writable<Task | null>(null);
 export const config = writable<Config | null>(null);
 export const showCreateTask = writable(false);
+
+/** Task event from the app stream, dispatched to TaskStream via this store. */
+export const taskEvent = writable<{ task_id: string; type: string; data: any } | null>(null);
 export const creatingChildOf = writable<string | null>(null);
 export const showConfig = writable(false);
 export const showTerminal = writable(false);

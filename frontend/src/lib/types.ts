@@ -139,14 +139,6 @@ export interface ReviewComment {
     updated_at: string;
 }
 
-export interface HomeAgentMessage {
-    id: string;
-    project_id: string;
-    role: string;
-    content: string;
-    created_at: string;
-}
-
 export interface TaskMessage {
     id: string;
     task_id: string;

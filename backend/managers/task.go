@@ -29,7 +29,7 @@ import (
 // TaskHandler handles task CRUD operations.
 type TaskHandler struct {
 	store          *store.Store
-	boardStreamMgr *stream.BoardStreamManager
+	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 	terminalMgr    *term.TerminalManager
 	executor       *exec.TaskExecutor
@@ -38,7 +38,7 @@ type TaskHandler struct {
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.BoardStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *bkg.CommitQueue) *TaskHandler {
+func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *bkg.CommitQueue) *TaskHandler {
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
 }
 
@@ -773,14 +773,16 @@ func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFile
 		return
 	}
 	// Broadcast to task stream clients for real-time display
-	b := h.executor.GetOrCreateStream(taskID)
-	b.Send(types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]interface{}{
-		"id":              msgID,
-		"conflicted_files": conflictedFiles,
-		"summary":         summary,
-		"content":         content,
-		"created_at":      time.Now().UTC().Format(time.RFC3339),
-	}})
+	task, _ := h.store.GetTaskByTaskID(taskID)
+	if task != nil && h.boardStreamMgr != nil {
+		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]interface{}{
+			"id":              msgID,
+			"conflicted_files": conflictedFiles,
+			"summary":         summary,
+			"content":         content,
+			"created_at":      time.Now().UTC().Format(time.RFC3339),
+		}})
+	}
 }
 
 // broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
@@ -814,7 +816,6 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.executor != nil {
 		_ = h.executor.StopTask(taskID)
 		h.executor.StopSandbox(taskID)
-		h.executor.RemoveStream(taskID)
 	}
 	if h.worktreeMgr != nil {
 		task, err := h.store.GetTaskByTaskID(taskID)

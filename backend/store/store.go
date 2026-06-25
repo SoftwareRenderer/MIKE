@@ -147,15 +147,6 @@ CREATE TABLE IF NOT EXISTS review_comments (
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS home_agent_messages (
-    id         TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    role       TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS task_threads (
     id              TEXT PRIMARY KEY,
     task_id         TEXT NOT NULL,
@@ -218,7 +209,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status)
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(parent_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_child ON task_dependencies(child_task_id);
 CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
-CREATE INDEX IF NOT EXISTS idx_home_agent_messages_project ON home_agent_messages(project_id);
 CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 `

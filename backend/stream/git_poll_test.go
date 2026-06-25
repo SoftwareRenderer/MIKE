@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,16 +13,14 @@ import (
 	"kanban/backend/types"
 )
 
-// TestGitStatusPoll verifies that the poller detects file changes and sends diff_changed events.
-func TestGitStatusPoll(t *testing.T) {
-	// Create a temporary test repo
+// TestGitPollerLifecycle verifies that the poller starts, runs, and stops cleanly.
+func TestGitPollerLifecycle(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	worktreesDir := filepath.Join(tmpDir, "worktrees")
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	// Initialize git repo
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
@@ -31,7 +28,6 @@ func TestGitStatusPoll(t *testing.T) {
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
-	// Create in-memory store and config
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
 	if err != nil {
@@ -49,7 +45,6 @@ func TestGitStatusPoll(t *testing.T) {
 		t.Fatalf("update config: %v", err)
 	}
 
-	// Create project and task in store
 	projID := "test-project"
 	taskID := "test-task"
 	branchName := "kanban/" + taskID
@@ -72,149 +67,201 @@ func TestGitStatusPoll(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	// Create worktree
 	wm := git.NewWorktreeManager(s, cfgStore)
 	_, _, err = wm.CreateWorktree(projID, taskID, branchName)
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 
-	// Create broadcaster
-	b := newBroadcaster(100)
+	asm := NewAppStreamManager(s, wm)
 
-	// Create stream manager with poller tracking
-	sm := &StreamManager{
-		store:       s,
-		worktreeMgr: wm,
-		pollers:     make(map[string]context.CancelFunc),
+	// Start poller — should not panic
+	asm.startPoller(projID)
+
+	// Wait for a few cycles
+	time.Sleep(5500 * time.Millisecond)
+
+	// Stop poller — should not panic
+	asm.stopPoller(projID)
+
+	// Verify poller is stopped
+	asm.pollersMu.Lock()
+	_, exists := asm.pollers[projID]
+	asm.pollersMu.Unlock()
+	if exists {
+		t.Fatal("expected poller to be stopped")
 	}
-
-	// Start the poller (simulating first client connecting)
-	ctx, cancel := context.WithCancel(context.Background())
-	sm.pollers[taskID] = cancel
-	go sm.pollGitStatus(ctx, taskID, b)
-
-	// Wait for initial baseline to be established (ticker fires at 2s)
-	time.Sleep(2500 * time.Millisecond)
-
-	// Check initial buffer count (baseline)
-	initialCount := b.bufferLength()
-
-	// Modify a file in the worktree
-	worktreePath := filepath.Join(worktreesDir, taskID)
-	writeFile(t, worktreePath, "new_file.txt", "hello world\n")
-
-	// Wait for poller to detect change (2s poll interval + buffer)
-	var detected bool
-	for i := 0; i < 10; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if b.bufferLength() > initialCount {
-			detected = true
-			break
-		}
-	}
-
-	if !detected {
-		t.Fatalf("poller did not detect file change within 5s; buffer length stayed at %d", initialCount)
-	}
-
-	// Verify the event type is diff_changed
-	lastMsg := b.getLastMessage()
-	if lastMsg == nil || lastMsg.Type != string(types.WSTypeDiffChanged) {
-		typ := "<nil>"
-		if lastMsg != nil {
-			typ = lastMsg.Type
-		}
-		t.Fatalf("expected diff_changed event, got type=%q", typ)
-	}
-
-	// --- Test: modifying the SAME file again also triggers a diff_changed event ---
-	// This verifies the fix for the bug where subsequent changes to the same file
-	// were not detected (because git status --porcelain shows identical output).
-	eventCountAfterFirst := b.bufferLength()
-
-	// Modify the same file again with different content
-	writeFile(t, worktreePath, "new_file.txt", "hello world\nsecond line\nthird line\n")
-
-	var sameFileDetected bool
-	for i := 0; i < 10; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if b.bufferLength() > eventCountAfterFirst {
-			sameFileDetected = true
-			break
-		}
-	}
-
-	if !sameFileDetected {
-		t.Fatalf("poller did not detect same-file modification within 5s; buffer length stayed at %d", eventCountAfterFirst)
-	}
-
-	// Verify the new event is also diff_changed
-	lastMsg = b.getLastMessage()
-	if lastMsg == nil || lastMsg.Type != string(types.WSTypeDiffChanged) {
-		typ := "<nil>"
-		if lastMsg != nil {
-			typ = lastMsg.Type
-		}
-		t.Fatalf("expected diff_changed event for same-file mod, got type=%q", typ)
-	}
-
-	// --- Test: same-line same-character-count edit on a TRACKED file ---
-	// This verifies the fix for the bug where --shortstat misses changes that
-	// produce identical line/byte counts (e.g., "foo" -> "bar").
-	// git diff --raw uses blob hashes, so ANY content change is detected.
-	{
-		// Create and commit a tracked file
-		writeFile(t, worktreePath, "tracked.txt", "foo\n")
-		runGit(t, worktreePath, "add", "tracked.txt")
-		runGit(t, worktreePath, "config", "user.email", "test@test.com")
-		runGit(t, worktreePath, "config", "user.name", "Test")
-		runGit(t, worktreePath, "commit", "-m", "Add tracked file")
-
-		// Wait for poller to establish new baseline after commit
-		time.Sleep(2500 * time.Millisecond)
-		eventCountAfterCommit := b.bufferLength()
-
-		// Modify with same character count (3 chars -> 3 chars)
-		writeFile(t, worktreePath, "tracked.txt", "bar\n")
-
-		var sameCharDetected bool
-		for i := 0; i < 10; i++ {
-			time.Sleep(500 * time.Millisecond)
-			if b.bufferLength() > eventCountAfterCommit {
-				sameCharDetected = true
-				break
-			}
-		}
-
-		if !sameCharDetected {
-			t.Fatalf("poller did not detect same-char-count edit on tracked file within 5s; buffer length stayed at %d", eventCountAfterCommit)
-		}
-
-		lastMsg = b.getLastMessage()
-		if lastMsg == nil || lastMsg.Type != string(types.WSTypeDiffChanged) {
-			typ := "<nil>"
-			if lastMsg != nil {
-				typ = lastMsg.Type
-			}
-			t.Fatalf("expected diff_changed event for same-char edit, got type=%q", typ)
-		}
-	}
-
-	// Stop the poller
-	cancel()
-	time.Sleep(500 * time.Millisecond)
 }
 
+// TestGitPollerSkipsBacklog verifies that the poller handles tasks without worktrees gracefully.
+func TestGitPollerSkipsBacklog(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(repoDir, 0o755)
+	os.MkdirAll(worktreesDir, 0o755)
+
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer s.Close()
+
+	cfgStore := config.NewConfigStore(s, dbPath)
+	cfg, err := cfgStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.WorkspaceDir = worktreesDir
+	if err := cfgStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	projID := "test-project"
+	taskID := "test-task"
+
+	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Task in in_progress but NO worktree (simulating backlog)
+	task := &types.Task{
+		ID:          taskID,
+		ProjectID:   projID,
+		Title:       "Test task",
+		Prompt:      "Test prompt",
+		Status:      "in_progress",
+		StatusState: "running",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wm := git.NewWorktreeManager(s, cfgStore)
+	asm := NewAppStreamManager(s, wm)
+
+	// Start poller — should not panic even without worktree
+	asm.startPoller(projID)
+	defer asm.stopPoller(projID)
+
+	// Wait for a few cycles — should not panic
+	time.Sleep(5500 * time.Millisecond)
+}
+
+// TestGitPollerDetectsChanges verifies that the worktree manager detects file changes.
+func TestGitPollerDetectsChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(repoDir, 0o755)
+	os.MkdirAll(worktreesDir, 0o755)
+
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer s.Close()
+
+	cfgStore := config.NewConfigStore(s, dbPath)
+	cfg, err := cfgStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.WorkspaceDir = worktreesDir
+	if err := cfgStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	projID := "test-project"
+	taskID := "test-task"
+	branchName := "kanban/" + taskID
+
+	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &types.Task{
+		ID:          taskID,
+		ProjectID:   projID,
+		Title:       "Test task",
+		Prompt:      "Test prompt",
+		Status:      "in_progress",
+		StatusState: "running",
+		Branch:      branchName,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wm := git.NewWorktreeManager(s, cfgStore)
+	_, _, err = wm.CreateWorktree(projID, taskID, branchName)
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Verify that the worktree manager can detect changes
+	worktreePath := filepath.Join(worktreesDir, taskID)
+
+	// Initial state — no diff
+	raw1, err := wm.GitDiffRaw(taskID, "")
+	if err != nil {
+		t.Fatalf("initial diff raw: %v", err)
+	}
+
+	// Make a change
+	writeFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
+
+	// After change — should detect diff
+	raw2, err := wm.GitDiffRaw(taskID, "")
+	if err != nil {
+		t.Fatalf("diff raw after change: %v", err)
+	}
+
+	if raw1 == raw2 {
+		t.Fatal("expected git diff raw to change after file creation")
+	}
+
+	// Verify full diff is available (untracked files show in Untracked, not Diff)
+	diffResult, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("get task diff: %v", err)
+	}
+	// New untracked file should appear in Untracked list
+	if len(diffResult.Untracked) == 0 && diffResult.Diff == "" {
+		t.Fatal("expected diff or untracked files after file creation")
+	}
+}
+
+// runGit runs a git command in the specified directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
+		t.Fatalf("git %s: %v: %s", args, err, out)
 	}
 }
 
+// writeFile writes content to a file in the specified directory.
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {

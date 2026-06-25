@@ -98,32 +98,6 @@ type StreamErrorEvent struct {
 	Code    string `json:"code"`
 }
 
-// HomeAgentWSMessage is the envelope for home agent WebSocket frames.
-type HomeAgentWSMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-// HomeAgentUserMessage is sent by the client to the home agent.
-type HomeAgentUserMessage struct {
-	Content string `json:"content"`
-}
-
-// HomeAgentTokenEvent is a streaming token from the home agent.
-type HomeAgentTokenEvent struct {
-	Text string `json:"text"`
-}
-
-// HomeAgentDoneEvent marks the end of a home agent response.
-type HomeAgentDoneEvent struct {
-	MessageID string `json:"message_id"`
-	Tokens    struct {
-		Prompt    int `json:"prompt"`
-		Completed int `json:"completed"`
-		Total     int `json:"total"`
-	} `json:"tokens"`
-}
-
 // TerminalMessage is the envelope for terminal WebSocket frames.
 type TerminalMessage struct {
 	Type string `json:"type"`

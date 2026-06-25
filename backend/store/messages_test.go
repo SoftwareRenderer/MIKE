@@ -315,32 +315,3 @@ func TestMessageTokenFields(t *testing.T) {
 		t.Fatalf("model/provider mismatch: %s/%s", m.ModelName, m.ProviderName)
 	}
 }
-
-func TestHomeAgentMessages(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	msgs := []*types.HomeAgentMessage{
-		newHomeAgentMessage("m1", "proj-1", "user", "hello"),
-		newHomeAgentMessage("m2", "proj-1", "assistant", "hi"),
-	}
-	for _, m := range msgs {
-		if err := s.CreateHomeAgentMessage(m); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
-
-	got, err := s.GetHomeAgentMessages("proj-1")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(got))
-	}
-	if got[0].Role != "user" || got[1].Role != "assistant" {
-		t.Fatalf("unexpected roles: %s, %s", got[0].Role, got[1].Role)
-	}
-}

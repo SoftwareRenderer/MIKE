@@ -98,17 +98,6 @@ func newReviewComment(id, taskID, filePath, comment string, lineNum int) *types.
 	}
 }
 
-// newHomeAgentMessage creates a HomeAgentMessage with default values for testing.
-func newHomeAgentMessage(id, projectID, role, content string) *types.HomeAgentMessage {
-	return &types.HomeAgentMessage{
-		ID:        id,
-		ProjectID: projectID,
-		Role:      role,
-		Content:   content,
-		CreatedAt: time.Now().UTC(),
-	}
-}
-
 // tempDir returns a temp directory managed by the test.
 func tempDir(t *testing.T) string {
 	t.Helper()

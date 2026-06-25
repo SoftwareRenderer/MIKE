@@ -2,8 +2,8 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
-    import { createTaskStream, sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask } from '$lib/store';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
+import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent } from '$lib/store';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -62,7 +62,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
     let connecting = $state(true);
-    let ws: ReturnType<typeof createTaskStream> | null = null;
     let scrollEl: HTMLElement | null = null;
 
     let atBottom = $state(true);
@@ -1050,11 +1049,6 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function handleStop() {
         markNotStreaming();
         awaitingResponse = false;
-        if (ws) {
-            ws.close();
-            ws = null;
-            connected = false;
-        }
         closeCurrentAssistant();
         try {
             await stopTask(projectId, taskId);
@@ -1215,62 +1209,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     function connect(skipSync = false) {
-        if (ws) return;
+        if (connected) return;
         connecting = true;
-        // Skip sync buffer on first connect (history already loaded from DB via loadHistory).
-        // Enable sync on reconnects to catch events missed during the disconnect window.
-        // After intentional reconnects (fork/thread-switch), skip sync because loadHistory
-        // already loaded the correct messages and the sync buffer may contain stale events
-        // from the old thread.
-        const syncBuffer = firstConnectDone && !skipSync;
-        ws = createTaskStream(projectId, taskId, (event) => handleEvent(event), syncBuffer);
-        ws.ws.onopen = () => {
-            connecting = false;
-            connected = true;
-            if (!firstConnectDone) {
-                // First connection — just remove any connection errors
-                firstConnectDone = true;
-                entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-            } else if (!awaitingResponse) {
-                // Reconnect — reload history from DB to discard any stale
-                // unpersisted entries (e.g., partial assistant message from
-                // a disconnected stream) that would appear as duplicates.
-                // Skip if awaiting response — the sync buffer will deliver
-                // the streaming tokens and we don't want to overwrite them.
-                loadHistory();
-            }
-        };
-        ws.ws.onclose = (event: CloseEvent) => {
-            const wasConnected = connected;
-            const wasAwaiting = awaitingResponse;
-            markNotStreaming();
-            awaitingResponse = false;
-            connected = false;
-            closeCurrentAssistant();
-            isStarting = false;
-            lastSentMessage = null;
-            isRegenerating = false;
-            ws = null;
-            // Preserve awaiting state so reconnect doesn't wipe streaming entries
-            if (wasAwaiting) {
-                awaitingResponse = true;
-            }
-            // Show connection lost error if this was an unexpected disconnect
-            if (!event.wasClean && (wasConnected || connecting) && !destroyed) {
-                const entry: ChatEntry = {
-                    id: genId(),
-                    role: 'error',
-                    content: 'Connection lost. Reconnecting...',
-                    isStreaming: false,
-                    error: { code: 'ws_disconnected', message: 'Connection lost. Reconnecting...' },
-                    createdAt: new Date().toISOString(),
-                };
-                entries = [...entries, entry];
-            }
-            // Auto-retry after 3 seconds
-            setTimeout(() => { if (!ws && !destroyed) connect(); }, 3000);
-        };
-        ws.ws.onerror = () => { connecting = false; };
+        connected = true;
+        connecting = false;
+        if (!firstConnectDone) {
+            firstConnectDone = true;
+            entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+        }
     }
 
     /** Dismiss a single error message without affecting other messages. */
@@ -1283,13 +1229,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    /** Force immediate WebSocket reconnect. */
+    /** Force immediate reconnection. */
     function handleRetryConnect() {
-        if (ws) {
-            ws.ws.onclose = null;
-            ws.close();
-            ws = null;
-        }
+        connected = false;
         // Remove existing connection lost errors
         entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
         connect();
@@ -1380,6 +1322,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Task may not exist yet
         }
         connect();
+        // Subscribe to task events from the app stream
+        const unsubTaskEvent = taskEvent.subscribe((event) => {
+            if (event && event.task_id === taskId) {
+                handleEvent({ type: event.type, data: event.data });
+            }
+        });
         // Scroll to bottom after history is loaded and DOM has rendered.
         // scroll() uses requestAnimationFrame internally so the DOM update is ready.
         scroll();
@@ -1410,12 +1358,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             unsubConfig();
             unsubViewport?.();
             window.removeEventListener('keydown', handleKeydown);
+            unsubTaskEvent();
         };
     });
 
     onDestroy(() => {
         destroyed = true;
-        if (ws) ws.close();
         if (inputTimeout) clearTimeout(inputTimeout);
     });
 </script>
