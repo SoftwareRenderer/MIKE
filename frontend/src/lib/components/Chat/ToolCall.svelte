@@ -136,7 +136,7 @@
                 <div class="tool-result tool-create-task">
                     <span class="create-task-text">Created task</span>
                     <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title="Open task">
-                        {createResult.title as string}
+                        <span class="btn-open-task-text">{createResult.title as string}</span>
                     </button>
                 </div>
             {:else}
@@ -244,7 +244,7 @@
         font-size: 0.75rem;
     }
     .btn-open-task {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 6px;
         padding: 6px 10px;
@@ -257,11 +257,15 @@
         border-left: 3px solid var(--color-column-backlog);
         cursor: pointer;
         transition: all 0.15s ease;
-        white-space: nowrap;
-        max-width: 280px;
+        max-width: 100%;
+        overflow: hidden;
+        font-family: inherit;
+        flex-shrink: 0;
+    }
+    .btn-open-task-text {
         overflow: hidden;
         text-overflow: ellipsis;
-        font-family: inherit;
+        white-space: nowrap;
     }
     .btn-open-task:hover {
         border-color: var(--color-border-bright);

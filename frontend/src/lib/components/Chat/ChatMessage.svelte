@@ -613,6 +613,40 @@
         margin: 8px 0;
         color: var(--color-text-secondary);
     }
+    .assistant .message-text :global(table) {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 0.75rem 0;
+        font-size: 0.875rem;
+        line-height: 1.5rem;
+        display: block;
+        overflow-x: auto;
+    }
+    .assistant .message-text :global(table:first-child) {
+        margin-top: 0;
+    }
+    .assistant .message-text :global(table:last-child) {
+        margin-bottom: 0;
+    }
+    .assistant .message-text :global(thead) {
+        background: var(--color-surface-3);
+    }
+    .assistant .message-text :global(th) {
+        font-weight: 600;
+        text-align: left;
+        padding: 6px 12px;
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+    }
+    .assistant .message-text :global(td) {
+        padding: 6px 12px;
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        vertical-align: top;
+    }
+    .assistant .message-text :global(tbody tr) {
+        background: var(--color-surface-1);
+    }
     .message-stats {
         display: flex;
         align-items: center;
