@@ -4,7 +4,7 @@
     import { get } from 'svelte/store';
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats, taskDiff as taskDiffStore } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats } from '$lib/store';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
@@ -596,11 +596,14 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
         loadDiff();
 
-        // Real-time diff update: apply diff from board stream broadcast
-        const unsubDiff = taskDiffStore.subscribe(diffs => {
-            const diffData = diffs[task.id];
-            if (diffData) {
-                updateDiff({ diff: diffData.diff, untracked: diffData.untracked });
+        // Real-time diff update: re-fetch when the diff hash changes or is cleared
+        let lastDiffHash = $state<string | null>(null);
+        const unsubDiff = taskDiffStats.subscribe(stats => {
+            const stat = stats[task.id];
+            const currentHash = stat?.hash || null;
+            if (currentHash !== lastDiffHash) {
+                lastDiffHash = currentHash;
+                loadDiff();
             }
         });
 

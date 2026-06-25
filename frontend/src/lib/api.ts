@@ -231,7 +231,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 export interface AppStreamCallbacks {
     onProjectCounts?: (counts: Record<string, ProjectCounts>) => void;
     onRefresh?: () => void;
-    onDiffStats?: (task_id: string, short_stat: string, untracked_n: number, untracked_lines: number) => void;
+    onDiffStats?: (task_id: string, hash: string, short_stat: string, untracked_n: number, untracked_lines: number) => void;
     onDiff?: (task_id: string, diff: string, untracked: Array<{ path: string; diff: string; file_size?: number }>) => void;
     onBranch?: (branch: string) => void;
     onTaskUpdated?: (task: Task) => void;
@@ -316,7 +316,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
                 callbacks.onProjectCounts(msg.data);
             }
             if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
-                callbacks.onDiffStats(msg.task_id, msg.short_stat, msg.untracked_n, msg.untracked_lines);
+                callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.untracked_n, msg.untracked_lines);
             }
             if (msg.type === 'task_diff' && callbacks.onDiff) {
                 callbacks.onDiff(msg.task_id, msg.diff, msg.untracked || []);

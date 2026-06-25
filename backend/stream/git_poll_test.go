@@ -13,8 +13,8 @@ import (
 	"kanban/backend/types"
 )
 
-// TestGitPollerLifecycle verifies that the poller starts, runs, and stops cleanly.
-func TestGitPollerLifecycle(t *testing.T) {
+// TestBranchPollerLifecycle verifies that the branch poller starts, runs, and stops cleanly.
+func TestBranchPollerLifecycle(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	worktreesDir := filepath.Join(tmpDir, "worktrees")
@@ -75,26 +75,26 @@ func TestGitPollerLifecycle(t *testing.T) {
 
 	asm := NewAppStreamManager(s, wm)
 
-	// Start poller — should not panic
-	asm.startPoller(projID)
+	// Start branch poller — should not panic
+	asm.startBranchPoller(projID)
 
 	// Wait for a few cycles
 	time.Sleep(5500 * time.Millisecond)
 
-	// Stop poller — should not panic
-	asm.stopPoller(projID)
+	// Stop branch poller — should not panic
+	asm.stopBranchPoller(projID)
 
 	// Verify poller is stopped
-	asm.pollersMu.Lock()
-	_, exists := asm.pollers[projID]
-	asm.pollersMu.Unlock()
+	asm.branchPollersMu.Lock()
+	_, exists := asm.branchPollers[projID]
+	asm.branchPollersMu.Unlock()
 	if exists {
-		t.Fatal("expected poller to be stopped")
+		t.Fatal("expected branch poller to be stopped")
 	}
 }
 
-// TestGitPollerSkipsBacklog verifies that the poller handles tasks without worktrees gracefully.
-func TestGitPollerSkipsBacklog(t *testing.T) {
+// TestBranchPollerSkipsBacklog verifies that the branch poller handles tasks without worktrees gracefully.
+func TestBranchPollerSkipsBacklog(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	worktreesDir := filepath.Join(tmpDir, "worktrees")
@@ -149,9 +149,9 @@ func TestGitPollerSkipsBacklog(t *testing.T) {
 	wm := git.NewWorktreeManager(s, cfgStore)
 	asm := NewAppStreamManager(s, wm)
 
-	// Start poller — should not panic even without worktree
-	asm.startPoller(projID)
-	defer asm.stopPoller(projID)
+	// Start branch poller — should not panic even without worktree
+	asm.startBranchPoller(projID)
+	defer asm.stopBranchPoller(projID)
 
 	// Wait for a few cycles — should not panic
 	time.Sleep(5500 * time.Millisecond)

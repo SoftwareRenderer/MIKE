@@ -2,7 +2,9 @@ package stream
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -66,13 +68,6 @@ type AppStreamUserMessage struct {
 	Attachments   string `json:"attachments,omitempty"`
 }
 
-// diffSnapshot holds the last-known git state for a task, used to detect changes.
-type diffSnapshot struct {
-	raw        string
-	shortStat  string
-	untrackedN int
-}
-
 // branchSnapshot holds the last-known branch for a project.
 type branchSnapshot struct {
 	branch string
@@ -87,9 +82,12 @@ type AppStreamManager struct {
 	store   *store.Store
 	worktreeMgr *git.WorktreeManager
 
-	// Diff pollers — one per project, starts when first client subscribes
-	pollersMu sync.Mutex
-	pollers   map[string]context.CancelFunc
+	// Filesystem watcher for worktree changes
+	watcher *WorktreeWatcher
+
+	// Branch pollers — one per project, for detecting branch switches
+	branchPollersMu sync.Mutex
+	branchPollers   map[string]context.CancelFunc
 
 	// User message handler — set by executor for forwarding WS user messages
 	userMsgHandler func(AppStreamUserMessage)
@@ -102,12 +100,16 @@ type AppStreamManager struct {
 
 // NewAppStreamManager creates a new AppStreamManager.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
-	return &AppStreamManager{
-		clients:     make(map[*websocket.Conn]*clientState),
-		store:       store,
-		worktreeMgr: worktreeMgr,
-		pollers:     make(map[string]context.CancelFunc),
+	asm := &AppStreamManager{
+		clients:         make(map[*websocket.Conn]*clientState),
+		store:           store,
+		worktreeMgr:     worktreeMgr,
+		branchPollers:   make(map[string]context.CancelFunc),
 	}
+	// Initialize the filesystem watcher
+	asm.watcher, _ = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
+	go asm.watcher.StartEventLoop()
+	return asm
 }
 
 // SetUserMessageHandler sets the callback for forwarding user messages.
@@ -138,6 +140,27 @@ func (asm *AppStreamManager) GetLazyStartHandler() LazyStartHandler {
 	return asm.lazyStartHandler
 }
 
+// WatchWorktree starts filesystem monitoring for a task's worktree.
+func (asm *AppStreamManager) WatchWorktree(taskID, projectID, baseRef string) {
+	if asm.watcher != nil {
+		_ = asm.watcher.Watch(taskID, projectID, baseRef)
+	}
+}
+
+// UnwatchWorktree stops filesystem monitoring for a task's worktree.
+func (asm *AppStreamManager) UnwatchWorktree(taskID string) {
+	if asm.watcher != nil {
+		asm.watcher.Unwatch(taskID)
+	}
+}
+
+// Close stops all watchers and releases resources.
+func (asm *AppStreamManager) Close() {
+	if asm.watcher != nil {
+		asm.watcher.Close()
+	}
+}
+
 // -- Subscription management --
 
 // subscribeProject adds a project subscription for a client.
@@ -155,9 +178,9 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 	wasEmpty := len(client.projectSub) == 1 // first project subscription
 	asm.mu.Unlock()
 
-	// Start diff poller if this is the first subscriber to this project
+	// Start branch poller if this is the first subscriber to this project
 	if wasEmpty {
-		asm.startPoller(projectID)
+		asm.startBranchPoller(projectID)
 	}
 }
 
@@ -181,9 +204,9 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 	hasSubs := len(client.projectSub) > 0
 	asm.mu.Unlock()
 
-	// Stop poller if no clients are subscribed to this project
+	// Stop branch poller if no clients are subscribed to this project
 	if !hasSubs {
-		asm.stopPoller(projectID)
+		asm.stopBranchPoller(projectID)
 	}
 }
 
@@ -384,6 +407,20 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 	})
 }
 
+// BroadcastDiffStats sends compact diff stats to all clients of a project.
+// Used by the card UI to show file counts and the commit button.
+// The hash lets the frontend detect content changes without receiving the full diff.
+func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int) {
+	asm.sendBoardPayload(projectID, map[string]interface{}{
+		"type":            "task_diff_stats",
+		"task_id":         taskID,
+		"hash":            diffHash,
+		"short_stat":      shortStat,
+		"untracked_n":     untrackedN,
+		"untracked_lines": untrackedLines,
+	})
+}
+
 // BroadcastDiff sends the full diff to all clients of a project.
 func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diff string, shortStat string, untrackedN int, untracked []map[string]interface{}) {
 	asm.sendBoardPayload(projectID, map[string]interface{}{
@@ -460,16 +497,11 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	return baseRef
 }
 
-// pollProjectDiffStats periodically checks git diff stats for tasks in in_progress/review
-// and broadcasts updates when file/line counts change. Also monitors the project's current branch.
-func (asm *AppStreamManager) pollProjectDiffStats(ctx context.Context, projectID string) {
-	if asm.store == nil || asm.worktreeMgr == nil {
-		return
-	}
+// pollBranch checks the project's current branch and broadcasts if it changed.
+func (asm *AppStreamManager) pollBranch(ctx context.Context, projectID string) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 
-	snapshots := make(map[string]diffSnapshot)
 	var lastBranch string
 
 	for {
@@ -477,87 +509,38 @@ func (asm *AppStreamManager) pollProjectDiffStats(ctx context.Context, projectID
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			// Check for branch changes
 			branch, _ := asm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
 			branch = strings.TrimSpace(branch)
 			if branch != lastBranch {
-				log.Printf("[board poll] project=%s branch changed: %s -> %s", projectID, lastBranch, branch)
+				log.Printf("[branch poll] project=%s branch changed: %s -> %s", projectID, lastBranch, branch)
 				lastBranch = branch
 				asm.BroadcastBranch(projectID, branch)
-			}
-
-			tasks, err := asm.store.GetTasksByProject(projectID)
-			if err != nil {
-				continue
-			}
-			for _, task := range tasks {
-				if task.Status != "in_progress" && task.Status != "review" {
-					continue
-				}
-				baseRef := asm.getDiffBaseline(task)
-				raw, err := asm.worktreeMgr.GitDiffRaw(task.ID, baseRef)
-				if err != nil {
-					continue
-				}
-				prev, exists := snapshots[task.ID]
-				if exists && prev.raw == raw {
-					continue
-				}
-				diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, "")
-				if err != nil {
-					continue
-				}
-				shortStat := diffResult.ShortStat
-				untrackedN := len(diffResult.Untracked)
-				snapshots[task.ID] = diffSnapshot{raw: raw, shortStat: shortStat, untrackedN: untrackedN}
-
-				if diffResult.Diff != "" || untrackedN > 0 {
-					log.Printf("[board poll] project=%s task=%s diff changed: %s (untracked: %d files)",
-						projectID, task.ID, shortStat, untrackedN)
-
-					// Send task_diff to board subscribers
-					untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
-					for i, u := range diffResult.Untracked {
-						untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
-					}
-					asm.BroadcastDiff(projectID, task.ID, diffResult.Diff, shortStat, untrackedN, untrackedMaps)
-
-					// Send diff_changed to task subscribers
-					if asm.hasTaskSubscribers(projectID, task.ID) {
-						asm.SendTaskEvent(projectID, task.ID, types.StreamEvent{
-							Type: types.WSTypeDiffChanged,
-							Data: diffResult,
-						})
-					}
-				} else {
-					asm.BroadcastDiff(projectID, task.ID, "", "", 0, nil)
-				}
 			}
 		}
 	}
 }
 
-// startPoller starts the diff stats poller for a project if not already running.
-func (asm *AppStreamManager) startPoller(projectID string) {
-	asm.pollersMu.Lock()
-	defer asm.pollersMu.Unlock()
-	if _, exists := asm.pollers[projectID]; exists {
+// startBranchPoller starts the branch poller for a project if not already running.
+func (asm *AppStreamManager) startBranchPoller(projectID string) {
+	asm.branchPollersMu.Lock()
+	defer asm.branchPollersMu.Unlock()
+	if _, exists := asm.branchPollers[projectID]; exists {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	asm.pollers[projectID] = cancel
-	go asm.pollProjectDiffStats(ctx, projectID)
-	log.Printf("[poller] project=%s started", projectID)
+	asm.branchPollers[projectID] = cancel
+	go asm.pollBranch(ctx, projectID)
+	log.Printf("[branch poller] project=%s started", projectID)
 }
 
-// stopPoller stops the diff stats poller for a project.
-func (asm *AppStreamManager) stopPoller(projectID string) {
-	asm.pollersMu.Lock()
-	defer asm.pollersMu.Unlock()
-	if cancel, exists := asm.pollers[projectID]; exists {
+// stopBranchPoller stops the branch poller for a project.
+func (asm *AppStreamManager) stopBranchPoller(projectID string) {
+	asm.branchPollersMu.Lock()
+	defer asm.branchPollersMu.Unlock()
+	if cancel, exists := asm.branchPollers[projectID]; exists {
 		cancel()
-		delete(asm.pollers, projectID)
-		log.Printf("[poller] project=%s stopped", projectID)
+		delete(asm.branchPollers, projectID)
+		log.Printf("[branch poller] project=%s stopped", projectID)
 	}
 }
 
@@ -592,10 +575,10 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		asm.mu.Unlock()
 		conn.Close(websocket.StatusNormalClosure, "closed")
 
-		// Stop pollers for projects no one is subscribed to
+		// Stop branch pollers for projects no one is subscribed to
 		for projectID := range client.projectSub {
 			if !asm.hasProjectSubscribers(projectID) {
-				asm.stopPoller(projectID)
+				asm.stopBranchPoller(projectID)
 			}
 		}
 	}()
@@ -713,7 +696,30 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 	}
 	for _, task := range tasks {
 		baseRef := asm.getDiffBaseline(task)
+		// Watch worktrees for tasks in active states
+		if task.Status == "in_progress" || task.Status == "review" {
+			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
+		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+			// Send compact stats for card UI
+			untrackedLines := 0
+			for _, u := range diffResult.Untracked {
+				untrackedLines += strings.Count(u.Diff, "\n")
+			}
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(diffResult.Diff)))
+			statsMsg, _ := json.Marshal(map[string]interface{}{
+				"type":            "task_diff_stats",
+				"task_id":         task.ID,
+				"hash":            hash,
+				"short_stat":      diffResult.ShortStat,
+				"untracked_n":     len(diffResult.Untracked),
+				"untracked_lines": untrackedLines,
+			})
+			asm.writeMu.Lock()
+			conn.Write(context.Background(), websocket.MessageText, statsMsg)
+			asm.writeMu.Unlock()
+
+			// Send full diff for detail view
 			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 			for i, u := range diffResult.Untracked {
 				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
@@ -752,10 +758,10 @@ func (asm *AppStreamManager) ResetForTest() {
 		conn.CloseNow()
 	}
 	asm.clients = make(map[*websocket.Conn]*clientState)
-	asm.pollersMu.Lock()
-	for _, cancel := range asm.pollers {
+	asm.branchPollersMu.Lock()
+	for _, cancel := range asm.branchPollers {
 		cancel()
 	}
-	asm.pollers = make(map[string]context.CancelFunc)
-	asm.pollersMu.Unlock()
+	asm.branchPollers = make(map[string]context.CancelFunc)
+	asm.branchPollersMu.Unlock()
 }

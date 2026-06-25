@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, Provider, Thread } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent } from '$lib/store';
+import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -1060,11 +1060,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         await loadHistory();
     }
 
+    let diffStats = $derived($taskDiffStatsStore[taskId] || null);
+    let hasChanges = $derived(!!diffStats?.hash);
+
     async function handleCommitAndDone() {
         if (isCommitting || disabled) return;
         isCommitting = true;
         try {
-            const updated = await commitAndDone(projectId, taskId);
+            let updated;
+            if (hasChanges) {
+                updated = await commitAndDone(projectId, taskId);
+            } else {
+                updated = await moveTask(projectId, taskId, 'done');
+            }
             boardStore.update(b => {
                 if (!b) return b;
                 return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
@@ -1549,14 +1557,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </button>
                     </div>
                 {/if}
-                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
+                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move task to Done'}>
                     {#if queueStatus === 'queued'}
                         <span class="spinner-inline"></span> In queue...
                     {:else if queueStatus === 'processing' || isCommitting}
-                        <span class="spinner-inline"></span> Committing...
+                        <span class="spinner-inline"></span> {hasChanges ? 'Committing...' : 'Moving...'}
                     {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        Commit and move to Done
+                        {#if hasChanges}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Commit and move to Done
+                        {:else}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Move to Done
+                        {/if}
                     {/if}
                 </button>
             </div>

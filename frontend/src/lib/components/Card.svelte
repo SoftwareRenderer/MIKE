@@ -171,6 +171,7 @@
 
     // Diff stats: pushed via WebSocket from the backend
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
+    let hasChanges = $derived(!!diffStats?.hash);
 
     function togglePicker(e: MouseEvent) {
         e.stopPropagation(); // Prevent card from opening when clicking the model badge
@@ -455,7 +456,7 @@
         const nextStatus = statuses[nextIdx];
         try {
             let updated: Task;
-            if (nextStatus === 'done') {
+            if (nextStatus === 'done' && hasChanges) {
                 updated = await commitAndDone(projectId, task.id);
             } else {
                 updated = await moveTask(projectId, task.id, nextStatus);
@@ -688,9 +689,9 @@
                         type="button"
                         class="action-icon action-move"
                         onclick={cycleStatus}
-                        aria-label={nextStatus === 'done' ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`}
-                        title={nextStatus === 'done' ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`}
-                        style="color: {nextStatus === 'done' ? '#3FB950' : statusColors[nextStatus]}"
+                        aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
+                        title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
+                        style="color: {nextStatus === 'done' && hasChanges ? '#3FB950' : statusColors[nextStatus]}"
                     >
                         {#if nextStatus === 'backlog'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -698,8 +699,10 @@
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         {:else if nextStatus === 'review'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                        {:else if nextStatus === 'done'}
+                        {:else if nextStatus === 'done' && hasChanges}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><line x1="4" y1="2" x2="4" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="2" r="2.5" fill="currentColor"/><circle cx="4" cy="14" r="2.5" fill="currentColor"/><line x1="12" y1="4" x2="12" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="14" r="2.5" fill="currentColor"/><path d="M12 4 C8 4, 7 2, 5.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+                        {:else if nextStatus === 'done'}
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                         {/if}
                     </button>
                 {/if}

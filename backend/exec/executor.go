@@ -576,6 +576,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 
 	task.Branch = branchName
 	task.BaseRef = baseRef
+	te.appStreamMgr.WatchWorktree(taskID, projectID, baseRef)
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
 		thread, terr := te.store.GetThread(task.CurrentThreadID)
@@ -740,6 +741,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, wtPath)
+	te.appStreamMgr.WatchWorktree(taskID, projectID, baseRef)
 
 	task.StatusState = "running"
 	task.Status = "in_progress"

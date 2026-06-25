@@ -239,7 +239,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectCounts = counts;
                     },
                     onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, short_stat, untracked_n, untracked_lines) => {
+                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines) => {
                         const stat = short_stat || '';
                         const fileMatch = stat.match(/(\d+) file\w* changed/);
                         const insMatch = stat.match(/(\d+) insertion\w*/);
@@ -249,9 +249,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         const totalFiles = trackedFiles + untracked;
                         const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
-                        if (totalFiles > 0) {
+                        if (hash) {
                             taskDiffStatsStore.update(map => {
-                                map[task_id] = { files: totalFiles, additions, deletions };
+                                map[task_id] = { hash, files: totalFiles, additions, deletions };
                                 return map;
                             });
                         } else {
