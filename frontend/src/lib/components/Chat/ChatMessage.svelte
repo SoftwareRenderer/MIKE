@@ -362,7 +362,7 @@
                     <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} />
                 {/each}
             {/if}
-            {#if stats}
+            {#if stats && stats.predicted_tokens > 0}
                 <div class="message-stats">
                     <span class="stats-model-name">{stats.model_name || 'model'}</span>
                     <span class="stat-separator">·</span>
