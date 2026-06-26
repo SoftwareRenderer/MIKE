@@ -70,6 +70,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
 	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
+	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)
 	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
 	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
 	s.mux.HandleFunc("/api/fs", s.handleFS)

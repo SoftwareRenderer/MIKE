@@ -229,3 +229,110 @@ func ensureGitRepo(t *testing.T, path string) {
 		cmd.Run()
 	}
 }
+
+func TestHandleFSWrite(t *testing.T) {
+	s := testServer(t)
+
+	t.Run("writes file content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "test.txt")
+		content := "hello world\nline two\n"
+
+		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+			"path":    filePath,
+			"content": content,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]interface{}](t, rr.Body)
+		if result["status"] != "written" {
+			t.Fatalf("expected status=written, got %v", result["status"])
+		}
+
+		// Verify file was written
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("read file: %v", err)
+		}
+		if string(data) != content {
+			t.Fatalf("expected %q, got %q", content, string(data))
+		}
+	})
+
+	t.Run("creates parent directories", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "a", "b", "c", "test.txt")
+		content := "nested content"
+
+		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+			"path":    filePath,
+			"content": content,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("read file: %v", err)
+		}
+		if string(data) != content {
+			t.Fatalf("expected %q, got %q", content, string(data))
+		}
+	})
+
+	t.Run("rejects missing path", func(t *testing.T) {
+		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+			"path":    "",
+			"content": "test",
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects method other than POST", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "test.txt")
+
+		req := testRequest(http.MethodGet, "/api/fs/write?path="+filePath, nil)
+		cookie := loginTest(t, s)
+		withAuth(req, cookie)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("expected 405, got %d", rr.Code)
+		}
+	})
+
+	t.Run("rejects files larger than 1MB", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "large.txt")
+		largeContent := strings.Repeat("x", 1_000_001)
+
+		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+			"path":    filePath,
+			"content": largeContent,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected 413, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+}

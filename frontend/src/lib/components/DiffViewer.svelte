@@ -4,7 +4,7 @@
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
 
 
-    let { files = [], untracked = [], onExpandFile, onExpandUntracked }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void } = $props();
+    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Track which collapsed blocks are expanded
@@ -29,6 +29,12 @@
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function handleRowClick(filePath: string, lineNumber: number | null) {
+        if (onLineClick && lineNumber != null) {
+            onLineClick(filePath, lineNumber + 1);
+        }
     }
 </script>
 
@@ -94,9 +100,14 @@
                         <div class="diff-file-content">
                             {#each uitems as item}
                                 {#if item.type === 'row'}
-                                    <div class={`diff-row diff-row-${item.row.variant}`}>
+                                    <div
+                                        class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                        role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
+                                        tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
+                                        onclick={() => handleRowClick(entry.path, item.row.lineNumber)}
+                                    >
                                         <span class="diff-line-num">
-                                            <span class="diff-line-num-text">{item.row.lineNumber ?? ''}</span>
+                                            <span class="diff-line-num-text">{item.row.lineNumber != null ? item.row.lineNumber + 1 : ''}</span>
                                         </span>
                                         <span class="diff-line-content">
                                             {#if item.row.variant === 'added'}
@@ -131,9 +142,12 @@
                                     </button>
                                     {#if expandedBlocks[item.block.id]}
                                         {#each item.block.rows as row}
-                                            <div class="diff-row diff-row-context">
+                                            <div
+                                                class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                onclick={() => handleRowClick(entry.path, row.lineNumber)}
+                                            >
                                                 <span class="diff-line-num">
-                                                    <span class="diff-line-num-text">{row.lineNumber ?? ''}</span>
+                                                    <span class="diff-line-num-text">{row.lineNumber != null ? row.lineNumber + 1 : ''}</span>
                                                 </span>
                                                 <span class="diff-line-content">
                                                     <span class="diff-prefix"> </span>
@@ -202,9 +216,14 @@
                         <div class="diff-file-content">
                             {#each items as item}
                                 {#if item.type === 'row'}
-                                    <div class={`diff-row diff-row-${item.row.variant}`}>
+                                    <div
+                                        class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                        role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
+                                        tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
+                                        onclick={() => handleRowClick(file.path, item.row.lineNumber)}
+                                    >
                                         <span class="diff-line-num">
-                                            <span class="diff-line-num-text">{item.row.lineNumber ?? ''}</span>
+                                            <span class="diff-line-num-text">{item.row.lineNumber != null ? item.row.lineNumber + 1 : ''}</span>
                                         </span>
                                         <span class="diff-line-content">
                                             {#if item.row.variant === 'added'}
@@ -239,9 +258,12 @@
                                     </button>
                                     {#if expandedBlocks[item.block.id]}
                                         {#each item.block.rows as row}
-                                            <div class="diff-row diff-row-context">
+                                            <div
+                                                class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                onclick={() => handleRowClick(file.path, row.lineNumber)}
+                                            >
                                                 <span class="diff-line-num">
-                                                    <span class="diff-line-num-text">{row.lineNumber ?? ''}</span>
+                                                    <span class="diff-line-num-text">{row.lineNumber != null ? row.lineNumber + 1 : ''}</span>
                                                 </span>
                                                 <span class="diff-line-content">
                                                     <span class="diff-prefix"> </span>
@@ -363,22 +385,26 @@
         border: 1px solid var(--color-border);
         border-top: none;
         border-radius: 0 0 6px 6px;
-        overflow: hidden;
+        overflow-x: auto;
+        display: table;
+        width: auto;
+        border-collapse: collapse;
     }
 
     /* Diff rows */
     .diff-row {
-        display: grid;
-        grid-template-columns: 2rem 1fr;
+        display: table-row;
         font-family: var(--font-mono);
         font-size: 0.75rem;
         line-height: 1.5;
         min-height: 1.5rem;
     }
     .diff-line-num {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
+        display: table-cell;
+        vertical-align: middle;
+        text-align: right;
+        width: 2rem;
+        flex-shrink: 0;
         padding-right: 8px;
         user-select: none;
         color: var(--color-text-tertiary);
@@ -388,11 +414,10 @@
         font-size: 0.75rem;
     }
     .diff-line-content {
-        display: flex;
-        align-items: center;
+        display: table-cell;
+        vertical-align: middle;
         padding: 0 8px;
         white-space: pre;
-        overflow-x: auto;
     }
     .diff-prefix {
         flex-shrink: 0;
@@ -405,13 +430,13 @@
     }
 
     /* Row variants */
-    .diff-row-added {
+    .diff-row-added .diff-line-content {
         background: rgba(63,185,80,0.15);
     }
     .diff-row-added .diff-prefix {
         color: var(--color-status-green);
     }
-    .diff-row-removed {
+    .diff-row-removed .diff-line-content {
         background: rgba(248,81,73,0.15);
     }
     .diff-row-removed .diff-prefix {
@@ -419,6 +444,16 @@
     }
     .diff-row-context .diff-prefix {
         color: var(--color-text-tertiary);
+    }
+
+    /* Clickable rows */
+    .diff-row-clickable {
+        cursor: pointer;
+    }
+    .diff-row-clickable:hover {
+        filter: brightness(0.95);
+        outline: 1px solid var(--color-accent);
+        outline-offset: -1px;
     }
 
     /* Collapse button */

@@ -340,6 +340,38 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"content": string(content)})
 }
 
+// handleFSWrite writes content to a file.
+func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	// Limit file size to 1MB
+	if len(req.Content) > 1_000_000 {
+		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
+		return
+	}
+	// Ensure parent directory exists
+	dir := filepath.Dir(req.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+		return
+	}
+	if err := os.WriteFile(req.Path, []byte(req.Content), 0644); err != nil {
+		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("write file: %v", err))
+		return
+	}
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": req.Path})
+}
+
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

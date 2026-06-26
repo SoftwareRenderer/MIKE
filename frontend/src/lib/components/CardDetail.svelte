@@ -15,6 +15,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
     import DiffSelect from './DiffSelect.svelte';
+    import FileEditor from './FileEditor.svelte';
     import Card from './Card.svelte';
 
     let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void } = $props();
@@ -146,6 +147,24 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Two-dropdown diff: '' means base ref (original branch), 'working' means working tree
     let diffFrom = $state('');
     let diffTo = $state('working');
+
+    // File editor overlay
+    let editingFile = $state<{ path: string; lineNumber: number } | null>(null);
+
+    function resolveFilePath(relativePath: string): string | null {
+        if (!workspaceDir || !task.id) return null;
+        return `${workspaceDir.replace(/\/+$/, '')}/${task.id}/${relativePath}`;
+    }
+
+    function handleDiffLineClick(relativePath: string, lineNumber: number) {
+        const fullPath = resolveFilePath(relativePath);
+        if (!fullPath) return;
+        editingFile = { path: fullPath, lineNumber };
+    }
+
+    function closeFileEditor(saved: boolean) {
+        editingFile = null;
+    }
 
     function formatRelativeTime(isoStr: string): string {
         if (!isoStr) return '';
@@ -926,41 +945,50 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <!-- Column 3: Working Changes (Diff) -->
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
-                    {#if worktreeExists || task.branch}
-                        <div class="diff-header">
-                            <DiffSelect options={fromOptions} value={diffFrom} onChange={onDiffFromChange} ariaLabel="From" />
-                            <span class="diff-arrow">→</span>
-                            <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
-                        </div>
-                    {/if}
-                    <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} />
-
-                    <!-- Checkpoint diff overlay -->
-                    {#if checkpointDiffOpen}
-                        <div class="checkpoint-diff-overlay">
-                            <div class="checkpoint-diff-header">
-                                <div class="checkpoint-diff-title">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                                    </svg>
-                                    <span>Changes before this checkpoint</span>
-                                </div>
-                                <button class="btn-close-checkpoint" onclick={closeCheckpointDiff} title="Close (Esc)" aria-label="Close">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                                        <path d="M18 6L6 18M6 6l12 12"/>
-                                    </svg>
-                                </button>
+                    {#if editingFile}
+                        <!-- Inline file editor -->
+                        <FileEditor
+                            filePath={editingFile.path}
+                            lineNumber={editingFile.lineNumber}
+                            onClose={closeFileEditor}
+                        />
+                    {:else}
+                        {#if worktreeExists || task.branch}
+                            <div class="diff-header">
+                                <DiffSelect options={fromOptions} value={diffFrom} onChange={onDiffFromChange} ariaLabel="From" />
+                                <span class="diff-arrow">→</span>
+                                <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
                             </div>
-                            {#if checkpointDiffLoading}
-                                <div class="checkpoint-diff-loading">
-                                    <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                        <path d="M12 2a10 10 0 0 1 10 10"/>
-                                    </svg>
+                        {/if}
+                        <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} onLineClick={handleDiffLineClick} />
+
+                        <!-- Checkpoint diff overlay -->
+                        {#if checkpointDiffOpen}
+                            <div class="checkpoint-diff-overlay">
+                                <div class="checkpoint-diff-header">
+                                    <div class="checkpoint-diff-title">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                                        </svg>
+                                        <span>Changes before this checkpoint</span>
+                                    </div>
+                                    <button class="btn-close-checkpoint" onclick={closeCheckpointDiff} title="Close (Esc)" aria-label="Close">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                            <path d="M18 6L6 18M6 6l12 12"/>
+                                        </svg>
+                                    </button>
                                 </div>
-                            {:else}
-                                <DiffViewer files={checkpointDiffFiles} untracked={checkpointDiffUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} />
-                            {/if}
-                        </div>
+                                {#if checkpointDiffLoading}
+                                    <div class="checkpoint-diff-loading">
+                                        <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                            <path d="M12 2a10 10 0 0 1 10 10"/>
+                                        </svg>
+                                    </div>
+                                {:else}
+                                    <DiffViewer files={checkpointDiffFiles} untracked={checkpointDiffUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} onLineClick={handleDiffLineClick} />
+                                {/if}
+                            </div>
+                        {/if}
                     {/if}
                 </div>
             </div>
