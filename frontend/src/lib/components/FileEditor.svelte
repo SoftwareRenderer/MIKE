@@ -167,8 +167,7 @@
             parent: editorEl,
         });
 
-        // Scroll to target line, maintaining relative vertical position
-        // (e.g. if clicked line was 80% down the diff viewport, show it 80% down the editor)
+        // Scroll to target line, centered in the viewport
         if (lineNumber >= 1) {
             requestAnimationFrame(() => {
                 if (!view) return;
@@ -189,11 +188,9 @@
                     if (!coords) return;
                     const viewportHeight = scroller.clientHeight;
                     const docHeight = scroller.scrollHeight;
-                    // Relative position of target line within the document
-                    const lineRatio = (lineNum - 1) / Math.max(totalLines - 1, 1);
-                    // Target scroll: place the line at the same relative position in the viewport
-                    const targetScroll = Math.max(0, coords.top + scroller.scrollTop - lineRatio * viewportHeight);
-                    scroller.scrollTop = Math.min(targetScroll, docHeight - viewportHeight);
+                    // Place the line ~30% from the top of the viewport for context above
+                    const targetScroll = coords.top + scroller.scrollTop - viewportHeight * 0.3;
+                    scroller.scrollTop = Math.max(0, Math.min(targetScroll, docHeight - viewportHeight));
                 });
             });
         }

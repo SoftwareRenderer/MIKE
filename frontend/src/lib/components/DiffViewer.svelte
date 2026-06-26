@@ -538,12 +538,10 @@
         filter: brightness(0.95);
     }
     .diff-row-clickable:hover .diff-line-num {
-        outline: 1px solid var(--color-accent);
-        outline-offset: -1px;
+        box-shadow: -1px 0 0 var(--color-accent), 0 -1px 0 var(--color-accent), 0 1px 0 var(--color-accent);
     }
     .diff-row-clickable:hover .diff-line-content {
-        outline-inline-end: 1px solid var(--color-accent);
-        outline-offset: -1px;
+        box-shadow: 1px 0 0 var(--color-accent), 0 -1px 0 var(--color-accent), 0 1px 0 var(--color-accent);
     }
 
     /* Collapse button */
