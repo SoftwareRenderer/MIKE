@@ -611,10 +611,12 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     });
 
     // Refresh diff when switching to Changes tab on mobile (WebSocket events may have been missed)
+    let prevTab = $state(activeTab);
     $effect(() => {
-        if (activeTab === 'diff') {
+        if (activeTab !== prevTab && activeTab === 'diff') {
             loadDiff();
         }
+        prevTab = activeTab;
     });
 
     // Load diff when task transitions out of backlog (worktree now exists)
@@ -627,6 +629,9 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         prevStatus = status || '';
     });
 
+    // Real-time diff update: re-fetch when the diff hash changes or is cleared
+    let lastDiffHash = $state<string | null>(null);
+
     onMount(() => {
         const unsubBoard = boardStore.subscribe(b => {
             if (b) {
@@ -638,8 +643,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
         loadDiff();
 
-        // Real-time diff update: re-fetch when the diff hash changes or is cleared
-        let lastDiffHash = $state<string | null>(null);
         const unsubDiff = taskDiffStats.subscribe(stats => {
             const stat = stats[task.id];
             const currentHash = stat?.hash || null;
@@ -728,9 +731,21 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }));
     }
 
+    let diffLoading = $state(false);
+
     async function loadDiff() {
-        if (!task || task.status === 'backlog') return;
-        await Promise.all([loadCommits(), loadDiffForMode()]);
+        if (!task || task.status === 'backlog' || diffLoading) return;
+        diffLoading = true;
+        try {
+            await Promise.all([loadCommits(), loadDiffForMode()]);
+        } finally {
+            diffLoading = false;
+            // Sync lastDiffHash with current store value so a pending WebSocket
+            // diffStats event doesn't trigger a redundant re-fetch.
+            const stats = get(taskDiffStats);
+            const stat = stats[task.id];
+            lastDiffHash = stat?.hash || null;
+        }
     }
 
     async function loadCommits() {

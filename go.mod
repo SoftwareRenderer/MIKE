@@ -3,6 +3,7 @@ module kanban
 go 1.26.2
 
 require (
+	github.com/andybalholm/brotli v1.2.1
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

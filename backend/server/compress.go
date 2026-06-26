@@ -8,13 +8,51 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/andybalholm/brotli"
 )
 
 // minCompressSize is the minimum response size to bother with compression.
 const minCompressSize = 1024
 
-// CompressMiddleware wraps an http.Handler to gzip responses when the
-// client sends Accept-Encoding: gzip and the body is >= minCompressSize.
+// compressionLevel maps encoding name to its preference rank (lower = preferred).
+var encodingPriority = map[string]int{
+	"br":   1,
+	"gzip": 2,
+	"deflate": 3,
+	"*":    4,
+}
+
+// selectEncoding picks the best compression encoding the client supports.
+// Returns "" if no supported encoding is found.
+func selectEncoding(acceptEncoding string) string {
+	if acceptEncoding == "" {
+		return ""
+	}
+
+	best := ""
+	bestRank := 5 // worse than wildcard
+
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		part = strings.TrimSpace(part)
+		// Strip quality factor (e.g. "br;q=0.8" -> "br")
+		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
+
+		rank, ok := encodingPriority[strings.ToLower(encoding)]
+		if !ok {
+			continue
+		}
+		if rank < bestRank {
+			bestRank = rank
+			best = encoding
+		}
+	}
+
+	return best
+}
+
+// CompressMiddleware wraps an http.Handler to compress responses when the
+// client supports it (brotli > gzip). Only compresses bodies >= minCompressSize.
 func CompressMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip compression for WebSocket upgrades (they hijack the connection).
@@ -22,13 +60,15 @@ func CompressMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+
+		encoding := selectEncoding(r.Header.Get("Accept-Encoding"))
+		if encoding == "" {
 			w.Header().Set("Vary", "Accept-Encoding")
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		cw := newCompressWriter(w)
+		cw := newCompressWriter(w, encoding)
 		next.ServeHTTP(cw, r)
 		cw.finish()
 	})
@@ -41,14 +81,17 @@ type compressWriter struct {
 	code          int
 	wroteHeader   bool
 	committed     bool
+	encoding      string
 	gz            *gzip.Writer
+	br            *brotli.Writer
 	contentLength int64 // parsed from Content-Length header, -1 if unknown
 }
 
-func newCompressWriter(w http.ResponseWriter) *compressWriter {
+func newCompressWriter(w http.ResponseWriter, encoding string) *compressWriter {
 	return &compressWriter{
 		ResponseWriter: w,
 		headers:        make(http.Header),
+		encoding:       encoding,
 		contentLength:  -1,
 	}
 }
@@ -75,8 +118,15 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		c.WriteHeader(http.StatusOK)
 	}
 	if c.committed {
-		if c.gz != nil {
-			return c.gz.Write(p)
+		switch c.encoding {
+		case "br":
+			if c.br != nil {
+				return c.br.Write(p)
+			}
+		case "gzip":
+			if c.gz != nil {
+				return c.gz.Write(p)
+			}
 		}
 		return c.ResponseWriter.Write(p)
 	}
@@ -95,12 +145,12 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	if estimated >= minCompressSize {
 		c.commit()
 	}
-	return n, nil
+	return n, err
 }
 
 func (c *compressWriter) commit() {
 	c.committed = true
-	c.headers.Set("Content-Encoding", "gzip")
+	c.headers.Set("Content-Encoding", c.encoding)
 	c.headers.Del("Content-Length")
 
 	for k, vv := range c.headers {
@@ -111,8 +161,14 @@ func (c *compressWriter) commit() {
 	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
 	c.ResponseWriter.WriteHeader(c.code)
 
-	c.gz = gzip.NewWriter(c.ResponseWriter)
-	c.gz.Write(c.body.Bytes())
+	switch c.encoding {
+	case "br":
+		c.br = brotli.NewWriter(c.ResponseWriter)
+		c.br.Write(c.body.Bytes())
+	case "gzip":
+		c.gz = gzip.NewWriter(c.ResponseWriter)
+		c.gz.Write(c.body.Bytes())
+	}
 }
 
 func (c *compressWriter) finish() {
@@ -128,12 +184,29 @@ func (c *compressWriter) finish() {
 		c.ResponseWriter.Write(c.body.Bytes())
 		return
 	}
-	c.gz.Close()
+
+	switch c.encoding {
+	case "br":
+		if c.br != nil {
+			c.br.Close()
+		}
+	case "gzip":
+		if c.gz != nil {
+			c.gz.Close()
+		}
+	}
 }
 
 func (c *compressWriter) Flush() {
-	if c.gz != nil {
-		c.gz.Flush()
+	switch c.encoding {
+	case "br":
+		if c.br != nil {
+			c.br.Flush()
+		}
+	case "gzip":
+		if c.gz != nil {
+			c.gz.Flush()
+		}
 	}
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
