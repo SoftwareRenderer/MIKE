@@ -6,6 +6,7 @@
 import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent, taskDiffStats as taskDiffStatsStore } from '$lib/store';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { formatToolArgs } from '$lib/utils/toolArgs';
+    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import ModelSelector from './ModelSelector.svelte';
@@ -74,6 +75,44 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let showHeader = $state(false);
     let inputTimeout: ReturnType<typeof setTimeout> | null = null;
     let inputValue = $state('');
+    let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
+
+    // Load draft text from localStorage on init
+    const savedDraft = getDraftText(taskId);
+    if (savedDraft !== null) {
+        inputValue = savedDraft;
+    }
+
+    // Load draft attachments from IndexedDB on init
+    loadDraftAttachments(taskId).then(atts => {
+        if (atts.length > 0) {
+            draftAttachments = atts.map(a => ({
+                file: new File([], '', { type: a.mimeType }),
+                preview: `data:${a.mimeType};base64,${a.data}`,
+                mimeType: a.mimeType,
+                base64: a.data,
+            }));
+        }
+    });
+
+    // Save draft text to localStorage on every change
+    function handleInputSave(val: string) {
+        if (val) {
+            setDraftText(taskId, val);
+        }
+    }
+
+    // Clear draft text and attachments on send (called synchronously from ChatForm)
+    function handleClearDraft() {
+        clearDraftText(taskId);
+        draftAttachments = [];
+    }
+
+    // Save draft attachments to IndexedDB on every change
+    $effect(() => {
+        const atts = draftAttachments;
+        saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+    });
 
     // Model selection state
     let providers: Provider[] = $state([]);
@@ -723,7 +762,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 await new Promise(resolve => requestAnimationFrame(resolve));
                 scroll();
             }
-        } catch { /* No history yet */ }
+        } catch (e) {
+            // Task may have been deleted — clear stale draft
+            if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
+                clearDraftText(taskId);
+                draftAttachments = [];
+            }
+            // Otherwise: no history yet, ignore
+        }
     }
 
     function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[] {
@@ -1683,6 +1729,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         <ChatForm
             bind:this={chatFormComp}
             bind:value={inputValue}
+            bind:attachments={draftAttachments}
             disabled={disabled}
             isLoading={isLoading}
             placeholder="Send a message to the agent..."
@@ -1693,7 +1740,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             contextUsed={contextState.used}
             contextLimit={contextState.limit}
             planMode={planMode}
-            onSubmit={(msg, atts) => handleSend(msg, atts)}
+            onInput={handleInputSave}
+            onClearDraft={handleClearDraft}
+            onSubmit={handleSend}
             onStop={handleStop}
             onModelSelect={handleModelSelect}
             onPlanModeToggle={handlePlanModeToggle}

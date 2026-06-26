@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import type { Project, Board, Config, Task, StreamEvent } from './types';
+import { loadCollapsedTasks, saveCollapsedTasks } from './storage';
 
 export const projects = writable<Project[]>([]);
 export const selectedProject = writable<Project | null>(null);
@@ -20,30 +21,6 @@ export const showSandboxConfig = writable(false);
 
 /** Tracks commit queue status per project: projectID → { taskID, status } */
 export const commitQueueStatus = writable<Record<string, { taskID: string; status: 'queued' | 'processing' }>>({});
-const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
-
-/** Load collapsed task IDs from localStorage. */
-function loadCollapsedTasks(): Set<string> {
-    try {
-        const raw = localStorage.getItem(COLLAPSED_TASKS_KEY);
-        if (raw) {
-            const ids = JSON.parse(raw) as string[];
-            return new Set(ids);
-        }
-    } catch {
-        // ignore
-    }
-    return new Set();
-}
-
-/** Save collapsed task IDs to localStorage. */
-function saveCollapsedTasks(ids: Set<string>): void {
-    try {
-        localStorage.setItem(COLLAPSED_TASKS_KEY, JSON.stringify([...ids]));
-    } catch {
-        // ignore
-    }
-}
 
 /**
  * expandedTasks store — tracks which task cards are expanded in the board view.

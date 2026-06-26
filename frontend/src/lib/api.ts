@@ -16,7 +16,7 @@ export function generateId(): string {
 // On reconnect, actions are replayed in order.
 // =============================================================================
 
-const QUEUE_KEY = 'kanban-offline-queue';
+import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage } from './storage';
 
 export interface QueuedAction {
     id: string;
@@ -74,24 +74,13 @@ function notifyQueueFlushed(optimisticTaskIds: string[], resolvedTasks: Map<stri
 
 /** Load queue from localStorage. */
 export function loadQueue(): QueuedAction[] {
-    try {
-        if (typeof localStorage === 'undefined') return [];
-        const raw = localStorage.getItem(QUEUE_KEY);
-        if (raw) {
-            actionQueue = JSON.parse(raw) as QueuedAction[];
-            return actionQueue;
-        }
-    } catch { /* ignore */ }
-    return [];
+    actionQueue = loadQueueFromStorage();
+    return actionQueue;
 }
 
 /** Save queue to localStorage. */
 function saveQueue() {
-    try {
-        if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(QUEUE_KEY, JSON.stringify(actionQueue));
-        }
-    } catch { /* ignore */ }
+    saveQueueToStorage(actionQueue);
     notifyQueueChanged();
 }
 

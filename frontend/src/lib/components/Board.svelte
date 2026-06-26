@@ -3,6 +3,7 @@
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
     import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { gc } from '$lib/storage';
 
     let { tasks, projectId, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
 
@@ -64,6 +65,8 @@
             const allIds = new Set(tasks.map(t => t.id));
             cleanupCollapsedTasks(allIds);
             expandedTasksStore.set(initExpandedTasks(parentTaskIds));
+            // Garbage-collect stale localStorage/IndexedDB entries for deleted tasks
+            gc(allIds).catch(() => {});
         }
     });
 

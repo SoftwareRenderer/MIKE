@@ -235,6 +235,27 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 
 ## Common Patterns
 
+### Client-Side Storage (`storage.ts`)
+All localStorage and IndexedDB access goes through `frontend/src/lib/storage.ts`. Never access localStorage or IndexedDB directly in components.
+
+**Key functions:**
+- `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
+- `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts (IndexedDB)
+- `gc(allTaskIds: Set<string>)` — garbage-collect ALL stale entries for deleted tasks (collapsed tasks, drafts, offline queue, attachments)
+
+**GC trigger:** Called in `Board.svelte` after the board is loaded. Components should NOT call `gc()` themselves.
+
+**Storage keys managed by `storage.ts`:**
+- `kanban-collapsed-tasks` — collapsed parent task IDs
+- `kanban:draft:<taskId>` — draft chat text per task
+- `kanban-offline-queue` — queued write actions
+- IndexedDB `kanban-drafts` — draft image attachments per task
+
+**Keys NOT managed by `storage.ts`** (no task reference, no GC needed):
+- `kanban:terminal:height` — terminal panel resize
+- `kanban:detail:boardRatio` / `kanban:detail:chatRatio` — panel split ratios
+- `diff_collapsed_files` — collapsed diff file paths (cleaned reactively in DiffViewer)
+
 ### Svelte 5 Reactivity
 - Use `$state()` for reactive variables
 - Use `$derived()` for computed values (NOT `by()`)

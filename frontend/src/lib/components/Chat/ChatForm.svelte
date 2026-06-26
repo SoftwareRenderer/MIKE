@@ -22,10 +22,13 @@
         contextUsed?: number;
         contextLimit?: number;
         planMode?: boolean;
+        attachments?: ImageAttachment[];
         onSubmit?: (message: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
+        onClearDraft?: () => void;
         onStop?: () => void;
         onModelSelect?: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
         onPlanModeToggle?: (planMode: boolean) => void;
+        onInput?: (value: string) => void;
     }
 
     let {
@@ -40,20 +43,22 @@
         contextUsed = 0,
         contextLimit = 0,
         planMode = false,
+        attachments = $bindable<ImageAttachment[]>([]),
         onSubmit,
         onStop,
         onModelSelect,
         onPlanModeToggle,
+        onInput,
+        onClearDraft,
     }: Props = $props();
-
-    let textareaEl: HTMLTextAreaElement | undefined;
-    let fileInputEl: HTMLInputElement | undefined;
-    let attachments = $state<ImageAttachment[]>([]);
     let canSend = $derived((value.trim().length > 0 || attachments.length > 0) && !disabled && !(providers.length > 0 && !selectedModel));
     let showModelSelector = $derived(providers.length > 0);
     let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
     const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
     const MAX_IMAGES = 4;
+
+    let textareaEl: HTMLTextAreaElement | undefined;
+    let fileInputEl: HTMLInputElement | undefined;
 
     export function focus() {
         textareaEl?.focus();
@@ -140,6 +145,8 @@
         value = '';
         attachments = [];
         resetHeight();
+        // Clear draft synchronously before onSubmit (component may unmount after)
+        onClearDraft?.();
         onSubmit?.(msg, imageAttachments.length > 0 ? imageAttachments : undefined);
     }
 
@@ -151,7 +158,14 @@
     $effect(() => {
         autoResize();
     });
-</script>
+
+    // Notify parent when value changes — persists draft text to localStorage
+    $effect(() => {
+        const _val = value;
+        onInput?.(_val);
+    });
+
+    </script>
 
 <form class="chat-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
     <!-- Model selector bar -->
