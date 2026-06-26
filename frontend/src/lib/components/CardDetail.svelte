@@ -1125,6 +1125,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .section-group {
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
+        border-left: 2px solid var(--col-color);
         overflow: hidden;
         transition: background 0.15s ease;
     }
@@ -1144,7 +1145,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         cursor: pointer;
         background: transparent;
         border: none;
-        border-bottom: 2px solid var(--col-color);
+        border-top: 2px solid var(--col-color);
         width: 100%;
         text-align: left;
         font: inherit;
@@ -1190,7 +1191,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         transform: rotate(-90deg);
     }
     .section-body {
-        padding: 8px 6px 6px 6px;
+        padding: 8px 6px 6px 8px;
         display: flex;
         flex-direction: column;
         gap: 8px;
