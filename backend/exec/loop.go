@@ -543,7 +543,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Reuse existing container if it's already running from a previous executor (lazy-start).
 			// Only create a new container and send status if one doesn't exist.
 			if !te.sandboxMgr.ContainerRunning(task.ID) {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "starting_container", "activity": "Starting sandbox container"}})
 				if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
 					task.StatusState = "failed"
 					task.Status = "review"
@@ -554,6 +553,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 				log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
 			} else {
 				log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
 			}
@@ -1902,48 +1902,46 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				stopReason = event.StopReason
 				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
 
-				// Persist assistant messages and tool calls from agent_end
+				// Persist assistant messages and tool calls from agent_end.
+				// Order must match LLM path: assistant(text+reasoning) then tool_call entries,
+				// so the frontend's mergeToolCallsIntoAssistant can merge them correctly.
+				// Pi message format:
+				//   - Assistant content blocks: {type:"text", text}, {type:"thinking", thinking},
+				//     {type:"toolCall", id, name, arguments}
+				//   - Tool results: separate messages with role="toolResult", toolCallId, content, isError
 				if len(event.Messages) > 0 {
-					// Build a map of tool_use_id -> tool_result from user messages
+					// Build a map of toolCallId -> tool_result from toolResult messages
 					toolResults := make(map[string]map[string]interface{})
 					for _, msg := range event.Messages {
 						role, _ := msg["role"].(string)
-						if role != "user" {
+						if role != "toolResult" {
 							continue
 						}
-						if content, ok := msg["content"].([]interface{}); ok {
-							for _, c := range content {
-								if cm, ok := c.(map[string]interface{}); ok {
-									if cm["type"] == "tool_result" {
-										toolUseID, _ := cm["tool_use_id"].(string)
-										if toolUseID == "" {
-											continue
-										}
-										// Extract content as string
-										var resultText string
-										if contentVal, ok := cm["content"].(string); ok {
-											resultText = contentVal
-										} else if contentArr, ok := cm["content"].([]interface{}); ok {
-											var parts []string
-											for _, item := range contentArr {
-												if itemMap, ok := item.(map[string]interface{}); ok {
-													if itemMap["type"] == "text" {
-														if t, ok := itemMap["text"].(string); ok {
-															parts = append(parts, t)
-														}
-													}
-												}
-											}
-											resultText = strings.Join(parts, "\n")
-										}
-										isError, _ := cm["is_error"].(bool)
-										toolResults[toolUseID] = map[string]interface{}{
-											"output":  resultText,
-											"success": !isError,
+						toolCallID, _ := msg["toolCallId"].(string)
+						if toolCallID == "" {
+							continue
+						}
+						// Extract content as string
+						var resultText string
+						if contentVal, ok := msg["content"].(string); ok {
+							resultText = contentVal
+						} else if contentArr, ok := msg["content"].([]interface{}); ok {
+							var parts []string
+							for _, item := range contentArr {
+								if itemMap, ok := item.(map[string]interface{}); ok {
+									if itemMap["type"] == "text" {
+										if t, ok := itemMap["text"].(string); ok {
+											parts = append(parts, t)
 										}
 									}
 								}
 							}
+							resultText = strings.Join(parts, "\n")
+						}
+						isError, _ := msg["isError"].(bool)
+						toolResults[toolCallID] = map[string]interface{}{
+							"output":  resultText,
+							"success": !isError,
 						}
 					}
 
@@ -1953,9 +1951,9 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							continue
 						}
 
-						// Extract text, reasoning, and tool_use from content blocks
+						// Extract text, reasoning, and toolCall from content blocks
 						var assistantText, reasoningText string
-						var toolUses []map[string]interface{}
+						var toolCalls []map[string]interface{}
 						if content, ok := msg["content"].([]interface{}); ok {
 							var texts []string
 							for _, c := range content {
@@ -1969,8 +1967,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 										if t, ok := cm["thinking"].(string); ok {
 											reasoningText = t
 										}
-									case "tool_use":
-										toolUses = append(toolUses, cm)
+									case "toolCall":
+										toolCalls = append(toolCalls, cm)
 									}
 								}
 							}
@@ -1988,12 +1986,29 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							}
 						}
 
-						// Persist tool calls first (so they appear before the assistant message)
-						for _, tu := range toolUses {
-							toolUseID, _ := tu["id"].(string)
-							toolName, _ := tu["name"].(string)
-							toolInput, _ := tu["input"].(map[string]interface{})
-							if toolUseID == "" {
+						// Persist assistant message first (even if empty — acts as anchor for tool call merge)
+						te.store.CreateTaskMessage(&types.TaskMessage{
+							ID:               uuid.New().String(),
+							TaskID:           task.ID,
+							ThreadID:         task.CurrentThreadID,
+							Role:             "assistant",
+							Content:          assistantText,
+							ReasoningContent: reasoningText,
+							ModelName:        "pi",
+							ProviderName:     "Pi Coding Agent",
+							PromptTokens:     promptTokens,
+							PredictedTokens:  predictedTokens,
+							Duration:         time.Since(startTime).Milliseconds(),
+							CreatedAt:        time.Now().UTC(),
+						})
+
+						// Persist tool calls after the assistant message
+						// so mergeToolCallsIntoAssistant merges them into the preceding assistant entry.
+						for _, tc := range toolCalls {
+							toolCallID, _ := tc["id"].(string)
+							toolName, _ := tc["name"].(string)
+							toolArgs, _ := tc["arguments"].(map[string]interface{})
+							if toolCallID == "" {
 								continue
 							}
 
@@ -2001,17 +2016,17 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							kanbanToolName := mapPiToolName(toolName)
 
 							// Build raw_args for display
-							rawArgs, _ := json.Marshal(toolInput)
+							rawArgs, _ := json.Marshal(toolArgs)
 
 							// Get matching tool result
-							result, hasResult := toolResults[toolUseID]
+							result, hasResult := toolResults[toolCallID]
 
 							// Build tool_call JSON (same format as LLM path)
 							tcJSON, _ := json.Marshal(map[string]interface{}{
-								"tool_id":           toolUseID,
+								"tool_id":           toolCallID,
 								"tool_name":         kanbanToolName,
 								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
-								"args":              toolInput,
+								"args":              toolArgs,
 								"raw_args":          string(rawArgs),
 								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
 							})
@@ -2035,24 +2050,6 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								ToolCalls:  string(tcJSON),
 								ToolResult: string(resultJSON),
 								CreatedAt:  time.Now().UTC(),
-							})
-						}
-
-						// Only persist assistant message if it has text or reasoning content
-						if assistantText != "" || reasoningText != "" {
-							te.store.CreateTaskMessage(&types.TaskMessage{
-								ID:               uuid.New().String(),
-								TaskID:           task.ID,
-								ThreadID:         task.CurrentThreadID,
-								Role:             "assistant",
-								Content:          assistantText,
-								ReasoningContent: reasoningText,
-								ModelName:        "pi",
-								ProviderName:     "Pi Coding Agent",
-								PromptTokens:     promptTokens,
-								PredictedTokens:  predictedTokens,
-								Duration:         time.Since(startTime).Milliseconds(),
-								CreatedAt:        time.Now().UTC(),
 							})
 						}
 					}
