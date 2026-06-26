@@ -95,11 +95,13 @@
             return;
         }
         if (e.key === 'Escape') {
+            e.stopPropagation();
             if (showConfirm) {
                 showConfirm = false;
                 return;
             }
             requestClose();
+            return;
         }
     }
 
@@ -160,8 +162,8 @@
     <div class="editor-header">
         <div class="header-left">
             <button class="btn-back" onclick={requestClose} aria-label="Back to diff" title="Back to diff">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </button>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -228,6 +230,7 @@
                     class="editor-textarea"
                     bind:this={textareaEl}
                     bind:value={content}
+                    onkeydown={handleKeyDown}
                     onscroll={handleTextareaScroll}
                     spellcheck="false"
                     aria-label="File content editor"
@@ -301,9 +304,10 @@
         white-space: nowrap;
     }
     .unsaved-dot {
+        align-self: center;
         color: var(--color-status-yellow, #f0c000);
-        font-size: 1.2em;
-        line-height: 1;
+        font-size: 0.875rem;
+        line-height: 0;
         flex-shrink: 0;
     }
     .btn-back {
@@ -311,7 +315,7 @@
         border: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        padding: 3px;
+        padding: 6px;
         border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
