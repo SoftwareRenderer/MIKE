@@ -345,15 +345,9 @@ func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
 		t.Errorf("expected origAdded=80, got %d", untracked.OrigAdded)
 	}
 
-	// Truncated diff should have exactly 60 change lines
-	changeCount := 0
-	for _, line := range strings.Split(untracked.Diff, "\n") {
-		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
-			changeCount++
-		}
-	}
-	if changeCount != defaultMaxChangeLines {
-		t.Errorf("expected %d change lines in truncated diff, got %d", defaultMaxChangeLines, changeCount)
+	// Truncated lines should have exactly 60 entries
+	if len(untracked.Lines) != defaultMaxChangeLines {
+		t.Errorf("expected %d lines in truncated untracked file, got %d", defaultMaxChangeLines, len(untracked.Lines))
 	}
 
 	// Verify full diff is available via skipTruncate
@@ -367,14 +361,8 @@ func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
 	if resultFull.Untracked[0].Truncated {
 		t.Error("expected full diff to NOT be truncated")
 	}
-	fullChangeCount := 0
-	for _, line := range strings.Split(resultFull.Untracked[0].Diff, "\n") {
-		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
-			fullChangeCount++
-		}
-	}
-	if fullChangeCount != 80 {
-		t.Errorf("expected 80 change lines in full diff, got %d", fullChangeCount)
+	if len(resultFull.Untracked[0].Lines) != 80 {
+		t.Errorf("expected 80 lines in full untracked file, got %d", len(resultFull.Untracked[0].Lines))
 	}
 }
 
@@ -513,8 +501,8 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	if untracked.Path != "binary-file.bin" {
 		t.Errorf("expected path binary-file.bin, got %s", untracked.Path)
 	}
-	if untracked.Diff != "" {
-		t.Error("expected binary file to have no diff content")
+	if len(untracked.Lines) != 0 {
+		t.Error("expected binary file to have no lines content")
 	}
 	if untracked.FileSize == 0 {
 		t.Error("expected binary file to have FileSize set")

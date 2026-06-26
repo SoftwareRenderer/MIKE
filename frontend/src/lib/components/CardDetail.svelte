@@ -129,7 +129,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     // Diff state
     let diffFiles: DiffFile[] = $state([]);
-    let untrackedFiles: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }[] = $state([]);
+    let untrackedFiles: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[] = $state([]);
     // Terminal - worktree exists when task has a branch (set on start, cleared on delete)
     let worktreeExists = $derived(!!task.branch);
 
@@ -141,7 +141,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     let checkpointDiffOpen = $state(false);
     let checkpointDiffHash = $state(''); // which checkpoint hash is currently shown
     let checkpointDiffFiles: DiffFile[] = $state([]);
-    let checkpointDiffUntracked: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }[] = $state([]);
+    let checkpointDiffUntracked: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[] = $state([]);
     let checkpointDiffLoading = $state(false);
     let checkpointDiffLabel = $state('');
     // Two-dropdown diff: '' means base ref (original branch), 'working' means working tree
@@ -164,6 +164,20 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     function closeFileEditor(saved: boolean) {
         editingFile = null;
+    }
+
+    /** Build a DiffFile from raw file lines (untracked/new files, all additions). */
+    function buildUntrackedDiffFile(path: string, lines?: string[]): DiffFile {
+        if (!lines || lines.length === 0) {
+            return { path, added: 0, removed: 0, rows: [] };
+        }
+        const rows = lines.map((text, i) => ({
+            key: `n-${i + 1}-${i}`,
+            lineNumber: i + 1,
+            variant: 'added' as const,
+            text,
+        }));
+        return { path, added: lines.length, removed: 0, rows };
     }
 
     function formatRelativeTime(isoStr: string): string {
@@ -285,8 +299,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                 fileSize: u.file_size,
                 truncated: u.truncated,
                 origAdded: u.orig_added,
-                origRemoved: u.orig_removed,
-                file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
+                file: buildUntrackedDiffFile(u.path, u.lines),
             }));
         } catch (e) {
             checkpointDiffFiles = [];
@@ -690,7 +703,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         }
     }
 
-    type DiffData = { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; orig_removed?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
+    type DiffData = { diff: string; untracked: Array<{ path: string; lines?: string[]; file_size?: number; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
 
     function updateDiff(data: DiffData) {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
@@ -711,8 +724,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             fileSize: u.file_size,
             truncated: u.truncated,
             origAdded: u.orig_added,
-            origRemoved: u.orig_removed,
-            file: parseUnifiedDiff(u.diff)[0] || { path: u.path, added: 0, removed: 0, rows: [] },
+            file: buildUntrackedDiffFile(u.path, u.lines),
         }));
     }
 

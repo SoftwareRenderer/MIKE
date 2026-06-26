@@ -1112,7 +1112,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
 						untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 						for i, u := range diffResult.Untracked {
-							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff, "truncated": u.Truncated, "orig_added": u.OrigAdded, "orig_removed": u.OrigRemoved}
+							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 						}
 						te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 					}
@@ -1202,7 +1202,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
 				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff, "truncated": u.Truncated, "orig_added": u.OrigAdded, "orig_removed": u.OrigRemoved}
+					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 				}
 				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
@@ -1286,7 +1286,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
 				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff, "truncated": u.Truncated, "orig_added": u.OrigAdded, "orig_removed": u.OrigRemoved}
+					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 				}
 				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
@@ -2110,7 +2110,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
 			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff, "truncated": u.Truncated, "orig_added": u.OrigAdded, "orig_removed": u.OrigRemoved}
+				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 			}
 			te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 		}

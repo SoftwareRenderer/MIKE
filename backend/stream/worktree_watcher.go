@@ -213,7 +213,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		// Compute hash from tracked diff + untracked file contents
 		hashInput := diffResult.Diff
 		for _, u := range diffResult.Untracked {
-			hashInput += u.Path + u.Diff
+			hashInput += u.Path + strings.Join(u.Lines, "\n")
 		}
 		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
 		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines)
@@ -224,11 +224,11 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}
 }
 
-// countUntrackedLines sums the pre-computed line counts from untracked file diffs.
+// countUntrackedLines sums the line counts from untracked file entries.
 func countUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
-		total += u.Lines
+		total += len(u.Lines)
 	}
 	return total
 }

@@ -854,7 +854,7 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			// Send compact stats for card UI
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {
-				untrackedLines += u.Lines
+				untrackedLines += len(u.Lines)
 			}
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(diffResult.Diff)))
 			statsMsg, _ := json.Marshal(map[string]interface{}{
@@ -872,7 +872,7 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			// Send full diff for detail view
 			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
 			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "file_size": u.FileSize, "diff": u.Diff}
+				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 			}
 			msg, _ := json.Marshal(map[string]interface{}{
 				"type":       "task_diff",

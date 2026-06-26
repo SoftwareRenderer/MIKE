@@ -5,7 +5,7 @@
     import { highlightLines } from '$lib/highlighter';
 
 
-    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
+    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -79,6 +79,13 @@
 
     // Track hovered row index per file for gutter highlight sync
     let hoveredRow = $state<Record<string, number>>({});
+
+    // Reset hover state when diff data changes (e.g. expand, reload)
+    $effect(() => {
+        const _files = files;
+        const _untracked = untracked;
+        hoveredRow = {};
+    });
 
     // Syntax highlight cache: filePath -> { lineNumKey: highlightedHtml }
     let highlightCache = $state<Record<string, Record<string, string>>>({});
@@ -660,6 +667,7 @@
         font-family: var(--font-mono);
         font-size: 14px;
         line-height: 1.5;
+        height: 1.5em;
         flex-shrink: 0;
         border-top: 1px solid transparent;
         border-bottom: 1px solid transparent;
@@ -707,6 +715,7 @@
         font-family: var(--font-mono);
         font-size: 14px;
         line-height: 1.5;
+        height: 1.5em;
         flex-shrink: 0;
         min-width: 100%;
         border-top: 1px solid transparent;

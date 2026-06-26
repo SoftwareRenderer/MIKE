@@ -479,15 +479,14 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	return out, nil
 }
 
-// UntrackedFile holds the path and unified diff content for an untracked file.
+// UntrackedFile holds the path and content lines for an untracked (new) file.
+// Since untracked files are always new, we store raw lines instead of a unified diff.
 type UntrackedFile struct {
-	Path      string `json:"path"`
-	Diff      string `json:"diff"`
-	FileSize  int64  `json:"file_size,omitempty"` // set when file is binary or >1MB (diff omitted)
-	Truncated bool   `json:"truncated,omitempty"`  // true when diff was truncated to maxChangeLines
-	OrigAdded int    `json:"orig_added,omitempty"` // original added count before truncation
-	OrigRemoved int  `json:"orig_removed,omitempty"` // original removed count before truncation
-	Lines     int    `json:"lines,omitempty"`       // total lines in the file (from diff)
+	Path      string   `json:"path"`
+	Lines     []string `json:"lines,omitempty"`       // file content lines (set for text files)
+	FileSize  int64    `json:"file_size,omitempty"`   // set when file is binary or >1MB (lines omitted)
+	Truncated bool     `json:"truncated,omitempty"`   // true when lines were truncated to maxChangeLines
+	OrigAdded int      `json:"orig_added,omitempty"`  // original line count before truncation
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
@@ -707,16 +706,14 @@ func pluralS(n int) string {
 	return "s"
 }
 
-// countDiffAddedLines counts the number of added lines (+ prefix, excluding +++ header)
-// in a unified diff. For diffs against /dev/null (new files), this equals the file's line count.
-func countDiffAddedLines(diff string) int {
-	count := 0
-	for _, line := range strings.Split(diff, "\n") {
-		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
-			count++
-		}
+// splitLines splits file content into lines, dropping a trailing empty entry
+// caused by a final newline (matching how files are conventionally stored).
+func splitLines(content string) []string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
-	return count
+	return lines
 }
 
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
@@ -873,17 +870,18 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 						continue
 					}
 					fileSize := info.Size()
-					// Skip diff for large files or binary files
+					// Skip content for large files or binary files
 					if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
 						untracked = append(untracked, UntrackedFile{Path: filePath, FileSize: fileSize})
 						continue
 					}
-					// Generate unified diff for the untracked file (compare against empty)
-					// git diff --no-index returns exit code 1 when files differ, which is expected
-					fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", filePath)
-					// Count lines from diff output (+ lines = file lines for new files)
-					lineCount := countDiffAddedLines(fileDiff)
-					untracked = append(untracked, UntrackedFile{Path: filePath, Diff: fileDiff, Lines: lineCount})
+					// Read file content directly (untracked = new file, all lines are additions)
+					data, err := os.ReadFile(fullPath)
+					if err != nil {
+						continue
+					}
+					fileLines := splitLines(string(data))
+					untracked = append(untracked, UntrackedFile{Path: filePath, Lines: fileLines})
 				}
 			}
 		}
@@ -895,25 +893,15 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	if doTruncate {
 		originalStats = countFileChanges(diffOut)
 		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
-		// Also truncate untracked file diffs
+		// Truncate untracked file lines (all additions for new files)
 		for i := range untracked {
-			if untracked[i].Diff == "" {
+			if len(untracked[i].Lines) == 0 {
 				continue
 			}
-			origStats := countFileChanges(untracked[i].Diff)
-			origAdded := 0
-			origRemoved := 0
-			if s, ok := origStats[untracked[i].Path]; ok {
-				origAdded = s.Added
-				origRemoved = s.Removed
-			}
-			totalChanges := origAdded + origRemoved
-			if totalChanges > defaultMaxChangeLines {
-				truncatedDiff, _ := truncateDiffLines(untracked[i].Diff, defaultMaxChangeLines)
-				untracked[i].Diff = truncatedDiff
+			if len(untracked[i].Lines) > defaultMaxChangeLines {
+				untracked[i].OrigAdded = len(untracked[i].Lines)
+				untracked[i].Lines = untracked[i].Lines[:defaultMaxChangeLines]
 				untracked[i].Truncated = true
-				untracked[i].OrigAdded = origAdded
-				untracked[i].OrigRemoved = origRemoved
 			}
 		}
 	}

@@ -306,7 +306,7 @@ function sortNodes(nodes: FileTreeNode[]): FileTreeNode[] {
  * Build a directory tree from untracked file entries.
  * Same structure as buildFileTree but accepts the untracked entry format.
  */
-export function buildUntrackedTree(untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>): FileTreeNode[] {
+export function buildUntrackedTree(untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }>): FileTreeNode[] {
     const root: FileTreeNode[] = [];
 
     for (const entry of untracked) {
@@ -335,7 +335,7 @@ export function buildUntrackedTree(untracked: Array<{ path: string; fileSize?: n
 
             if (isLeaf) {
                 node.added = entry.origAdded ?? entry.file.added;
-                node.removed = entry.origRemoved ?? entry.file.removed;
+                node.removed = entry.file.removed;
                 node.file = entry.file;
             }
 
