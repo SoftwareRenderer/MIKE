@@ -745,29 +745,16 @@
     }
 
     /* Lezer token highlighting — GitHub Dark palette (matches FileEditor) */
-    :global(.diff-text .hl-keyword,
-        .diff-text .hl-controlkeyword,
-        .diff-text .hl-definitionkeyword,
-        .diff-text .hl-modulekeyword,
-        .diff-text .hl-operatorkeyword,
-        .diff-text .hl-modifier) {
+    :global(.diff-text .hl-keyword) {
         color: #F97583;
     }
-    :global(.diff-text .hl-constantkeyword,
-        .diff-text .hl-self,
-        .diff-text .hl-null,
-        .diff-text .hl-atom,
-        .diff-text .hl-unit,
-        .diff-text .hl-bool) {
+    :global(.diff-text .hl-constantkeyword) {
         color: #79C0FF;
     }
     :global(.diff-text .hl-definitionvariable,
         .diff-text .hl-variable,
         .diff-text .hl-classname,
-        .diff-text .hl-typename,
-        .diff-text .hl-macro,
-        .diff-text .hl-namespace,
-        .diff-text .hl-label) {
+        .diff-text .hl-typename) {
         color: #FFA657;
     }
     :global(.diff-text .hl-function) {
@@ -779,56 +766,31 @@
     }
     :global(.diff-text .hl-string,
         .diff-text .hl-attributevalue,
-        .diff-text .hl-regexp,
-        .diff-text .hl-character,
-        .diff-text .hl-url,
-        .diff-text .hl-color,
-        .diff-text .hl-escape) {
+        .diff-text .hl-regexp) {
         color: #A5D6FF;
     }
     :global(.diff-text .hl-number) {
         color: #79C0FF;
     }
-    :global(.diff-text .hl-comment,
-        .diff-text .hl-doccomment,
-        .diff-text .hl-docstring) {
+    :global(.diff-text .hl-comment) {
         color: #8B949E;
         font-style: italic;
     }
     :global(.diff-text .hl-operator) {
         color: #FF7B72;
     }
-    :global(.diff-text .hl-punctuation,
-        .diff-text .hl-bracket,
-        .diff-text .hl-separator) {
+    :global(.diff-text .hl-punctuation) {
         color: #C9D1D9;
     }
     :global(.diff-text .hl-tagname) {
         color: #7EE787;
     }
-    :global(.diff-text .hl-processinginstruction,
-        .diff-text .hl-meta) {
+    :global(.diff-text .hl-meta) {
         color: #C9D1D9;
     }
     :global(.diff-text .hl-invalid) {
         color: #F97583;
         text-decoration: underline wavy #F97583;
-    }
-    :global(.diff-text .hl-heading) {
-        color: #FFA657;
-        font-weight: 600;
-    }
-    :global(.diff-text .hl-emphasis) {
-        font-style: italic;
-    }
-    :global(.diff-text .hl-strong) {
-        font-weight: 600;
-    }
-    :global(.diff-text .hl-link) {
-        color: #58A6FF;
-    }
-    :global(.diff-text .hl-monospace) {
-        font-family: var(--font-mono);
     }
 
     /* Row variants */
