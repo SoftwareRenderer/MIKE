@@ -89,7 +89,7 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
         // Hunk header: "@@ -old_start,old_count +new_start,new_count @@"
         if (line.startsWith('@@')) {
             inHunk = true;
-            const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+            const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? +@@/);
             if (match) {
                 oldLine = Number.parseInt(match[1] ?? '0', 10);
                 newLine = Number.parseInt(match[2] ?? '0', 10);
