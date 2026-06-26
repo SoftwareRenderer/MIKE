@@ -641,7 +641,7 @@
         display: flex;
         flex-direction: column;
         min-width: 0;
-        overflow: hidden;
+        overflow: clip;
     }
 
     /* Gutter + scroll area row */
@@ -649,6 +649,8 @@
         display: flex;
         flex: 1;
         min-height: 0;
+        overflow: hidden;
+        overflow-x: auto;
     }
 
     /* Fixed gutter column */
@@ -697,8 +699,6 @@
     /* Scrollable content column */
     .diff-line-scroll {
         flex: 1;
-        overflow-x: auto;
-        overflow-y: visible;
         min-width: 0;
     }
 
