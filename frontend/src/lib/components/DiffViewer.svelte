@@ -177,7 +177,7 @@
 
     function handleRowClick(filePath: string, lineNumber: number | null) {
         if (onLineClick && lineNumber != null) {
-            onLineClick(filePath, lineNumber + 1);
+            onLineClick(filePath, lineNumber);
         }
     }
 
@@ -253,116 +253,115 @@
                     {:else if ufile.rows.length > 0}
                         {@const uitems = getDisplayItems(ufile.rows)}
                         <div class="diff-file-content">
-                            <div class="diff-gutter">
-                                {#each uitems as item, i}
-                                    {#if item.type === 'row'}
-                                        <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[entry.path] === i}>
-                                            <span class="diff-line-num">
-                                                <span class="diff-line-num-text">{item.row.lineNumber != null ? item.row.lineNumber + 1 : ''}</span>
-                                            </span>
-                                        </div>
-                                    {:else if item.type === 'collapsed'}
-                                        <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[entry.path] === i}></div>
-                                        {#if expandedBlocks[item.block.id]}
-                                            {#each item.block.rows as row, ji}
-                                                <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[entry.path] === i + 1 + ji}>
-                                                    <span class="diff-line-num">
-                                                        <span class="diff-line-num-text">{row.lineNumber != null ? row.lineNumber + 1 : ''}</span>
-                                                    </span>
-                                                </div>
-                                            {/each}
-                                        {/if}
-                                    {/if}
-                                {/each}
-                                {#if entry.truncated && onExpandUntracked}
-                                    <div class="diff-gutter-row diff-gutter-expand"></div>
-                                {/if}
-                            </div>
-                            <div class="diff-line-scroll">
-                                <div class="diff-line-content-wrapper">
+                            <div class="diff-file-body">
+                                <div class="diff-gutter">
                                     {#each uitems as item, i}
                                         {#if item.type === 'row'}
-                                            <div
-                                                class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
-                                                role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
-                                                tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
-                                                onclick={() => handleRowClick(entry.path, item.row.lineNumber)}
-                                                onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
-                                                onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
-                                            >
-                                                <span class="diff-line-content">
-                                                    {#if item.row.variant === 'added'}
-                                                        <span class="diff-prefix">+</span>
-                                                    {:else if item.row.variant === 'removed'}
-                                                        <span class="diff-prefix">-</span>
-                                                    {:else}
-                                                        <span class="diff-prefix"> </span>
-                                                    {/if}
-                                                    {#if getHighlight(entry.path, item.row.lineNumber)}
-                                                        <span class="diff-text">{@html getHighlight(entry.path, item.row.lineNumber)!}</span>
-                                                    {:else}
-                                                        <span class="diff-text">{item.row.text || ' '}</span>
-                                                    {/if}
+                                            <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[entry.path] === i}>
+                                                <span class="diff-line-num">
+                                                    <span class="diff-line-num-text">{item.row.lineNumber || ''}</span>
                                                 </span>
                                             </div>
                                         {:else if item.type === 'collapsed'}
-                                            <button
-                                                type="button"
-                                                class="diff-collapse-btn"
-                                                aria-expanded={expandedBlocks[item.block.id]}
-                                                onclick={() => toggleBlock(item.block.id)}
-                                                onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
-                                                onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
-                                                title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
-                                            >
-                                                {#if expandedBlocks[item.block.id]}
-                                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                        <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                                    </svg>
-                                                    Hide {item.block.count} unmodified lines
-                                                {:else}
-                                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                        <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                    </svg>
-                                                    Show {item.block.count} unmodified lines
-                                                {/if}
-                                            </button>
+                                            <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[entry.path] === i}></div>
                                             {#if expandedBlocks[item.block.id]}
                                                 {#each item.block.rows as row, ji}
-                                                    <div
-                                                        class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
-                                                        onclick={() => handleRowClick(entry.path, row.lineNumber)}
-                                                        onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i + 1 + ji } }}
-                                                        onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
-                                                    >
-                                                        <span class="diff-line-content">
-                                                            <span class="diff-prefix"> </span>
-                                                            {#if getHighlight(entry.path, row.lineNumber)}
-                                                                <span class="diff-text">{@html getHighlight(entry.path, row.lineNumber)!}</span>
-                                                            {:else}
-                                                                <span class="diff-text">{row.text || ' '}</span>
-                                                            {/if}
+                                                    <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[entry.path] === i + 1 + ji}>
+                                                        <span class="diff-line-num">
+                                                            <span class="diff-line-num-text">{row.lineNumber || ''}</span>
                                                         </span>
                                                     </div>
                                                 {/each}
                                             {/if}
                                         {/if}
                                     {/each}
-                                    {#if entry.truncated && onExpandUntracked}
-                                        <button
-                                            type="button"
-                                            class="diff-expand-btn"
-                                            onclick={() => onExpandUntracked(entry.path)}
-                                            title="Load full diff for this file"
-                                        >
-                                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                            </svg>
-                                            Show full diff
-                                        </button>
-                                    {/if}
+                                </div>
+                                <div class="diff-line-scroll">
+                                    <div class="diff-line-content-wrapper">
+                                        {#each uitems as item, i}
+                                            {#if item.type === 'row'}
+                                                <div
+                                                    class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                    role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
+                                                    tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
+                                                    onclick={() => handleRowClick(entry.path, item.row.lineNumber)}
+                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
+                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                                >
+                                                    <span class="diff-line-content">
+                                                        {#if item.row.variant === 'added'}
+                                                            <span class="diff-prefix">+</span>
+                                                        {:else if item.row.variant === 'removed'}
+                                                            <span class="diff-prefix">-</span>
+                                                        {:else}
+                                                            <span class="diff-prefix"> </span>
+                                                        {/if}
+                                                        {#if getHighlight(entry.path, item.row.lineNumber)}
+                                                            <span class="diff-text">{@html getHighlight(entry.path, item.row.lineNumber)!}</span>
+                                                        {:else}
+                                                            <span class="diff-text">{item.row.text || ' '}</span>
+                                                        {/if}
+                                                    </span>
+                                                </div>
+                                            {:else if item.type === 'collapsed'}
+                                                <button
+                                                    type="button"
+                                                    class="diff-collapse-btn"
+                                                    aria-expanded={expandedBlocks[item.block.id]}
+                                                    onclick={() => toggleBlock(item.block.id)}
+                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
+                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                                    title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
+                                                >
+                                                    {#if expandedBlocks[item.block.id]}
+                                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                                        </svg>
+                                                        Hide {item.block.count} unmodified lines
+                                                    {:else}
+                                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                            <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                        </svg>
+                                                        Show {item.block.count} unmodified lines
+                                                    {/if}
+                                                </button>
+                                                {#if expandedBlocks[item.block.id]}
+                                                    {#each item.block.rows as row, ji}
+                                                        <div
+                                                            class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                            onclick={() => handleRowClick(entry.path, row.lineNumber)}
+                                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i + 1 + ji } }}
+                                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                                        >
+                                                            <span class="diff-line-content">
+                                                                <span class="diff-prefix"> </span>
+                                                                {#if getHighlight(entry.path, row.lineNumber)}
+                                                                    <span class="diff-text">{@html getHighlight(entry.path, row.lineNumber)!}</span>
+                                                                {:else}
+                                                                    <span class="diff-text">{row.text || ' '}</span>
+                                                                {/if}
+                                                            </span>
+                                                        </div>
+                                                    {/each}
+                                                {/if}
+                                            {/if}
+                                        {/each}
+                                    </div>
                                 </div>
                             </div>
+                            {#if entry.truncated && onExpandUntracked}
+                                <button
+                                    type="button"
+                                    class="diff-expand-btn"
+                                    onclick={() => onExpandUntracked(entry.path)}
+                                    title="Load full diff for this file"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                        <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    Show full diff
+                                </button>
+                            {/if}
                         </div>
                     {/if}
                 {/if}
@@ -415,116 +414,115 @@
                     {:else}
                         {@const items = getDisplayItems(file.rows)}
                         <div class="diff-file-content">
-                            <div class="diff-gutter">
-                                {#each items as item, i}
-                                    {#if item.type === 'row'}
-                                        <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[file.path] === i}>
-                                            <span class="diff-line-num">
-                                                <span class="diff-line-num-text">{item.row.lineNumber != null ? item.row.lineNumber + 1 : ''}</span>
-                                            </span>
-                                        </div>
-                                    {:else if item.type === 'collapsed'}
-                                        <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[file.path] === i}></div>
-                                        {#if expandedBlocks[item.block.id]}
-                                            {#each item.block.rows as row, ji}
-                                                <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[file.path] === i + 1 + ji}>
-                                                    <span class="diff-line-num">
-                                                        <span class="diff-line-num-text">{row.lineNumber != null ? row.lineNumber + 1 : ''}</span>
-                                                    </span>
-                                                </div>
-                                            {/each}
-                                        {/if}
-                                    {/if}
-                                {/each}
-                                {#if file.truncated && onExpandFile}
-                                    <div class="diff-gutter-row diff-gutter-expand"></div>
-                                {/if}
-                            </div>
-                            <div class="diff-line-scroll">
-                                <div class="diff-line-content-wrapper">
+                            <div class="diff-file-body">
+                                <div class="diff-gutter">
                                     {#each items as item, i}
                                         {#if item.type === 'row'}
-                                            <div
-                                                class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
-                                                role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
-                                                tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
-                                                onclick={() => handleRowClick(file.path, item.row.lineNumber)}
-                                                onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
-                                                onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
-                                            >
-                                                <span class="diff-line-content">
-                                                    {#if item.row.variant === 'added'}
-                                                        <span class="diff-prefix">+</span>
-                                                    {:else if item.row.variant === 'removed'}
-                                                        <span class="diff-prefix">-</span>
-                                                    {:else}
-                                                        <span class="diff-prefix"> </span>
-                                                    {/if}
-                                                    {#if getHighlight(file.path, item.row.lineNumber)}
-                                                        <span class="diff-text">{@html getHighlight(file.path, item.row.lineNumber)!}</span>
-                                                    {:else}
-                                                        <span class="diff-text">{item.row.text || ' '}</span>
-                                                    {/if}
+                                            <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[file.path] === i}>
+                                                <span class="diff-line-num">
+                                                    <span class="diff-line-num-text">{item.row.lineNumber || ''}</span>
                                                 </span>
                                             </div>
                                         {:else if item.type === 'collapsed'}
-                                            <button
-                                                type="button"
-                                                class="diff-collapse-btn"
-                                                aria-expanded={expandedBlocks[item.block.id]}
-                                                onclick={() => toggleBlock(item.block.id)}
-                                                onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
-                                                onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
-                                                title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
-                                            >
-                                                {#if expandedBlocks[item.block.id]}
-                                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                        <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                                    </svg>
-                                                    Hide {item.block.count} unmodified lines
-                                                {:else}
-                                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                        <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                    </svg>
-                                                    Show {item.block.count} unmodified lines
-                                                {/if}
-                                            </button>
+                                            <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[file.path] === i}></div>
                                             {#if expandedBlocks[item.block.id]}
                                                 {#each item.block.rows as row, ji}
-                                                    <div
-                                                        class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
-                                                        onclick={() => handleRowClick(file.path, row.lineNumber)}
-                                                        onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i + 1 + ji } }}
-                                                        onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
-                                                    >
-                                                        <span class="diff-line-content">
-                                                            <span class="diff-prefix"> </span>
-                                                            {#if getHighlight(file.path, row.lineNumber)}
-                                                                <span class="diff-text">{@html getHighlight(file.path, row.lineNumber)!}</span>
-                                                            {:else}
-                                                                <span class="diff-text">{row.text || ' '}</span>
-                                                            {/if}
+                                                    <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[file.path] === i + 1 + ji}>
+                                                        <span class="diff-line-num">
+                                                            <span class="diff-line-num-text">{row.lineNumber || ''}</span>
                                                         </span>
                                                     </div>
                                                 {/each}
                                             {/if}
                                         {/if}
                                     {/each}
-                                    {#if file.truncated && onExpandFile}
-                                        <button
-                                            type="button"
-                                            class="diff-expand-btn"
-                                            onclick={() => onExpandFile(file.path)}
-                                            title="Load full diff for this file"
-                                        >
-                                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                            </svg>
-                                            Show full diff
-                                        </button>
-                                    {/if}
+                                </div>
+                                <div class="diff-line-scroll">
+                                    <div class="diff-line-content-wrapper">
+                                        {#each items as item, i}
+                                            {#if item.type === 'row'}
+                                                <div
+                                                    class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                    role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
+                                                    tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
+                                                    onclick={() => handleRowClick(file.path, item.row.lineNumber)}
+                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
+                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                                >
+                                                    <span class="diff-line-content">
+                                                        {#if item.row.variant === 'added'}
+                                                            <span class="diff-prefix">+</span>
+                                                        {:else if item.row.variant === 'removed'}
+                                                            <span class="diff-prefix">-</span>
+                                                        {:else}
+                                                            <span class="diff-prefix"> </span>
+                                                        {/if}
+                                                        {#if getHighlight(file.path, item.row.lineNumber)}
+                                                            <span class="diff-text">{@html getHighlight(file.path, item.row.lineNumber)!}</span>
+                                                        {:else}
+                                                            <span class="diff-text">{item.row.text || ' '}</span>
+                                                        {/if}
+                                                    </span>
+                                                </div>
+                                            {:else if item.type === 'collapsed'}
+                                                <button
+                                                    type="button"
+                                                    class="diff-collapse-btn"
+                                                    aria-expanded={expandedBlocks[item.block.id]}
+                                                    onclick={() => toggleBlock(item.block.id)}
+                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
+                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                                    title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
+                                                >
+                                                    {#if expandedBlocks[item.block.id]}
+                                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                                        </svg>
+                                                        Hide {item.block.count} unmodified lines
+                                                    {:else}
+                                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                            <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                        </svg>
+                                                        Show {item.block.count} unmodified lines
+                                                    {/if}
+                                                </button>
+                                                {#if expandedBlocks[item.block.id]}
+                                                    {#each item.block.rows as row, ji}
+                                                        <div
+                                                            class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                            onclick={() => handleRowClick(file.path, row.lineNumber)}
+                                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i + 1 + ji } }}
+                                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                                        >
+                                                            <span class="diff-line-content">
+                                                                <span class="diff-prefix"> </span>
+                                                                {#if getHighlight(file.path, row.lineNumber)}
+                                                                    <span class="diff-text">{@html getHighlight(file.path, row.lineNumber)!}</span>
+                                                                {:else}
+                                                                    <span class="diff-text">{row.text || ' '}</span>
+                                                                {/if}
+                                                            </span>
+                                                        </div>
+                                                    {/each}
+                                                {/if}
+                                            {/if}
+                                        {/each}
+                                    </div>
                                 </div>
                             </div>
+                            {#if file.truncated && onExpandFile}
+                                <button
+                                    type="button"
+                                    class="diff-expand-btn"
+                                    onclick={() => onExpandFile(file.path)}
+                                    title="Load full diff for this file"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                        <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    Show full diff
+                                </button>
+                            {/if}
                         </div>
                     {/if}
                 {/if}
@@ -626,7 +624,7 @@
         color: var(--color-status-red);
     }
 
-    /* File content — flex row: fixed gutter + scrollable content */
+    /* File content — column: gutter+scroll body + expand button */
     .diff-file-content {
         margin-top: 2px;
         border: 1px solid var(--color-border);
@@ -634,7 +632,16 @@
         border-right: none;
         border-radius: 0 0 6px 6px;
         display: flex;
+        flex-direction: column;
         min-width: 0;
+        overflow: hidden;
+    }
+
+    /* Gutter + scroll area row */
+    .diff-file-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
     }
 
     /* Fixed gutter column */
@@ -651,7 +658,7 @@
 
     .diff-gutter-row {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: 14px;
         line-height: 1.5;
         flex-shrink: 0;
         border-top: 1px solid transparent;
@@ -676,7 +683,7 @@
         overflow: hidden;
     }
     .diff-line-num-text {
-        font-size: 0.75rem;
+        font-size: 14px;
     }
 
     /* Scrollable content column */
@@ -698,7 +705,7 @@
     .diff-row {
         display: block;
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: 14px;
         line-height: 1.5;
         flex-shrink: 0;
         min-width: 100%;

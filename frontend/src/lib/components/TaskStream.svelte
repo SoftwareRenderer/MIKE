@@ -328,12 +328,14 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 4px;
+        margin-bottom: 8px;
     }
     .tool-name {
         font-weight: 600;
         font-size: 0.875rem;
         color: var(--color-accent);
+        display: flex;
+        align-items: center;
     }
     .spinner { color: var(--color-status-yellow); }
     .success { color: var(--color-status-green); }

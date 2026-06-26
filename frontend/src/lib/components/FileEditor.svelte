@@ -551,11 +551,11 @@
     /* CodeMirror theme overrides to match our UI */
     .editor-content :global(.cm-editor) {
         height: 100%;
-        font-size: 0.75rem;
+        font-size: 14px;
     }
     .editor-content :global(.cm-scroller) {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: 14px;
         line-height: 1.5;
         tab-size: 4;
     }

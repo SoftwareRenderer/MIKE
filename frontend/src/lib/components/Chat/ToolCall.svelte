@@ -170,11 +170,13 @@
         border-radius: var(--radius-md);
         padding: 8px;
     }
-    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     .tool-name {
         font-size: 0.8125rem;
         font-weight: 600;
         color: var(--color-text-primary);
+        display: flex;
+        align-items: center;
     }
     .tool-args {
         font-size: 0.75rem;
@@ -191,6 +193,8 @@
         text-overflow: ellipsis;
     }
     .tool-args-link {
+        display: flex;
+        align-items: center;
         background: none;
         border: none;
         padding: 0;
