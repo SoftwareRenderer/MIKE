@@ -2,7 +2,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
-    import { detectLanguage, highlightLines } from '$lib/highlighter';
+    import { highlightLines } from '$lib/highlighter';
 
 
     let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
@@ -22,46 +22,40 @@
         const _files = files;
         const _untracked = untracked;
 
-        (async () => {
-            const result: typeof highlightCache = {};
-            const tasks: Promise<void>[] = [];
+        const result: typeof highlightCache = {};
 
-            for (const file of _files) {
-                if (file.rows.length === 0 || file.fileSize) continue;
-                const lang = detectLanguage(file.path);
-                if (!lang) continue;
-                const texts = file.rows.map(r => r.text);
-                const fileResult: Record<string, string> = {};
-                tasks.push(
-                    highlightLines(texts, lang).then(htmls => {
-                        file.rows.forEach((row, i) => {
-                            fileResult[String(row.lineNumber)] = htmls[i] || row.text;
-                        });
-                    })
-                );
-                result[file.path] = fileResult;
-            }
+        for (const file of _files) {
+            if (file.rows.length === 0 || file.fileSize) continue;
+            const texts = file.rows.map(r => r.text);
+            const fileResult: Record<string, string> = {};
+            const htmls = highlightLines(texts, file.path);
+            let hasAnyHighlight = false;
+            file.rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    fileResult[String(row.lineNumber)] = htmls[i];
+                    hasAnyHighlight = true;
+                }
+            });
+            if (hasAnyHighlight) result[file.path] = fileResult;
+        }
 
-            for (const entry of _untracked) {
-                const ufile = entry.file;
-                if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
-                const lang = detectLanguage(entry.path);
-                if (!lang) continue;
-                const texts = ufile.rows.map(r => r.text);
-                const fileResult: Record<string, string> = {};
-                tasks.push(
-                    highlightLines(texts, lang).then(htmls => {
-                        ufile.rows.forEach((row, i) => {
-                            fileResult[String(row.lineNumber)] = htmls[i] || row.text;
-                        });
-                    })
-                );
-                result[entry.path] = fileResult;
-            }
+        for (const entry of _untracked) {
+            const ufile = entry.file;
+            if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
+            const texts = ufile.rows.map(r => r.text);
+            const fileResult: Record<string, string> = {};
+            const htmls = highlightLines(texts, entry.path);
+            let hasAnyHighlight = false;
+            ufile.rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    fileResult[String(row.lineNumber)] = htmls[i];
+                    hasAnyHighlight = true;
+                }
+            });
+            if (hasAnyHighlight) result[entry.path] = fileResult;
+        }
 
-            await Promise.all(tasks);
-            highlightCache = result;
-        })();
+        highlightCache = result;
     });
 
     function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
@@ -503,6 +497,143 @@
         font-family: inherit;
         font-size: inherit;
         white-space: inherit;
+    }
+
+    /* Lezer token highlighting — GitHub Dark palette (matches FileEditor) */
+    :global(
+        .diff-text .hl-keyword,
+        .diff-text .hl-controlkeyword,
+        .diff-text .hl-definitionkeyword,
+        .diff-text .hl-modulekeyword,
+        .diff-text .hl-operatorkeyword,
+        .diff-text .hl-modifier,
+        .diff-text .hl-constantkeyword,
+        .diff-text .hl-self,
+        .diff-text .hl-null,
+        .diff-text .hl-atom,
+        .diff-text .hl-unit,
+        .diff-text .hl-bool,
+        .diff-text .hl-definitionvariable,
+        .diff-text .hl-variable,
+        .diff-text .hl-classname,
+        .diff-text .hl-typename,
+        .diff-text .hl-macro,
+        .diff-text .hl-namespace,
+        .diff-text .hl-label,
+        .diff-text .hl-function,
+        .diff-text .hl-property,
+        .diff-text .hl-attribute,
+        .diff-text .hl-string,
+        .diff-text .hl-attributevalue,
+        .diff-text .hl-regexp,
+        .diff-text .hl-character,
+        .diff-text .hl-url,
+        .diff-text .hl-color,
+        .diff-text .hl-escape,
+        .diff-text .hl-number,
+        .diff-text .hl-comment,
+        .diff-text .hl-doccomment,
+        .diff-text .hl-docstring,
+        .diff-text .hl-operator,
+        .diff-text .hl-punctuation,
+        .diff-text .hl-bracket,
+        .diff-text .hl-separator,
+        .diff-text .hl-tagname,
+        .diff-text .hl-processinginstruction,
+        .diff-text .hl-meta,
+        .diff-text .hl-invalid,
+        .diff-text .hl-heading,
+        .diff-text .hl-emphasis,
+        .diff-text .hl-strong,
+        .diff-text .hl-link,
+        .diff-text .hl-monospace
+    ) {
+        /* colors set per-group below */
+    }
+    :global(.diff-text .hl-keyword,
+        .diff-text .hl-controlkeyword,
+        .diff-text .hl-definitionkeyword,
+        .diff-text .hl-modulekeyword,
+        .diff-text .hl-operatorkeyword,
+        .diff-text .hl-modifier) {
+        color: #F97583;
+    }
+    :global(.diff-text .hl-constantkeyword,
+        .diff-text .hl-self,
+        .diff-text .hl-null,
+        .diff-text .hl-atom,
+        .diff-text .hl-unit,
+        .diff-text .hl-bool) {
+        color: #79C0FF;
+    }
+    :global(.diff-text .hl-definitionvariable,
+        .diff-text .hl-variable,
+        .diff-text .hl-classname,
+        .diff-text .hl-typename,
+        .diff-text .hl-macro,
+        .diff-text .hl-namespace,
+        .diff-text .hl-label) {
+        color: #FFA657;
+    }
+    :global(.diff-text .hl-function) {
+        color: #D2A8FF;
+    }
+    :global(.diff-text .hl-property,
+        .diff-text .hl-attribute) {
+        color: #79C0FF;
+    }
+    :global(.diff-text .hl-string,
+        .diff-text .hl-attributevalue,
+        .diff-text .hl-regexp,
+        .diff-text .hl-character,
+        .diff-text .hl-url,
+        .diff-text .hl-color,
+        .diff-text .hl-escape) {
+        color: #A5D6FF;
+    }
+    :global(.diff-text .hl-number) {
+        color: #79C0FF;
+    }
+    :global(.diff-text .hl-comment,
+        .diff-text .hl-doccomment,
+        .diff-text .hl-docstring) {
+        color: #8B949E;
+        font-style: italic;
+    }
+    :global(.diff-text .hl-operator) {
+        color: #FF7B72;
+    }
+    :global(.diff-text .hl-punctuation,
+        .diff-text .hl-bracket,
+        .diff-text .hl-separator) {
+        color: #C9D1D9;
+    }
+    :global(.diff-text .hl-tagname) {
+        color: #7EE787;
+    }
+    :global(.diff-text .hl-processinginstruction,
+        .diff-text .hl-meta) {
+        color: #C9D1D9;
+    }
+    :global(.diff-text .hl-invalid) {
+        color: #F97583;
+        text-decoration: underline wavy #F97583;
+    }
+    :global(.diff-text .hl-heading) {
+        color: #FFA657;
+        font-weight: 600;
+    }
+    :global(.diff-text .hl-emphasis) {
+        font-style: italic;
+    }
+    :global(.diff-text .hl-strong) {
+        font-weight: 600;
+    }
+    :global(.diff-text .hl-link) {
+        color: #58A6FF;
+    }
+    :global(.diff-text .hl-monospace) {
+        font-family: var(--font-mono);
     }
 
     /* Row variants — backgrounds on cells since .diff-row uses display: contents */
