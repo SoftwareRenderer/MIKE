@@ -1,9 +1,99 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, unmount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
     import { showToast } from '$lib/store';
-    import { toHomeRelative } from '$lib/utils/path';
-    import { getHighlighter, detectLanguage } from '$lib/highlighter';
+
+    // CodeMirror
+    import { EditorView, basicSetup } from 'codemirror';
+    import { EditorState } from '@codemirror/state';
+    import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
+    import { tags } from '@lezer/highlight';
+    import { javascript } from '@codemirror/lang-javascript';
+    import { python } from '@codemirror/lang-python';
+    import { go } from '@codemirror/lang-go';
+    import { json } from '@codemirror/lang-json';
+    import { markdown } from '@codemirror/lang-markdown';
+    import { rust } from '@codemirror/lang-rust';
+    import { cpp } from '@codemirror/lang-cpp';
+    import { php } from '@codemirror/lang-php';
+    import { sql } from '@codemirror/lang-sql';
+    import { html } from '@codemirror/lang-html';
+    import { css } from '@codemirror/lang-css';
+
+    // GitHub Dark theme — matches shiki's github-dark token colors
+    const githubDarkHighlight = HighlightStyle.define([
+        { tag: tags.keyword, color: '#F97583' },
+        { tag: tags.constant(tags.keyword), color: '#79C0FF' },
+        { tag: tags.definition(tags.variableName), color: '#FFA657' },
+        { tag: tags.variableName, color: '#FFA657' },
+        { tag: tags.function(tags.variableName), color: '#D2A8FF' },
+        { tag: tags.propertyName, color: '#79C0FF' },
+        { tag: tags.string, color: '#A5D6FF' },
+        { tag: tags.number, color: '#79C0FF' },
+        { tag: tags.comment, color: '#8B949E', fontStyle: 'italic' },
+        { tag: tags.operator, color: '#FF7B72' },
+        { tag: tags.punctuation, color: '#C9D1D9' },
+        { tag: tags.className, color: '#FFA657' },
+        { tag: tags.typeName, color: '#FFA657' },
+        { tag: tags.tagName, color: '#7EE787' },
+        { tag: tags.attributeName, color: '#79C0FF' },
+        { tag: tags.attributeValue, color: '#A5D6FF' },
+        { tag: tags.regexp, color: '#A5D6FF' },
+        { tag: tags.meta, color: '#C9D1D9' },
+        { tag: tags.invalid, color: '#f97583', textDecoration: 'underline wavy #f97583' },
+    ]);
+
+    const githubDarkTheme = EditorView.theme({
+        '&': {
+            backgroundColor: 'transparent',
+            color: '#C9D1D9',
+        },
+        '&.cm-focused': {
+            outline: 'none',
+        },
+        '.cm-scroller': {
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.75rem',
+            lineHeight: '1.5',
+            tabSize: 4,
+        },
+        '.cm-gutters': {
+            background: 'var(--color-surface-1)',
+            borderRight: '1px solid var(--color-border)',
+            color: '#484F58',
+            padding: '0 6px 0 0',
+        },
+        '.cm-activeLineGutter': {
+            color: '#8B949E',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+        },
+        '.cm-activeLine': {
+            backgroundColor: 'rgba(255,255,255,0.04)',
+        },
+        '.cm-selectionBackground': {
+            backgroundColor: 'rgba(88,166,255,0.3)',
+        },
+        '&.cm-focused .cm-selectionBackground': {
+            backgroundColor: 'rgba(88,166,255,0.3)',
+        },
+        '.cm-cursor': {
+            borderLeftColor: '#C9D1D9',
+        },
+        '.cm-matchBracket': {
+            backgroundColor: 'rgba(88,166,255,0.3)',
+        },
+        '.cm-searchMatch': {
+            backgroundColor: 'rgba(200,180,30,0.3)',
+        },
+        '.cm-searchMatch.cm-searchMatch-selected': {
+            backgroundColor: 'rgba(200,180,30,0.5)',
+        },
+        '.cm-tooltip': {
+            backgroundColor: 'var(--color-surface-1)',
+            border: '1px solid var(--color-border)',
+            color: '#C9D1D9',
+        },
+    });
 
     let { filePath, lineNumber, onClose }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void } = $props();
 
@@ -14,57 +104,154 @@
     let error = $state('');
     let fileTooLarge = $state(false);
     let displayPath = $state('');
-    let highlightedHtml = $state('');
 
     let hasChanges = $derived(content !== originalContent);
     let lineCount = $derived(content.split('\n').length);
 
-    let textareaEl: HTMLTextAreaElement | null = null;
-    let preEl: HTMLDivElement | null = null;
-    let lineNumbersEl: HTMLDivElement | null = null;
+    let editorEl: HTMLDivElement | null = null;
     let showConfirm = $state(false);
 
+    let view: EditorView | null = null;
 
+    function getLanguageSupport(path: string) {
+        const ext = path.split('.').pop()?.toLowerCase() || '';
+        const base = path.split('/').pop()?.toLowerCase() || '';
 
-    async function updateHighlight() {
-        const lang = detectLanguage(filePath);
-        if (!lang) {
-            highlightedHtml = '';
-            return;
-        }
-        try {
-            const hl = await getHighlighter();
-            const html = hl.codeToHtml(content, { lang, theme: 'github-dark' });
-            highlightedHtml = html;
-        } catch {
-            highlightedHtml = '';
+        const extMap: Record<string, () => any> = {
+            js: javascript, mjs: javascript, cjs: javascript, jsx: javascript, mx: javascript,
+            ts: javascript, tsx: javascript,
+            py: python, pyw: python,
+            go: go,
+            c: cpp, h: cpp,
+            cpp: cpp, cc: cpp, cxx: cpp, hxx: cpp, hpp: cpp,
+            rs: rust,
+            json: json,
+            md: markdown, mdx: markdown,
+            php: php,
+            sql: sql,
+            html: html, htm: html,
+            css: css, scss: css, sass: css, less: css,
+        };
+
+        if (base === 'dockerfile') return null;
+        if (base === 'makefile' || base === 'cmakeLists.txt') return null;
+
+        const support = extMap[ext];
+        return support ? support() : null;
+    }
+
+    function createEditor() {
+        if (!editorEl) return;
+
+        const langSupport = getLanguageSupport(filePath);
+        const extensions = [
+            basicSetup,
+            githubDarkTheme,
+            syntaxHighlighting(githubDarkHighlight),
+            EditorView.updateListener.of((update) => {
+                if (update.docChanged) {
+                    content = update.state.doc.toString();
+                }
+            }),
+            EditorState.tabSize.of(4),
+            ...(langSupport ? [langSupport] : []),
+        ];
+
+        const state = EditorState.create({
+            doc: content,
+            extensions,
+        });
+
+        view = new EditorView({
+            state,
+            parent: editorEl,
+        });
+
+        // Scroll to target line, maintaining relative vertical position
+        // (e.g. if clicked line was 80% down the diff viewport, show it 80% down the editor)
+        if (lineNumber >= 1) {
+            requestAnimationFrame(() => {
+                if (!view) return;
+                const totalLines = view.state.doc.lines;
+                const lineNum = Math.min(lineNumber, totalLines);
+                const line = view.state.doc.line(lineNum);
+                view.dispatch({
+                    selection: { anchor: line.from, head: line.from },
+                });
+                view.focus();
+
+                // Second rAF to ensure layout is complete
+                requestAnimationFrame(() => {
+                    if (!view || !editorEl) return;
+                    const scroller = editorEl.querySelector('.cm-scroller');
+                    if (!scroller) return;
+                    const coords = view.coordsAtPos(line.from);
+                    if (!coords) return;
+                    const viewportHeight = scroller.clientHeight;
+                    const docHeight = scroller.scrollHeight;
+                    // Relative position of target line within the document
+                    const lineRatio = (lineNum - 1) / Math.max(totalLines - 1, 1);
+                    // Target scroll: place the line at the same relative position in the viewport
+                    const targetScroll = Math.max(0, coords.top + scroller.scrollTop - lineRatio * viewportHeight);
+                    scroller.scrollTop = Math.min(targetScroll, docHeight - viewportHeight);
+                });
+            });
         }
     }
 
-    // Debounced highlight update
-    let highlightTimer: ReturnType<typeof setTimeout> | null = null;
-    function scheduleHighlight() {
-        if (highlightTimer) clearTimeout(highlightTimer);
-        highlightTimer = setTimeout(updateHighlight, 150);
+    function updateEditorContent() {
+        if (view) {
+            const current = view.state.doc.toString();
+            if (current !== content) {
+                view.dispatch({
+                    changes: { from: 0, to: current.length, insert: content },
+                    selection: { anchor: 0 },
+                });
+            }
+        }
     }
 
     onMount(() => {
         loadFile();
+
+        // On mobile, the keyboard changes the viewport height. Scroll cursor into view.
+        function handleResize() {
+            if (!view) return;
+            const sel = view.state.selection.main;
+            if (sel.anchor !== sel.head) return; // don't interrupt selections
+            view.dispatch(
+                { selection: { anchor: sel.anchor, head: sel.head } },
+                { scrollIntoView: true },
+            );
+        }
+
+        // Use visualViewport API for accurate keyboard tracking (Chrome Android)
+        const vv = typeof visualViewport !== 'undefined' ? visualViewport : null;
+        vv?.addEventListener('resize', handleResize, { passive: true });
+        // Fallback for iOS Safari (uses window resize)
+        window.addEventListener('resize', handleResize);
+
         return () => {
-            if (highlightTimer) clearTimeout(highlightTimer);
+            view?.destroy();
+            vv?.removeEventListener('resize', handleResize);
+            window.removeEventListener('resize', handleResize);
         };
     });
 
-    // Re-highlight when content changes
+    // Re-create editor when content changes externally (e.g. after load)
     $effect(() => {
-        if (!loading && content) scheduleHighlight();
+        if (!loading && !fileTooLarge && !view && editorEl) {
+            createEditor();
+        } else if (!loading && !fileTooLarge && view && content !== originalContent && content === view.state.doc.toString()) {
+            // Content synced, no action needed
+        }
     });
 
     async function loadFile() {
         loading = true;
         error = '';
         fileTooLarge = false;
-        displayPath = toHomeRelative(filePath);
+        displayPath = filePath.split('/').pop() || filePath;
 
         try {
             const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`);
@@ -146,57 +333,15 @@
         showConfirm = false;
         if (discard) handleClose();
     }
-
-    function handleScroll() {
-        if (textareaEl && preEl) {
-            preEl.scrollTop = textareaEl.scrollTop;
-            preEl.scrollLeft = textareaEl.scrollLeft;
-        }
-        if (textareaEl && lineNumbersEl) {
-            lineNumbersEl.scrollTop = textareaEl.scrollTop;
-        }
-    }
-
-    // Scroll to target line after content loads
-    $effect(() => {
-        if (!loading && textareaEl && !fileTooLarge && lineNumber >= 1) {
-            const lineIndex = lineNumber - 1;
-            const lines = content.split('\n');
-            let charOffset = 0;
-            for (let i = 0; i < lineIndex && i < lines.length; i++) {
-                charOffset += lines[i]!.length + 1;
-            }
-            textareaEl.setSelectionRange(charOffset, charOffset);
-            textareaEl.focus();
-
-            requestAnimationFrame(() => {
-                if (!textareaEl) return;
-                const style = window.getComputedStyle(textareaEl);
-                const fontSize = parseFloat(style.fontSize) || 13;
-                const lineHeightRaw = style.lineHeight;
-                let lineHeight: number;
-                if (lineHeightRaw.endsWith('px')) {
-                    lineHeight = parseFloat(lineHeightRaw) || fontSize * 1.5;
-                } else {
-                    lineHeight = (parseFloat(lineHeightRaw) || 1.5) * fontSize;
-                }
-                const viewportHeight = textareaEl.clientHeight;
-                const targetScroll = lineIndex * lineHeight - viewportHeight / 3;
-                textareaEl.scrollTop = Math.max(0, targetScroll);
-                if (preEl) preEl.scrollTop = textareaEl.scrollTop;
-                if (lineNumbersEl) lineNumbersEl.scrollTop = textareaEl.scrollTop;
-            });
-        }
-    });
 </script>
 
-<div class="file-editor" tabindex="-1">
+<div class="file-editor" tabindex="-1" onkeydown={handleKeyDown}>
     <!-- Header -->
     <div class="editor-header">
         <div class="header-left">
-            <button class="btn-back" onclick={requestClose} aria-label="Back to diff" title="Back to diff">
+            <button class="btn-back" onclick={requestClose} aria-label="Close editor" title="Close editor">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
             </button>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -251,29 +396,7 @@
                 <span>File too large to edit (max 1MB)</span>
             </div>
         {:else}
-            <div class="editor-content">
-                <!-- Line numbers gutter -->
-                <div class="line-numbers" bind:this={lineNumbersEl} aria-hidden="true">
-                    {#each Array.from({ length: lineCount }, (_, i) => i + 1) as lineNum}
-                        <div class="line-number">{lineNum}</div>
-                    {/each}
-                </div>
-                <!-- Code area: highlight layer + textarea overlay -->
-                <div class="code-area">
-                    {#if highlightedHtml}
-                        <div class="highlight-layer" bind:this={preEl}>{@html highlightedHtml}</div>
-                    {/if}
-                    <textarea
-                        class="editor-textarea"
-                        bind:this={textareaEl}
-                        bind:value={content}
-                        onkeydown={handleKeyDown}
-                        onscroll={handleScroll}
-                        spellcheck="false"
-                        aria-label="File content editor"
-                    ></textarea>
-                </div>
-            </div>
+            <div class="editor-content" bind:this={editorEl}></div>
         {/if}
     </div>
 
@@ -296,7 +419,7 @@
             <p id="confirm-desc">You have unsaved changes. Discard them?</p>
             <div class="confirm-actions">
                 <button class="btn-confirm-cancel" onclick={() => confirmClose(false)}>Keep Editing</button>
-                <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>Discard & Close</button>
+                <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>Discard &amp; Close</button>
             </div>
         </div>
     </div>
@@ -424,71 +547,33 @@
 
     .editor-content {
         flex: 1;
-        display: flex;
         overflow: hidden;
         min-height: 0;
     }
 
-    .line-numbers {
-        flex-shrink: 0;
-        width: 2.5rem;
-        padding: 8px 6px 8px 0;
-        text-align: right;
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-        line-height: 1.5;
-        color: var(--color-text-tertiary);
-        background: var(--color-surface-1);
-        overflow: hidden;
-        user-select: none;
-        border-right: 1px solid var(--color-border);
-    }
-    .line-number {
-        height: 1.5em;
-    }
-
-    /* Code area: highlight + textarea overlay */
-    .code-area {
-        flex: 1;
-        position: relative;
-        overflow: hidden;
-        min-width: 0;
-    }
-
-    .highlight-layer {
-        position: absolute;
-        inset: 0;
-        margin: 0;
-        padding: 8px;
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-        line-height: 1.5;
-        white-space: pre;
-        overflow: hidden;
-        pointer-events: none;
-        tab-size: 4;
-    }
-
-    .editor-textarea {
-        position: absolute;
-        inset: 0;
-        width: 100%;
+    /* CodeMirror theme overrides to match our UI */
+    .editor-content :global(.cm-editor) {
         height: 100%;
-        padding: 8px;
-        border: none;
-        outline: none;
-        resize: none;
+        font-size: 0.75rem;
+    }
+    .editor-content :global(.cm-scroller) {
         font-family: var(--font-mono);
         font-size: 0.75rem;
         line-height: 1.5;
-        color: transparent;
-        background: transparent;
-        caret-color: var(--color-text-primary);
         tab-size: 4;
-        white-space: pre;
-        overflow-wrap: normal;
-        overflow: auto;
-        z-index: 1;
+    }
+    .editor-content :global(.cm-gutters) {
+        background: var(--color-surface-1);
+        border-right: 1px solid var(--color-border);
+        color: var(--color-text-tertiary);
+        padding: 0 6px 0 0;
+    }
+    .editor-content :global(.cm-activeLineGutter) {
+        color: #8B949E;
+        background: rgba(255,255,255,0.06);
+    }
+    .editor-content :global(.cm-content) {
+        caret-color: var(--color-text-primary);
     }
 
     .editor-footer {

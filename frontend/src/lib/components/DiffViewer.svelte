@@ -412,6 +412,7 @@
         padding: 6px 8px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
+        border-right: none;
         border-radius: 6px 6px 0 0;
         cursor: pointer;
         font-size: 0.8125rem;
@@ -459,6 +460,7 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
+        border-right: none;
         border-radius: 0 0 6px 6px;
         display: grid;
         grid-template-columns: 2rem 1fr;
