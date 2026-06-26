@@ -854,7 +854,7 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			// Send compact stats for card UI
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {
-				untrackedLines += strings.Count(u.Diff, "\n")
+				untrackedLines += u.Lines
 			}
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(diffResult.Diff)))
 			statsMsg, _ := json.Marshal(map[string]interface{}{

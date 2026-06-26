@@ -149,7 +149,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     let diffTo = $state('working');
 
     // File editor overlay
-    let editingFile = $state<{ path: string; lineNumber: number } | null>(null);
+    let editingFile = $state<{ path: string; lineNumber: number; displayPath: string } | null>(null);
 
     function resolveFilePath(relativePath: string): string | null {
         if (!workspaceDir || !task.id) return null;
@@ -159,7 +159,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
         if (!fullPath) return;
-        editingFile = { path: fullPath, lineNumber };
+        editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
     function closeFileEditor(saved: boolean) {
@@ -950,6 +950,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                         <FileEditor
                             filePath={editingFile.path}
                             lineNumber={editingFile.lineNumber}
+                            displayPath={editingFile.displayPath}
                             onClose={closeFileEditor}
                         />
                     {:else}

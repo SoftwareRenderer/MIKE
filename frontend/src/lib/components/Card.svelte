@@ -771,14 +771,16 @@
                     </div>
                 {/if}
             {/if}
-            {#if diffStats}
-                <span class="diff-stats">
-                    {#if diffStats.files > 0}<span class="diff-files">{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>{/if}
-                    {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
-                    {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
-                    {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
-                </span>
-            {/if}
+        </div>
+    {/if}
+    {#if diffStats}
+        <div class="diff-stats-row">
+            <span class="diff-stats">
+                {#if diffStats.files > 0}<span class="diff-files">{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>{/if}
+                {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
+                {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
+                {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
+            </span>
         </div>
     {/if}
     {#if subtaskProgress}
@@ -1229,13 +1231,18 @@
     .badge-sep {
         flex-shrink: 0;
     }
+    .diff-stats-row {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 0;
+    }
     .diff-stats {
         display: inline-flex;
         align-items: center;
         gap: 3px;
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
-        padding: 2px 0;
         font-variant-numeric: tabular-nums;
     }
     .diff-files {

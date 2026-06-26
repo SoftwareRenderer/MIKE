@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -72,8 +73,8 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 		baseRef:   baseRef,
 	}
 
-	// Add directory to fsnotify watcher (recursive via watching the dir itself)
-	if err := ww.watcher.Add(path); err != nil {
+	// Add directory to fsnotify watcher (recursive)
+	if err := ww.addRecursive(path); err != nil {
 		delete(ww.worktrees, taskID)
 		return err
 	}
@@ -138,6 +139,18 @@ func (ww *WorktreeWatcher) StartEventLoop() {
 }
 
 func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
+	// If a new directory was created, start watching it recursively
+	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+		if info, err := filepath.Abs(event.Name); err == nil {
+			if dirInfo, err := filepath.EvalSymlinks(info); err == nil {
+				if fi, err := os.Stat(dirInfo); err == nil && fi.IsDir() {
+					_ = ww.watcher.Add(event.Name)
+					_ = ww.addRecursive(event.Name)
+				}
+			}
+		}
+	}
+
 	// Find which task's worktree this event belongs to
 	ww.mu.Lock()
 
@@ -218,6 +231,24 @@ func countUntrackedLines(untracked []git.UntrackedFile) int {
 		total += u.Lines
 	}
 	return total
+}
+
+// addRecursive watches a directory and all its existing subdirectories.
+func (ww *WorktreeWatcher) addRecursive(dir string) error {
+	// Watch the directory itself
+	if err := ww.watcher.Add(dir); err != nil {
+		return err
+	}
+	// Walk existing subdirectories and watch them too
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip errors, keep watching what we can
+		}
+		if d.IsDir() && path != dir {
+			_ = ww.watcher.Add(path)
+		}
+		return nil
+	})
 }
 
 

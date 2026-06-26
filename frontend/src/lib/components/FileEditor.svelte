@@ -95,7 +95,7 @@
         },
     });
 
-    let { filePath, lineNumber, onClose }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string } = $props();
 
     let content = $state('');
     let originalContent = $state('');
@@ -248,7 +248,7 @@
         loading = true;
         error = '';
         fileTooLarge = false;
-        displayPath = filePath.split('/').pop() || filePath;
+        displayPath = displayPathProp || filePath.split('/').pop() || filePath;
 
         try {
             const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`);

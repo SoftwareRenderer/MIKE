@@ -26,7 +26,56 @@
     let expandedBlocks = $state<Record<string, boolean>>({});
 
     // Track which file sections are expanded (file headers)
-    let expandedFiles = $state<Record<string, boolean>>({});
+    // Persisted to localStorage so collapsed state survives page refreshes.
+    // Single global key — stale paths are cleaned up by the $effect below.
+    const COLLAPSED_DIFF_KEY = 'diff_collapsed_files';
+
+    function loadCollapsedFiles(): Set<string> {
+        try {
+            const raw = localStorage.getItem(COLLAPSED_DIFF_KEY);
+            if (raw) return new Set(JSON.parse(raw) as string[]);
+        } catch {
+            // ignore
+        }
+        return new Set();
+    }
+
+    function saveCollapsedFiles(collapsed: Set<string>) {
+        try {
+            localStorage.setItem(COLLAPSED_DIFF_KEY, JSON.stringify([...collapsed]));
+        } catch {
+            // ignore
+        }
+    }
+
+    let collapsedFiles = $state(loadCollapsedFiles());
+
+    // Clean up stale entries: remove paths that no longer exist in the current diff
+    $effect(() => {
+        const _files = files;
+        const _untracked = untracked;
+        const currentPaths = new Set<string>();
+        for (const f of _files) currentPaths.add(f.path);
+        for (const u of _untracked) currentPaths.add(u.path);
+
+        let changed = false;
+        const next = new Set<string>();
+        for (const path of collapsedFiles) {
+            if (currentPaths.has(path)) {
+                next.add(path);
+            } else {
+                changed = true;
+            }
+        }
+        if (changed) {
+            collapsedFiles = next;
+            saveCollapsedFiles(next);
+        }
+    });
+
+    function isFileOpen(path: string): boolean {
+        return !collapsedFiles.has(path);
+    }
 
     // Track hovered row index per file for gutter highlight sync
     let hoveredRow = $state<Record<string, number>>({});
@@ -84,7 +133,14 @@
     }
 
     function toggleFile(path: string) {
-        expandedFiles = { ...expandedFiles, [path]: !(expandedFiles[path] ?? true) };
+        const next = new Set(collapsedFiles);
+        if (next.has(path)) {
+            next.delete(path);
+        } else {
+            next.add(path);
+        }
+        collapsedFiles = next;
+        saveCollapsedFiles(next);
     }
 
     /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
@@ -143,7 +199,7 @@
         <!-- Untracked files -->
         {#each sortedUntracked as entry (entry.path)}
             {@const ufile = entry.file}
-            {@const isUntrackedExpanded = expandedFiles[entry.path] ?? true}
+            {@const isUntrackedExpanded = isFileOpen(entry.path)}
             {@const isLarge = entry.fileSize !== undefined}
             <section class="diff-file-section diff-file-section-untracked diff-file-enter">
                 <button
@@ -315,7 +371,7 @@
 
         <!-- Tracked files -->
         {#each sortedFiles as file (file.path)}
-            {@const isFileExpanded = expandedFiles[file.path] ?? true}
+            {@const isFileExpanded = isFileOpen(file.path)}
             <section class="diff-file-section diff-file-enter">
                 <button
                     type="button"
