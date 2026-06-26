@@ -1093,6 +1093,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						te.gitRun(worktreePath, "commit", "-m", commitMsg)
 						task.StatusState = "completed"
 						task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(task.ID)
+						}
 					} else {
 						task.StatusState = "awaiting_review"
 						task.Status = "review"
@@ -2088,6 +2091,9 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			te.gitRun(worktreePath, "commit", "-m", commitMsg)
 			task.StatusState = "completed"
 			task.Status = "done"
+			if te.sandboxMgr != nil {
+				_ = te.sandboxMgr.Stop(task.ID)
+			}
 		} else {
 			task.StatusState = "awaiting_review"
 			task.Status = "review"

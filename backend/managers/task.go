@@ -291,6 +291,9 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, project
 
 	if req.Status == "done" {
 		task.StatusState = "completed"
+		if h.executor != nil {
+			h.executor.StopSandbox(taskID)
+		}
 	} else if task.StatusState == "completed" {
 		// Task moved away from Done — reset status so it can run again
 		task.StatusState = "idle"
@@ -472,6 +475,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if err := h.store.UpdateTask(task); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Stop sandbox container
+	if h.executor != nil {
+		h.executor.StopSandbox(taskID)
 	}
 
 	// If a subtask was marked done, auto-start the next sibling

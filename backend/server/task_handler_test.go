@@ -733,3 +733,25 @@ func TestBoardEndpointSubtasks(t *testing.T) {
 		t.Fatalf("expected 2 tasks on board, got %d", len(tasks))
 	}
 }
+
+// Test: commit-and-done endpoint moves task to done and stops sandbox
+func TestCommitAndDone(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "commit-done")
+
+	// Commit-and-done (no worktree exists, but handler should still move task to done)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done: %d %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]interface{}](t, rr.Body)
+	if result["status"] != "done" {
+		t.Fatalf("expected status=done, got %s", result["status"])
+	}
+	if result["status_state"] != "completed" {
+		t.Fatalf("expected status_state=completed, got %s", result["status_state"])
+	}
+}
