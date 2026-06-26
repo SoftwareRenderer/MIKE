@@ -2,6 +2,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
+    import { detectLanguage, highlightLines } from '$lib/highlighter';
 
 
     let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
@@ -12,6 +13,60 @@
 
     // Track which file sections are expanded (file headers)
     let expandedFiles = $state<Record<string, boolean>>({});
+
+    // Syntax highlight cache: filePath -> { lineNumKey: highlightedHtml }
+    let highlightCache = $state<Record<string, Record<string, string>>>({});
+
+    $effect(() => {
+        // Read props to establish reactive dependencies
+        const _files = files;
+        const _untracked = untracked;
+
+        (async () => {
+            const result: typeof highlightCache = {};
+            const tasks: Promise<void>[] = [];
+
+            for (const file of _files) {
+                if (file.rows.length === 0 || file.fileSize) continue;
+                const lang = detectLanguage(file.path);
+                if (!lang) continue;
+                const texts = file.rows.map(r => r.text);
+                const fileResult: Record<string, string> = {};
+                tasks.push(
+                    highlightLines(texts, lang).then(htmls => {
+                        file.rows.forEach((row, i) => {
+                            fileResult[String(row.lineNumber)] = htmls[i] || row.text;
+                        });
+                    })
+                );
+                result[file.path] = fileResult;
+            }
+
+            for (const entry of _untracked) {
+                const ufile = entry.file;
+                if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
+                const lang = detectLanguage(entry.path);
+                if (!lang) continue;
+                const texts = ufile.rows.map(r => r.text);
+                const fileResult: Record<string, string> = {};
+                tasks.push(
+                    highlightLines(texts, lang).then(htmls => {
+                        ufile.rows.forEach((row, i) => {
+                            fileResult[String(row.lineNumber)] = htmls[i] || row.text;
+                        });
+                    })
+                );
+                result[entry.path] = fileResult;
+            }
+
+            await Promise.all(tasks);
+            highlightCache = result;
+        })();
+    });
+
+    function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
+        return highlightCache[filePath]?.[String(lineNumber)];
+    }
 
     function toggleBlock(id: string) {
         expandedBlocks = { ...expandedBlocks, [id]: !expandedBlocks[id] };
@@ -117,7 +172,11 @@
                                             {:else}
                                                 <span class="diff-prefix"> </span>
                                             {/if}
-                                            <span class="diff-text">{item.row.text || ' '}</span>
+                                            {#if getHighlight(entry.path, item.row.lineNumber)}
+                                                <span class="diff-text">{@html getHighlight(entry.path, item.row.lineNumber)!}</span>
+                                            {:else}
+                                                <span class="diff-text">{item.row.text || ' '}</span>
+                                            {/if}
                                         </span>
                                     </div>
                                 {:else if item.type === 'collapsed'}
@@ -151,7 +210,11 @@
                                                 </span>
                                                 <span class="diff-line-content">
                                                     <span class="diff-prefix"> </span>
-                                                    <span class="diff-text">{row.text || ' '}</span>
+                                                    {#if getHighlight(entry.path, row.lineNumber)}
+                                                        <span class="diff-text">{@html getHighlight(entry.path, row.lineNumber)!}</span>
+                                                    {:else}
+                                                        <span class="diff-text">{row.text || ' '}</span>
+                                                    {/if}
                                                 </span>
                                             </div>
                                         {/each}
@@ -233,7 +296,11 @@
                                             {:else}
                                                 <span class="diff-prefix"> </span>
                                             {/if}
-                                            <span class="diff-text">{item.row.text || ' '}</span>
+                                            {#if getHighlight(file.path, item.row.lineNumber)}
+                                                <span class="diff-text">{@html getHighlight(file.path, item.row.lineNumber)!}</span>
+                                            {:else}
+                                                <span class="diff-text">{item.row.text || ' '}</span>
+                                            {/if}
                                         </span>
                                     </div>
                                 {:else if item.type === 'collapsed'}
@@ -267,7 +334,11 @@
                                                 </span>
                                                 <span class="diff-line-content">
                                                     <span class="diff-prefix"> </span>
-                                                    <span class="diff-text">{row.text || ' '}</span>
+                                                    {#if getHighlight(file.path, row.lineNumber)}
+                                                        <span class="diff-text">{@html getHighlight(file.path, row.lineNumber)!}</span>
+                                                    {:else}
+                                                        <span class="diff-text">{row.text || ' '}</span>
+                                                    {/if}
                                                 </span>
                                             </div>
                                         {/each}
@@ -308,9 +379,10 @@
 
     .diff-scroll {
         flex: 1;
+        overflow-x: auto;
         overflow-y: auto;
         min-height: 0;
-        padding: 12px 8px 12px 8px;
+        padding: 0 8px 12px 8px;
     }
 
     .diff-empty {
@@ -340,11 +412,14 @@
         padding: 6px 8px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        border-radius: 6px;
+        border-radius: 6px 6px 0 0;
         cursor: pointer;
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
         text-align: left;
+        position: sticky;
+        top: 0;
+        z-index: 5;
     }
     .diff-file-header:hover {
         background: var(--color-surface-3);
@@ -379,32 +454,28 @@
         color: var(--color-status-red);
     }
 
-    /* File content */
+    /* File content — grid layout so all rows share the same width */
     .diff-file-content {
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
         border-radius: 0 0 6px 6px;
-        overflow-x: auto;
-        display: table;
-        width: auto;
-        border-collapse: collapse;
+        display: grid;
+        grid-template-columns: 2rem 1fr;
+        width: 100%;
+        overflow-x: visible;
     }
 
     /* Diff rows */
     .diff-row {
-        display: table-row;
+        display: contents;
         font-family: var(--font-mono);
         font-size: 0.75rem;
         line-height: 1.5;
         min-height: 1.5rem;
     }
     .diff-line-num {
-        display: table-cell;
-        vertical-align: middle;
         text-align: right;
-        width: 2rem;
-        flex-shrink: 0;
         padding-right: 8px;
         user-select: none;
         color: var(--color-text-tertiary);
@@ -414,10 +485,7 @@
         font-size: 0.75rem;
     }
     .diff-line-content {
-        display: table-cell;
-        vertical-align: middle;
         padding: 0 8px;
-        white-space: pre;
     }
     .diff-prefix {
         flex-shrink: 0;
@@ -428,13 +496,25 @@
     .diff-text {
         white-space: pre;
     }
+    /* Ensure syntax-highlighted spans render correctly inside table cells */
+    .diff-text > span {
+        font-family: inherit;
+        font-size: inherit;
+        white-space: inherit;
+    }
 
-    /* Row variants */
+    /* Row variants — backgrounds on cells since .diff-row uses display: contents */
+    .diff-row-added .diff-line-num {
+        background: rgba(63,185,80,0.08);
+    }
     .diff-row-added .diff-line-content {
         background: rgba(63,185,80,0.15);
     }
     .diff-row-added .diff-prefix {
         color: var(--color-status-green);
+    }
+    .diff-row-removed .diff-line-num {
+        background: rgba(248,81,73,0.08);
     }
     .diff-row-removed .diff-line-content {
         background: rgba(248,81,73,0.15);
@@ -447,17 +527,26 @@
     }
 
     /* Clickable rows */
-    .diff-row-clickable {
+    .diff-row-clickable .diff-line-num,
+    .diff-row-clickable .diff-line-content {
         cursor: pointer;
     }
-    .diff-row-clickable:hover {
+    .diff-row-clickable:hover .diff-line-num,
+    .diff-row-clickable:hover .diff-line-content {
         filter: brightness(0.95);
+    }
+    .diff-row-clickable:hover .diff-line-num {
         outline: 1px solid var(--color-accent);
+        outline-offset: -1px;
+    }
+    .diff-row-clickable:hover .diff-line-content {
+        outline-inline-end: 1px solid var(--color-accent);
         outline-offset: -1px;
     }
 
     /* Collapse button */
     .diff-collapse-btn {
+        grid-column: 1 / -1;
         display: flex;
         align-items: center;
         gap: 4px;
@@ -479,6 +568,7 @@
 
     /* Large/binary file notice */
     .diff-large-file-notice {
+        grid-column: 1 / -1;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -517,12 +607,12 @@
 
     /* Expand button for truncated files */
     .diff-expand-btn {
+        grid-column: 1 / -1;
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 6px;
-        width: 100%;
-        padding: 8px 12px;
+        justify-content: flex-start;
+        gap: 8px;
+        padding: 12px;
         background: var(--color-surface-2);
         border: none;
         border-top: 1px dashed var(--color-border);

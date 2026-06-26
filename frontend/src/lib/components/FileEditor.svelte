@@ -3,6 +3,7 @@
     import { ensureCsrfToken } from '$lib/api';
     import { showToast } from '$lib/store';
     import { toHomeRelative } from '$lib/utils/path';
+    import { getHighlighter, detectLanguage } from '$lib/highlighter';
 
     let { filePath, lineNumber, onClose }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void } = $props();
 
@@ -13,20 +14,50 @@
     let error = $state('');
     let fileTooLarge = $state(false);
     let displayPath = $state('');
+    let highlightedHtml = $state('');
 
     let hasChanges = $derived(content !== originalContent);
     let lineCount = $derived(content.split('\n').length);
 
     let textareaEl: HTMLTextAreaElement | null = null;
+    let preEl: HTMLDivElement | null = null;
     let lineNumbersEl: HTMLDivElement | null = null;
-    let triggerEl: HTMLElement | null = null;
-
-    // Confirm dialog state
     let showConfirm = $state(false);
 
+
+
+    async function updateHighlight() {
+        const lang = detectLanguage(filePath);
+        if (!lang) {
+            highlightedHtml = '';
+            return;
+        }
+        try {
+            const hl = await getHighlighter();
+            const html = hl.codeToHtml(content, { lang, theme: 'github-dark' });
+            highlightedHtml = html;
+        } catch {
+            highlightedHtml = '';
+        }
+    }
+
+    // Debounced highlight update
+    let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+    function scheduleHighlight() {
+        if (highlightTimer) clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(updateHighlight, 150);
+    }
+
     onMount(() => {
-        triggerEl = document.activeElement as HTMLElement;
         loadFile();
+        return () => {
+            if (highlightTimer) clearTimeout(highlightTimer);
+        };
+    });
+
+    // Re-highlight when content changes
+    $effect(() => {
+        if (!loading && content) scheduleHighlight();
     });
 
     async function loadFile() {
@@ -89,9 +120,7 @@
     function handleKeyDown(e: KeyboardEvent) {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault();
-            if (hasChanges && !fileTooLarge) {
-                handleSave();
-            }
+            if (hasChanges && !fileTooLarge) handleSave();
             return;
         }
         if (e.key === 'Escape') {
@@ -115,18 +144,20 @@
 
     function confirmClose(discard: boolean) {
         showConfirm = false;
-        if (discard) {
-            handleClose();
-        }
+        if (discard) handleClose();
     }
 
-    function handleTextareaScroll() {
+    function handleScroll() {
+        if (textareaEl && preEl) {
+            preEl.scrollTop = textareaEl.scrollTop;
+            preEl.scrollLeft = textareaEl.scrollLeft;
+        }
         if (textareaEl && lineNumbersEl) {
             lineNumbersEl.scrollTop = textareaEl.scrollTop;
         }
     }
 
-    // Scroll to the target line after content loads
+    // Scroll to target line after content loads
     $effect(() => {
         if (!loading && textareaEl && !fileTooLarge && lineNumber >= 1) {
             const lineIndex = lineNumber - 1;
@@ -152,12 +183,14 @@
                 const viewportHeight = textareaEl.clientHeight;
                 const targetScroll = lineIndex * lineHeight - viewportHeight / 3;
                 textareaEl.scrollTop = Math.max(0, targetScroll);
+                if (preEl) preEl.scrollTop = textareaEl.scrollTop;
+                if (lineNumbersEl) lineNumbersEl.scrollTop = textareaEl.scrollTop;
             });
         }
     });
 </script>
 
-<div class="file-editor" onkeydown={handleKeyDown} tabindex="-1">
+<div class="file-editor" tabindex="-1">
     <!-- Header -->
     <div class="editor-header">
         <div class="header-left">
@@ -225,16 +258,21 @@
                         <div class="line-number">{lineNum}</div>
                     {/each}
                 </div>
-                <!-- Textarea -->
-                <textarea
-                    class="editor-textarea"
-                    bind:this={textareaEl}
-                    bind:value={content}
-                    onkeydown={handleKeyDown}
-                    onscroll={handleTextareaScroll}
-                    spellcheck="false"
-                    aria-label="File content editor"
-                ></textarea>
+                <!-- Code area: highlight layer + textarea overlay -->
+                <div class="code-area">
+                    {#if highlightedHtml}
+                        <div class="highlight-layer" bind:this={preEl}>{@html highlightedHtml}</div>
+                    {/if}
+                    <textarea
+                        class="editor-textarea"
+                        bind:this={textareaEl}
+                        bind:value={content}
+                        onkeydown={handleKeyDown}
+                        onscroll={handleScroll}
+                        spellcheck="false"
+                        aria-label="File content editor"
+                    ></textarea>
+                </div>
             </div>
         {/if}
     </div>
@@ -272,7 +310,6 @@
         overflow: hidden;
     }
 
-    /* Header */
     .editor-header {
         display: flex;
         align-items: center;
@@ -354,7 +391,6 @@
         transform-origin: center;
     }
 
-    /* Body */
     .editor-body {
         flex: 1;
         overflow: hidden;
@@ -386,7 +422,6 @@
         to { transform: rotate(360deg); }
     }
 
-    /* Editor content */
     .editor-content {
         flex: 1;
         display: flex;
@@ -412,9 +447,33 @@
         height: 1.5em;
     }
 
-    .editor-textarea {
+    /* Code area: highlight + textarea overlay */
+    .code-area {
         flex: 1;
+        position: relative;
+        overflow: hidden;
+        min-width: 0;
+    }
+
+    .highlight-layer {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        padding: 8px;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        line-height: 1.5;
+        white-space: pre;
+        overflow: hidden;
+        pointer-events: none;
+        tab-size: 4;
+    }
+
+    .editor-textarea {
+        position: absolute;
+        inset: 0;
         width: 100%;
+        height: 100%;
         padding: 8px;
         border: none;
         outline: none;
@@ -422,15 +481,16 @@
         font-family: var(--font-mono);
         font-size: 0.75rem;
         line-height: 1.5;
-        color: var(--color-text-primary);
-        background: var(--color-surface-1);
+        color: transparent;
+        background: transparent;
+        caret-color: var(--color-text-primary);
         tab-size: 4;
         white-space: pre;
         overflow-wrap: normal;
-        overflow-x: auto;
+        overflow: auto;
+        z-index: 1;
     }
 
-    /* Footer */
     .editor-footer {
         display: flex;
         align-items: center;
@@ -449,7 +509,6 @@
         color: var(--color-status-yellow, #f0c000);
     }
 
-    /* Confirmation dialog */
     .confirm-overlay {
         position: absolute;
         inset: 0;
