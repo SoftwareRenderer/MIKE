@@ -515,7 +515,8 @@ func (c *Client) readEvents() {
 }
 
 // ToStreamEvent converts a PiEvent to a Kanban StreamEvent for WebSocket broadcasting.
-func ToStreamEvent(event PiEvent) types.StreamEvent {
+// The sandbox parameter indicates whether Pi is running inside a container.
+func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
 	switch event.Type {
 	case "message_update":
 		switch event.AssistantEventType {
@@ -538,7 +539,7 @@ func ToStreamEvent(event PiEvent) types.StreamEvent {
 				"tool_id":   event.ToolCallID,
 				"tool_name": event.ToolName,
 				"args":      event.ToolArgs,
-				"sandbox":   false, // Pi tools run in-process, not sandboxed separately
+				"sandbox":   sandbox,
 			},
 		}
 

@@ -163,6 +163,27 @@ func (d *loopDetector) phraseDetected() bool {
 	return d.phraseFired
 }
 
+// mapPiToolName maps Pi's tool names to Kanban's tool names.
+// Pi uses Anthropic-style names (read, write, edit) while Kanban uses read_file, write_file, edit_file.
+func mapPiToolName(piToolName string) string {
+	switch piToolName {
+	case "read":
+		return "read_file"
+	case "write":
+		return "write_file"
+	case "edit":
+		return "edit_file"
+	case "bash":
+		return "bash"
+	case "task_complete":
+		return "task_complete"
+	case "final_answer":
+		return "task_complete"
+	default:
+		return piToolName
+	}
+}
+
 // extractTarget extracts the primary file/target from a tool call.
 func extractTarget(toolName, rawArgs string) string {
 	switch toolName {
@@ -1800,7 +1821,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				return
 			}
 			log.Printf("[pi] task=%s startup event: %s", task.ID, event.Type)
-			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
+			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {
@@ -1871,7 +1892,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			}
 
 			// Stream the event to frontend
-			if streamEvent := pi.ToStreamEvent(event); streamEvent.Type != "" {
+			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 
@@ -1881,16 +1902,60 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				stopReason = event.StopReason
 				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
 
-				// Persist assistant messages from agent_end
+				// Persist assistant messages and tool calls from agent_end
 				if len(event.Messages) > 0 {
+					// Build a map of tool_use_id -> tool_result from user messages
+					toolResults := make(map[string]map[string]interface{})
+					for _, msg := range event.Messages {
+						role, _ := msg["role"].(string)
+						if role != "user" {
+							continue
+						}
+						if content, ok := msg["content"].([]interface{}); ok {
+							for _, c := range content {
+								if cm, ok := c.(map[string]interface{}); ok {
+									if cm["type"] == "tool_result" {
+										toolUseID, _ := cm["tool_use_id"].(string)
+										if toolUseID == "" {
+											continue
+										}
+										// Extract content as string
+										var resultText string
+										if contentVal, ok := cm["content"].(string); ok {
+											resultText = contentVal
+										} else if contentArr, ok := cm["content"].([]interface{}); ok {
+											var parts []string
+											for _, item := range contentArr {
+												if itemMap, ok := item.(map[string]interface{}); ok {
+													if itemMap["type"] == "text" {
+														if t, ok := itemMap["text"].(string); ok {
+															parts = append(parts, t)
+														}
+													}
+												}
+											}
+											resultText = strings.Join(parts, "\n")
+										}
+										isError, _ := cm["is_error"].(bool)
+										toolResults[toolUseID] = map[string]interface{}{
+											"output":  resultText,
+											"success": !isError,
+										}
+									}
+								}
+							}
+						}
+					}
+
 					for _, msg := range event.Messages {
 						role, _ := msg["role"].(string)
 						if role != "assistant" {
 							continue
 						}
 
-						// Extract text content
+						// Extract text, reasoning, and tool_use from content blocks
 						var assistantText, reasoningText string
+						var toolUses []map[string]interface{}
 						if content, ok := msg["content"].([]interface{}); ok {
 							var texts []string
 							for _, c := range content {
@@ -1904,6 +1969,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 										if t, ok := cm["thinking"].(string); ok {
 											reasoningText = t
 										}
+									case "tool_use":
+										toolUses = append(toolUses, cm)
 									}
 								}
 							}
@@ -1921,20 +1988,73 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							}
 						}
 
-						te.store.CreateTaskMessage(&types.TaskMessage{
-							ID:               uuid.New().String(),
-							TaskID:           task.ID,
-							ThreadID:         task.CurrentThreadID,
-							Role:             "assistant",
-							Content:          assistantText,
-							ReasoningContent: reasoningText,
-							ModelName:        "pi",
-							ProviderName:     "Pi Coding Agent",
-							PromptTokens:     promptTokens,
-							PredictedTokens:  predictedTokens,
-							Duration:         time.Since(startTime).Milliseconds(),
-							CreatedAt:        time.Now().UTC(),
-						})
+						// Persist tool calls first (so they appear before the assistant message)
+						for _, tu := range toolUses {
+							toolUseID, _ := tu["id"].(string)
+							toolName, _ := tu["name"].(string)
+							toolInput, _ := tu["input"].(map[string]interface{})
+							if toolUseID == "" {
+								continue
+							}
+
+							// Map Pi tool names to Kanban tool names
+							kanbanToolName := mapPiToolName(toolName)
+
+							// Build raw_args for display
+							rawArgs, _ := json.Marshal(toolInput)
+
+							// Get matching tool result
+							result, hasResult := toolResults[toolUseID]
+
+							// Build tool_call JSON (same format as LLM path)
+							tcJSON, _ := json.Marshal(map[string]interface{}{
+								"tool_id":           toolUseID,
+								"tool_name":         kanbanToolName,
+								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
+								"args":              toolInput,
+								"raw_args":          string(rawArgs),
+								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
+							})
+
+							var resultJSON []byte
+							if hasResult {
+								resultJSON, _ = json.Marshal(result)
+							} else {
+								resultJSON, _ = json.Marshal(map[string]interface{}{
+									"output":  "",
+									"success": true,
+								})
+							}
+
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID:         uuid.New().String(),
+								TaskID:     task.ID,
+								ThreadID:   task.CurrentThreadID,
+								Role:       "tool_call",
+								Content:    "",
+								ToolCalls:  string(tcJSON),
+								ToolResult: string(resultJSON),
+								CreatedAt:  time.Now().UTC(),
+							})
+						}
+
+						// Only persist assistant message if it has text or reasoning content
+						if assistantText != "" || reasoningText != "" {
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID:               uuid.New().String(),
+								TaskID:           task.ID,
+								ThreadID:         task.CurrentThreadID,
+								Role:             "assistant",
+								Content:          assistantText,
+								ReasoningContent: reasoningText,
+								ModelName:        "pi",
+								ProviderName:     "Pi Coding Agent",
+								PromptTokens:     promptTokens,
+								PredictedTokens:  predictedTokens,
+								Duration:         time.Since(startTime).Milliseconds(),
+								CreatedAt:        time.Now().UTC(),
+							})
+						}
 					}
 				}
 
