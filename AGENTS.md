@@ -300,3 +300,10 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - **`unable to open database file`**: Use `testServer(t)` helper which creates temp DB
 - **`context deadline exceeded`**: Increase test timeout or optimize slow operations
 - **Sandbox tests fail**: Ensure gVisor is installed (`runsc --version`)
+
+### Crash Debugging (Flight Recorder)
+- Go flight recorder runs **always-on** (~1% overhead), writing to `data/kanban.trace`
+- Trace is rotated every 30s — on crash, the file contains ~30s of pre-crash data
+- Analyze a crash trace: `go tool trace -http=:8080 data/kanban.trace` (opens browser UI)
+- Rotated traces kept as `data/kanban.trace.old` — overwritten each rotation
+- Key views: goroutine scheduling, heap allocations, GC activity, syscalls

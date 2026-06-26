@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/trace"
 	"syscall"
+	"time"
 
 	"kanban/backend/server"
 )
@@ -38,6 +40,54 @@ func main() {
 		log.Fatalf("Failed to create worktrees directory: %v", err)
 	}
 
+	// Ensure data directory exists
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
+	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)
+	tracePath := filepath.Join(dataDir, "kanban.trace")
+	traceFile, err := os.Create(tracePath)
+	if err != nil {
+		log.Fatalf("Failed to create trace file: %v", err)
+	}
+	if err := trace.Start(traceFile); err != nil {
+		traceFile.Close()
+		log.Fatalf("Failed to start flight recorder: %v", err)
+	}
+	log.Printf("Flight recorder started -> %s", tracePath)
+
+	// Rotate trace file every 30s so only recent data is kept at crash time
+	rotationDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				trace.Stop()
+				traceFile.Close()
+				// Rename old trace with timestamp
+				oldName := tracePath + ".old"
+				_ = os.Rename(tracePath, oldName)
+				// Start fresh trace
+				f, err := os.Create(tracePath)
+				if err != nil {
+					log.Printf("[trace] rotate: failed to create new trace: %v", err)
+					continue
+				}
+				traceFile = f
+				if err := trace.Start(f); err != nil {
+					f.Close()
+					log.Printf("[trace] rotate: failed to restart trace: %v", err)
+					continue
+				}
+			case <-rotationDone:
+				return
+			}
+		}
+	}()
+
 	srv, err := server.NewServer(*dbPath, worktreesDir)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
@@ -55,5 +105,8 @@ func main() {
 
 	<-sigCh
 	log.Println("Shutting down...")
+	close(rotationDone)
+	trace.Stop()
+	traceFile.Close()
 	srv.Shutdown(context.Background())
 }
