@@ -609,6 +609,7 @@
         white-space: nowrap;
         font-family: var(--font-mono);
         font-size: 0.75rem;
+        color: var(--color-text-primary);
     }
 
     .diff-file-stats {
@@ -892,7 +893,8 @@
 
     /* Untracked file entries */
     .diff-file-header-untracked {
-        background: rgba(250,204,21,0.08);
+        background: #2D3339;
+        border-left: 2px solid rgba(250,204,21,0.6);
     }
     .diff-untracked-icon {
         flex-shrink: 0;
