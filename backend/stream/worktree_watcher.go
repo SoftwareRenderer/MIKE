@@ -196,10 +196,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 
 	untrackedN := len(diffResult.Untracked)
 	if diffResult.Diff != "" || untrackedN > 0 {
-		untrackedLines := 0
-		for _, u := range diffResult.Untracked {
-			untrackedLines += countNewlines(u.Diff)
-		}
+		untrackedLines := countUntrackedLines(diffResult.Untracked)
 		// Compute hash from tracked diff + untracked file contents
 		hashInput := diffResult.Diff
 		for _, u := range diffResult.Untracked {
@@ -214,14 +211,13 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}
 }
 
-func countNewlines(s string) int {
-	count := 0
-	for _, c := range s {
-		if c == '\n' {
-			count++
-		}
+// countUntrackedLines sums the pre-computed line counts from untracked file diffs.
+func countUntrackedLines(untracked []git.UntrackedFile) int {
+	total := 0
+	for _, u := range untracked {
+		total += u.Lines
 	}
-	return count
+	return total
 }
 
 

@@ -459,6 +459,7 @@ type UntrackedFile struct {
 	Truncated bool   `json:"truncated,omitempty"`  // true when diff was truncated to maxChangeLines
 	OrigAdded int    `json:"orig_added,omitempty"` // original added count before truncation
 	OrigRemoved int  `json:"orig_removed,omitempty"` // original removed count before truncation
+	Lines     int    `json:"lines,omitempty"`       // total lines in the file (from diff)
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
@@ -646,6 +647,50 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 
 // hunkRe parses a unified diff hunk header.
 // Groups: 1=oldStart, 2=oldCount, 3=newStart, 4=newCount, 5=context
+// shortStatFromDiff computes a git-style shortstat string from a unified diff.
+// Format: "X file(s) changed, Y insertion(s)(+), Z deletion(s)(-)"
+// Omits zero-value parts (e.g., no deletions mentioned if count is 0).
+func shortStatFromDiff(diff string) string {
+	stats := countFileChanges(diff)
+	files := len(stats)
+	var totalAdded, totalRemoved int
+	for _, s := range stats {
+		totalAdded += s.Added
+		totalRemoved += s.Removed
+	}
+	if files == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	parts = append(parts, fmt.Sprintf("%d file%s changed", files, pluralS(files)))
+	if totalAdded > 0 {
+		parts = append(parts, fmt.Sprintf("%d insertion%s(+)", totalAdded, pluralS(totalAdded)))
+	}
+	if totalRemoved > 0 {
+		parts = append(parts, fmt.Sprintf("%d deletion%s(-)", totalRemoved, pluralS(totalRemoved)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// countDiffAddedLines counts the number of added lines (+ prefix, excluding +++ header)
+// in a unified diff. For diffs against /dev/null (new files), this equals the file's line count.
+func countDiffAddedLines(diff string) int {
+	count := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			count++
+		}
+	}
+	return count
+}
+
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
 
 // GetDiff returns the git diff for a task's worktree relative to baseRef (or HEAD if empty).
@@ -750,8 +795,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
+		shortStat = shortStatFromDiff(diffOut)
 		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
-		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..%s", target, headRef))
 		// No untracked files for commit-to-commit diff
 	} else {
 		// Single-ref diff: working tree vs baseRef.
@@ -774,11 +819,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			if err != nil {
 				return nil, fmt.Errorf("git diff: %w", err)
 			}
-			shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..HEAD", target))
-		} else {
-			shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
 		}
-
+		shortStat = shortStatFromDiff(diffOut)
 		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 		// Get untracked files from git status --porcelain (lines starting with "?? ")
@@ -808,7 +850,9 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 				// Generate unified diff for the untracked file (compare against empty)
 				// git diff --no-index returns exit code 1 when files differ, which is expected
 				fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", path)
-				untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff})
+				// Count lines from diff output (+ lines = file lines for new files)
+				lineCount := countDiffAddedLines(fileDiff)
+				untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff, Lines: lineCount})
 			}
 		}
 	}

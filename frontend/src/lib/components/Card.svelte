@@ -78,7 +78,7 @@
     let actionCount = $derived(
         (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // + subtask
         + (!isDoneSubtask ? 1 : 0) // edit
-        + (inline && task.parent_task_id ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks)
+        + (inline && task.parent_task_id || task.status === 'in_progress' ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks and in_progress)
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -705,6 +705,8 @@
                     </button>
                 {:else if inline && task.parent_task_id}
                     <!-- no move button for inline subtasks -->
+                {:else if task.status === 'in_progress'}
+                    <!-- no move button for in_progress tasks -->
                 {:else}
                     <button
                         type="button"
