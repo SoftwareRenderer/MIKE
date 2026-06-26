@@ -13,6 +13,24 @@ export interface DiffRow {
     text: string;
 }
 
+/** A node in the file tree: either a directory or a file leaf. */
+export interface FileTreeNode {
+    /** Display name (last path segment). */
+    name: string;
+    /** Full path from root. */
+    path: string;
+    /** Whether this is a directory or a file. */
+    type: 'file' | 'directory';
+    /** Child nodes (directories only). */
+    children: FileTreeNode[];
+    /** Aggregated added lines. */
+    added: number;
+    /** Aggregated removed lines. */
+    removed: number;
+    /** The DiffFile for leaf nodes. */
+    file?: DiffFile;
+}
+
 /** A parsed file group from a unified diff. */
 export interface DiffFile {
     /** File path (e.g., "src/lib/utils.ts"). */

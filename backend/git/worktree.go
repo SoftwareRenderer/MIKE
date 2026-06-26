@@ -433,6 +433,34 @@ func (wm *WorktreeManager) buildUntrackedSnapshot(worktreePath, untrackedList st
 	return strings.Join(parts, "\n")
 }
 
+// walkUntrackedEntries expands git status --porcelain "?? " entries into individual file paths.
+// When a whole directory is untracked, git status returns "?? dir/" — this function walks
+// the directory and returns all regular file paths (relative to worktreePath).
+func walkUntrackedEntries(worktreePath, path string) []string {
+	fullPath := filepath.Join(worktreePath, path)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return nil
+	}
+	if info.Mode().IsRegular() {
+		return []string{path}
+	}
+	// It's a directory — walk it recursively
+	var files []string
+	_ = filepath.Walk(fullPath, func(fp string, info os.FileInfo, err error) error {
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(worktreePath, fp)
+		if err != nil {
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	return files
+}
+
 // GitStatus returns the git status --porcelain output for a task's worktree.
 func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
@@ -836,23 +864,27 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 				if path == "" {
 					continue
 				}
-				fullPath := filepath.Join(worktreePath, path)
-				info, err := os.Stat(fullPath)
-				if err != nil || !info.Mode().IsRegular() {
-					continue
+				// Expand directories into individual file paths
+				filePaths := walkUntrackedEntries(worktreePath, path)
+				for _, filePath := range filePaths {
+					fullPath := filepath.Join(worktreePath, filePath)
+					info, err := os.Stat(fullPath)
+					if err != nil || !info.Mode().IsRegular() {
+						continue
+					}
+					fileSize := info.Size()
+					// Skip diff for large files or binary files
+					if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
+						untracked = append(untracked, UntrackedFile{Path: filePath, FileSize: fileSize})
+						continue
+					}
+					// Generate unified diff for the untracked file (compare against empty)
+					// git diff --no-index returns exit code 1 when files differ, which is expected
+					fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", filePath)
+					// Count lines from diff output (+ lines = file lines for new files)
+					lineCount := countDiffAddedLines(fileDiff)
+					untracked = append(untracked, UntrackedFile{Path: filePath, Diff: fileDiff, Lines: lineCount})
 				}
-				fileSize := info.Size()
-				// Skip diff for large files or binary files
-				if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
-					untracked = append(untracked, UntrackedFile{Path: path, FileSize: fileSize})
-					continue
-				}
-				// Generate unified diff for the untracked file (compare against empty)
-				// git diff --no-index returns exit code 1 when files differ, which is expected
-				fileDiff, _ := wm.gitRunOutput(worktreePath, "diff", "--no-index", "/dev/null", path)
-				// Count lines from diff output (+ lines = file lines for new files)
-				lineCount := countDiffAddedLines(fileDiff)
-				untracked = append(untracked, UntrackedFile{Path: path, Diff: fileDiff, Lines: lineCount})
 			}
 		}
 	}
@@ -913,10 +945,15 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 	for _, line := range strings.Split(statusOut, "\n") {
 		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
 			path := strings.TrimSpace(line[3:])
-			if path != "" {
+			if path == "" {
+				continue
+			}
+			// Expand directories into individual file paths
+			filePaths := walkUntrackedEntries(worktreePath, path)
+			for _, filePath := range filePaths {
 				untrackedN++
 				// Count lines in new (untracked) files
-				fullPath := filepath.Join(worktreePath, path)
+				fullPath := filepath.Join(worktreePath, filePath)
 				if data, err := os.ReadFile(fullPath); err == nil {
 					untrackedLines += strings.Count(string(data), "\n")
 				}

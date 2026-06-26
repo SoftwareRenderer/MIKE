@@ -403,6 +403,88 @@ func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
 	}
 }
 
+func TestWalkUntrackedEntries_RegularFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir, "file.txt", "content")
+
+	files := walkUntrackedEntries(tmpDir, "file.txt")
+	if len(files) != 1 || files[0] != "file.txt" {
+		t.Errorf("expected [file.txt], got %v", files)
+	}
+}
+
+func TestWalkUntrackedEntries_Directory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create subdirectory with files
+	os.MkdirAll(filepath.Join(tmpDir, "sub", "nested"), 0o755)
+	writeFile(t, filepath.Join(tmpDir, "sub"), "file1.txt", "content1")
+	writeFile(t, filepath.Join(tmpDir, "sub", "nested"), "file2.txt", "content2")
+
+	// Walk the directory entry (simulating "?? sub/" from git status)
+	files := walkUntrackedEntries(tmpDir, "sub")
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
+	}
+
+	// Check paths use forward slashes (filepath.Rel on Unix)
+	pathSet := make(map[string]bool)
+	for _, f := range files {
+		pathSet[f] = true
+	}
+	if !pathSet["sub/file1.txt"] {
+		t.Error("expected sub/file1.txt")
+	}
+	if !pathSet["sub/nested/file2.txt"] {
+		t.Error("expected sub/nested/file2.txt")
+	}
+}
+
+func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+
+	// Create a new directory with files (simulating "?? js/" from git status)
+	os.MkdirAll(filepath.Join(worktreePath, "js"), 0o755)
+	writeFile(t, filepath.Join(worktreePath, "js"), "app.js", "console.log('hello');\n")
+	writeFile(t, filepath.Join(worktreePath, "js"), "utils.js", "export fn() {}\n")
+
+	// Also create a file at root level
+	writeFile(t, worktreePath, "index.html", "<html></html>\n")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Should have 3 untracked files (2 in js/ + 1 at root)
+	if len(result.Untracked) != 3 {
+		t.Fatalf("expected 3 untracked files, got %d: paths=%v",
+			len(result.Untracked),
+			func() []string { paths := make([]string, len(result.Untracked)); for i, u := range result.Untracked { paths[i] = u.Path }; return paths }())
+	}
+
+	pathSet := make(map[string]bool)
+	for _, u := range result.Untracked {
+		pathSet[u.Path] = true
+	}
+	if !pathSet["js/app.js"] {
+		t.Error("expected js/app.js in untracked files")
+	}
+	if !pathSet["js/utils.js"] {
+		t.Error("expected js/utils.js in untracked files")
+	}
+	if !pathSet["index.html"] {
+		t.Error("expected index.html in untracked files")
+	}
+}
+
 func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 

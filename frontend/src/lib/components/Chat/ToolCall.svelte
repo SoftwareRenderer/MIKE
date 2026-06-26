@@ -155,7 +155,7 @@
         {:else if tc.result && tc.result.trim()}
             <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
         {/if}
-        {#if tc.duration !== undefined}
+        {#if tc.duration !== undefined && tc.toolName !== 'task_complete'}
             <span class="tool-duration">{tc.duration}ms</span>
         {/if}
     </div>

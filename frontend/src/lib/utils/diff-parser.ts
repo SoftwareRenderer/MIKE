@@ -1,4 +1,4 @@
-import type { DiffFile, DiffRow } from '$lib/types/diff';
+import type { DiffFile, DiffRow, FileTreeNode } from '$lib/types/diff';
 
 /**
  * Parse a raw unified diff (git diff output) into structured DiffFile[] data.
@@ -232,4 +232,118 @@ export function truncatePath(path: string, maxLength = 48): string {
     const head = Math.ceil((maxLength - 3) / 2);
     const tail = Math.floor((maxLength - 3) / 2);
     return `${path.slice(0, head)}…${path.slice(path.length - tail)}`;
+}
+
+/**
+ * Build a directory tree from a list of DiffFile entries.
+ * Returns sorted FileTreeNode[] — directories before files, alphabetical within each type.
+ * Each directory aggregates added/removed counts from its children recursively.
+ */
+export function buildFileTree(files: DiffFile[]): FileTreeNode[] {
+    const root: FileTreeNode[] = [];
+
+    for (const file of files) {
+        const parts = file.path.split('/').filter(Boolean);
+        let currentLevel = root;
+        let currentPath = '';
+
+        for (let index = 0; index < parts.length; index++) {
+            const part = parts[index]!;
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            const isLeaf = index === parts.length - 1;
+
+            let node = currentLevel.find((candidate) => candidate.name === part && candidate.type === (isLeaf ? 'file' : 'directory'));
+            if (!node) {
+                node = {
+                    name: part,
+                    path: currentPath,
+                    type: isLeaf ? 'file' : 'directory',
+                    children: [],
+                    added: 0,
+                    removed: 0,
+                    file: isLeaf ? file : undefined,
+                };
+                currentLevel.push(node);
+            }
+
+            if (isLeaf) {
+                node.added = file.added;
+                node.removed = file.removed;
+                node.file = file;
+            }
+
+            if (!isLeaf) {
+                currentLevel = node.children;
+            }
+        }
+    }
+
+    return sortNodes(root);
+}
+
+/** Recursively aggregate stats and sort nodes (directories first, then alphabetical). */
+function sortNodes(nodes: FileTreeNode[]): FileTreeNode[] {
+    return nodes
+        .map((node) => {
+            if (node.type === 'directory') {
+                const sortedChildren = sortNodes(node.children);
+                node.children = sortedChildren;
+                // Aggregate stats from children
+                node.added = sortedChildren.reduce((sum, child) => sum + child.added, 0);
+                node.removed = sortedChildren.reduce((sum, child) => sum + child.removed, 0);
+            }
+            return node;
+        })
+        .sort((a, b) => {
+            if (a.type !== b.type) {
+                return a.type === 'directory' ? -1 : 1;
+            }
+            return a.name.localeCompare(b.name);
+        });
+}
+
+/**
+ * Build a directory tree from untracked file entries.
+ * Same structure as buildFileTree but accepts the untracked entry format.
+ */
+export function buildUntrackedTree(untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>): FileTreeNode[] {
+    const root: FileTreeNode[] = [];
+
+    for (const entry of untracked) {
+        const parts = entry.path.split('/').filter(Boolean);
+        let currentLevel = root;
+        let currentPath = '';
+
+        for (let index = 0; index < parts.length; index++) {
+            const part = parts[index]!;
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            const isLeaf = index === parts.length - 1;
+
+            let node = currentLevel.find((candidate) => candidate.name === part && candidate.type === (isLeaf ? 'file' : 'directory'));
+            if (!node) {
+                node = {
+                    name: part,
+                    path: currentPath,
+                    type: isLeaf ? 'file' : 'directory',
+                    children: [],
+                    added: 0,
+                    removed: 0,
+                    file: isLeaf ? entry.file : undefined,
+                };
+                currentLevel.push(node);
+            }
+
+            if (isLeaf) {
+                node.added = entry.origAdded ?? entry.file.added;
+                node.removed = entry.origRemoved ?? entry.file.removed;
+                node.file = entry.file;
+            }
+
+            if (!isLeaf) {
+                currentLevel = node.children;
+            }
+        }
+    }
+
+    return sortNodes(root);
 }

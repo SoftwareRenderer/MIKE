@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { DiffFile } from '$lib/types/diff';
+    import type { DiffFile, DiffRow } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
     import { highlightLines } from '$lib/highlighter';
@@ -7,6 +7,20 @@
 
     let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; origRemoved?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
+
+    // Sort files: directories first (by path), then root files
+    let sortedFiles = $derived(sortFilesByPath(files));
+    let sortedUntracked = $derived(sortUntrackedByPath(untracked));
+
+    // Map untracked entries by path for lookup
+    let untrackedMap = $state(new Map<string, typeof untracked[number]>());
+    $effect(() => {
+        const map = new Map<string, typeof untracked[number]>();
+        for (const entry of untracked) {
+            map.set(entry.path, entry);
+        }
+        untrackedMap = map;
+    });
 
     // Track which collapsed blocks are expanded
     let expandedBlocks = $state<Record<string, boolean>>({});
@@ -73,6 +87,28 @@
         expandedFiles = { ...expandedFiles, [path]: !(expandedFiles[path] ?? true) };
     }
 
+    /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
+    function sortFilesByPath(files: DiffFile[]): DiffFile[] {
+        return [...files].sort((a, b) => {
+            const aHasDir = a.path.includes('/');
+            const bHasDir = b.path.includes('/');
+            if (aHasDir && !bHasDir) return -1;
+            if (!aHasDir && bHasDir) return 1;
+            return a.path.localeCompare(b.path);
+        });
+    }
+
+    /** Sort untracked entries by path: files with directory prefix first, then root files. */
+    function sortUntrackedByPath(entries: typeof untracked): typeof untracked {
+        return [...entries].sort((a, b) => {
+            const aHasDir = a.path.includes('/');
+            const bHasDir = b.path.includes('/');
+            if (aHasDir && !bHasDir) return -1;
+            if (!aHasDir && bHasDir) return 1;
+            return a.path.localeCompare(b.path);
+        });
+    }
+
     function getDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
         return buildDisplayItems(rows);
     }
@@ -88,7 +124,9 @@
             onLineClick(filePath, lineNumber + 1);
         }
     }
+
 </script>
+
 
 {#if !hasContent}
     <div class="diff-empty">
@@ -101,7 +139,9 @@
 {:else}
     <div class="diff-scroll">
         <div class="diff-content-wrapper">
-        {#each untracked as entry (entry.path)}
+
+        <!-- Untracked files -->
+        {#each sortedUntracked as entry (entry.path)}
             {@const ufile = entry.file}
             {@const isUntrackedExpanded = expandedFiles[entry.path] ?? true}
             {@const isLarge = entry.fileSize !== undefined}
@@ -272,7 +312,9 @@
                 {/if}
             </section>
         {/each}
-        {#each files as file (file.path)}
+
+        <!-- Tracked files -->
+        {#each sortedFiles as file (file.path)}
             {@const isFileExpanded = expandedFiles[file.path] ?? true}
             <section class="diff-file-section diff-file-enter">
                 <button
@@ -432,6 +474,7 @@
                 {/if}
             </section>
         {/each}
+
         </div>
     </div>
 {/if}
@@ -831,4 +874,12 @@
         background: var(--color-surface-3);
         color: var(--color-accent-hover);
     }
+
+    /* Tree grouping */
+
+
+    /* Directory header */
+
+
+
 </style>
