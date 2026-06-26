@@ -67,10 +67,23 @@ const githubDarkHighlighter = tagHighlighter([
     { tag: tags.separator, class: 'hl-separator' },
 ]);
 
+// Cached Language objects — CodeMirror lang packages export functions
+const _js = javascript().language;
+const _py = python().language;
+const _go = go().language;
+const _cpp = cpp().language;
+const _rust = rust().language;
+const _json = json().language;
+const _md = markdown().language;
+const _php = php().language;
+const _sql = sql().language;
+const _html = html().language;
+const _css = css().language;
+const _yaml = yaml().language;
+
 /**
- * Map file extensions / basenames to CodeMirror Language objects.
+ * Map file extensions to CodeMirror Language objects.
  * Returns null for unsupported languages (plain text fallback).
- * CodeMirror lang packages export functions — must be called to get the Language.
  */
 function getLanguage(path: string): Language | null {
     const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -80,33 +93,21 @@ function getLanguage(path: string): Language | null {
     if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') return null;
 
     const extMap: Record<string, Language> = {
-        // JavaScript / TypeScript
-        js: javascript().language, mjs: javascript().language, cjs: javascript().language, jsx: javascript().language, mx: javascript().language,
-        ts: javascript().language, tsx: javascript().language,
-        // Python
-        py: python().language, pyw: python().language,
-        // Go
-        go: go().language,
-        // C / C++
-        c: cpp().language, h: cpp().language,
-        cpp: cpp().language, cc: cpp().language, cxx: cpp().language, hxx: cpp().language, hpp: cpp().language,
-        cppm: cpp().language, hppm: cpp().language, cx: cpp().language, cxxm: cpp().language,
-        // Rust
-        rs: rust().language,
-        // JSON
-        json: json().language,
-        // Markdown
-        md: markdown().language, mdx: markdown().language,
-        // PHP
-        php: php().language, php3: php().language, php4: php().language, php5: php().language, php7: php().language, phps: php().language, phpws: php().language,
-        // SQL
-        sql: sql().language,
-        // HTML
-        html: html().language, htm: html().language,
-        // CSS
-        css: css().language, scss: css().language, sass: css().language, less: css().language,
-        // YAML
-        yaml: yaml().language, yml: yaml().language,
+        js: _js, mjs: _js, cjs: _js, jsx: _js, mx: _js,
+        ts: _js, tsx: _js,
+        py: _py, pyw: _py,
+        go: _go,
+        c: _cpp, h: _cpp,
+        cpp: _cpp, cc: _cpp, cxx: _cpp, hxx: _cpp, hpp: _cpp,
+        cppm: _cpp, hppm: _cpp, cx: _cpp, cxxm: _cpp,
+        rs: _rust,
+        json: _json,
+        md: _md, mdx: _md,
+        php: _php, php3: _php, php4: _php, php5: _php, php7: _php, phps: _php, phpws: _php,
+        sql: _sql,
+        html: _html, htm: _html,
+        css: _css, scss: _css, sass: _css, less: _css,
+        yaml: _yaml, yml: _yaml,
     };
 
     return extMap[ext] ?? null;
@@ -151,11 +152,6 @@ export function highlightLines(lines: string[], path: string): string[] {
 
         const result: string[] = new Array(lines.length).fill('');
 
-        /** Start position of a line */
-        function lineStart(lineIdx: number): number {
-            return lineStarts[lineIdx];
-        }
-
         /** Add an unstyled text segment to the current line */
         function addGap(lineIdx: number, from: number, to: number) {
             if (from >= to) return;
@@ -180,7 +176,7 @@ export function highlightLines(lines: string[], path: string): string[] {
 
         // For each line, interleave gaps (unstyled) and styled spans
         for (let i = 0; i < lines.length; i++) {
-            const lStart = lineStart(i);
+            const lStart = lineStarts[i];
             const lEnd = lineEnds[i];
             if (lStart === lEnd) continue; // empty line
 
@@ -235,10 +231,4 @@ export function highlightLines(lines: string[], path: string): string[] {
     }
 }
 
-/**
- * Detect the language from a file path and return the CodeMirror Language.
- * Used externally to check if a file supports highlighting.
- */
-export function detectLanguage(path: string): Language | null {
-    return getLanguage(path);
-}
+
