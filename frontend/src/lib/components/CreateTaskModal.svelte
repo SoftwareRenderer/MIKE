@@ -44,6 +44,11 @@
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
+    let isAgentSelected = $derived(() => {
+        if (!selectedUrl) return false;
+        const p = providers.find(p => p.url === selectedUrl);
+        return p ? p.kind !== 'llm' : false;
+    });
 
     // Subscribe to config store to pick up providers (may load after modal opens)
     // $configStore syntax auto-subscribes to store changes
@@ -228,6 +233,7 @@
                 </div>
             {/if}
             <div class="options">
+                {#if !isAgentSelected()}
                 <label class="checkbox-label">
                     <input type="checkbox" bind:checked={planMode} />
                     <span class="option-text">
@@ -235,6 +241,7 @@
                         <span class="option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
                     </span>
                 </label>
+                {/if}
                 <label class="checkbox-label">
                     <input type="checkbox" bind:checked={autoCommit} />
                     Auto-commit on completion

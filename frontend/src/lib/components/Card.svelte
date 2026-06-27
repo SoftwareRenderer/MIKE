@@ -323,6 +323,11 @@
     let editUrl = $state('');
     let editReasoningEffort = $state('');
     let editProviders: Provider[] = $state([]);
+    let isAgentSelected = $derived(() => {
+        if (!editUrl) return false;
+        const p = editProviders.find(p => p.url === editUrl);
+        return p ? p.kind !== 'llm' : false;
+    });
 
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
@@ -602,6 +607,7 @@
                     </div>
                 {/if}
                 <div class="card-edit-options">
+                    {#if !isAgentSelected()}
                     <label class="card-edit-checkbox">
                         <input type="checkbox" bind:checked={editPlanMode} />
                         <span class="card-edit-option-text">
@@ -609,6 +615,7 @@
                             <span class="card-edit-option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
                         </span>
                     </label>
+                    {/if}
                     <label class="card-edit-checkbox">
                         <input type="checkbox" bind:checked={editAutoCommit} />
                         <span>Auto-commit on completion</span>

@@ -184,7 +184,7 @@
             {#if !isAgent}
                 <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} />
             {/if}
-            {#if onPlanModeToggle}
+            {#if onPlanModeToggle && !isAgent}
                 <button
                     type="button"
                     class="btn-plan-toggle"

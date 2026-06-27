@@ -120,6 +120,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let planMode = $state(false);
+    let isAgentSelected = $derived(() => {
+        if (!selectedUrl) return false;
+        const p = providers.find(p => p.url === selectedUrl);
+        return p ? p.kind !== 'llm' : false;
+    });
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
@@ -1629,6 +1634,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         onSelect={handleModelSelect}
                     />
                 {/if}
+                {#if !isAgentSelected()}
                 <button
                     type="button"
                     class="btn-plan-toggle"
@@ -1646,6 +1652,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     </svg>
                     <span>{planMode ? 'Plan' : 'Act'}</span>
                 </button>
+                {/if}
             </div>
             <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Start the AI task">
                 {#if isStarting}
