@@ -40,13 +40,15 @@
     ]);
 
     const githubDarkTheme = EditorView.theme({
-        '&': { backgroundColor: 'transparent', color: '#C9D1D9' },
+        '&': { backgroundColor: 'transparent', color: '#C9D1D9', height: '100%' },
         '&.cm-focused': { outline: 'none' },
         '.cm-scroller': {
             fontFamily: 'var(--font-mono)',
             fontSize: '14px',
             lineHeight: '1.5',
             tabSize: 4,
+            overflow: 'auto',
+            height: '100%',
         },
         '.cm-gutters': {
             background: 'var(--color-surface-1)',
@@ -318,7 +320,7 @@
         <div class="editor-header">
             <div class="editor-tab">
                 <button class="btn-close-file" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close file" title="Close file">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
                         <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
@@ -392,15 +394,15 @@
         border-bottom: 1px solid var(--color-border);
         background: var(--color-surface-1);
         flex-shrink: 0;
-        min-height: 30px;
+        min-height: 40px;
     }
 
     .editor-tab {
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 4px 8px;
-        font-size: 0.75rem;
+        gap: 6px;
+        padding: 6px 8px;
+        font-size: 0.875rem;
         color: var(--color-text-primary);
     }
 
@@ -425,7 +427,7 @@
         border: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        padding: 2px;
+        padding: 6px;
         border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
@@ -465,8 +467,8 @@
     }
 
     .editor-save-btn {
-        padding: 2px 8px;
-        font-size: 0.6875rem;
+        padding: 6px 12px;
+        font-size: 0.75rem;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-secondary);

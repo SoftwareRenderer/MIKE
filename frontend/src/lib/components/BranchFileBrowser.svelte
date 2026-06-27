@@ -363,4 +363,35 @@
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
     }
+
+    @media (max-width: 768px) {
+        .file-browser-header {
+            padding: 10px 12px;
+        }
+        .file-browser-label {
+            font-size: 0.8125rem;
+        }
+        .new-file-btn {
+            width: 32px;
+            height: 32px;
+        }
+        .file-browser-path {
+            padding: 8px 10px;
+        }
+        .file-browser-path-input {
+            padding: 4px 8px;
+            font-size: 0.8125rem;
+        }
+        .file-browser-item {
+            padding: 8px 12px;
+            font-size: 0.9375rem;
+            gap: 10px;
+        }
+        .file-browser-error,
+        .file-browser-loading,
+        .file-browser-empty {
+            padding: 12px;
+            font-size: 0.875rem;
+        }
+    }
 </style>

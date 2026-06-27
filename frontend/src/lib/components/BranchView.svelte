@@ -91,6 +91,7 @@
 
     function handleFileSelected(path: string) {
         selectedFilePath = path;
+        if (isMobile) activeTab = 'editor';
     }
 
     function handleSymbolsUpdate(newSymbols: Array<{ name: string; kind: string; line: number; indent: number }>) {
@@ -305,7 +306,7 @@
                 onFocused={handleEditorFocused}
                 onSymbolsUpdate={handleSymbolsUpdate}
                 onHasChanges={handleHasChanges}
-                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); }}
+                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); if (isMobile) activeTab = 'files'; }}
             />
         </div>
 
@@ -564,6 +565,8 @@
         }
         .branch-center-column {
             width: 100% !important;
+            flex: 1 !important;
+            min-height: 0;
         }
         .branch-right-column {
             width: 100% !important;
@@ -579,6 +582,7 @@
         }
         .branch-body {
             flex-direction: column;
+            min-height: 0;
         }
     }
 </style>
