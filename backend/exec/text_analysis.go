@@ -6,7 +6,6 @@ import (
 	"unicode"
 )
 
-var spaceRe = regexp.MustCompile(`\s+`)
 var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
 
 // phraseDetector tracks sentences/phrases seen within a single streaming response
@@ -46,8 +45,14 @@ func (d *phraseDetector) check(newText string) bool {
 		return false
 	}
 
-	// Combine pending text with new text
-	text := d.pending + newText
+	// Combine pending text with new text using Builder to avoid allocation
+	// when pending is empty (common case for complete sentences).
+	var b strings.Builder
+	if d.pending != "" {
+		b.WriteString(d.pending)
+	}
+	b.WriteString(newText)
+	text := b.String()
 	d.pending = ""
 
 	// Split on sentence boundaries
@@ -79,6 +84,12 @@ func (d *phraseDetector) check(newText string) bool {
 		d.seen[phrase] = true
 	}
 
+	// Bound the pending buffer to prevent unbounded memory growth
+	// from extremely long text without sentence boundaries.
+	if len(d.pending) > maxPendingSize {
+		d.pending = ""
+	}
+
 	return false
 }
 
@@ -86,21 +97,28 @@ func (d *phraseDetector) check(newText string) bool {
 // A sentence boundary is: .!? followed by whitespace/newline, .!? followed by uppercase,
 // or a double newline.
 // The last segment (incomplete sentence) is included so it can accumulate more text.
+// maxPendingSize limits the phraseDetector.pending buffer to prevent
+// unbounded memory growth from extremely long text without sentence boundaries.
+const maxPendingSize = 16 * 1024
+
 func splitSentences(text string) []string {
+	runes := []rune(text)
+	n := len(runes)
 	var segments []string
 	var current strings.Builder
 	i := 0
-	for i < len(text) {
-		r := rune(text[i])
+
+	for i < n {
+		r := runes[i]
 		current.WriteRune(r)
 
-		if isSentenceEnd(r) && i+1 < len(text) {
-			next := rune(text[i+1])
+		if isSentenceEnd(r) && i+1 < n {
+			next := runes[i+1]
 			// Boundary: punctuation followed by whitespace or uppercase
 			if isWhitespace(next) || (next >= 'A' && next <= 'Z') {
 				// Consume trailing whitespace as delimiter
 				i++
-				for i < len(text) && isWhitespace(rune(text[i])) {
+				for i < n && isWhitespace(runes[i]) {
 					i++
 				}
 				segments = append(segments, current.String())
@@ -109,7 +127,7 @@ func splitSentences(text string) []string {
 			}
 		}
 		// Also handle double newline as boundary
-		if r == '\n' && i+1 < len(text) && rune(text[i+1]) == '\n' {
+		if r == '\n' && i+1 < n && runes[i+1] == '\n' {
 			i++ // consume second newline
 			segments = append(segments, current.String())
 			current.Reset()
@@ -134,13 +152,21 @@ func splitSentences(text string) []string {
 func normalizePhrase(s string) string {
 	// Lowercase
 	s = strings.ToLower(s)
-	// Trim leading/trailing whitespace
-	s = strings.TrimSpace(s)
-	// Trim trailing punctuation
-	s = strings.TrimRight(s, ".,!?;:")
-	// Collapse internal whitespace
-	s = spaceRe.ReplaceAllString(s, " ")
-	return s
+	// Collapse whitespace and trim in one pass (Fields splits on all whitespace, Join uses single space)
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	// Trim trailing punctuation from the last word
+	last := len(fields) - 1
+	fields[last] = strings.TrimRight(fields[last], ".,!?;:")
+	if fields[last] == "" && len(fields) == 1 {
+		return ""
+	}
+	if fields[last] == "" {
+		fields = fields[:last]
+	}
+	return strings.Join(fields, " ")
 }
 
 // wordCount counts the number of words in a phrase.

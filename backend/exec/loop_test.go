@@ -657,3 +657,160 @@ func TestFormatConversationTurns_TruncatesLongToolResults(t *testing.T) {
 		t.Error("expected truncation marker '...' in output")
 	}
 }
+
+// --- UTF-8 Tests (regression for CPU spike bug) ---
+
+func TestSplitSentences_UTF8Characters(t *testing.T) {
+	// Multi-byte UTF-8 characters should be preserved correctly
+	segments := splitSentences("Café résumé naïve. Hello world!")
+	if len(segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
+	}
+	if segments[0] != "Café résumé naïve." {
+		t.Errorf("expected 'Café résumé naïve.', got %q", segments[0])
+	}
+	if segments[1] != "Hello world!" {
+		t.Errorf("expected 'Hello world!', got %q", segments[1])
+	}
+}
+
+func TestSplitSentences_CJKCharacters(t *testing.T) {
+	// CJK characters are 3 bytes each — must not be corrupted.
+	// Note: isSentenceEnd only recognizes ASCII .!? not CJK full-width 。！
+	// So this tests that CJK chars pass through without corruption.
+	segments := splitSentences("你好世界. 这是一个测试!")
+	if len(segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
+	}
+	if segments[0] != "你好世界." {
+		t.Errorf("expected '你好世界.', got %q", segments[0])
+	}
+	if segments[1] != "这是一个测试!" {
+		t.Errorf("expected '这是一个测试!', got %q", segments[1])
+	}
+}
+
+func TestSplitSentences_Emoji(t *testing.T) {
+	// Emoji are 4-byte UTF-8 (surrogate pairs)
+	segments := splitSentences("Hello 👋 world. How are you?")
+	if len(segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
+	}
+	if segments[0] != "Hello 👋 world." {
+		t.Errorf("expected 'Hello 👋 world.', got %q", segments[0])
+	}
+}
+
+func TestSplitSentences_MixedUTF8(t *testing.T) {
+	// Mix of ASCII, 2-byte, 3-byte, and 4-byte characters
+	segments := splitSentences("café 日本語 🎉 done. Next!")
+	if len(segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
+	}
+	if segments[0] != "café 日本語 🎉 done." {
+		t.Errorf("expected 'café 日本語 🎉 done.', got %q", segments[0])
+	}
+}
+
+func TestPhraseDetector_UTF8Streaming(t *testing.T) {
+	// Simulate streaming chunks containing multi-byte UTF-8 characters.
+	// This is the exact scenario that caused the CPU spike:
+	// small chunks with UTF-8 chars that get split across calls.
+	d := newPhraseDetector()
+
+	// Feed chunks that contain UTF-8 characters
+	// "Let me analyze the café's approach to this problème.">
+	chunks := []string{
+		"Let me analyze the caf",
+		"é's approach to this pr",
+		"oblème.",
+	}
+	for _, chunk := range chunks {
+		if d.check(chunk) {
+			t.Error("should not detect repetition in first occurrence")
+		}
+	}
+
+	// Now repeat the same phrase
+	chunks2 := []string{
+		"Let me analyze the caf",
+		"é's approach to this pr",
+		"oblème.",
+	}
+	fired := false
+	for _, chunk := range chunks2 {
+		if d.check(chunk) {
+			fired = true
+			break
+		}
+	}
+	if !fired {
+		t.Error("should detect repetition of UTF-8 phrase")
+	}
+}
+
+func TestPhraseDetector_PendingBufferBound(t *testing.T) {
+	// Feed a very long text without sentence boundaries.
+	// The pending buffer should be bounded to maxPendingSize.
+	d := newPhraseDetector()
+
+	// Generate text longer than maxPendingSize (16KB) without sentence boundaries
+	longText := strings.Repeat("no sentence boundary here just words ", 1000)
+	if len(longText) < maxPendingSize {
+		t.Skipf("test text %d bytes is shorter than maxPendingSize %d", len(longText), maxPendingSize)
+	}
+
+	d.check(longText)
+	// Pending should be bounded
+	if len(d.pending) > maxPendingSize {
+		t.Errorf("pending buffer %d bytes exceeds maxPendingSize %d", len(d.pending), maxPendingSize)
+	}
+}
+
+func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
+	// Regression test: ensure UTF-8 text doesn't cause exponential pending growth.
+	// Before the fix, multi-byte chars were split into bytes, re-encoded as longer
+	// sequences, and the pending buffer grew exponentially with each call.
+	d := newPhraseDetector()
+
+	// UTF-8 text with multi-byte characters, no sentence boundaries
+	utf8Text := "café résumé naïve 日本語 🎉"
+
+	// Feed the same text multiple times (no boundaries, so it accumulates in pending)
+	for i := 0; i < 10; i++ {
+		d.check(utf8Text)
+	}
+
+	// The pending buffer should not grow exponentially.
+	// With the fix, pending is bounded to maxPendingSize.
+	// Without the fix, it would be ~utf8Text * 10 * corruption_factor.
+	if len(d.pending) > maxPendingSize {
+		t.Errorf("pending buffer %d bytes exceeds maxPendingSize %d (UTF-8 bloat?)", len(d.pending), maxPendingSize)
+	}
+}
+
+func TestNormalizePhrase_UTF8(t *testing.T) {
+	// Ensure normalizePhrase preserves UTF-8 characters
+	result := normalizePhrase("  Café Résumé  ")
+	expected := "café résumé"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestNormalizePhrase_TrailingPunctuationOnlyWord(t *testing.T) {
+	// Edge case: a single word that is entirely punctuation after trim
+	result := normalizePhrase("....")
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestNormalizePhrase_WordWithTrailingPunctuation(t *testing.T) {
+	// Word followed by punctuation should have punctuation stripped
+	result := normalizePhrase("hello world!!!")
+	expected := "hello world"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
