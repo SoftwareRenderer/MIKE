@@ -29,6 +29,10 @@
     let unsavedFiles = $state<string[]>([]);
     let editorFocused = $state(false);
 
+    // Mobile layout
+    let isMobile = $state(false);
+    let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
+
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
 
@@ -162,9 +166,20 @@
         if (activeResize) e.preventDefault();
     }
 
+    function checkMobile() {
+        const wasMobile = isMobile;
+        isMobile = window.matchMedia('(max-width: 768px)').matches;
+        if (isMobile) {
+            activeTab = 'files';
+            if (!wasMobile) splitRatio = 0.75;
+        }
+    }
+
     onMount(() => {
         loadCommits();
         loadBranches();
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
         window.addEventListener('keydown', handleKeydown);
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
@@ -172,6 +187,7 @@
     });
 
     onDestroy(() => {
+        window.removeEventListener('resize', checkMobile);
         window.removeEventListener('keydown', handleKeydown);
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
@@ -198,13 +214,43 @@
         </button>
     </div>
 
+    <!-- Mobile Tab Bar -->
+    {#if isMobile}
+        <div class="mobile-tab-bar">
+            <button
+                class="tab-btn {activeTab === 'files' ? 'active' : ''}"
+                onclick={() => activeTab = 'files'}
+                title="File browser"
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h4l2 2v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2h4l2 2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                Files
+            </button>
+            <button
+                class="tab-btn {activeTab === 'editor' ? 'active' : ''}"
+                onclick={() => activeTab = 'editor'}
+                title="Editor"
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                Editor
+            </button>
+            <button
+                class="tab-btn {activeTab === 'symbols' ? 'active' : ''}"
+                onclick={() => activeTab = 'symbols'}
+                title="Symbols"
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                Symbols
+            </button>
+        </div>
+    {/if}
+
     <!-- 3-column layout -->
     <div class="branch-body">
         <!-- Left column: file browser + git graph -->
-        <div class="branch-left-column" style="width: {leftWidth}px">
+        <div class="branch-left-column" class:hidden={isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
             <div class="branch-split-container">
                 <!-- Top: File browser -->
-                <div class="branch-file-browser" style="height: {splitRatio * 100}%">
+                <div class="branch-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
                     <BranchFileBrowser
                         projectPath={projectPath}
                         unsavedFiles={unsavedFiles}
@@ -214,6 +260,7 @@
                 </div>
 
                 <!-- Drag handle (vertical split) -->
+                {#if !isMobile}
                 <div
                     class="branch-split-handle"
                     class:dragging={activeResize === 'split'}
@@ -222,9 +269,10 @@
                     aria-label="Resize panels"
                     tabindex="0"
                 ></div>
+                {/if}
 
                 <!-- Bottom: Git graph -->
-                <div class="branch-git-graph" style="height: {(1 - splitRatio) * 100}%">
+                <div class="branch-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
                     <BranchGitGraph
                         projectId={projectId}
                         currentBranch={selectedBranch}
@@ -251,7 +299,7 @@
         ></div>
 
         <!-- Center column: File editor -->
-        <div class="branch-center-column">
+        <div class="branch-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
             <BranchEditor
                 filePath={selectedFilePath}
                 onFocused={handleEditorFocused}
@@ -272,7 +320,7 @@
         ></div>
 
         <!-- Right column: Symbol outline -->
-        <div class="branch-right-column" style="width: {rightWidth}px">
+        <div class="branch-right-column" class:hidden={isMobile && activeTab !== 'symbols'} style="width: {rightWidth}px">
             <BranchSymbols
                 symbols={symbols}
                 onSymbolClick={(line: number) => {
@@ -461,5 +509,76 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+    }
+
+    .mobile-tab-bar {
+        display: none;
+    }
+    .column.hidden {
+        display: none;
+    }
+
+    @media (max-width: 768px) {
+        .mobile-tab-bar {
+            display: flex;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-surface-1);
+            flex-shrink: 0;
+        }
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 10px 8px;
+            border: none;
+            background: none;
+            color: var(--color-text-tertiary);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s ease;
+        }
+        .tab-btn.active {
+            color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+        }
+        .tab-btn:hover:not(.active) {
+            color: var(--color-text-primary);
+        }
+        .branch-left-column {
+            width: 100% !important;
+            border-right: none;
+            flex: 1 !important;
+            min-height: 0;
+        }
+        .branch-file-browser.mobile {
+            flex: 0 0 75% !important;
+            min-height: 100px;
+        }
+        .branch-git-graph.mobile {
+            flex: 1;
+            min-height: 0;
+        }
+        .branch-center-column {
+            width: 100% !important;
+        }
+        .branch-right-column {
+            width: 100% !important;
+            border-left: none;
+        }
+        .branch-resize-handle {
+            display: none;
+        }
+        .branch-left-column.hidden,
+        .branch-center-column.hidden,
+        .branch-right-column.hidden {
+            display: none;
+        }
+        .branch-body {
+            flex-direction: column;
+        }
     }
 </style>
