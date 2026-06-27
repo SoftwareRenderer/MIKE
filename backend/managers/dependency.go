@@ -24,7 +24,8 @@ func NewDependencyHandler(store *store.Store) *DependencyHandler {
 }
 
 // HandleDependencies lists or creates dependencies for a task.
-func (h *DependencyHandler) HandleDependencies(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *DependencyHandler) HandleDependencies(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
 		deps, err := h.store.GetDependents(taskID)
@@ -61,7 +62,9 @@ func (h *DependencyHandler) HandleDependencies(w http.ResponseWriter, r *http.Re
 }
 
 // HandleDependency handles DELETE for a specific dependency.
-func (h *DependencyHandler) HandleDependency(w http.ResponseWriter, r *http.Request, projectID, taskID, childTaskID string) {
+func (h *DependencyHandler) HandleDependency(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
+	childTaskID := r.PathValue("childID")
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -74,7 +77,8 @@ func (h *DependencyHandler) HandleDependency(w http.ResponseWriter, r *http.Requ
 }
 
 // HandleDependents lists tasks that depend on this task.
-func (h *DependencyHandler) HandleDependents(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *DependencyHandler) HandleDependents(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

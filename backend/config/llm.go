@@ -275,59 +275,6 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
-// ResolveModel resolves a model selection to the actual server URL and model name.
-// Resolution order: task override -> highest-priority provider's default model.
-// If the task has explicit llama_server_url/model_name set, those take priority.
-// Otherwise, use the first provider (highest priority) and its default model.
-// Fallback: first available model of the first provider.
-func ResolveModel(taskLlamaURL, taskModelName, defaultProviderName string, cfg *types.Config) (serverURL, modelName string) {
-	// 1. Task-level override (explicit values set on the task)
-	if taskLlamaURL != "" {
-		serverURL = taskLlamaURL
-	}
-	if taskModelName != "" {
-		modelName = taskModelName
-	}
-	// If both are set on the task, use them directly
-	if serverURL != "" && modelName != "" {
-		return serverURL, modelName
-	}
-
-	// 2. Use highest-priority provider (first in list)
-	if len(cfg.Providers) > 0 {
-		p := cfg.Providers[0]
-		if serverURL == "" {
-			serverURL = p.URL
-		}
-		// Use provider's default model if set
-		// Default model may be in composite format: modelName|reasoningEffort
-		if modelName == "" && p.DefaultModel != "" {
-			defaultName := p.DefaultModel
-			defaultEffort := ""
-			if parts := strings.Split(p.DefaultModel, "|"); len(parts) == 2 {
-				defaultName = parts[0]
-				defaultEffort = parts[1]
-			}
-			for _, m := range p.Models {
-				if m.Name == defaultName {
-					// If composite format, match effort too
-					if defaultEffort != "" && m.ReasoningEffort != defaultEffort {
-						continue
-					}
-					modelName = m.Name
-					break
-				}
-			}
-		}
-		// Fallback: use the first available model
-		if modelName == "" && len(p.Models) > 0 {
-			modelName = p.Models[0].Name
-		}
-	}
-
-	return serverURL, modelName
-}
-
 // GetModelReasoningEffort looks up the reasoning effort for a model by name across all providers.
 // Returns types.DefaultReasoningEffort if the model is not found.
 func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {

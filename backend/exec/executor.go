@@ -86,7 +86,9 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 }
 
 // HandleStart starts a task's AI execution.
-func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -108,7 +110,9 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request, proj
 }
 
 // HandleStop stops a running task.
-func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -123,7 +127,9 @@ func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request, proje
 }
 
 // HandleRetry retries a failed task.
-func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -138,17 +144,19 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request, proj
 }
 
 // HandleResume resumes a paused task (same as retry for now).
-func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	te.HandleRetry(w, r, projectID, taskID)
+	te.HandleRetry(w, r)
 }
 
 // HandleSend accepts a user message via HTTP POST and triggers task execution.
 // Returns the created message on success.
-func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -536,60 +544,122 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	return te.StartSubtaskWithParent(projectID, selectedID)
 }
 
-// StartTask begins AI execution for a task.
+// taskExecSetup holds the shared state prepared for task execution.
+type taskExecSetup struct {
+	task               *types.Task
+	project            *types.Project
+	worktreePath       string
+	serverURL          string
+	modelName          string
+	ctx                context.Context
+	cancel             context.CancelFunc
+	userMsgChan        chan stream.UserMessage
+	sandboxEnabled     bool
+	networkIsolation   bool
+	baseImage          string
+	sandboxDockerfilePath string
+	memoryLimit        int
+}
 
-func (te *TaskExecutor) StartTask(projectID, taskID string) error {
-	task, err := te.store.GetTask(projectID, taskID)
+// prepareTaskExecution sets up the shared infrastructure for task execution.
+// Both StartTask and handleLazyStart use this to avoid duplicating worktree
+// creation, branch watching, status updates, and sandbox configuration.
+// Returns nil if the task is already actively running (caller should check execSetup == nil).
+func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideServerURL, overrideModelName string) (*taskExecSetup, error) {
+	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	// Reset stale running state (executor crashed/server restarted)
 	if task.StatusState == "running" {
 		te.taskMu.Lock()
 		_, activelyRunning := te.tasks[taskID]
 		te.taskMu.Unlock()
-		if !activelyRunning {
-			log.Printf("[start] task=%s stale running state detected, resetting to idle", taskID)
-			task.StatusState = "idle"
-			task.Status = "todo"
-			if err := te.store.UpdateTask(task); err != nil {
-				return fmt.Errorf("reset stale state: %w", err)
-			}
-			te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
-		} else {
-			return fmt.Errorf("task already running")
+		if activelyRunning {
+			return nil, fmt.Errorf("task already running")
 		}
+		log.Printf("[start] task=%s stale running state detected, resetting", taskID)
+		task.StatusState = "idle"
 	}
 
-	serverURL := task.LlamaServerURL
+	serverURL := overrideServerURL
 	if serverURL == "" {
-		return fmt.Errorf("llama server URL not configured")
+		serverURL = task.LlamaServerURL
+	}
+	if serverURL == "" {
+		return nil, fmt.Errorf("llama server URL not configured")
 	}
 
-	modelName := task.ModelName
-	branchName := fmt.Sprintf("task/%s", task.ID)
+	modelName := overrideModelName
+	if modelName == "" {
+		modelName = task.ModelName
+	}
 
+	branchName := fmt.Sprintf("task/%s", task.ID)
 	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
 	task.Branch = branchName
 	task.BaseRef = baseRef
 	te.appStreamMgr.WatchWorktree(taskID, projectID, baseRef)
+
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
 		thread, terr := te.store.GetThread(task.CurrentThreadID)
 		if terr == nil && thread.GitBranch != "" && thread.GitBranch != branchName {
-			// Checkout the thread's branch (create it from HEAD if it doesn't exist locally)
 			_ = te.worktreeMgr.GitRunInWorktree(taskID, "checkout", "-B", thread.GitBranch)
 			task.Branch = thread.GitBranch
 		}
 	}
+
 	task.StatusState = "running"
 	task.Status = "in_progress"
 	if err := te.store.UpdateTask(task); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	userMsgChan := make(chan stream.UserMessage, 16)
+	te.taskMu.Lock()
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
+	te.taskMu.Unlock()
+
+	project, err := te.store.GetProject(projectID)
+	if err != nil {
+		cancel()
+		te.taskMu.Lock()
+		delete(te.tasks, taskID)
+		te.taskMu.Unlock()
+		return nil, fmt.Errorf("get project for sandbox check: %w", err)
+	}
+
+	return &taskExecSetup{
+		task:                task,
+		project:             project,
+		worktreePath:        worktreePath,
+		serverURL:           serverURL,
+		modelName:           modelName,
+		ctx:                 ctx,
+		cancel:              cancel,
+		userMsgChan:         userMsgChan,
+		sandboxEnabled:      project.SandboxEnabled,
+		networkIsolation:    project.SandboxNetworkIsolation,
+		baseImage:           project.SandboxImage,
+		sandboxDockerfilePath: project.SandboxDockerfilePath,
+		memoryLimit:         project.SandboxMemoryLimit,
+	}, nil
+}
+
+// StartTask begins AI execution for a task.
+func (te *TaskExecutor) StartTask(projectID, taskID string) error {
+	execSetup, err := te.prepareTaskExecution(projectID, taskID, "", "")
+	if err != nil {
 		return err
 	}
+	task := execSetup.task
 
 	existingMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	if len(existingMsgs) == 0 {
@@ -606,29 +676,16 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	// If the last message is already from the assistant, just update status without re-triggering the LLM
 	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
 		log.Printf("[start] task=%s last message is from assistant, skipping LLM call", taskID)
+		execSetup.cancel()
+		te.taskMu.Lock()
+		delete(te.tasks, taskID)
+		te.taskMu.Unlock()
 		return nil
 	}
 
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	userMsgChan := make(chan stream.UserMessage, 16)
-	te.taskMu.Lock()
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
-	te.taskMu.Unlock()
-
-	// Check if project has sandbox enabled
-	project, projErr := te.store.GetProject(projectID)
-	if projErr != nil {
-		return fmt.Errorf("get project for sandbox check: %w", projErr)
-	}
-	sandboxEnabled := project.SandboxEnabled
-	networkIsolation := project.SandboxNetworkIsolation
-	baseImage := project.SandboxImage
-	sandboxDockerfilePath := project.SandboxDockerfilePath
-	memoryLimit := project.SandboxMemoryLimit
-
-	go te.executeTask(ctx, task, projectID, project.Name, worktreePath, serverURL, modelName, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -696,87 +753,27 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
 		return
 	}
-	// Reset stale running state (executor crashed/server restarted)
-	if task.StatusState == "running" {
-		te.taskMu.Lock()
-		_, activelyRunning := te.tasks[taskID]
-		te.taskMu.Unlock()
-		if !activelyRunning {
-			log.Printf("[lazy-start] task=%s stale running state detected, resetting", taskID)
-			task.StatusState = "idle"
-		}
-	}
 
-	if serverURL == "" {
-		serverURL = task.LlamaServerURL
-	}
-	if serverURL == "" {
-		log.Printf("[lazy-start] task=%s no server URL configured", taskID)
-		task.StatusState = "failed"
-		task.Status = "review"
-		task.Output = "LLM server URL not configured"
-		_ = te.store.UpdateTask(task)
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(task.ID, "LLM server URL not configured", "no_server_configured")
-		return
-	}
-
-	if modelName == "" {
-		modelName = task.ModelName
-	}
-	log.Printf("[lazy-start] task=%s url=%s model=%s", taskID, serverURL, modelName)
-
-	branchName := fmt.Sprintf("task/%s", task.ID)
-
-	wtPath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
+	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName)
 	if err != nil {
-		log.Printf("[lazy-start] task=%s worktree error: %v", taskID, err)
+		log.Printf("[lazy-start] task=%s setup failed: %v", taskID, err)
 		task.StatusState = "failed"
 		task.Status = "review"
-		task.Output = fmt.Sprintf("Failed to create worktree: %v", err)
+		task.Output = err.Error()
 		_ = te.store.UpdateTask(task)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(task.ID, fmt.Sprintf("Worktree creation failed: %v", err), "worktree_failed")
+		te.sendAndPersistError(task.ID, err.Error(), "setup_failed")
 		return
 	}
-	log.Printf("[lazy-start] task=%s worktree=%s", taskID, wtPath)
-	te.appStreamMgr.WatchWorktree(taskID, projectID, baseRef)
-
-	task.StatusState = "running"
-	task.Status = "in_progress"
-	task.BaseRef = baseRef
-	_ = te.store.UpdateTask(task)
+	task = execSetup.task
+	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	userMsgChan := make(chan stream.UserMessage, 16)
-	te.taskMu.Lock()
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
-	te.taskMu.Unlock()
-
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
-	// Check if project has sandbox enabled
-	project, projErr := te.store.GetProject(projectID)
-	if projErr != nil {
-		log.Printf("[lazy-start] task=%s get project error: %v", taskID, projErr)
-		task.StatusState = "failed"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Failed to load project: %v", projErr)
-		_ = te.store.UpdateTask(task)
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(task.ID, "Failed to load project", "project_not_found")
-		return
-	}
-	sandboxEnabled := project.SandboxEnabled
-	networkIsolation := project.SandboxNetworkIsolation
-	baseImage := project.SandboxImage
-	sandboxDockerfilePath := project.SandboxDockerfilePath
-	memoryLimit := project.SandboxMemoryLimit
-
-	go te.executeTask(ctx, task, projectID, project.Name, wtPath, serverURL, modelName, userMsgChan, sandboxEnabled, networkIsolation, baseImage, sandboxDockerfilePath, memoryLimit)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
 }
 
 // -- Helper functions --
@@ -801,16 +798,4 @@ func estimateTotalTokens(content, reasoning string) int {
 	return estimateTokensFromText(content) + estimateTokensFromText(reasoning)
 }
 
-func parseModelMetadata(msg string) (content, modelName, serverURL string) {
-	idx := strings.Index(msg, "\n")
-	if idx <= 0 {
-		return msg, "", ""
-	}
-	head := msg[:idx]
-	content = msg[idx+1:]
-	var meta map[string]string
-	if err := json.Unmarshal([]byte(head), &meta); err != nil {
-		return msg, "", ""
-	}
-	return content, meta["model_name"], meta["llama_server_url"]
-}
+

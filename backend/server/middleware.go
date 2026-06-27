@@ -105,15 +105,6 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// GetSessionID retrieves the session id from the request context.
-// Returns empty string if not present (e.g., public endpoint).
-func GetSessionID(r *http.Request) string {
-	if id, ok := r.Context().Value(sessionKey{}).(string); ok {
-		return id
-	}
-	return ""
-}
-
 // PanicRecoveryMiddleware recovers from panics and returns a JSON error.
 func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,10 +168,4 @@ func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// GetCSRFToken retrieves the CSRF token from the request context.
-func GetCSRFToken(r *http.Request) string {
-	if token, ok := r.Context().Value(csrfKey{}).(string); ok {
-		return token
-	}
-	return ""
-}
+

@@ -60,7 +60,8 @@ func enrichTaskWorktree(task *types.Task, workspaceDir string) {
 }
 
 // HandleList lists or creates tasks for a project.
-func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
 		tasks, err := h.store.GetTasksByProject(projectID)
@@ -187,7 +188,9 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 }
 
 // HandleByID handles GET/PUT/DELETE for a single task.
-func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
 		task, err := h.store.GetTask(projectID, taskID)
@@ -237,7 +240,8 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request, project
 }
 
 // HandleClearDone deletes all tasks with status 'done' for a project.
-func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -264,7 +268,9 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request, pr
 }
 
 // HandleMove moves a task to a different column.
-func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -395,7 +401,9 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
 // Operations are serialized per project to prevent git race conditions.
-func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -489,308 +497,6 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
-}
-
-// mergeWorktreeIntoOrigin merges the task's worktree branch into the project's current branch.
-// On merge conflict, it uses the LLM to resolve conflicts.
-func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *types.Task) error {
-	// BaseRef is a commit hash. Find which branch it belongs to.
-	originBranch := ""
-	if task.BaseRef != "" {
-		// Check if BaseRef is a commit hash (40 hex chars)
-		if len(task.BaseRef) == 40 && isHex(task.BaseRef) {
-			// Find the branch that points to this commit (or a descendant)
-			project, pErr := h.store.GetProject(projectID)
-			if pErr == nil {
-				// Try project's stored origin_branch first
-				if project.OriginBranch != "" {
-					originBranch = project.OriginBranch
-				}
-				// Verify: check if originBranch is a descendant of BaseRef
-				if originBranch != "" {
-					c := osexec.Command("git", "-C", project.Path, "merge-base", "--is-ancestor", task.BaseRef, originBranch)
-					if c.Run() != nil {
-						originBranch = "" // BaseRef is not an ancestor, don't use this branch
-					}
-				}
-			}
-		}
-	}
-	// Fall back to live HEAD
-	if originBranch == "" {
-		var err error
-		originBranch, err = h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil {
-			log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
-			return nil
-		}
-	}
-	originBranch = strings.TrimSpace(originBranch)
-	if originBranch == "" || originBranch == "HEAD" {
-		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
-		return nil
-	}
-	taskBranch := task.Branch
-	if taskBranch == "" {
-		log.Printf("[merge] task=%s no task branch set, skipping merge", taskID)
-		return nil
-	}
-
-	// Stash any working tree changes to allow clean checkout
-	hadStash := false
-	if err := h.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban merge stash"); err == nil {
-		hadStash = true
-	}
-	defer func() {
-		if hadStash {
-			_ = h.worktreeMgr.GitRunInProject(projectID, "stash", "pop")
-		}
-	}()
-
-	// Checkout origin branch in the project directory (force to handle dirty working tree)
-	if err := h.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", originBranch); err != nil {
-		return fmt.Errorf("checkout origin branch %s: %w", originBranch, err)
-	}
-
-	// Merge the task branch
-	mergeOut, mergeErr := h.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch)
-	if mergeErr == nil {
-		log.Printf("[merge] task=%s merged into %s successfully: %s", taskID, originBranch, strings.TrimSpace(mergeOut))
-		return nil
-	}
-
-	// Merge conflict detected — resolve with LLM
-	log.Printf("[merge] task=%s conflict merging into %s, resolving with LLM", taskID, originBranch)
-	conflictedFiles := h.getConflictedFiles(projectID)
-	if len(conflictedFiles) == 0 {
-		// Abort merge if no conflicted files found (shouldn't happen)
-		_ = h.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
-		return fmt.Errorf("merge conflict but no conflicted files found")
-	}
-
-	// Log conflict detection as system message
-	fileList := strings.Join(conflictedFiles, ", ")
-	h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge conflict detected in: %s. Resolving with LLM...", fileList))
-
-	// Resolve conflicts with LLM
-	resolutionMsg, resolveErr := h.resolveMergeConflicts(projectID, taskID, task, conflictedFiles)
-	if resolveErr != nil {
-		log.Printf("[merge] task=%s LLM conflict resolution failed: %v", taskID, resolveErr)
-		// Abort merge and return error
-		_ = h.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
-		return fmt.Errorf("LLM conflict resolution failed: %w", resolveErr)
-	}
-
-	// Stage resolved files and commit
-	for _, f := range conflictedFiles {
-		_ = h.worktreeMgr.GitRunInProject(projectID, "add", f)
-	}
-	modelName := task.ModelName
-	if modelName == "" {
-		modelName = "unknown model"
-	}
-	commitMsg := fmt.Sprintf("%s, generated by %s\n\n%s", task.Title, modelName, resolutionMsg)
-	if err := h.worktreeMgr.GitRunInProject(projectID, "commit", "-m", commitMsg); err != nil {
-		return fmt.Errorf("commit resolved merge: %w", err)
-	}
-
-	log.Printf("[merge] task=%s conflicts resolved and committed", taskID)
-	return nil
-}
-
-// getConflictedFiles returns a list of files with merge conflicts.
-func (h *TaskHandler) getConflictedFiles(projectID string) []string {
-	statusOut, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil
-	}
-	var files []string
-	for line := range strings.SplitSeq(statusOut, "\n") {
-		f := strings.TrimSpace(line)
-		if f != "" {
-			files = append(files, f)
-		}
-	}
-	return files
-}
-
-// resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
-func (h *TaskHandler) resolveMergeConflicts(projectID, taskID string, task *types.Task, conflictedFiles []string) (string, error) {
-	serverURL := task.LlamaServerURL
-	modelName := task.ModelName
-	if serverURL == "" || modelName == "" {
-		return "", fmt.Errorf("no LLM config on task")
-	}
-
-	// Build conflict context for each file
-	var conflictParts []string
-	for _, f := range conflictedFiles {
-		project, _ := h.store.GetProject(projectID)
-		filePath := filepath.Join(project.Path, f)
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			log.Printf("[merge] task=%s failed to read conflicted file %s: %v", taskID, f, err)
-			continue
-		}
-		conflictParts = append(conflictParts, fmt.Sprintf("FILE: %s\n---BEGIN---\n%s\n---END---", f, string(content)))
-	}
-
-	if len(conflictParts) == 0 {
-		return "", fmt.Errorf("no conflict content to resolve")
-	}
-
-	conflictContext := strings.Join(conflictParts, "\n\n")
-	prompt := fmt.Sprintf(`You are resolving merge conflicts. The following files have merge conflict markers (<<<<<<< , =======, >>>>>>> ).
-
-Task title: %s
-Task description: %s
-
-Conflicted files:
-
-%s
-
-For each file, provide the fully resolved content WITHOUT any conflict markers. Maintain the intent of the newer changes. If any functionality was lost during resolution, note it.
-
-Output format: For each file, output:
-RESOLVE <filepath>
-<full resolved file content>
-END_RESOLVE
-
-Then output a summary:
-SUMMARY
-<Brief summary of changes made and any lost functionality>
-END_SUMMARY`, task.Title, task.Prompt, conflictContext)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "You are an expert developer resolving git merge conflicts. Output the fully resolved file contents and a summary."},
-		{Role: "user", Content: prompt},
-	}
-
-	_, response, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages)
-	if err != nil {
-		return "", fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	// Parse the response and write resolved files
-	project, _ := h.store.GetProject(projectID)
-	var summary string
-	currentFile := ""
-	var currentContent strings.Builder
-	inResolve := false
-	inSummary := false
-
-	for line := range strings.SplitSeq(response, "\n") {
-		if strings.HasPrefix(line, "RESOLVE ") {
-			// Write previous file if any
-			if currentFile != "" && inResolve {
-				fullPath := filepath.Join(project.Path, currentFile)
-				if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
-					log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
-				}
-			}
-			currentFile = strings.TrimPrefix(line, "RESOLVE ")
-			currentContent.Reset()
-			inResolve = true
-			inSummary = false
-			continue
-		}
-		if line == "END_RESOLVE" {
-			// Write current file
-			if currentFile != "" && inResolve {
-				fullPath := filepath.Join(project.Path, currentFile)
-				if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
-					log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
-				}
-				inResolve = false
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "SUMMARY") {
-			inSummary = true
-			inResolve = false
-			continue
-		}
-		if line == "END_SUMMARY" {
-			inSummary = false
-			continue
-		}
-		if inResolve {
-			currentContent.WriteString(line + "\n")
-		} else if inSummary {
-			if summary != "" {
-				summary += "\n"
-			}
-			summary += line
-		}
-	}
-	// Write last file if any
-	if currentFile != "" && inResolve {
-		fullPath := filepath.Join(project.Path, currentFile)
-		if err := os.WriteFile(fullPath, []byte(currentContent.String()), 0644); err != nil {
-			log.Printf("[merge] task=%s failed to write resolved file %s: %v", taskID, currentFile, err)
-		}
-	}
-
-	if summary == "" {
-		summary = "Conflicts resolved (no summary provided by LLM)"
-	}
-
-	// Log resolution as a merge_resolution message (persisted + broadcast)
-	h.logMergeResolution(taskID, task.CurrentThreadID, conflictedFiles, summary)
-
-	return summary, nil
-}
-
-// logSystemMessage creates a system message in the task's conversation thread.
-func (h *TaskHandler) logSystemMessage(taskID, threadID, content string) {
-	if threadID == "" {
-		return
-	}
-	if err := h.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        uuid.New().String(),
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "system",
-		Content:   content,
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		log.Printf("[system-msg] task=%s failed to log message: %v", taskID, err)
-	}
-}
-
-// logMergeResolution persists a merge_resolution message and broadcasts it to task stream clients.
-func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFiles []string, summary string) {
-	if threadID == "" {
-		return
-	}
-	content := fmt.Sprintf("Merge conflicts resolved in %d file(s): %s\n\n%s",
-		len(conflictedFiles), strings.Join(conflictedFiles, ", "), summary)
-	msgID := uuid.New().String()
-	if err := h.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        msgID,
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "merge_resolution",
-		Content:   content,
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
-		return
-	}
-	// Broadcast to task stream clients for real-time display
-	task, _ := h.store.GetTaskByTaskID(taskID)
-	if task != nil && h.boardStreamMgr != nil {
-		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
-			"id":               msgID,
-			"conflicted_files": conflictedFiles,
-			"summary":          summary,
-			"content":          content,
-			"created_at":       time.Now().UTC().Format(time.RFC3339),
-		}})
-	}
 }
 
 // broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
@@ -937,7 +643,9 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 // HandleStartWithSubtasks is the HTTP handler for starting a task.
 // If the task has incomplete subtasks, it uses the LLM to pick one and starts it.
 // If the task has no subtasks, it starts normally.
-func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1010,7 +718,9 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 
 // HandleStopWithCascade is the HTTP handler for stopping a task.
 // If the task has running descendants, it stops them all.
-func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1038,7 +748,9 @@ func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleStartSubtask explicitly starts a single subtask without moving the parent.
-func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1120,14 +832,4 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	}
 
 	return nil
-}
-
-// isHex checks if a string contains only hexadecimal characters.
-func isHex(s string) bool {
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
-		}
-	}
-	return true
 }

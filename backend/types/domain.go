@@ -21,7 +21,6 @@ type Task struct {
 	ReasoningEffort           string    `json:"reasoning_effort"`
 	MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"`
 	AutoCommit                bool      `json:"auto_commit"`
-	AutoPR                    bool      `json:"auto_pr"`
 	PlanMode                  bool      `json:"plan_mode"`
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`

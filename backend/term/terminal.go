@@ -276,7 +276,9 @@ func (t *taskTerminal) close() {
 }
 
 // HandleTerminal handles WebSocket connections for a task terminal.
-func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -293,7 +295,8 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 }
 
 // HandleProjectTerminal handles WebSocket connections for a project-level terminal.
-func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request, projectID string) {
+func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

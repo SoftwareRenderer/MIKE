@@ -134,12 +134,17 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		taskBufSize:   DefaultBufferSize,
 	}
 	// Initialize the filesystem watcher for task worktrees
-	asm.watcher, _ = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
-	go asm.watcher.StartEventLoop()
+	var err error
+	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
+	if err == nil {
+		go asm.watcher.StartEventLoop()
+	}
 
 	// Initialize the project directory watcher
-	asm.projectWatcher, _ = NewProjectWatcher(asm.BroadcastFsEvent)
-	go asm.projectWatcher.StartEventLoop()
+	asm.projectWatcher, err = NewProjectWatcher(asm.BroadcastFsEvent)
+	if err == nil {
+		go asm.projectWatcher.StartEventLoop()
+	}
 
 	return asm
 }

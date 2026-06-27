@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"kanban/backend/auth"
 )
@@ -118,5 +117,3 @@ func clearSessionCookie(w http.ResponseWriter) {
 	})
 }
 
-// sessionDuration returns the session max age.
-var sessionDuration = 30 * 24 * time.Hour

@@ -23,7 +23,8 @@ func NewReviewHandler(store *store.Store) *ReviewHandler {
 }
 
 // HandleComments lists or creates review comments for a task.
-func (h *ReviewHandler) HandleComments(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *ReviewHandler) HandleComments(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
 		comments, err := h.store.GetReviewComments(taskID)
@@ -59,7 +60,8 @@ func (h *ReviewHandler) HandleComments(w http.ResponseWriter, r *http.Request, p
 }
 
 // HandleComment handles GET/PUT/DELETE for a single review comment.
-func (h *ReviewHandler) HandleComment(w http.ResponseWriter, r *http.Request, projectID, taskID, commentID string) {
+func (h *ReviewHandler) HandleComment(w http.ResponseWriter, r *http.Request) {
+	commentID := r.PathValue("commentID")
 	switch r.Method {
 	case http.MethodPut:
 		var req types.UpdateReviewCommentRequest

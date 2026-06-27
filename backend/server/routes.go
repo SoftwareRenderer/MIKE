@@ -4,70 +4,33 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"regexp"
-)
-
-// pathRegex patterns for routing.
-var (
-	reProjectByID         = regexp.MustCompile(`^/api/projects/([^/]+)$`)
-	reProjectBoard        = regexp.MustCompile(`^/api/projects/([^/]+)/board$`)
-	reAppStream           = regexp.MustCompile(`^/api/stream$`)
-	reProjectTasks        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks$`)
-	reProjectTaskByID     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)$`)
-	reTaskMove            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/move$`)
-	reTaskStart           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/start$`)
-	reTaskStartSubtask    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/start-subtask$`)
-	reTaskStop            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/stop$`)
-	reTaskRetry           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/retry$`)
-	reTaskResume          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/resume$`)
-	reTaskSend            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/send$`)
-	reTaskDiff            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/diff$`)
-	reTaskCommits         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commits$`)
-	reTaskResetWorktree   = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/reset-worktree$`)
-	reTaskMessages        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages$`)
-	reTaskMessageByID     = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/messages/([^/]+)$`)
-	reTaskDeps            = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies$`)
-	reTaskDepChild        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependencies/([^/]+)$`)
-	reTaskDependents      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/dependents$`)
-	reTaskReview          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/review-comments$`)
-	reTaskReviewByID      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/review-comments/([^/]+)$`)
-	reTaskReorder         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/reorder$`)
-	reTasksDone           = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/done$`)
-	reProjectGitLog       = regexp.MustCompile(`^/api/projects/([^/]+)/git/log$`)
-	reProjectGitBranch    = regexp.MustCompile(`^/api/projects/([^/]+)/git/branch$`)
-	reProjectGitBranches  = regexp.MustCompile(`^/api/projects/([^/]+)/git/branches$`)
-	reProjectGitDiff      = regexp.MustCompile(`^/api/projects/([^/]+)/git/diff$`)
-	reProjectGitStatus    = regexp.MustCompile(`^/api/projects/([^/]+)/git/status$`)
-	reProjectGitCheckout  = regexp.MustCompile(`^/api/projects/([^/]+)/git/checkout$`)
-	reProjectGitPull      = regexp.MustCompile(`^/api/projects/([^/]+)/git/pull$`)
-	reProjectGitPush      = regexp.MustCompile(`^/api/projects/([^/]+)/git/push$`)
-	reProjectStats        = regexp.MustCompile(`^/api/projects/([^/]+)/stats$`)
-	reProjectSandboxBuild = regexp.MustCompile(`^/api/projects/([^/]+)/sandbox/build$`)
-	reProjectTerminal     = regexp.MustCompile(`^/api/projects/([^/]+)/terminal$`)
-	reTaskTerminal        = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/terminal$`)
-	reTaskCommit          = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/commit$`)
-	reTaskThreads         = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads$`)
-	reTaskThreadSwitch    = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/switch$`)
-	reTaskThreadFork      = regexp.MustCompile(`^/api/projects/([^/]+)/tasks/([^/]+)/threads/fork$`)
 )
 
 func (s *Server) setupRoutes() {
 	s.mux = http.NewServeMux()
 
+	// Health & auth
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
 
+	// Config
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
 	s.mux.HandleFunc("/api/config/fetch-models", s.configStore.HandleFetchModels)
 	s.mux.HandleFunc("/api/config/pi-available", s.configStore.HandlePiAvailability)
 	s.mux.HandleFunc("/api/config/test-pi-connection", s.configStore.HandleTestPiConnection)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
+
+	// Test endpoints
 	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
 	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
+
+	// WebSocket stream
 	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
+
+	// Global utilities
 	s.mux.HandleFunc("/api/gc", s.handleGC)
 	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)
@@ -75,9 +38,64 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
 	s.mux.HandleFunc("/api/fs", s.handleFS)
 
-	s.mux.HandleFunc("/api/projects", s.handleProjects)
-	s.mux.HandleFunc("/api/projects/", s.handleProjectScoped)
+	// Projects
+	s.mux.HandleFunc("GET /api/projects", s.projectHandler.HandleList)
+	s.mux.HandleFunc("POST /api/projects", s.projectHandler.HandleCreate)
+	s.mux.HandleFunc("GET /api/projects/counts", s.projectHandler.HandleCounts)
+	s.mux.HandleFunc("/api/projects/{projectID}", s.projectHandler.HandleByID)
+	s.mux.HandleFunc("/api/projects/{projectID}/board", s.boardHandler.HandleGetBoard)
+	s.mux.HandleFunc("/api/projects/{projectID}/board/reorder", s.boardHandler.HandleReorder)
+	s.mux.HandleFunc("/api/projects/{projectID}/stats", s.projectHandler.HandleStats)
+	s.mux.HandleFunc("/api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
+	s.mux.HandleFunc("/api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
 
+	// Tasks
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks", s.taskHandler.HandleList)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/done", s.taskHandler.HandleClearDone)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/reorder", s.boardHandler.HandleReorder)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStartWithSubtasks)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStopWithCascade)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/diff", s.gitHandler.HandleTaskDiff)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commits", s.gitHandler.HandleTaskCommits)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/reset-worktree", s.gitHandler.HandleResetWorktree)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)
+
+	// Task messages
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
+
+	// Task threads
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/fork", s.handleThreadFork)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/switch", s.handleThreadSwitch)
+
+	// Task dependencies
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependencies", s.depHandler.HandleDependencies)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependencies/{childID}", s.depHandler.HandleDependency)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependents", s.depHandler.HandleDependents)
+
+	// Task review comments
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/review-comments", s.reviewHandler.HandleComments)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/review-comments/{commentID}", s.reviewHandler.HandleComment)
+
+	// Git operations
+	s.mux.HandleFunc("/api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/branch", s.gitHandler.HandleCurrentBranch)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/branches", s.gitHandler.HandleBranches)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/diff", s.gitHandler.HandleDiff)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/status", s.gitHandler.HandleStatus)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/checkout", s.gitHandler.HandleCheckout)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
+
+	// Frontend
 	frontendDist := GetEnv("FRONTEND_DIST", "./frontend/dist")
 	if _, err := os.Stat(frontendDist); err == nil {
 		sub, err := fs.Sub(os.DirFS(frontendDist), ".")
@@ -85,207 +103,4 @@ func (s *Server) setupRoutes() {
 			s.mux.Handle("/", http.FileServer(noWriterToFS{http.FS(sub)}))
 		}
 	}
-}
-
-func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	if path != "/api/projects" {
-		s.handleProjectScoped(w, r)
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		s.projectHandler.HandleList(w, r)
-	case http.MethodPost:
-		s.projectHandler.HandleCreate(w, r)
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleProjectScoped(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	if path == "/api/projects/counts" {
-		s.projectHandler.HandleCounts(w, r)
-		return
-	}
-
-	if m := reProjectByID.FindStringSubmatch(path); m != nil {
-		s.projectHandler.HandleByID(w, r, m[1])
-		return
-	}
-
-	if m := reProjectStats.FindStringSubmatch(path); m != nil {
-		s.projectHandler.HandleStats(w, r, m[1])
-		return
-	}
-
-	if m := reProjectBoard.FindStringSubmatch(path); m != nil {
-		s.boardHandler.HandleGetBoard(w, r, m[1])
-		return
-	}
-
-	if m := reTaskReorder.FindStringSubmatch(path); m != nil {
-		s.boardHandler.HandleReorder(w, r, m[1])
-		return
-	}
-
-	if m := reTasksDone.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleClearDone(w, r, m[1])
-		return
-	}
-
-	if m := reProjectTasks.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleList(w, r, m[1])
-		return
-	}
-
-	if m := reTaskDeps.FindStringSubmatch(path); m != nil {
-		s.depHandler.HandleDependencies(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskDepChild.FindStringSubmatch(path); m != nil {
-		s.depHandler.HandleDependency(w, r, m[1], m[2], m[3])
-		return
-	}
-
-	if m := reTaskDependents.FindStringSubmatch(path); m != nil {
-		s.depHandler.HandleDependents(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskReview.FindStringSubmatch(path); m != nil {
-		s.reviewHandler.HandleComments(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskReviewByID.FindStringSubmatch(path); m != nil {
-		s.reviewHandler.HandleComment(w, r, m[1], m[2], m[3])
-		return
-	}
-
-	if m := reTaskSend.FindStringSubmatch(path); m != nil {
-		s.executor.HandleSend(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskDiff.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleTaskDiff(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskCommits.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleTaskCommits(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskResetWorktree.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleResetWorktree(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskMessageByID.FindStringSubmatch(path); m != nil {
-		s.handleTaskMessageByID(w, r, m[1], m[2], m[3])
-		return
-	}
-	if m := reTaskMessages.FindStringSubmatch(path); m != nil {
-		s.handleTaskMessages(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskThreadFork.FindStringSubmatch(path); m != nil {
-		s.handleThreadFork(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskThreadSwitch.FindStringSubmatch(path); m != nil {
-		s.handleThreadSwitch(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskThreads.FindStringSubmatch(path); m != nil {
-		s.handleThreads(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskMove.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleMove(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskCommit.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleCommitAndDone(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reTaskStart.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleStartWithSubtasks(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskStartSubtask.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleStartSubtask(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskStop.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleStopWithCascade(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskRetry.FindStringSubmatch(path); m != nil {
-		s.executor.HandleRetry(w, r, m[1], m[2])
-		return
-	}
-	if m := reTaskResume.FindStringSubmatch(path); m != nil {
-		s.executor.HandleResume(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reProjectTaskByID.FindStringSubmatch(path); m != nil {
-		s.taskHandler.HandleByID(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reProjectGitLog.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleLog(w, r, m[1])
-		return
-	}
-	if m := reProjectGitBranch.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleCurrentBranch(w, r, m[1])
-		return
-	}
-	if m := reProjectGitBranches.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleBranches(w, r, m[1])
-		return
-	}
-	if m := reProjectGitDiff.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleDiff(w, r, m[1])
-		return
-	}
-	if m := reProjectGitStatus.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleStatus(w, r, m[1])
-		return
-	}
-	if m := reProjectGitCheckout.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandleCheckout(w, r, m[1])
-		return
-	}
-	if m := reProjectGitPull.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandlePull(w, r, m[1])
-		return
-	}
-	if m := reProjectGitPush.FindStringSubmatch(path); m != nil {
-		s.gitHandler.HandlePush(w, r, m[1])
-		return
-	}
-
-	if m := reTaskTerminal.FindStringSubmatch(path); m != nil {
-		s.terminalMgr.HandleTerminal(w, r, m[1], m[2])
-		return
-	}
-
-	if m := reProjectSandboxBuild.FindStringSubmatch(path); m != nil {
-		s.projectHandler.HandleSandboxBuild(w, r, m[1])
-		return
-	}
-
-	if m := reProjectTerminal.FindStringSubmatch(path); m != nil {
-		s.terminalMgr.HandleProjectTerminal(w, r, m[1])
-		return
-	}
-
-	http.NotFound(w, r)
 }

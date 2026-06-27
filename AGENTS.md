@@ -6,19 +6,8 @@
 
 gVisor (`runsc`) is required for project sandboxing. When a project has sandboxing enabled, task tool calls and terminal sessions run inside gVisor-isolated containers.
 
-**Install:**
-```bash
-sudo bash scripts/install-gvisor.sh
-```
-
-**Verify:**
-```bash
-runsc --version
-podman run --rm --runtime runsc --runtime-flag ignore-cgroups=true --security-opt label=disable alpine echo hello
-```
-
 **Notes:**
-- gVisor must be installed system-wide (`/usr/local/bin/runsc`) — it needs root-level cgroup access
+- gVisor must run in rootless mode
 - Podman sandbox commands run via `podman --runtime runsc`
 - Without gVisor, projects with sandboxing enabled will refuse to start tasks (hard error, no fallback)
 
@@ -38,7 +27,7 @@ curl -s http://localhost:3000/api/config
 ```
 
 ### Rules
-- **Always restart** after backend changes
+- **Restarting** Backend changes require a restart. Frontend changes do not require restarts.
 - **Never leave running** after a crash or panic
 - **E2E tests manage their own server** — global-setup starts/stops a test server automatically
 - **Restart manually after tests** — your dev server is killed during test runs

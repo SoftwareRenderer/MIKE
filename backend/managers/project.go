@@ -127,7 +127,8 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleStats returns aggregated token usage stats for a project.
-func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
 		stats, err := h.store.GetProjectStats(id)
@@ -201,7 +202,8 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 }
 
 // HandleSandboxBuild builds a container image from the project's Dockerfile.
-func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("projectID")
 	if r.Method != http.MethodPost {
 		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -240,7 +242,8 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.
-func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
 		p, err := h.store.GetProject(id)

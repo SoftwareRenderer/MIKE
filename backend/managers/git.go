@@ -26,7 +26,8 @@ func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHan
 
 // HandleLog returns commit log for a project.
 // With ?full=1 query param, returns extended fields: hash, author, date, parents.
-func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -94,7 +95,8 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request, projectID
 }
 
 // HandleBranches lists branches for a project.
-func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -117,7 +119,8 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request, proj
 }
 
 // HandleCurrentBranch returns the current branch name for a project.
-func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -135,7 +138,8 @@ func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request,
 }
 
 // HandleDiff returns diff between refs.
-func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -156,7 +160,8 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request, projectI
 }
 
 // HandleStatus returns working tree status.
-func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -173,7 +178,8 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request, projec
 }
 
 // HandleCheckout checks out a branch.
-func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -193,7 +199,8 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request, proj
 }
 
 // HandlePull pulls from remote.
-func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -208,7 +215,8 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request, projectI
 }
 
 // HandlePush pushes to remote.
-func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request, projectID string) {
+func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -226,7 +234,9 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request, projectI
 // Only commits after the divergence from the original branch are returned.
 // Also returns the base commit info for display in the diff selector.
 // Falls back to project repo when worktree doesn't exist (e.g., after commit-and-done).
-func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
@@ -327,7 +337,9 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 //   - head: second ref for commit-to-commit diff (git diff base..head)
 //
 // Falls back to project repo when worktree doesn't exist (e.g., after commit-and-done).
-func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
@@ -420,7 +432,9 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 
 // HandleResetWorktree resets the task's worktree to a specific commit.
 // Used when deleting messages after a checkpoint to roll back file changes.
-func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return

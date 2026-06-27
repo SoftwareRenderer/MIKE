@@ -20,7 +20,9 @@ import (
 	"kanban/backend/types"
 )
 
-func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method == http.MethodDelete {
 		var req struct {
 			MessageID    string `json:"message_id"`
@@ -56,88 +58,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 		// If so, delete those orphaned fork threads and switch to parent if needed.
 		// Skip during regeneration — the message is being re-sent, not permanently removed.
 		if !req.Regenerate {
-			// Match by message ID first (direct match), then by created_at time (for copied messages
-			// in fork threads that have new IDs but preserved timestamps).
-			checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(req.MessageID)
-			if len(checkpointThreads) == 0 && msgTimeErr == nil && msgCreatedAt != nil {
-				checkpointThreads, _ = s.store.GetThreadsByCheckpointMessageTime(msgCreatedAt.Format(time.RFC3339))
-			}
-			if len(checkpointThreads) > 0 {
-				activeWasDeleted := false
-				// Collect branches to delete before removing threads
-				var branchesToDelete []string
-				for _, th := range checkpointThreads {
-					if th.IsActive {
-						activeWasDeleted = true
-					}
-					if th.GitBranch != "" {
-						branchesToDelete = append(branchesToDelete, th.GitBranch)
-					}
-					_ = s.store.DeleteThread(th.ID)
-				}
-				if activeWasDeleted {
-					// Switch to the parent thread of the deleted active thread.
-					// Walk up the parent chain in case parents were also deleted.
-					allThreads, _ := s.store.GetThreadsByTask(taskID)
-					threadMap := make(map[string]types.TaskThread)
-					for _, t := range allThreads {
-						threadMap[t.ID] = t
-					}
-					var targetThread *types.TaskThread
-					candidate := checkpointThreads[0].ParentThreadID
-					for candidate != "" {
-						parent, ok := threadMap[candidate]
-						if !ok {
-							// Parent was also deleted; walk up further
-							candidate = parent.ParentThreadID
-							continue
-						}
-						// Found a surviving parent
-						_ = s.store.SetActiveThread(parent.ID)
-						task.CurrentThreadID = parent.ID
-						task.UpdatedAt = time.Now().UTC()
-						_ = s.store.UpdateTask(task)
-						targetThread = &parent
-						candidate = "" // break
-					}
-					if candidate != "" {
-						// No surviving parent found; fall back to root/Main thread
-						for _, t := range allThreads {
-							if t.Name == "Main" || t.ParentThreadID == "" {
-								_ = s.store.SetActiveThread(t.ID)
-								task.CurrentThreadID = t.ID
-								task.UpdatedAt = time.Now().UTC()
-								_ = s.store.UpdateTask(task)
-								targetThread = &t
-								break
-							}
-						}
-					}
-					// Checkout the new active thread's branch and delete orphaned branches
-					s.checkoutThreadBranch(taskID, targetThread)
-					for _, branch := range branchesToDelete {
-						s.deleteThreadBranch(taskID, branch)
-					}
-				} else {
-					// Non-active fork deleted; just clean up its branch
-					for _, branch := range branchesToDelete {
-						s.deleteThreadBranch(taskID, branch)
-					}
-				}
-				// Reset file state to match the (possibly new) active thread's conversation
-				lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
-				s.resetWorktreeToCommit(taskID, lastCommit)
-				s.broadcastTaskDiff(taskID)
-				// Broadcast updated task so frontend has new currentThreadID before diff loads
-				s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
-				s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
-			} else {
-				// No fork threads affected, but messages were deleted.
-				// Reset file state to match remaining conversation in active thread.
-				lastCommit := s.getLastCommitHashInThread(threadID)
-				s.resetWorktreeToCommit(taskID, lastCommit)
-				s.broadcastTaskDiff(taskID)
-			}
+			s.cleanupDeletedMessageForks(projectID, taskID, task, threadID, req.MessageID, msgCreatedAt, msgTimeErr)
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -187,7 +108,8 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request, proj
 	JSONResponse(w, http.StatusOK, messages)
 }
 
-func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request, projectID, taskID, messageID string) {
+func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
+	messageID := r.PathValue("messageID")
 	if r.Method == http.MethodGet {
 		// Check if deleting this message would delete a fork branch.
 		// Used by the frontend to show a warning in the delete dialog.
@@ -571,7 +493,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleThreads lists all threads for a task.
-func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
 		threads, err := s.store.GetThreadsByTask(taskID)
@@ -657,7 +581,9 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 }
 
 // handleThreadSwitch switches the active thread for a task.
-func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -755,7 +681,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request, proj
 }
 
 // handleThreadFork creates a new thread by forking from a checkpoint.
-func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
+func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -983,4 +911,92 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 		return
 	}
 	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
+}
+
+// cleanupDeletedMessageForks handles orphan fork thread cleanup when a checkpoint
+// message is deleted. Deletes orphaned forks, switches to surviving parent if needed,
+// checkouts branch, resets worktree, and broadcasts updates.
+func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *types.Task, threadID, messageID string, msgCreatedAt *time.Time, msgTimeErr error) {
+	// Match by message ID first (direct match), then by created_at time (for copied messages
+	// in fork threads that have new IDs but preserved timestamps).
+	checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(messageID)
+	if len(checkpointThreads) == 0 && msgTimeErr == nil && msgCreatedAt != nil {
+		checkpointThreads, _ = s.store.GetThreadsByCheckpointMessageTime(msgCreatedAt.Format(time.RFC3339))
+	}
+	if len(checkpointThreads) > 0 {
+		activeWasDeleted := false
+		// Collect branches to delete before removing threads
+		var branchesToDelete []string
+		for _, th := range checkpointThreads {
+			if th.IsActive {
+				activeWasDeleted = true
+			}
+			if th.GitBranch != "" {
+				branchesToDelete = append(branchesToDelete, th.GitBranch)
+			}
+			_ = s.store.DeleteThread(th.ID)
+		}
+		if activeWasDeleted {
+			// Switch to the parent thread of the deleted active thread.
+			// Walk up the parent chain in case parents were also deleted.
+			allThreads, _ := s.store.GetThreadsByTask(taskID)
+			threadMap := make(map[string]types.TaskThread)
+			for _, t := range allThreads {
+				threadMap[t.ID] = t
+			}
+			var targetThread *types.TaskThread
+			candidate := checkpointThreads[0].ParentThreadID
+			for candidate != "" {
+				parent, ok := threadMap[candidate]
+				if !ok {
+					// Parent was also deleted; walk up further
+					candidate = parent.ParentThreadID
+					continue
+				}
+				// Found a surviving parent
+				_ = s.store.SetActiveThread(parent.ID)
+				task.CurrentThreadID = parent.ID
+				task.UpdatedAt = time.Now().UTC()
+				_ = s.store.UpdateTask(task)
+				targetThread = &parent
+				candidate = "" // break
+			}
+			if candidate != "" {
+				// No surviving parent found; fall back to root/Main thread
+				for _, t := range allThreads {
+					if t.Name == "Main" || t.ParentThreadID == "" {
+						_ = s.store.SetActiveThread(t.ID)
+						task.CurrentThreadID = t.ID
+						task.UpdatedAt = time.Now().UTC()
+						_ = s.store.UpdateTask(task)
+						targetThread = &t
+						break
+					}
+				}
+			}
+			// Checkout the new active thread's branch and delete orphaned branches
+			s.checkoutThreadBranch(taskID, targetThread)
+			for _, branch := range branchesToDelete {
+				s.deleteThreadBranch(taskID, branch)
+			}
+		} else {
+			// Non-active fork deleted; just clean up its branch
+			for _, branch := range branchesToDelete {
+				s.deleteThreadBranch(taskID, branch)
+			}
+		}
+		// Reset file state to match the (possibly new) active thread's conversation
+		lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
+		s.resetWorktreeToCommit(taskID, lastCommit)
+		s.broadcastTaskDiff(taskID)
+		// Broadcast updated task so frontend has new currentThreadID before diff loads
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
+	} else {
+		// No fork threads affected, but messages were deleted.
+		// Reset file state to match remaining conversation in active thread.
+		lastCommit := s.getLastCommitHashInThread(threadID)
+		s.resetWorktreeToCommit(taskID, lastCommit)
+		s.broadcastTaskDiff(taskID)
+	}
 }

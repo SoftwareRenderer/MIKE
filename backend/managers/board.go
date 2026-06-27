@@ -24,11 +24,8 @@ func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager
 }
 
 // HandleGetBoard returns the board (all tasks) for a project.
-func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request, projectID string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 
 	if _, err := h.store.GetProject(projectID); err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
@@ -55,11 +52,8 @@ func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request, pr
 }
 
 // HandleReorder bulk-reorders tasks within columns.
-func (h *BoardHandler) HandleReorder(w http.ResponseWriter, r *http.Request, projectID string) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (h *BoardHandler) HandleReorder(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
 
 	if _, err := h.store.GetProject(projectID); err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")

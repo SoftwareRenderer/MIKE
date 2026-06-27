@@ -6,15 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"kanban/backend/types"
 )
-
-// GenerateUUID returns a new UUID string.
-func GenerateUUID() string {
-	return uuid.New().String()
-}
 
 // GenerateTaskID returns a human-readable task ID (e.g., "frost-amber-quartz").
 func GenerateTaskID() string {

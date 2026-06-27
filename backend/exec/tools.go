@@ -423,7 +423,6 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ReasoningEffort:           parent.ReasoningEffort,
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
 		AutoCommit:                parent.AutoCommit,
-		AutoPR:                    parent.AutoPR,
 		PlanMode:                  false,
 		ParentTaskID:              actualParentID,
 		CreatedAt:                 now,

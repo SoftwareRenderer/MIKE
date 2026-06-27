@@ -109,7 +109,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     model_name                   TEXT NOT NULL DEFAULT '',
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
     auto_commit                  INTEGER NOT NULL DEFAULT 0,
-    auto_pr                      INTEGER NOT NULL DEFAULT 0,
     plan_mode                    INTEGER NOT NULL DEFAULT 0,
     parent_task_id               TEXT NULL,
     change_summary               TEXT DEFAULT NULL,
@@ -473,18 +472,17 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoPR, planMode, titleGenerating int
+	var autoCommit, planMode, titleGenerating int
 	var createdAt, updatedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoPR, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
+		&autoCommit, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
 	t.AutoCommit = i2b(autoCommit)
-	t.AutoPR = i2b(autoPR)
 	t.PlanMode = i2b(planMode)
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)

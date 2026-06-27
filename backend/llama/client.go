@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"kanban/backend/types"
 )
@@ -329,37 +328,6 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 
 	return usage, strings.TrimSpace(*content), nil
-}
-
-// HealthCheck pings the llama server.
-func (c *LlamaClient) HealthCheck() error {
-	url := c.baseURL + "/chat/completions"
-	reqBody := map[string]any{
-		"model":      c.modelName,
-		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
-		"max_tokens": 1,
-	}
-	data, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setAuthHeader(req)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("llama server error: %d", resp.StatusCode)
-	}
-	return nil
 }
 
 // MergeToolCalls merges streaming tool call deltas by index into complete tool calls.
