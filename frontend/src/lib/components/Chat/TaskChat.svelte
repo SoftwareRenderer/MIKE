@@ -439,10 +439,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     }
                 }
                 closeCurrentAssistant();
-                // Store prompt tokens for next turn's context baseline
+                // Store total context (prompt + predicted) for context usage display.
+                // prompt_tokens = input sent to LLM, predicted_tokens = output generated.
+                // Total context consumed = both, since output becomes part of history for next turn.
                 if (data.prompt_tokens !== undefined) {
-                    lastPromptTokens = data.prompt_tokens;
-                    contextState.used = data.prompt_tokens;
+                    lastPromptTokens = data.prompt_tokens + (data.predicted_tokens || 0);
+                    contextState.used = lastPromptTokens;
                 }
                 // Attach stats to the last assistant entry
                 const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
@@ -537,8 +539,13 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'stats': {
-                const data = event.data as { model_name: string; predicted_tokens: number; predicted_ms: number };
-                // Sync frontend counter with backend count for accuracy
+                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number };
+                // Sync frontend counter with backend count for accuracy.
+                // Update lastPromptTokens from the backend's prompt_tokens (accurate per-turn baseline).
+                // This ensures context usage is correct across tool call turns (no complete event between them).
+                if (data.prompt_tokens !== undefined && data.prompt_tokens > 0) {
+                    lastPromptTokens = data.prompt_tokens;
+                }
                 if (data.predicted_tokens !== streamTokenCount) {
                     streamTokenCount = data.predicted_tokens;
                     contextState.used = lastPromptTokens + streamTokenCount;
@@ -549,7 +556,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     if (entry) {
                         entry.stats = {
                             model_name: data.model_name,
-                            prompt_tokens: entry.stats?.prompt_tokens ?? 0,
+                            prompt_tokens: data.prompt_tokens ?? entry.stats?.prompt_tokens ?? 0,
                             predicted_tokens: data.predicted_tokens,
                             prompt_ms: entry.stats?.prompt_ms ?? 0,
                             predicted_ms: data.predicted_ms,
@@ -770,10 +777,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const dbIds = new Set(messages.map(m => m.id));
             const existingNonDb = entries.filter(e => !dbIds.has(e.id));
             entries = [...mergedDbEntries, ...existingNonDb];
-            // Restore context usage from the last assistant message
+            // Restore context usage from the last assistant message.
+            // Use total context (prompt + predicted) to reflect full window consumed.
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
-            if (lastAssistant?.stats?.prompt_tokens) {
-                lastPromptTokens = lastAssistant.stats.prompt_tokens;
+            if (lastAssistant?.stats) {
+                lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
                 contextState.used = lastPromptTokens;
             }
             // After replacing entries, the DOM re-renders and scroll state may be lost.

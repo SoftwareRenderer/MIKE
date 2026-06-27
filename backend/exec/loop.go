@@ -367,6 +367,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		var usage *types.ChatUsage
 		var streamErr error
 		var lastProgressSend time.Time // throttle progress updates to ~1/2s
+		var lastPredictedN int         // track predicted tokens for real-time stats events
 
 		go func() {
 			usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
@@ -407,6 +408,20 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 					}
 				}
+				// Send stats event when predicted token count changes.
+				// LLM client accumulates usage/timings from each SSE frame.
+				if usage != nil {
+					predictedN := usage.CompletionTokens
+					if predictedN != lastPredictedN {
+						lastPredictedN = predictedN
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+							"model_name":     activeModel,
+							"prompt_tokens":  usage.PromptTokens,
+							"predicted_tokens": predictedN,
+							"predicted_ms":   usage.PredictedMs,
+						}})
+					}
+				}
 			})
 
 			// Retry on transient errors (skip if cancelled by user message).
@@ -425,6 +440,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 						if choice.Delta.Content != nil {
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+						}
+						// Send stats event when predicted token count changes (retry path)
+						if usage != nil {
+							predictedN := usage.CompletionTokens
+							if predictedN != lastPredictedN {
+								lastPredictedN = predictedN
+								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+									"model_name":     activeModel,
+									"prompt_tokens":  usage.PromptTokens,
+									"predicted_tokens": predictedN,
+									"predicted_ms":   usage.PredictedMs,
+								}})
+							}
 						}
 					})
 					if streamErr == nil {

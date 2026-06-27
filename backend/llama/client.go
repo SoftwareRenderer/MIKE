@@ -192,22 +192,17 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 		if cr.Usage != nil {
 			usage = cr.Usage
-			if cr.Timings != nil {
-				usage.PromptMs = int64(cr.Timings.PromptMs)
-				usage.PredictedMs = int64(cr.Timings.PredictedMs)
-				// Fill cache tokens from timings if not in usage
-				if usage.PromptTokensDetails.CachedTokens == 0 && cr.Timings.CacheN > 0 {
-					usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
-				}
-			}
 			log.Printf("[llama] usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
 				usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
-		} else if cr.Timings != nil {
-			// Streaming response without usage object (e.g., llama.cpp) - build from timings
+		}
+		// Always process Timings (per-frame for llama.cpp) to get intermediate token counts.
+		// Timings.PredictedN gives cumulative completion tokens generated so far.
+		// This drives real-time stats events during streaming.
+		if cr.Timings != nil {
 			if usage == nil {
 				usage = &types.ChatUsage{}
 			}
-			// prompt_tokens = processed (prompt_n) + cached (cache_n)
+			// Use Timings for per-frame token counts (updates every frame during streaming)
 			usage.PromptTokens = cr.Timings.PromptN + cr.Timings.CacheN
 			usage.CompletionTokens = cr.Timings.PredictedN
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
