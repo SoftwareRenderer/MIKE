@@ -508,3 +508,47 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 		t.Error("expected binary file to have FileSize set")
 	}
 }
+
+func TestShouldIgnorePath_KnownDirs(t *testing.T) {
+	// Known directories at root level
+	for _, dir := range []string{"node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv", "target", "vendor", ".gradle", ".mypy_cache", ".pytest_cache", "coverage", ".nuxt", ".output", ".svelte-kit", ".turbo", ".vercel", ".docker"} {
+		if !ShouldIgnorePath(dir) {
+			t.Errorf("expected %q to be ignored", dir)
+		}
+		if !ShouldIgnorePath(dir + "/file.txt") {
+			t.Errorf("expected %q/file.txt to be ignored", dir)
+		}
+	}
+}
+
+func TestShouldIgnorePath_NestedPaths(t *testing.T) {
+	// Known directories nested deeper
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"src/node_modules/pkg/index.js", true},
+		{"packages/app/.next/cache/build", true},
+		{"lib/__pycache__/module.cpython-311.pyc", true},
+		{"a/b/c/vendor/bin/tool", true},
+		{"src/dist/output.js", true},
+		// Should NOT match partial names
+		{"my_node_modules/file.txt", false},
+		{"node_modules_backup/file.txt", false},
+		{"distro/file.txt", false},
+		{"building/file.txt", false},
+		{"coverage_report/file.txt", false},
+		// Normal paths should not be ignored
+		{"src/index.ts", false},
+		{"lib/utils/helpers.ts", false},
+		{"README.md", false},
+		{".github/workflows/ci.yml", false},
+	}
+
+	for _, tc := range tests {
+		result := ShouldIgnorePath(tc.path)
+		if result != tc.expected {
+			t.Errorf("ShouldIgnorePath(%q) = %v, want %v", tc.path, result, tc.expected)
+		}
+	}
+}

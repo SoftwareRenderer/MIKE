@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,9 +20,10 @@ type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrack
 
 // worktreeInfo tracks the state of a watched worktree.
 type worktreeInfo struct {
-	projectID string
-	path      string
-	baseRef   string
+	projectID  string
+	path       string
+	baseRef    string
+	ignoredDirs map[string]struct{} // merged set: hardcoded + git-ignored directory names
 }
 
 // WorktreeWatcher uses fsnotify to detect file changes in git worktrees.
@@ -66,20 +68,24 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 		_ = ww.watcher.Remove(info.path)
 	}
 
+	// Discover ignored directories (hardcoded + .gitignore)
+	ignored := loadIgnoredDirs(path)
+
 	// Track worktree info
 	ww.worktrees[taskID] = worktreeInfo{
-		projectID: projectID,
-		path:      path,
-		baseRef:   baseRef,
+		projectID:  projectID,
+		path:       path,
+		baseRef:    baseRef,
+		ignoredDirs: ignored,
 	}
 
-	// Add directory to fsnotify watcher (recursive)
-	if err := ww.addRecursive(path); err != nil {
+	// Add directory to fsnotify watcher (recursive, skipping ignored dirs)
+	if err := ww.addRecursive(path, ignored); err != nil {
 		delete(ww.worktrees, taskID)
 		return err
 	}
 
-	log.Printf("[watcher] task=%s watching %s", taskID, path)
+	log.Printf("[watcher] task=%s watching %s (ignored dirs: %d)", taskID, path, len(ignored))
 	return nil
 }
 
@@ -139,18 +145,6 @@ func (ww *WorktreeWatcher) StartEventLoop() {
 }
 
 func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
-	// If a new directory was created, start watching it recursively
-	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
-		if info, err := filepath.Abs(event.Name); err == nil {
-			if dirInfo, err := filepath.EvalSymlinks(info); err == nil {
-				if fi, err := os.Stat(dirInfo); err == nil && fi.IsDir() {
-					_ = ww.watcher.Add(event.Name)
-					_ = ww.addRecursive(event.Name)
-				}
-			}
-		}
-	}
-
 	// Find which task's worktree this event belongs to
 	ww.mu.Lock()
 
@@ -173,6 +167,38 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	if taskID == "" {
 		ww.mu.Unlock()
 		return
+	}
+
+	// Skip events from ignored directories
+	if len(info.ignoredDirs) > 0 {
+		relPath, err := filepath.Rel(info.path, event.Name)
+		if err == nil && git.ShouldIgnorePath(relPath) {
+			ww.mu.Unlock()
+			return
+		}
+		// Also check against git-discovered ignored dirs (top-level only)
+		if basename := filepath.Base(event.Name); basename != "." {
+			if _, ok := info.ignoredDirs[basename]; ok {
+				ww.mu.Unlock()
+				return
+			}
+		}
+	}
+
+	// If a new directory was created, start watching it recursively
+	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+		if absPath, err := filepath.Abs(event.Name); err == nil {
+			if dirInfo, err := filepath.EvalSymlinks(absPath); err == nil {
+				if fi, err := os.Stat(dirInfo); err == nil && fi.IsDir() {
+					// Skip ignored directories
+					basename := filepath.Base(event.Name)
+					if _, ok := info.ignoredDirs[basename]; !ok && !git.ShouldIgnorePath(basename) {
+						_ = ww.watcher.Add(event.Name)
+						_ = ww.addRecursive(event.Name, info.ignoredDirs)
+					}
+				}
+			}
+		}
 	}
 
 	// Skip remove/rename events for debounce trigger — they still count as changes
@@ -233,8 +259,72 @@ func countUntrackedLines(untracked []git.UntrackedFile) int {
 	return total
 }
 
+// loadIgnoredDirs builds a merged set of directory names to ignore.
+// Combines hardcoded well-known directories with directories discovered
+// via git check-ignore (respects .gitignore rules).
+func loadIgnoredDirs(repoRoot string) map[string]struct{} {
+	// Start with hardcoded list
+	result := make(map[string]struct{})
+	for name := range git.IgnoredDirs() {
+		result[name] = struct{}{}
+	}
+
+	// Discover additional ignored directories via git check-ignore.
+	// Walk immediate subdirectories of the repo root and batch-check them.
+	entries, err := os.ReadDir(repoRoot)
+	if err != nil {
+		return result // not a directory, return hardcoded only
+	}
+
+	var dirNames []string
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name()[0] != '.' && entry.Name() != "git" {
+			// Skip hidden dirs (already handled by hardcoded) and the .git dir itself
+			// Check dirs that aren't already in our hardcoded list
+			if _, ok := result[entry.Name()]; !ok {
+				dirNames = append(dirNames, entry.Name())
+			}
+		}
+	}
+
+	if len(dirNames) == 0 {
+		return result
+	}
+
+	// Batch check via git check-ignore (stdin mode)
+	cmd := exec.Command("git", "check-ignore", "--stdin")
+	cmd.Dir = repoRoot
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return result
+	}
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+
+	// Write directory names to stdin
+	for _, name := range dirNames {
+		fmt.Fprintln(stdin, name)
+	}
+	_ = stdin.Close()
+
+	if err := cmd.Run(); err != nil {
+		return result // git check-ignore returns non-zero if nothing is ignored
+	}
+
+	// Parse output: each line is an ignored path
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			result[name] = struct{}{}
+		}
+	}
+
+	return result
+}
+
 // addRecursive watches a directory and all its existing subdirectories.
-func (ww *WorktreeWatcher) addRecursive(dir string) error {
+// Skips directories whose basename is in the ignoredDirs set.
+func (ww *WorktreeWatcher) addRecursive(dir string, ignoredDirs map[string]struct{}) error {
 	// Watch the directory itself
 	if err := ww.watcher.Add(dir); err != nil {
 		return err
@@ -245,6 +335,10 @@ func (ww *WorktreeWatcher) addRecursive(dir string) error {
 			return nil // skip errors, keep watching what we can
 		}
 		if d.IsDir() && path != dir {
+			// Skip ignored directories
+			if _, ok := ignoredDirs[d.Name()]; ok {
+				return filepath.SkipDir
+			}
 			_ = ww.watcher.Add(path)
 		}
 		return nil

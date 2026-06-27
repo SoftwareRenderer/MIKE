@@ -16,6 +16,48 @@ import (
 	"kanban/backend/store"
 )
 
+// ignoredDirs is a set of well-known directory names that should never be
+// watched or shown in diffs. Covers directories found in virtually every
+// .gitignore file.
+var ignoredDirs = map[string]struct{}{
+	"node_modules":    {},
+	".next":           {},
+	"dist":            {},
+	"build":           {},
+	".cache":          {},
+	"__pycache__":     {},
+	".venv":           {},
+	"target":          {},
+	"vendor":          {},
+	".gradle":         {},
+	".mypy_cache":     {},
+	".pytest_cache":   {},
+	"coverage":        {},
+	".nuxt":           {},
+	".output":         {},
+	".svelte-kit":     {},
+	".turbo":          {},
+	".vercel":         {},
+	".docker":         {},
+}
+
+// IgnoredDirs returns the set of well-known directory names to always skip.
+func IgnoredDirs() map[string]struct{} {
+	return ignoredDirs
+}
+
+// ShouldIgnorePath returns true if any path component (directory name) in the
+// given path matches a known ignored directory. Uses full component match only
+// (e.g., "node_modules" matches "a/node_modules/b.js" but NOT "my_node_modules/b.js").
+func ShouldIgnorePath(path string) bool {
+	for _, component := range strings.Split(path, string(filepath.Separator)) {
+		if _, ok := ignoredDirs[component]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
 	store        *store.Store
@@ -864,6 +906,10 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 				// Expand directories into individual file paths
 				filePaths := walkUntrackedEntries(worktreePath, path)
 				for _, filePath := range filePaths {
+									// Skip files in ignored directories (safety net for tracked files)
+					if ShouldIgnorePath(filePath) {
+						continue
+					}
 					fullPath := filepath.Join(worktreePath, filePath)
 					info, err := os.Stat(fullPath)
 					if err != nil || !info.Mode().IsRegular() {
