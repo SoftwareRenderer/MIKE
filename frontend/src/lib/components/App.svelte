@@ -700,7 +700,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !(showCardDetailVal && selectedTaskVal)}
+            {#if !(showCardDetailVal && selectedTaskVal) && !showBranchViewVal}
             <header class="top-bar">
                 {#if isMobile}
                     <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu" title="Open menu">
@@ -767,6 +767,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
                         fsEventQueue={fsEventQueue}
+                        onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
                         onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}

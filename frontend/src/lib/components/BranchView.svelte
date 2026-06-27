@@ -1,18 +1,20 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch } from '$lib/api';
+    import { getHomeRelativePath } from '$lib/utils/path';
     import type { GitCommit } from '$lib/types';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
 
-    let { projectId, projectPath, currentBranch, onClose, fsEventQueue }: {
+    let { projectId, projectPath, currentBranch, onClose, fsEventQueue, onOpenTerminal }: {
         projectId: string;
         projectPath: string;
         currentBranch: string;
         onClose: () => void;
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
+        onOpenTerminal: () => void;
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
@@ -178,15 +180,20 @@
 </script>
 
 <div class="branch-view" role="dialog" aria-label="Branch view">
-    <!-- Header bar -->
+    <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="branch-header">
-        <div class="branch-header-left">
-            <span class="branch-view-title">Explorer</span>
-        </div>
         <button class="close-btn" onclick={onClose} aria-label="Close branch view" title="Close (Escape)">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                <line x1="3" y1="3" x2="13" y2="13"/>
-                <line x1="13" y1="3" x2="3" y2="13"/>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+        </button>
+        <span class="branch-view-title">Explorer</span>
+        <span class="project-path">{getHomeRelativePath(projectPath)}</span>
+        <div class="branch-header-spacer"></div>
+        <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </button>
     </div>
@@ -290,17 +297,11 @@
     .branch-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 8px;
         padding: 6px 12px;
         border-bottom: 1px solid var(--color-border);
         background: var(--color-surface-1);
         flex-shrink: 0;
-    }
-
-    .branch-header-left {
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
 
     .branch-view-title {
@@ -311,18 +312,48 @@
         letter-spacing: 0.05em;
     }
 
+    .project-path {
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        line-height: 1;
+        align-self: center;
+    }
+
+    .branch-header-spacer {
+        flex: 1;
+    }
+
     .close-btn {
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        background: transparent;
+        background: none;
+        border: none;
         color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
     }
     .close-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+
+    .terminal-btn {
+        padding: 6px 12px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        cursor: pointer;
+    }
+    .terminal-btn:hover {
+        background: var(--color-accent);
+        color: white;
     }
 
     .branch-body {
