@@ -1,24 +1,13 @@
 /**
  * Convert an absolute path to a `~/` prefixed display path.
  * e.g. `/home/mwren/projects/hasc` → `~/projects/hasc`
- * Falls back to the raw path if it doesn't match a home directory pattern.
+ * Falls back to the basename if it doesn't match a home directory pattern.
  */
 export function toHomeRelative(path: string): string {
     if (!path) return '';
     const match = path.match(/^\/home\/[^/]+\/(.+)$/);
     if (match) return '~/' + match[1];
-    return path;
-}
-
-/**
- * Alias for backward compatibility. Prefer `toHomeRelative` for consistency.
- * Unlike toHomeRelative, this falls back to the basename instead of the raw path.
- */
-export function getHomeRelativePath(absolutePath: string): string {
-    if (!absolutePath) return '';
-    const match = absolutePath.match(/^\/home\/[^/]+\/(.+)$/);
-    if (match) return '~/' + match[1];
-    return absolutePath.split('/').pop() || absolutePath;
+    return path.split('/').pop() || path;
 }
 
 /**

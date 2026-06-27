@@ -73,7 +73,4 @@ export function startDrag(
     document.addEventListener('mouseup', handleMouseUp);
 }
 
-/** Stop the current drag session (if any). */
-export function cancelDrag(): void {
-    stopDrag();
-}
+

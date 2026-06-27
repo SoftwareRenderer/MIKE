@@ -3,7 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed } from '$lib/api';
-import { getHomeRelativePath, getWorktreeDisplayPath } from '$lib/utils/path';
+import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
@@ -744,7 +744,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     {/if}
                 </button>
                 <span class="project-title">
-                    {getHomeRelativePath(currentProject.path)}
+                    {toHomeRelative(currentProject.path)}
                     {#if currentBranch}
                         <button
                             class="branch-badge"

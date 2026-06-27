@@ -120,25 +120,6 @@ export function isAgentProvider(p: Provider): boolean {
     return p.kind !== 'llm';
 }
 
-export interface TaskDependency {
-    id: string;
-    parent_task_id: string;
-    child_task_id: string;
-    auto_start: boolean;
-    created_at: string;
-}
-
-export interface ReviewComment {
-    id: string;
-    task_id: string;
-    file_path: string;
-    line_num: number;
-    comment: string;
-    resolved: boolean;
-    created_at: string;
-    updated_at: string;
-}
-
 export interface TaskMessage {
     id: string;
     task_id: string;
@@ -174,22 +155,6 @@ export interface TaskCommit {
     short: string;
     subject: string;
     date: string;
-}
-
-export interface GitBranch {
-    name: string;
-    hash: string;
-    is_current: boolean;
-}
-
-export interface GitStatus {
-    branch: string;
-    hash: string;
-    clean: boolean;
-    added: string[];
-    modified: string[];
-    deleted: string[];
-    untracked: string[];
 }
 
 export interface MoveTaskRequest {
@@ -253,69 +218,6 @@ export type StreamEventType =
 export interface StreamEvent {
     type: StreamEventType;
     data: unknown;
-}
-
-export interface StreamTokenEvent {
-    text: string;
-}
-
-export interface StreamReasoningEvent {
-    text: string;
-}
-
-export interface StreamReasoningEndEvent {
-    summary: string;
-}
-
-export interface StreamToolCallEvent {
-    tool_id: string;
-    tool_name: string;
-    tool_display_name?: string;
-    args: Record<string, unknown>;
-    sandbox?: boolean;
-}
-
-export interface StreamToolResultEvent {
-    tool_id: string;
-    success: boolean;
-    output: string;
-    duration: number;
-}
-
-export interface StreamStatusEvent {
-    state: string;
-    activity: string;
-}
-
-export interface StreamQueueEvent {
-    position: number;
-    estimated_wait_seconds?: number;
-}
-
-export interface StreamCompleteEvent {
-    state: string;
-    summary: string;
-    model_name: string;
-    prompt_tokens: number;
-    predicted_tokens: number;
-    prompt_ms: number;
-    predicted_ms: number;
-    duration: number;
-}
-
-export interface StreamErrorEvent {
-    message: string;
-    code?: string;
-}
-
-export interface StreamCheckpointPendingEvent {
-    message_id: string; // assistant message ID being committed
-}
-
-export interface StreamCheckpointCompleteEvent {
-    message_id: string;
-    commit_hash: string;
-    label: string;
 }
 
 export type StreamSectionType = 'text' | 'reasoning' | 'tool_call';

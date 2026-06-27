@@ -1,12 +1,15 @@
-const API_BASE = '/api';
+import { API_BASE, apiFetch, apiError, generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken, registerSetOffline } from './api/helpers';
 
-/** Generate a unique ID. Falls back to timestamp-based ID if crypto.randomUUID is unavailable. */
-export function generateId(): string {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+// Re-export helpers for direct imports from $lib/api
+export { generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken };
+
+// Re-export stream and terminal modules
+export { createAppStream } from './api/stream';
+export type { AppStream, AppStreamCallbacks } from './api/stream';
+export { createTerminal, createProjectTerminal } from './api/terminal';
+
+// Register setOfflineStatus so helpers can mark app offline on fetch failures
+registerSetOffline((offline: boolean) => setOfflineStatus(offline));
 
 // =============================================================================
 // Offline Action Queue
@@ -304,12 +307,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'updateConfig':
             await updateConfigRaw(p.config);
             break;
-        case 'createDependency':
-            await createDependencyRaw(p.projectId, taskId, p.childTaskId, p.autoStart);
-            break;
-        case 'createReviewComment':
-            await createReviewCommentRaw(p.projectId, taskId, p.filePath, p.lineNum, p.comment);
-            break;
         case 'resetProjectStats':
             await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
             break;
@@ -331,86 +328,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
 function queueWrite<T>(type: string, params: Record<string, any>, optimistic: T): T & { queued: true; actionId: string } {
     const queued = enqueueAction({ type, params });
     return { ...(optimistic as any), queued: true, actionId: queued.id } as T & { queued: true; actionId: string };
-}
-
-/** CSRF token, set on login or session check. Held in memory only. */
-let csrfToken: string = '';
-
-/** Set the CSRF token (called after login or session check). */
-export function setCsrfToken(token: string): void {
-    csrfToken = token;
-}
-
-/** Clear the CSRF token (called on logout). */
-export function clearCsrfToken(): void {
-    csrfToken = '';
-}
-
-/** Lazily fetch CSRF token from session endpoint (for E2E test auth). */
-export async function ensureCsrfToken(): Promise<string> {
-    // Check module-level token first, then window.__csrfToken (set by E2E tests)
-    if (csrfToken) return csrfToken;
-    if (typeof window !== 'undefined' && (window as any).__csrfToken) return (window as any).__csrfToken;
-    // Auto-fetch from session endpoint (public, no CSRF needed)
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        try {
-            const res = await fetch('/api/auth/session', { credentials: 'include', signal: controller.signal });
-            const data = await res.json();
-            if (data.authenticated && data.csrf_token) {
-                csrfToken = data.csrf_token;
-                return csrfToken;
-            }
-        } finally {
-            clearTimeout(timeoutId);
-        }
-    } catch { /* ignore */ }
-    return '';
-}
-
-/** Wrapper around fetch that includes credentials (cookies) and CSRF token on every request. */
-async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-    const headers = new Headers(init?.headers);
-    // Skip CSRF for login endpoint (public)
-    if (!url.includes('/api/auth/login')) {
-        const token = await ensureCsrfToken();
-        if (token) headers.set('X-CSRF-Token', token);
-    }
-    // Add timeout to prevent hanging requests when server is unreachable
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    try {
-        return await fetch(url, { ...init, credentials: 'include', headers, signal: controller.signal });
-    } catch (e: any) {
-        // If request fails, mark as offline so subsequent calls use the queue
-        if (e?.name === 'TypeError' || e?.name === 'AbortError') {
-            setOfflineStatus(true);
-        }
-        throw e;
-    } finally {
-        clearTimeout(timeoutId);
-    }
-}
-
-/** Returns true if the response is a 401 Unauthorized. */
-export function isUnauthorized(res: Response): boolean {
-    return res.status === 401;
-}
-
-/** Returns true if the response is a 403 Forbidden (e.g., invalid CSRF token). */
-export function isForbidden(res: Response): boolean {
-    return res.status === 403;
-}
-
-/** Extract error message from a failed API response, falling back to a default. */
-async function apiError(res: Response, defaultMsg: string): Promise<Error> {
-    try {
-        const body = await res.json();
-        return new Error(body.error || defaultMsg);
-    } catch {
-        return new Error(defaultMsg);
-    }
 }
 
 // -- Project endpoints --
@@ -632,10 +549,6 @@ async function retryTaskRaw(projectId: string, taskId: string): Promise<Task> {
     if (!res.ok) throw await apiError(res, 'Failed to retry task');
     return res.json();
 }
-export async function retryTask(projectId: string, taskId: string): Promise<Task> {
-    if (isOffline) { return queueWrite('retryTask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
-    return retryTaskRaw(projectId, taskId);
-}
 
 async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
@@ -645,170 +558,6 @@ async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
 export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
     if (isOffline) { return queueWrite('resumeTask', { projectId, taskId }, { id: taskId, status: 'in_progress' }); }
     return resumeTaskRaw(projectId, taskId);
-}
-
-// App stream - single WebSocket for all real-time events
-export interface AppStreamCallbacks {
-    onProjectCounts?: (counts: Record<string, ProjectCounts>) => void;
-    onRefresh?: () => void;
-    onDiffStats?: (task_id: string, hash: string, short_stat: string, untracked_n: number, untracked_lines: number) => void;
-    onDiff?: (task_id: string, diff: string, untracked: Array<{ path: string; diff: string; file_size?: number }>) => void;
-    onBranch?: (branch: string) => void;
-    onFsEvent?: (op: 'create' | 'delete', path: string) => void;
-    onTaskUpdated?: (task: Task) => void;
-    onTaskDeleted?: (task_id: string) => void;
-    onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void;
-    onTaskEvent?: (task_id: string, event: StreamEvent) => void; // task-scoped events (tokens, tool calls, etc.)
-    onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
-}
-
-export interface AppStream {
-    close: () => void;
-    subscribeProject: (projectId: string) => void;
-    unsubscribeProject: (projectId: string) => void;
-    subscribeTask: (projectId: string, taskId: string) => void;
-    unsubscribeTask: (projectId: string, taskId: string) => void;
-}
-
-export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectAttempts = 0;
-    let isClosed = false;
-    const maxDelay = 30_000;
-    let currentWs: WebSocket | null = null;
-    // Track active subscriptions for re-subscription on reconnect
-    const subscribedProjects = new Set<string>();
-    const subscribedTasks = new Set<string>(); // "projectId:taskId"
-    // Pending messages queued before WebSocket is open
-    const pendingMessages: Array<{ type: string; data: Record<string, any> }> = [];
-
-    function sendMsg(type: string, data: Record<string, any>) {
-        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(JSON.stringify({ type, data }));
-        } else {
-            // Queue message for when WebSocket opens
-            pendingMessages.push({ type, data });
-        }
-    }
-
-    function flushPending() {
-        for (const msg of pendingMessages) {
-            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                currentWs.send(JSON.stringify(msg));
-            }
-        }
-        pendingMessages.length = 0;
-    }
-
-    let hasConnectedOnce = false;
-
-    function connect() {
-        if (isClosed) return;
-        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream`);
-        currentWs = ws;
-
-        ws.onopen = () => {
-            reconnectAttempts = 0;
-            hasConnectedOnce = true;
-            callbacks.onConnected?.(true);
-            // Flush pending messages first
-            flushPending();
-            // Re-subscribe to all previously subscribed projects/tasks
-            for (const projectId of subscribedProjects) {
-                sendMsg('subscribe_project', { project_id: projectId });
-            }
-            for (const key of subscribedTasks) {
-                const [projectId, taskId] = key.split(':');
-                sendMsg('subscribe_task', { project_id: projectId, task_id: taskId });
-            }
-        };
-
-        ws.onmessage = (e) => {
-            const msg = JSON.parse(e.data);
-            // Handle task_event (server-side multiplexed task events)
-            if (msg.type === 'task_event' && callbacks.onTaskEvent) {
-                callbacks.onTaskEvent(msg.task_id, {
-                    type: msg.event,
-                    data: msg.data,
-                });
-                return;
-            }
-            // Handle board-level events
-            if (msg.type === 'board_refresh' && callbacks.onRefresh) {
-                callbacks.onRefresh();
-            }
-            if (msg.type === 'project_counts' && callbacks.onProjectCounts) {
-                callbacks.onProjectCounts(msg.data);
-            }
-            if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
-                callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.untracked_n, msg.untracked_lines);
-            }
-            if (msg.type === 'task_diff' && callbacks.onDiff) {
-                callbacks.onDiff(msg.task_id, msg.diff, msg.untracked || []);
-            }
-            if (msg.type === 'project_branch' && callbacks.onBranch) {
-                callbacks.onBranch(msg.branch);
-            }
-            if (msg.type === 'fs_event' && callbacks.onFsEvent) {
-                callbacks.onFsEvent(msg.op, msg.path);
-            }
-            if (msg.type === 'task_updated' && callbacks.onTaskUpdated) {
-                callbacks.onTaskUpdated(msg.task);
-            }
-            if (msg.type === 'task_deleted' && callbacks.onTaskDeleted) {
-                callbacks.onTaskDeleted(msg.task_id);
-            }
-            if (msg.type === 'commit_status' && callbacks.onCommitStatus) {
-                callbacks.onCommitStatus(msg.task_id, msg.status);
-            }
-        };
-
-        ws.onclose = () => {
-            currentWs = null;
-            if (isClosed) return;
-            // Signal offline on any disconnect (including initial connection failure)
-            callbacks.onConnected?.(false);
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
-            reconnectAttempts++;
-            reconnectTimer = setTimeout(() => connect(), delay);
-        };
-
-        ws.onerror = () => {
-            // Connection errors trigger onclose, which handles reconnect
-        };
-    }
-
-    connect();
-
-    return {
-        close: () => {
-            isClosed = true;
-            if (reconnectTimer) {
-                clearTimeout(reconnectTimer);
-                reconnectTimer = null;
-            }
-            if (currentWs) {
-                currentWs.close();
-                currentWs = null;
-            }
-        },
-        subscribeProject: (projectId: string) => {
-            subscribedProjects.add(projectId);
-            sendMsg('subscribe_project', { project_id: projectId });
-        },
-        unsubscribeProject: (projectId: string) => {
-            subscribedProjects.delete(projectId);
-            sendMsg('unsubscribe_project', { project_id: projectId });
-        },
-        subscribeTask: (projectId: string, taskId: string) => {
-            subscribedTasks.add(`${projectId}:${taskId}`);
-            sendMsg('subscribe_task', { project_id: projectId, task_id: taskId });
-        },
-        unsubscribeTask: (projectId: string, taskId: string) => {
-            subscribedTasks.delete(`${projectId}:${taskId}`);
-            sendMsg('unsubscribe_task', { project_id: projectId, task_id: taskId });
-        },
-    };
 }
 
 /** Send a user message via HTTP POST. Triggers executor and returns the created message. */
@@ -961,10 +710,6 @@ async function reloadPromptsRaw(): Promise<{ status: string; message: string; fi
     if (!res.ok) throw await apiError(res, 'Failed to reload prompts');
     return res.json();
 }
-export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
-    if (isOffline) { enqueueAction({ type: 'reloadPrompts', params: {} }); return { status: 'queued', message: '', files: [] }; }
-    return reloadPromptsRaw();
-}
 
 // -- Configuration endpoints --
 export async function getConfig(): Promise<Config> {
@@ -1007,15 +752,6 @@ export async function fetchModels(llamaServerUrl: string, apiKey?: string): Prom
     return res.json();
 }
 
-/** Check if Pi is available on the server. */
-export async function checkPiAvailable(): Promise<{ available: boolean; version?: string }> {
-    const res = await apiFetch(`${API_BASE}/config/pi-available`, {
-        method: 'GET',
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to check Pi availability');
-    return res.json();
-}
-
 /** Test Pi connection (runs `pi --version`). */
 export async function testPiConnection(): Promise<{ success: boolean; message: string }> {
     const res = await apiFetch(`${API_BASE}/config/test-pi-connection`, {
@@ -1027,85 +763,13 @@ export async function testPiConnection(): Promise<{ success: boolean; message: s
     return res.json();
 }
 
-/** Resolve a provider+model selection to the actual server URL and model name. */
-export function resolveProviderModel(
-    providers: { name: string; url: string; models: Array<{ name: string; reasoning_effort?: string }> }[],
-    providerName: string,
-    modelName: string
-): { llama_server_url: string; model_name: string } | null {
-    const provider = providers.find(p => p.name === providerName);
-    if (!provider) return null;
-    return { llama_server_url: provider.url, model_name: modelName };
-}
-
-// -- Dependency endpoints --
-export async function getDependencies(projectId: string, taskId: string): Promise<TaskDependency[]> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch dependencies');
-    return res.json();
-}
-
-async function createDependencyRaw(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ child_task_id: childTaskId, auto_start: autoStart }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to create dependency');
-    return res.json();
-}
-export async function createDependency(projectId: string, taskId: string, childTaskId: string, autoStart: boolean): Promise<TaskDependency> {
-    if (isOffline) {
-        const id = generateId();
-        return queueWrite('createDependency', { projectId, taskId, childTaskId, autoStart }, { id, task_id: taskId, child_task_id: childTaskId, auto_start: autoStart });
-    }
-    return createDependencyRaw(projectId, taskId, childTaskId, autoStart);
-}
-
-// -- Review comment endpoints --
-export async function getReviewComments(projectId: string, taskId: string): Promise<ReviewComment[]> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch review comments');
-    return res.json();
-}
-
-async function createReviewCommentRaw(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/review-comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: filePath, line_num: lineNum, comment }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to create review comment');
-    return res.json();
-}
-export async function createReviewComment(projectId: string, taskId: string, filePath: string, lineNum: number, comment: string): Promise<ReviewComment> {
-    if (isOffline) {
-        const id = generateId();
-        return queueWrite('createReviewComment', { projectId, taskId, filePath, lineNum, comment }, { id, task_id: taskId, file_path: filePath, line_num: lineNum, comment, resolved: false, created_at: new Date().toISOString() });
-    }
-    return createReviewCommentRaw(projectId, taskId, filePath, lineNum, comment);
-}
-
 // -- Git endpoints --
-export async function getGitLog(projectId: string, branch?: string): Promise<GitCommit[]> {
-    const url = branch ? `${API_BASE}/projects/${projectId}/git/log?branch=${branch}` : `${API_BASE}/projects/${projectId}/git/log`;
-    const res = await apiFetch(url);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
-    return res.json();
-}
-
 /** Fetch git log with full commit details (hash, parents, date). */
 export async function getGitLogFull(projectId: string, branch?: string): Promise<GitCommit[]> {
     const params = new URLSearchParams({ full: '1' });
     if (branch) params.set('branch', branch);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
-    return res.json();
-}
-
-export async function getGitStatus(projectId: string): Promise<GitStatus> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
     return res.json();
 }
 
@@ -1184,66 +848,3 @@ export async function deleteTaskThread(projectId: string, taskId: string, thread
     return deleteTaskThreadRaw(projectId, taskId, threadId);
 }
 
-// -- Terminal --
-export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term, onClosed);
-}
-
-// -- Project Terminal (shell in project root) --
-export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term, onClosed);
-}
-
-// Filter xterm.js init queries that the PTY echoes back as visible garbage.
-// These are terminal capability probes sent automatically on terminal creation.
-function isTerminalQuery(data: string): boolean {
-    if (!data.startsWith('\x1b')) return false;
-    const second = data[1];
-    // DCS sequence (e.g. charset detection)
-    if (second === 'P') return true;
-    // OSC queries: title (]0;?), background color (]10;?), foreground (]11;?), cursor (]12;?)
-    if (second === ']') {
-        return /^\x1b\](0|10|11|12);\?\x07?$/.test(data);
-    }
-    // DSR queries: device attributes (c), secondary device attributes ($y)
-    if (second === '[') {
-        return data === '\x1b[c' || data.startsWith('\x1b[$y');
-    }
-    return false;
-}
-
-// Shared WebSocket setup for terminal connections
-// Returns the WebSocket and sets ws.onClose handler to call onClosed callback.
-function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
-    // Show status immediately — backend will send its own messages when ready
-    term.write('\x1b[2mConnecting...\x1b[0m');
-    const ws = new WebSocket(url);
-    ws.onopen = () => {
-        // Replace connecting message: go to row 1 col 1, clear line
-        term.write('\x1b[1H\x1b[2K');
-    };
-    term.onData((data) => {
-        // Filter out xterm.js init queries that the PTY echoes back as garbage text.
-        // These are terminal capability queries (DA1, OSC color/title, DCS) sent on mount.
-        if (isTerminalQuery(data)) return;
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'input', data }));
-        }
-    });
-    term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-    });
-    ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'output') term.write(msg.data);
-        if (msg.type === 'title') term.title = msg.data;
-        if (msg.type === 'status') term.write(msg.data);
-        if (msg.type === 'closed' && onClosed) onClosed();
-    };
-    ws.onclose = () => {
-        if (onClosed) onClosed();
-    };
-    return ws;
-}

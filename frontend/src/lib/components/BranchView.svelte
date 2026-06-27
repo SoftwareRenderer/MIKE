@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch } from '$lib/api';
-    import { getHomeRelativePath } from '$lib/utils/path';
+    import { toHomeRelative } from '$lib/utils/path';
     import type { GitCommit } from '$lib/types';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
@@ -221,7 +221,7 @@
             </svg>
         </button>
         <span class="branch-view-title">Explorer</span>
-        <span class="project-path">{getHomeRelativePath(projectPath)}</span>
+        <span class="project-path">{toHomeRelative(projectPath)}</span>
         <div class="branch-header-spacer"></div>
         <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
