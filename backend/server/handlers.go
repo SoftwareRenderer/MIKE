@@ -327,6 +327,11 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
+	// Validate path is within allowed project root
+	if err := s.validateFSPath(path, r); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Limit file size to 1MB to avoid loading huge files
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -352,6 +357,11 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
 		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	// Validate path is within allowed project root
+	if err := s.validateFSPath(req.Path, r); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Limit file size to 1MB
@@ -380,6 +390,11 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = string(os.PathSeparator)
+	}
+	// Validate path is within allowed project root
+	if err := s.validateFSPath(path, r); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	includeFiles := r.URL.Query().Get("files") == "1"
 
@@ -435,6 +450,29 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	})
 
 	JSONResponse(w, http.StatusOK, result)
+}
+
+// validateFSPath checks that the requested path is within an allowed root.
+// If a "project" query param is present, it looks up the project and restricts
+// access to its root directory. Without a project param, access is unrestricted
+// (for backwards compatibility with Dockerfile picker, project creation, etc.).
+func (s *Server) validateFSPath(path string, r *http.Request) error {
+	projectID := r.URL.Query().Get("project")
+	if projectID == "" {
+		return nil // no project constraint
+	}
+	project, err := s.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("project not found")
+	}
+	// Clean both paths to prevent directory traversal
+	cleanPath := filepath.Clean(path)
+	cleanRoot := filepath.Clean(project.Path)
+	// Ensure path is within the project root
+	if !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) && cleanPath != cleanRoot {
+		return fmt.Errorf("path outside allowed project directory")
+	}
+	return nil
 }
 
 // handleFSInitGit initializes a git repository in the given path.

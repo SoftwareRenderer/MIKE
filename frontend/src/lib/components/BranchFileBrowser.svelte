@@ -3,7 +3,8 @@
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
-    let { projectPath, initialPath, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
+    let { projectId, projectPath, initialPath, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
+        projectId: string;
         projectPath: string;
         initialPath?: string;
         unsavedFiles: string[];
@@ -25,7 +26,7 @@
         createError = '';
         try {
             const csrfToken = await ensureCsrfToken();
-            const res = await fetch('/api/fs/write', {
+            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -62,12 +63,16 @@
     ]);
 
     async function loadDir(path: string) {
+        // Clamp to project root
+        if (!path.startsWith(projectPath)) {
+            path = projectPath;
+        }
         loading = true;
         error = '';
         currentPath = path;
         onPathChange(path);
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1`);
+            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1&project=${encodeURIComponent(projectId)}`);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error || 'Failed to read directory');
@@ -75,8 +80,8 @@
             const data = await res.json();
             entries = (data.entries || [])
                 .filter((e: any) => {
-                    // Keep ".." for navigation, filter out other dotfiles and ignored directories
-                    if (e.name === '..') return true;
+                    // Keep ".." only when not at project root
+                    if (e.name === '..') return currentPath !== projectPath;
                     if (e.name.startsWith('.')) return false;
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
@@ -105,7 +110,20 @@
     function handlePathInput() {
         const p = currentPath.trim();
         if (p) {
-            loadDir(p);
+            // Clamp to project root - resolve any .. that would escape
+            const resolved = p.replace(/\/+/g, '/').replace(/\/$/, '');
+            // Walk segments, skip .. that would go above project root
+            const projectParts = projectPath.replace(/\/$/, '').split('/').filter(Boolean);
+            const pathParts = resolved.replace(/\/$/, '').split('/').filter(Boolean);
+            const stack = [...projectParts];
+            for (const part of pathParts) {
+                if (part === '..') {
+                    if (stack.length > projectParts.length) stack.pop();
+                } else if (part !== '.') {
+                    stack.push(part);
+                }
+            }
+            loadDir(stack.join('/') || projectPath);
         }
     }
 

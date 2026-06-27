@@ -26,15 +26,21 @@
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
 
+    // Validate file path stays within project root
+    function isPathSafe(path: string): boolean {
+        return path && path.startsWith(projectPath);
+    }
+
     // Selected file state
-    let selectedFilePath = $state(initialFile || '');
+    let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
+    let selectedFilePath = $state(initialSafeFile);
     let unsavedFiles = $state<string[]>([]);
     let editorFocused = $state(false);
 
     // Mobile layout
     let isMobile = $state(false);
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
-    let currentFolderPath = $state(initialFile ? initialFile.substring(0, initialFile.lastIndexOf('/')) : projectPath);
+    let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : projectPath);
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
@@ -93,6 +99,7 @@
     }
 
     function handleFileSelected(path: string) {
+        if (!isPathSafe(path)) return;
         selectedFilePath = path;
         onUpdateFile(path);
         if (isMobile) activeTab = 'editor';
@@ -262,6 +269,7 @@
                 <!-- Top: File browser -->
                 <div class="branch-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
                     <BranchFileBrowser
+                        projectId={projectId}
                         projectPath={projectPath}
                         initialPath={currentFolderPath}
                         unsavedFiles={unsavedFiles}
@@ -313,6 +321,7 @@
         <!-- Center column: File editor -->
         <div class="branch-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
             <BranchEditor
+                projectId={projectId}
                 filePath={selectedFilePath}
                 onFocused={handleEditorFocused}
                 onSymbolsUpdate={handleSymbolsUpdate}

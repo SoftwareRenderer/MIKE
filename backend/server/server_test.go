@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/backend/types"
 )
 
 // testPassword is the password used in tests (matches KANBAN_PASSWORD env var).
@@ -333,6 +335,103 @@ func TestHandleFSWrite(t *testing.T) {
 
 		if rr.Code != http.StatusRequestEntityTooLarge {
 			t.Fatalf("expected 413, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+}
+
+func TestHandleFSPathValidation(t *testing.T) {
+	s := testServer(t)
+
+	// Create a test project
+	tmpDir := t.TempDir()
+	project := &types.Project{
+		ID:   "test-project-fs",
+		Name: "FS Test Project",
+		Path: tmpDir,
+	}
+	if err := s.store.CreateProject(project); err != nil {
+		t.Fatal(err)
+	}
+	// Create a file inside the project
+	os.WriteFile(filepath.Join(tmpDir, "allowed.txt"), []byte("ok"), 0644)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	t.Run("allows file within project root", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+filepath.Join(tmpDir, "allowed.txt")+"&project=test-project-fs", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects file outside project root", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/read?path=/etc/passwd&project=test-project-fs", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects path traversal via ..", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+tmpDir+"/../../../etc/passwd&project=test-project-fs", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("allows write within project root", func(t *testing.T) {
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-fs", map[string]string{
+			"path":    filepath.Join(tmpDir, "new-file.txt"),
+			"content": "hello",
+		})
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects write outside project root", func(t *testing.T) {
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-fs", map[string]string{
+			"path":    "/tmp/escape.txt",
+			"content": "escaped",
+		})
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("allows fs listing within project root", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs?path="+tmpDir+"&files=1&project=test-project-fs", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects fs listing outside project root", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs?path=/tmp&files=1&project=test-project-fs", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("allows access without project param", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+filepath.Join(tmpDir, "allowed.txt"), nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
 	})
 }

@@ -66,7 +66,8 @@
         '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     });
 
-    let { filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+    let { projectId, filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+        projectId: string;
         filePath: string;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
@@ -204,7 +205,7 @@
         originalContent = '';
 
         try {
-            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`);
+            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}`);
             if (!res.ok) {
                 if (res.status === 413) {
                     fileTooLarge = true;
@@ -238,7 +239,7 @@
         saving = true;
         try {
             const csrfToken = await ensureCsrfToken();
-            const res = await fetch('/api/fs/write', {
+            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

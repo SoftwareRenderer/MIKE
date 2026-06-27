@@ -182,7 +182,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         const params = new URLSearchParams(location.search);
         const projectId = params.get('project');
         const taskId = params.get('task');
-        urlFileId = params.get('file') || '';
+        const fileParam = params.get('file') || '';
+        urlFileId = (fileParam && fileParam.startsWith(currentProject?.path || '')) ? fileParam : '';
 
         // If URL has no project param, go back to project list
         if (!projectId && currentProject) {
@@ -795,7 +796,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         initialFile={urlFileId || ''}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                        onUpdateFile={(path) => updateUrl({ project: currentProject?.id, view: 'branch', file: path })}
+                        onUpdateFile={(path) => { if (path && path.startsWith(currentProject?.path || '')) updateUrl({ project: currentProject?.id, view: 'branch', file: path }); else updateUrl({ project: currentProject?.id, view: 'branch', file: null }); }}
                         onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
@@ -1235,12 +1236,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     .branch-badge {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        padding: 1px 6px;
+        gap: 4px;
+        padding: 3px 10px;
         border-radius: 999px;
         background: rgba(163, 113, 247, 0.15);
         color: var(--color-status-purple);
-        font-size: 0.6875rem;
+        font-size: 0.8125rem;
         font-weight: 500;
         font-family: var(--font-mono);
         cursor: pointer;
