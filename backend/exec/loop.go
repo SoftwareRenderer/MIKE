@@ -2054,6 +2054,29 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								ToolResult: string(resultJSON),
 								CreatedAt:  time.Now().UTC(),
 							})
+
+							// Send tool_result WS event to finalize pending tool calls on the frontend.
+							// If the streaming tool_execution_end was missing/late the frontend
+							// would otherwise leave isPending=true forever (stuck spinner).
+							resultOutput := ""
+							resultSuccess := true
+							if hasResult {
+								if out, ok := result["output"].(string); ok {
+									resultOutput = out
+								}
+								if suc, ok := result["success"].(bool); ok {
+									resultSuccess = suc
+								}
+							}
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{
+								"tool_id":   toolCallID,
+								"success":   resultSuccess,
+								"output":    resultOutput,
+								"args":      toolArgs,
+								"raw_args":  string(rawArgs),
+								"path":      extractPathFromArgs(string(rawArgs)),
+								"sandbox":   sandboxEnabled && isSandboxableTool(kanbanToolName),
+							}})
 						}
 					}
 				}
