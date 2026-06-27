@@ -15,12 +15,12 @@ type ContentPart struct {
 
 // ChatMessage represents a message in the conversation.
 type ChatMessage struct {
-	Role             string      `json:"role"`
-	Content          string      `json:"content"`
+	Role             string        `json:"role"`
+	Content          string        `json:"content"`
 	ContentParts     []ContentPart // multi-modal content parts; when set, overrides Content in LLM API
-	ReasoningContent string      `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCallMsg `json:"tool_calls,omitempty"` // assistant's tool calls (for message history)
-	ToolCallID       string      `json:"tool_call_id,omitempty"` // tool result's reference to assistant's call
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallMsg `json:"tool_calls,omitempty"`   // assistant's tool calls (for message history)
+	ToolCallID       string        `json:"tool_call_id,omitempty"` // tool result's reference to assistant's call
 }
 
 // ToolCallMsg is a tool call in an assistant message (non-streaming format).
@@ -35,16 +35,16 @@ type ToolCallMsg struct {
 
 // ChatTool represents a tool definition.
 type ChatTool struct {
-	Type     string `json:"type"`
+	Type     string   `json:"type"`
 	Function *ToolDef `json:"function"`
 }
 
 // ToolDef defines a tool's schema.
 type ToolDef struct {
-	Name        string                 `json:"name"`
-	DisplayName string                 // UI-only, not sent to LLM
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string         `json:"name"`
+	DisplayName string         // UI-only, not sent to LLM
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // ChatToolCall represents a tool call (or delta) from the model.
@@ -97,18 +97,18 @@ type ChatUsage struct {
 
 // ChatTimings processing timings from the LLM response.
 type ChatTimings struct {
-	CacheN        int     `json:"cache_n"`        // tokens served from KV cache
-	PromptN       int     `json:"prompt_n"`        // tokens actually processed
-	PromptMs      float64 `json:"prompt_ms"`
-	PredictedN    int     `json:"predicted_n"`     // tokens generated
-	PredictedMs   float64 `json:"predicted_ms"`
+	CacheN      int     `json:"cache_n"`  // tokens served from KV cache
+	PromptN     int     `json:"prompt_n"` // tokens actually processed
+	PromptMs    float64 `json:"prompt_ms"`
+	PredictedN  int     `json:"predicted_n"` // tokens generated
+	PredictedMs float64 `json:"predicted_ms"`
 }
 
 // ChatResponse is a full streaming response frame.
 type ChatResponse struct {
-	Choices  []ChatChoice `json:"choices"`
-	Usage    *ChatUsage   `json:"usage,omitempty"`
-	Timings  *ChatTimings `json:"timings,omitempty"`
+	Choices []ChatChoice `json:"choices"`
+	Usage   *ChatUsage   `json:"usage,omitempty"`
+	Timings *ChatTimings `json:"timings,omitempty"`
 }
 
 // StreamCallback is called for each streaming token/tool_call.

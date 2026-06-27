@@ -136,15 +136,15 @@ func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.T
 
 // copyMsg holds the fields needed to copy a message.
 type copyMsg struct {
-	role, content, createdAt       string
-	reasoningContent, toolCalls    *string
-	toolResult, modelName          *string
-	providerName                   *string
-	promptTokens, predictedTokens  int
-	cacheTokens                    int
-	promptMs, predictedMs          int
-	duration                       int64
-	gitCommitHash                  *string
+	role, content, createdAt      string
+	reasoningContent, toolCalls   *string
+	toolResult, modelName         *string
+	providerName                  *string
+	promptTokens, predictedTokens int
+	cacheTokens                   int
+	promptMs, predictedMs         int
+	duration                      int64
+	gitCommitHash                 *string
 }
 
 // CopyMessagesToThread copies messages from a source thread up to and including a specific message into a target thread.

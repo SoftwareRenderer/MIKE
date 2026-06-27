@@ -36,12 +36,12 @@ func TestGetPlanModeToolDefinitions(t *testing.T) {
 
 func TestGetToolDefinitions_Standard(t *testing.T) {
 	tools := GetToolDefinitions()
-	
+
 	toolNames := make(map[string]bool)
 	for _, tool := range tools {
 		toolNames[tool.Function.Name] = true
 	}
-	
+
 	// Standard mode should have all tools
 	expectedTools := []string{"read_file", "write_file", "edit_file", "bash", "task_complete", "create_task"}
 	for _, name := range expectedTools {

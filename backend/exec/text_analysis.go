@@ -12,9 +12,9 @@ var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
 // phraseDetector tracks sentences/phrases seen within a single streaming response
 // to detect exact repetition in real-time.
 type phraseDetector struct {
-	seen     map[string]bool // normalized phrases already seen
-	pending  string          // incomplete sentence waiting for more text
-	fired    bool            // already triggered for this response
+	seen    map[string]bool // normalized phrases already seen
+	pending string          // incomplete sentence waiting for more text
+	fired   bool            // already triggered for this response
 }
 
 // minPhraseWords is the minimum word count for a phrase to be tracked.

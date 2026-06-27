@@ -4,32 +4,32 @@ import "time"
 
 // Task represents a card on the Kanban board.
 type Task struct {
-	ID                      string    `json:"id"`
-	ProjectID               string    `json:"project_id"`
-	Title                   string    `json:"title"`
-	Prompt                  string    `json:"prompt"`
-	Status                  string    `json:"status"`
-	ColumnOrder             int       `json:"column_order"`
-	SessionID               string    `json:"session_id"`
-	Branch                  string    `json:"branch"`
-	BaseRef                 string    `json:"base_ref,omitempty"`
-	BranchTip               string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
-	Output                  string    `json:"output"`
-	StatusState             string    `json:"status_state"`
-	LlamaServerURL          string    `json:"llama_server_url"`
-	ModelName               string    `json:"model_name"`
-	ReasoningEffort         string    `json:"reasoning_effort"`
-	MaxConsecutiveFailedTurns int     `json:"max_consecutive_failed_turns"`
-	AutoCommit              bool      `json:"auto_commit"`
-	AutoPR                  bool      `json:"auto_pr"`
-	PlanMode                bool      `json:"plan_mode"`
-	ParentTaskID            string    `json:"parent_task_id,omitempty"`
-	TitleGenerating         bool      `json:"title_generating"`
-	CurrentThreadID         string    `json:"current_thread_id,omitempty"`
-	ChangeSummary           string    `json:"change_summary,omitempty"` // LLM-generated summary of changes
-	WorktreeExists          bool      `json:"worktree_exists"`
-	CreatedAt               time.Time `json:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at"`
+	ID                        string    `json:"id"`
+	ProjectID                 string    `json:"project_id"`
+	Title                     string    `json:"title"`
+	Prompt                    string    `json:"prompt"`
+	Status                    string    `json:"status"`
+	ColumnOrder               int       `json:"column_order"`
+	SessionID                 string    `json:"session_id"`
+	Branch                    string    `json:"branch"`
+	BaseRef                   string    `json:"base_ref,omitempty"`
+	BranchTip                 string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
+	Output                    string    `json:"output"`
+	StatusState               string    `json:"status_state"`
+	LlamaServerURL            string    `json:"llama_server_url"`
+	ModelName                 string    `json:"model_name"`
+	ReasoningEffort           string    `json:"reasoning_effort"`
+	MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"`
+	AutoCommit                bool      `json:"auto_commit"`
+	AutoPR                    bool      `json:"auto_pr"`
+	PlanMode                  bool      `json:"plan_mode"`
+	ParentTaskID              string    `json:"parent_task_id,omitempty"`
+	TitleGenerating           bool      `json:"title_generating"`
+	CurrentThreadID           string    `json:"current_thread_id,omitempty"`
+	ChangeSummary             string    `json:"change_summary,omitempty"` // LLM-generated summary of changes
+	WorktreeExists            bool      `json:"worktree_exists"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 // Board represents the collection of tasks for a project.
@@ -64,9 +64,9 @@ type Config struct {
 
 // ModelConfig represents a model with its per-model settings.
 type ModelConfig struct {
-	Name           string `json:"name"`
+	Name            string `json:"name"`
 	ReasoningEffort string `json:"reasoning_effort"`
-	ContextWindow  *int   `json:"context_window,omitempty"` // nil if not reported by LLM
+	ContextWindow   *int   `json:"context_window,omitempty"` // nil if not reported by LLM
 }
 
 // ProviderKind distinguishes between standard LLM providers and Pi agents.
@@ -86,10 +86,10 @@ type Provider struct {
 	Concurrency     int           `json:"concurrency"`
 	DefaultModel    string        `json:"default_model"`
 	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
-	InputPrice      float64       `json:"input_price"`      // USD per 1M input (non-cached) tokens
-	OutputPrice     float64       `json:"output_price"`     // USD per 1M output tokens
-	CacheReadPrice  float64       `json:"cache_read_price"` // USD per 1M cache-read tokens
-	CacheWritePrice float64       `json:"cache_write_price"` // USD per 1M cache-write tokens (overrides input_price when set)
+	InputPrice      float64       `json:"input_price"`                // USD per 1M input (non-cached) tokens
+	OutputPrice     float64       `json:"output_price"`               // USD per 1M output tokens
+	CacheReadPrice  float64       `json:"cache_read_price"`           // USD per 1M cache-read tokens
+	CacheWritePrice float64       `json:"cache_write_price"`          // USD per 1M cache-write tokens (overrides input_price when set)
 }
 
 // IsAgent returns true if this provider is any coding agent (not a standard LLM).
@@ -215,15 +215,15 @@ type TaskMessage struct {
 
 // ProjectStats holds aggregated token usage for a project.
 type ProjectStats struct {
-	TotalTasks         int        `json:"total_tasks"`
-	TotalPromptTokens  int        `json:"total_prompt_tokens"`
-	TotalCacheTokens   int        `json:"total_cache_tokens"`
-	TotalProcessedTokens int      `json:"total_processed_tokens"`
-	TotalGeneratedTokens int      `json:"total_generated_tokens"`
-	AvgPromptTps       float64    `json:"avg_prompt_tps"`
-	AvgGenerationTps   float64    `json:"avg_generation_tps"`
-	ByModel            []ModelStats `json:"by_model"`
-	TotalCost          float64    `json:"total_cost"` // USD total cost across all models
+	TotalTasks           int          `json:"total_tasks"`
+	TotalPromptTokens    int          `json:"total_prompt_tokens"`
+	TotalCacheTokens     int          `json:"total_cache_tokens"`
+	TotalProcessedTokens int          `json:"total_processed_tokens"`
+	TotalGeneratedTokens int          `json:"total_generated_tokens"`
+	AvgPromptTps         float64      `json:"avg_prompt_tps"`
+	AvgGenerationTps     float64      `json:"avg_generation_tps"`
+	ByModel              []ModelStats `json:"by_model"`
+	TotalCost            float64      `json:"total_cost"` // USD total cost across all models
 }
 
 // ModelStats holds token usage aggregated by provider/model.

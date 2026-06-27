@@ -7,7 +7,7 @@ import (
 )
 
 // JSONResponse sends a JSON response with the given status code.
-func JSONResponse(w http.ResponseWriter, status int, v interface{}) {
+func JSONResponse(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
@@ -21,6 +21,6 @@ func JSONError(w http.ResponseWriter, status int, message string) {
 }
 
 // JSONErrorf sends a JSON error response with formatted message.
-func JSONErrorf(w http.ResponseWriter, status int, format string, args ...interface{}) {
+func JSONErrorf(w http.ResponseWriter, status int, format string, args ...any) {
 	JSONError(w, status, fmt.Sprintf(format, args...))
 }

@@ -198,7 +198,7 @@ func TestGetProjectStatsThroughput(t *testing.T) {
 	msg.PromptTokens = 1000
 	msg.PredictedTokens = 500
 	msg.CacheTokens = 0
-	msg.PromptMs = 1000 // 1s
+	msg.PromptMs = 1000    // 1s
 	msg.PredictedMs = 2000 // 2s
 
 	if err := s.CreateTaskMessage(msg); err != nil {

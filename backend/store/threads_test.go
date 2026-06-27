@@ -51,9 +51,21 @@ func TestGetThreadsByTask(t *testing.T) {
 
 	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 	threads := []*types.TaskThread{
-		func() *types.TaskThread { th := newThread("th-1", "task-1", "Main"); th.CreatedAt = baseTime; return th }(),
-		func() *types.TaskThread { th := newThread("th-2", "task-1", "Fork #1"); th.CreatedAt = baseTime.Add(1 * time.Second); return th }(),
-		func() *types.TaskThread { th := newThread("th-3", "task-1", "Fork #2"); th.CreatedAt = baseTime.Add(2 * time.Second); return th }(),
+		func() *types.TaskThread {
+			th := newThread("th-1", "task-1", "Main")
+			th.CreatedAt = baseTime
+			return th
+		}(),
+		func() *types.TaskThread {
+			th := newThread("th-2", "task-1", "Fork #1")
+			th.CreatedAt = baseTime.Add(1 * time.Second)
+			return th
+		}(),
+		func() *types.TaskThread {
+			th := newThread("th-3", "task-1", "Fork #2")
+			th.CreatedAt = baseTime.Add(2 * time.Second)
+			return th
+		}(),
 	}
 	for _, th := range threads {
 		if err := s.CreateThread(th); err != nil {
@@ -238,9 +250,24 @@ func TestCopyMessagesToThread(t *testing.T) {
 	// Create messages in source thread with distinct timestamps
 	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 	msgs := []*types.TaskMessage{
-		func() *types.TaskMessage { m := newMessage("m1", "task-1", "user", "first"); m.ThreadID = "src-thread"; m.CreatedAt = baseTime; return m }(),
-		func() *types.TaskMessage { m := newMessage("m2", "task-1", "assistant", "reply"); m.ThreadID = "src-thread"; m.CreatedAt = baseTime.Add(1 * time.Second); return m }(),
-		func() *types.TaskMessage { m := newMessage("m3", "task-1", "user", "second"); m.ThreadID = "src-thread"; m.CreatedAt = baseTime.Add(2 * time.Second); return m }(),
+		func() *types.TaskMessage {
+			m := newMessage("m1", "task-1", "user", "first")
+			m.ThreadID = "src-thread"
+			m.CreatedAt = baseTime
+			return m
+		}(),
+		func() *types.TaskMessage {
+			m := newMessage("m2", "task-1", "assistant", "reply")
+			m.ThreadID = "src-thread"
+			m.CreatedAt = baseTime.Add(1 * time.Second)
+			return m
+		}(),
+		func() *types.TaskMessage {
+			m := newMessage("m3", "task-1", "user", "second")
+			m.ThreadID = "src-thread"
+			m.CreatedAt = baseTime.Add(2 * time.Second)
+			return m
+		}(),
 	}
 	for _, m := range msgs {
 		if err := s.CreateTaskMessage(m); err != nil {

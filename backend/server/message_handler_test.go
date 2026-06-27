@@ -10,7 +10,7 @@ func TestMessageCreate(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Hello world",
 	})
@@ -19,7 +19,7 @@ func TestMessageCreate(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["role"] != "user" || result["content"] != "Hello world" {
 		t.Fatalf("unexpected message: %+v", result)
 	}
@@ -38,7 +38,7 @@ func TestMessageCreateMissingFields(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Test task")
 
 	// Missing role
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"content": "Hello",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -47,7 +47,7 @@ func TestMessageCreateMissingFields(t *testing.T) {
 	}
 
 	// Missing content
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role": "user",
 	})
 	rr = testResponseAuth(t, s, req)
@@ -63,7 +63,7 @@ func TestMessageList(t *testing.T) {
 
 	// Create 3 messages
 	for _, content := range []string{"msg 1", "msg 2", "msg 3"} {
-		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 			"role":    "user",
 			"content": content,
 		})
@@ -76,7 +76,7 @@ func TestMessageList(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	msgs := mustJSON[[]map[string]interface{}](t, rr.Body)
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
 	// Task creation stores the prompt as a system message, so there's 1 extra
 	if len(msgs) != 4 {
 		t.Fatalf("expected 4 messages (3 user + 1 prompt), got %d", len(msgs))
@@ -89,16 +89,16 @@ func TestMessageUpdate(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Test task")
 
 	// Create a message
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Original content",
 	})
 	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]interface{}](t, createRR.Body)
+	msg := mustJSON[map[string]any](t, createRR.Body)
 	msgID := msg["id"].(string)
 
 	// Update the message
-	req := testRequest("PATCH", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, map[string]interface{}{
+	req := testRequest("PATCH", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, map[string]any{
 		"content": "Updated content",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -109,7 +109,7 @@ func TestMessageUpdate(t *testing.T) {
 	// Verify update
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	listRR := testResponseAuth(t, s, listReq)
-	msgs := mustJSON[[]map[string]interface{}](t, listRR.Body)
+	msgs := mustJSON[[]map[string]any](t, listRR.Body)
 	if msgs[len(msgs)-1]["content"] != "Updated content" {
 		t.Fatalf("expected updated content, got %s", msgs[len(msgs)-1]["content"])
 	}
@@ -123,17 +123,17 @@ func TestMessageDeleteAfter(t *testing.T) {
 	// Create messages
 	var msgIDs []string
 	for _, content := range []string{"msg 1", "msg 2", "msg 3", "msg 4"} {
-		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 			"role":    "user",
 			"content": content,
 		})
 		rr := testResponseAuth(t, s, req)
-		msg := mustJSON[map[string]interface{}](t, rr.Body)
+		msg := mustJSON[map[string]any](t, rr.Body)
 		msgIDs = append(msgIDs, msg["id"].(string))
 	}
 
 	// Delete after msg 2
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"message_id": msgIDs[1],
 	})
 	rr := testResponseAuth(t, s, req)
@@ -146,7 +146,7 @@ func TestMessageDeleteAfter(t *testing.T) {
 	// second may all be deleted together. The store layer tests verify precise behavior.
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	listRR := testResponseAuth(t, s, listReq)
-	remaining := mustJSON[[]map[string]interface{}](t, listRR.Body)
+	remaining := mustJSON[[]map[string]any](t, listRR.Body)
 	// At least the deleted message itself should be gone
 	for _, m := range remaining {
 		if m["id"] == msgIDs[1] {
@@ -161,7 +161,7 @@ func TestMessageDeleteMissingID(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
 
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{})
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{})
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
@@ -174,12 +174,12 @@ func TestMessageGetByID(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Test task")
 
 	// Create a message
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]interface{}{
+	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Hello",
 	})
 	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]interface{}](t, createRR.Body)
+	msg := mustJSON[map[string]any](t, createRR.Body)
 	msgID := msg["id"].(string)
 
 	// Get message metadata (will_delete_branch check)
@@ -189,7 +189,7 @@ func TestMessageGetByID(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	// No fork threads, so will_delete_branch should be false
 	if result["will_delete_branch"] != false {
 		t.Fatalf("expected will_delete_branch=false, got %v", result["will_delete_branch"])

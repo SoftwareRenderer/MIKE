@@ -27,14 +27,14 @@ func testStore(t *testing.T) *Store {
 func newTask(id, projectID string) *types.Task {
 	now := time.Now().UTC()
 	return &types.Task{
-		ID:         id,
-		ProjectID:  projectID,
-		Title:      id,
-		Prompt:     "test prompt",
-		Status:     "backlog",
+		ID:          id,
+		ProjectID:   projectID,
+		Title:       id,
+		Prompt:      "test prompt",
+		Status:      "backlog",
 		StatusState: "idle",
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 }
 
@@ -64,10 +64,10 @@ func newMessage(id, taskID, role, content string) *types.TaskMessage {
 // newThread creates a TaskThread with default values for testing.
 func newThread(id, taskID, name string) *types.TaskThread {
 	return &types.TaskThread{
-		ID:      id,
-		TaskID:  taskID,
-		Name:    name,
-		IsActive: false,
+		ID:        id,
+		TaskID:    taskID,
+		Name:      name,
+		IsActive:  false,
 		CreatedAt: time.Now().UTC(),
 	}
 }

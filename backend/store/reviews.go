@@ -70,7 +70,7 @@ func (s *Store) UpdateReviewComment(id string, comment *string, resolved *bool) 
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	query := `UPDATE review_comments SET updated_at = ?`
-	args := []interface{}{now.Format(time.RFC3339)}
+	args := []any{now.Format(time.RFC3339)}
 	if comment != nil {
 		query += `, comment = ?`
 		args = append(args, *comment)

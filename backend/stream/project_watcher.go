@@ -31,10 +31,10 @@ func NewProjectWatcher(broadcast fsBroadcastFn) (*ProjectWatcher, error) {
 		return nil, err
 	}
 	return &ProjectWatcher{
-		watcher:     w,
-		projects:    make(map[string]string),
-		debounces:   make(map[string]*time.Timer),
-		broadcast:   broadcast,
+		watcher:   w,
+		projects:  make(map[string]string),
+		debounces: make(map[string]*time.Timer),
+		broadcast: broadcast,
 	}, nil
 }
 

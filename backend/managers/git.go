@@ -169,7 +169,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	clean := len(strings.TrimSpace(string(out))) == 0
-	httputil.JSONResponse(w, http.StatusOK, map[string]interface{}{"clean": clean, "status": string(out)})
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"clean": clean, "status": string(out)})
 }
 
 // HandleCheckout checks out a branch.
@@ -302,7 +302,7 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 		return nil, fmt.Errorf("git log from project: %s: %w", string(out), err)
 	}
 
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -325,6 +325,7 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 // Optional query params:
 //   - base: custom base ref (overrides resolved baseline)
 //   - head: second ref for commit-to-commit diff (git diff base..head)
+//
 // Falls back to project repo when worktree doesn't exist (e.g., after commit-and-done).
 func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request, projectID, taskID string) {
 	task, err := h.store.GetTask(projectID, taskID)

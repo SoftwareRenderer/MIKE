@@ -16,8 +16,8 @@ import (
 
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store    *store.Store
-	dbPath   string
+	store  *store.Store
+	dbPath string
 }
 
 // NewConfigStore creates a new ConfigStore.
@@ -137,14 +137,14 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 
 // configResponse wraps Config with additional metadata for API responses.
 type configResponse struct {
-	WorkspaceDir        string     `json:"workspace_dir"`
-	DatabasePath        string     `json:"database_path"`
-	Providers           []types.Provider `json:"providers"`
-	DefaultProvider     string     `json:"default_provider"`
-	DefaultAutoCommit   *bool      `json:"default_auto_commit,omitempty"`
-	DefaultPlanMode     *bool      `json:"default_plan_mode,omitempty"`
-	DefaultMaxFailedTurns *int     `json:"default_max_failed_turns,omitempty"`
-	EncryptionEnabled   bool       `json:"encryption_enabled"`
+	WorkspaceDir          string           `json:"workspace_dir"`
+	DatabasePath          string           `json:"database_path"`
+	Providers             []types.Provider `json:"providers"`
+	DefaultProvider       string           `json:"default_provider"`
+	DefaultAutoCommit     *bool            `json:"default_auto_commit,omitempty"`
+	DefaultPlanMode       *bool            `json:"default_plan_mode,omitempty"`
+	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
+	EncryptionEnabled     bool             `json:"encryption_enabled"`
 }
 
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
@@ -171,19 +171,19 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		// Mask API keys before sending to client
 		maskAPIKeys(cfg.Providers)
 		resp := configResponse{
-			WorkspaceDir:        cfg.WorkspaceDir,
-			DatabasePath:        cfg.DatabasePath,
-			Providers:           cfg.Providers,
-			DefaultProvider:     cfg.DefaultProvider,
-			DefaultAutoCommit:   cfg.DefaultAutoCommit,
-			DefaultPlanMode:     cfg.DefaultPlanMode,
+			WorkspaceDir:          cfg.WorkspaceDir,
+			DatabasePath:          cfg.DatabasePath,
+			Providers:             cfg.Providers,
+			DefaultProvider:       cfg.DefaultProvider,
+			DefaultAutoCommit:     cfg.DefaultAutoCommit,
+			DefaultPlanMode:       cfg.DefaultPlanMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
-			EncryptionEnabled:   crypto.IsEnabled(),
+			EncryptionEnabled:     crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	case http.MethodPut:
 		// Partial update: only update fields that are provided
-		var updates map[string]interface{}
+		var updates map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 			return
@@ -245,14 +245,14 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		// Mask API keys before sending response
 		maskAPIKeys(current.Providers)
 		resp := configResponse{
-			WorkspaceDir:        current.WorkspaceDir,
-			DatabasePath:        current.DatabasePath,
-			Providers:           current.Providers,
-			DefaultProvider:     current.DefaultProvider,
-			DefaultAutoCommit:   current.DefaultAutoCommit,
-			DefaultPlanMode:     current.DefaultPlanMode,
+			WorkspaceDir:          current.WorkspaceDir,
+			DatabasePath:          current.DatabasePath,
+			Providers:             current.Providers,
+			DefaultProvider:       current.DefaultProvider,
+			DefaultAutoCommit:     current.DefaultAutoCommit,
+			DefaultPlanMode:       current.DefaultPlanMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
-			EncryptionEnabled:   crypto.IsEnabled(),
+			EncryptionEnabled:     crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	default:

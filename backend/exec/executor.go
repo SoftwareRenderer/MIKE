@@ -16,8 +16,8 @@ import (
 	"kanban/backend/httputil"
 	"kanban/backend/llama"
 	"kanban/backend/sandbox"
-	"kanban/backend/stream"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
@@ -25,14 +25,14 @@ import (
 
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store          *store.Store
-	configStore    *config.ConfigStore
-	appStreamMgr   *stream.AppStreamManager
-	worktreeMgr    *git.WorktreeManager
-	sandboxMgr     *sandbox.SandboxManager
-	gate           *ConcurrencyGate
-	taskMu         sync.Mutex
-	tasks          map[string]*executionState
+	store        *store.Store
+	configStore  *config.ConfigStore
+	appStreamMgr *stream.AppStreamManager
+	worktreeMgr  *git.WorktreeManager
+	sandboxMgr   *sandbox.SandboxManager
+	gate         *ConcurrencyGate
+	taskMu       sync.Mutex
+	tasks        map[string]*executionState
 }
 
 type executionState struct {
@@ -65,13 +65,13 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 // NewTaskExecutor creates a new TaskExecutor.
 func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager) *TaskExecutor {
 	te := &TaskExecutor{
-		store:          store,
-		configStore:    configStore,
-		appStreamMgr:   appStreamMgr,
-		worktreeMgr:    worktreeMgr,
-		sandboxMgr:     sandboxMgr,
-		gate:           NewConcurrencyGate(),
-		tasks:          make(map[string]*executionState),
+		store:        store,
+		configStore:  configStore,
+		appStreamMgr: appStreamMgr,
+		worktreeMgr:  worktreeMgr,
+		sandboxMgr:   sandboxMgr,
+		gate:         NewConcurrencyGate(),
+		tasks:        make(map[string]*executionState),
 	}
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	te.appStreamMgr.SetUserMessageHandler(func(um stream.AppStreamUserMessage) {
@@ -213,12 +213,12 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, proje
 	}
 
 	// Broadcast echo to WS clients
-	echoData := map[string]interface{}{"id": msgID, "role": "user", "content": req.Content}
+	echoData := map[string]any{"id": msgID, "role": "user", "content": req.Content}
 	if threadID != "" {
 		echoData["thread_id"] = threadID
 	}
 	if req.Attachments != "" {
-		var atts []interface{}
+		var atts []any
 		if err := json.Unmarshal([]byte(req.Attachments), &atts); err == nil && len(atts) > 0 {
 			echoData["attachments"] = atts
 		}
@@ -235,7 +235,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request, proje
 	})
 
 	// Return the message
-	result := map[string]interface{}{
+	result := map[string]any{
 		"id":      msgID,
 		"role":    "user",
 		"content": req.Content,
@@ -290,7 +290,6 @@ func (te *TaskExecutor) ResetForTest() {
 	}
 	te.appStreamMgr.ResetForTest()
 }
-
 
 // -- Subtask auto-start methods --
 

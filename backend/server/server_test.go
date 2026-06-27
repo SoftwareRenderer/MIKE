@@ -58,7 +58,7 @@ func testServer(t *testing.T) *Server {
 }
 
 // testRequest creates an http.Request for testing.
-func testRequest(method, path string, body interface{}) *http.Request {
+func testRequest(method, path string, body any) *http.Request {
 	var reader io.Reader
 	if body != nil {
 		data, _ := json.Marshal(body)
@@ -149,7 +149,7 @@ func createTestProject(t *testing.T, s *Server) string {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)
-	proj := map[string]interface{}{
+	proj := map[string]any{
 		"name": "test-project",
 		"path": dir,
 	}
@@ -159,7 +159,7 @@ func createTestProject(t *testing.T, s *Server) string {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
 }
 
@@ -190,7 +190,7 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 func createTestTask(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()
 	cookie, csrfToken := loginTestCSRF(t, s)
-	task := map[string]interface{}{
+	task := map[string]any{
 		"prompt": prompt,
 	}
 	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
@@ -199,7 +199,7 @@ func createTestTask(t *testing.T, s *Server, projectID string, prompt string) st
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
 }
 
@@ -251,7 +251,7 @@ func TestHandleFSWrite(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
-		result := mustJSON[map[string]interface{}](t, rr.Body)
+		result := mustJSON[map[string]any](t, rr.Body)
 		if result["status"] != "written" {
 			t.Fatalf("expected status=written, got %v", result["status"])
 		}

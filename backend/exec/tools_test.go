@@ -96,7 +96,7 @@ func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
 		return os.ReadFile(filepath.Join(dir, path))
 	}
 
-	result, ok := te.executeTool("read_file", map[string]interface{}{"path": "hello.txt"}, dir, &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, nil, nil, readFn, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -116,7 +116,7 @@ func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
 	te := &TaskExecutor{}
 
 	// No readFn — should fall back to host
-	result, ok := te.executeTool("read_file", map[string]interface{}{"path": "host.txt"}, dir, &types.Task{}, nil, nil, nil, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "host.txt"}, dir, &types.Task{}, nil, nil, nil, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -133,7 +133,7 @@ func TestExecuteTool_ReadFile_PathEscape(t *testing.T) {
 		return []byte("should not reach here"), nil
 	}
 
-	result, ok := te.executeTool("read_file", map[string]interface{}{"path": "../etc/passwd"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "../etc/passwd"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
 	if ok {
 		t.Fatalf("expected failure for path escape, got success: %s", result)
 	}
@@ -156,7 +156,7 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 		return os.WriteFile(fullPath, []byte(content), 0644)
 	}
 
-	result, ok := te.executeTool("write_file", map[string]interface{}{
+	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "test.txt",
 		"content": "hello sandbox",
 	}, dir, &types.Task{}, nil, nil, nil, writeFn)
@@ -188,7 +188,7 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 	te := &TaskExecutor{}
 
 	// No writeFn — should fall back to host
-	result, ok := te.executeTool("write_file", map[string]interface{}{
+	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "host.txt",
 		"content": "hello host",
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -216,7 +216,7 @@ func TestExecuteTool_WriteFile_PathEscape(t *testing.T) {
 		return nil // should not reach here
 	}
 
-	result, ok := te.executeTool("write_file", map[string]interface{}{
+	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "../etc/evil",
 		"content": "malicious",
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, writeFn)
@@ -238,7 +238,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 		return os.WriteFile(fullPath, []byte(content), 0644)
 	}
 
-	result, ok := te.executeTool("write_file", map[string]interface{}{
+	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "deep/nested/dir/file.txt",
 		"content": "nested content",
 	}, dir, &types.Task{}, nil, nil, nil, writeFn)
@@ -257,7 +257,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 
 func TestExecuteTool_TaskComplete(t *testing.T) {
 	te := &TaskExecutor{}
-	result, ok := te.executeTool("task_complete", map[string]interface{}{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	result, ok := te.executeTool("task_complete", map[string]any{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -268,7 +268,7 @@ func TestExecuteTool_TaskComplete(t *testing.T) {
 
 func TestExecuteTool_UnknownTool(t *testing.T) {
 	te := &TaskExecutor{}
-	result, ok := te.executeTool("unknown_tool", map[string]interface{}{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	result, ok := te.executeTool("unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
 	if ok {
 		t.Fatalf("expected failure for unknown tool, got success: %s", result)
 	}
@@ -284,7 +284,7 @@ func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
 		return nil, fmt.Errorf("file not found in sandbox")
 	}
 
-	result, ok := te.executeTool("read_file", map[string]interface{}{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
 	}
@@ -306,50 +306,50 @@ func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
 	te := &TaskExecutor{}
 
 	tests := []struct {
-		name     string
-		args     map[string]interface{}
-		want     string
-		wantErr  bool
+		name    string
+		args    map[string]any
+		want    string
+		wantErr bool
 	}{
 		{
 			name:    "no offset/limit returns full file",
-			args:    map[string]interface{}{"path": "test.txt"},
+			args:    map[string]any{"path": "test.txt"},
 			want:    content,
 			wantErr: false,
 		},
 		{
 			name:    "offset 1 returns full file",
-			args:    map[string]interface{}{"path": "test.txt", "offset": float64(1)},
+			args:    map[string]any{"path": "test.txt", "offset": float64(1)},
 			want:    content,
 			wantErr: false,
 		},
 		{
 			name:    "offset 4 returns lines 4-10",
-			args:    map[string]interface{}{"path": "test.txt", "offset": float64(4)},
+			args:    map[string]any{"path": "test.txt", "offset": float64(4)},
 			want:    "line4\nline5\nline6\nline7\nline8\nline9\nline10",
 			wantErr: false,
 		},
 		{
 			name:    "offset 4 limit 3 returns lines 4-6",
-			args:    map[string]interface{}{"path": "test.txt", "offset": float64(4), "limit": float64(3)},
+			args:    map[string]any{"path": "test.txt", "offset": float64(4), "limit": float64(3)},
 			want:    "line4\nline5\nline6",
 			wantErr: false,
 		},
 		{
 			name:    "limit 3 returns first 3 lines",
-			args:    map[string]interface{}{"path": "test.txt", "limit": float64(3)},
+			args:    map[string]any{"path": "test.txt", "limit": float64(3)},
 			want:    "line1\nline2\nline3",
 			wantErr: false,
 		},
 		{
 			name:    "offset past end returns empty message",
-			args:    map[string]interface{}{"path": "test.txt", "offset": float64(100)},
+			args:    map[string]any{"path": "test.txt", "offset": float64(100)},
 			want:    "(empty — offset past end of file)",
 			wantErr: false,
 		},
 		{
 			name:    "limit larger than file returns full file",
-			args:    map[string]interface{}{"path": "test.txt", "limit": float64(100)},
+			args:    map[string]any{"path": "test.txt", "limit": float64(100)},
 			want:    content,
 			wantErr: false,
 		},
@@ -385,11 +385,11 @@ func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "hello world", "newText": "goodbye world"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -416,12 +416,12 @@ func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "alpha", "newText": "ALPHA"},
 		{"oldText": "gamma", "newText": "GAMMA"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -448,11 +448,11 @@ func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "not here", "newText": "replacement"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -473,11 +473,11 @@ func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "foo", "newText": "BAR"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -498,12 +498,12 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "abcd", "newText": "ABCD"},
 		{"oldText": "cdef", "newText": "CDEF"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -517,11 +517,11 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 
 func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "x", "newText": "y"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "../etc/passwd",
 		"edits": json.RawMessage(editsJSON),
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
@@ -541,11 +541,11 @@ func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "", "newText": "replacement"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -565,9 +565,9 @@ func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
 	}
 
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{})
+	editsJSON, _ := json.Marshal([]map[string]any{})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -601,11 +601,11 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 		return os.WriteFile(fullPath, []byte(c), 0644)
 	}
 
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "original", "newText": "modified"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, dir, &types.Task{}, nil, nil, readFn, writeFn)
@@ -631,11 +631,11 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 
 func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
 	te := &TaskExecutor{}
-	editsJSON, _ := json.Marshal([]map[string]interface{}{
+	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "x", "newText": "y"},
 	})
 
-	result, ok := te.executeTool("edit_file", map[string]interface{}{
+	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "nonexistent.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
@@ -653,7 +653,7 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 	dir := t.TempDir()
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool("bash", map[string]interface{}{
+	result, ok := te.executeTool("bash", map[string]any{
 		"command": "echo hello",
 		"timeout": float64(5),
 	}, dir, &types.Task{}, nil, nil, nil, nil)
@@ -668,7 +668,7 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 func TestExecuteTool_Bash_Dangerous(t *testing.T) {
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool("bash", map[string]interface{}{
+	result, ok := te.executeTool("bash", map[string]any{
 		"command": "sudo rm -rf /",
 		"timeout": float64(5),
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
@@ -739,7 +739,7 @@ func TestValidateWorktreePath_Escapes(t *testing.T) {
 		"../../etc/passwd",
 		"foo/../../etc/passwd",
 		"..",
-		"/etc/passwd",       // absolute path
+		"/etc/passwd",        // absolute path
 		"/tmp/other/file.go", // absolute path outside worktree
 	}
 	for _, path := range escapes {
@@ -757,7 +757,7 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 		return fmt.Errorf("permission denied")
 	}
 
-	result, ok := te.executeTool("write_file", map[string]interface{}{
+	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "readonly.txt",
 		"content": "data",
 	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, writeFn)
@@ -769,14 +769,12 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 	}
 }
 
-
-
 func TestValidateWorktreePath_SandboxMountPath(t *testing.T) {
 	// Sandbox mode: LLM uses /worktree/... paths
 	tests := []struct {
-		name    string
-		path    string
-		wantOK  bool
+		name   string
+		path   string
+		wantOK bool
 	}{
 		{"sandbox valid", "/worktree/hello.c", true},
 		{"sandbox nested", "/worktree/src/main.go", true},

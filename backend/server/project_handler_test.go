@@ -10,7 +10,7 @@ func TestProjectCreate(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name": "My Project",
 		"path": dir,
 	})
@@ -19,7 +19,7 @@ func TestProjectCreate(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["name"] != "My Project" {
 		t.Fatalf("unexpected name: %s", result["name"])
 	}
@@ -33,7 +33,7 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name":                      "Sandboxed Project",
 		"path":                      dir,
 		"sandbox_enabled":           true,
@@ -44,7 +44,7 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_enabled"] != true {
 		t.Fatalf("expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
 	}
@@ -56,7 +56,7 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 	projID := result["id"].(string)
 	req = testRequest("GET", "/api/projects/"+projID, nil)
 	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_enabled"] != true {
 		t.Fatalf("GET: expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
 	}
@@ -68,7 +68,7 @@ func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
 	initGitRepo(t, dir)
 
 	// sandbox_enabled=true without sandbox_network_isolation should return 400
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name":            "Sandboxed Project",
 		"path":            dir,
 		"sandbox_enabled": true,
@@ -78,14 +78,14 @@ func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	msg, ok := result["error"].(string)
 	if !ok || msg == "" {
 		t.Fatal("expected error message in response")
 	}
 
 	// sandbox_enabled=false without sandbox_network_isolation should succeed
-	req = testRequest("POST", "/api/projects", map[string]interface{}{
+	req = testRequest("POST", "/api/projects", map[string]any{
 		"name":            "Non-Sandboxed Project",
 		"path":            dir,
 		"sandbox_enabled": false,
@@ -102,14 +102,14 @@ func TestProjectCreateDuplicatePath(t *testing.T) {
 	initGitRepo(t, dir)
 
 	// Create first project
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name": "Project A",
 		"path": dir,
 	})
 	testResponseAuth(t, s, req)
 
 	// Create second project with same path — should fail (500 for UNIQUE constraint violation)
-	req = testRequest("POST", "/api/projects", map[string]interface{}{
+	req = testRequest("POST", "/api/projects", map[string]any{
 		"name": "Project B",
 		"path": dir,
 	})
@@ -126,7 +126,7 @@ func TestProjectList(t *testing.T) {
 	for _, name := range []string{"Project A", "Project B"} {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
-		req := testRequest("POST", "/api/projects", map[string]interface{}{
+		req := testRequest("POST", "/api/projects", map[string]any{
 			"name": name,
 			"path": dir,
 		})
@@ -139,7 +139,7 @@ func TestProjectList(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	projects := mustJSON[[]map[string]interface{}](t, rr.Body)
+	projects := mustJSON[[]map[string]any](t, rr.Body)
 	if len(projects) != 2 {
 		t.Fatalf("expected 2 projects, got %d", len(projects))
 	}
@@ -159,7 +159,7 @@ func TestProjectGetByID(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["id"] != projID {
 		t.Fatalf("wrong ID: %s", result["id"])
 	}
@@ -179,7 +179,7 @@ func TestProjectUpdate(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	req := testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"name": "Renamed Project",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -187,7 +187,7 @@ func TestProjectUpdate(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["name"] != "Renamed Project" {
 		t.Fatalf("unexpected name: %s", result["name"])
 	}
@@ -200,7 +200,7 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 	// Verify default: sandbox disabled, network isolation disabled
 	req := testRequest("GET", "/api/projects/"+projID, nil)
 	rr := testResponseAuth(t, s, req)
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_enabled"] == true {
 		t.Fatal("expected sandbox_enabled to be false by default")
 	}
@@ -209,15 +209,15 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 	}
 
 	// Enable sandbox and network isolation
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
-		"sandbox_enabled":            true,
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_enabled":           true,
 		"sandbox_network_isolation": true,
 	})
 	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_enabled"] != true {
 		t.Fatal("expected sandbox_enabled to be true")
 	}
@@ -226,14 +226,14 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 	}
 
 	// Disable only network isolation (sandbox stays on)
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"sandbox_network_isolation": false,
 	})
 	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_enabled"] != true {
 		t.Fatal("expected sandbox_enabled to still be true")
 	}
@@ -270,7 +270,7 @@ func TestProjectCounts(t *testing.T) {
 
 	// Move one to in_progress
 	taskID := createTestTask(t, s, projID, "In progress task")
-	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]interface{}{
+	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
 		"status": "in_progress",
 	})
 	moveRR := testResponseAuth(t, s, moveReq)
@@ -280,7 +280,7 @@ func TestProjectCounts(t *testing.T) {
 
 	// Move one to review
 	reviewTaskID := createTestTask(t, s, projID, "Review task")
-	moveReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+reviewTaskID+"/move", map[string]interface{}{
+	moveReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+reviewTaskID+"/move", map[string]any{
 		"status": "review",
 	})
 	moveRR2 := testResponseAuth(t, s, moveReq2)
@@ -291,7 +291,7 @@ func TestProjectCounts(t *testing.T) {
 	// Debug: list tasks and their statuses
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
 	listRR := testResponseAuth(t, s, listReq)
-	tasks := mustJSON[[]map[string]interface{}](t, listRR.Body)
+	tasks := mustJSON[[]map[string]any](t, listRR.Body)
 	for _, task := range tasks {
 		t.Logf("task %s: status=%s", task["id"], task["status"])
 	}
@@ -302,8 +302,8 @@ func TestProjectCounts(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	counts := mustJSON[map[string]interface{}](t, rr.Body)
-	projCounts, ok := counts[projID].(map[string]interface{})
+	counts := mustJSON[map[string]any](t, rr.Body)
+	projCounts, ok := counts[projID].(map[string]any)
 	if !ok {
 		t.Fatalf("project %s not found in counts: %+v", projID, counts)
 	}
@@ -332,8 +332,8 @@ func TestBoardEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	board := mustJSON[map[string]interface{}](t, rr.Body)
-	tasks := board["tasks"].([]interface{})
+	board := mustJSON[map[string]any](t, rr.Body)
+	tasks := board["tasks"].([]any)
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks on board, got %d", len(tasks))
 	}
@@ -348,7 +348,7 @@ func TestClearDone(t *testing.T) {
 	doneTask := createTestTask(t, s, projID, "Done task")
 
 	// Move one to done
-	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+doneTask+"/move", map[string]interface{}{
+	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+doneTask+"/move", map[string]any{
 		"status": "done",
 	})
 	moveRR := testResponseAuth(t, s, moveReq)
@@ -366,7 +366,7 @@ func TestClearDone(t *testing.T) {
 	// Verify done task is gone but backlog task remains
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
 	listRR := testResponseAuth(t, s, listReq)
-	tasks := mustJSON[[]map[string]interface{}](t, listRR.Body)
+	tasks := mustJSON[[]map[string]any](t, listRR.Body)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after clear done, got %d", len(tasks))
 	}
@@ -380,7 +380,7 @@ func TestProjectCreateWithMemoryLimit(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name":                      "Memory Limit Project",
 		"path":                      dir,
 		"sandbox_enabled":           true,
@@ -392,7 +392,7 @@ func TestProjectCreateWithMemoryLimit(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_memory_limit"].(float64) != 2048 {
 		t.Fatalf("expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
 	}
@@ -401,7 +401,7 @@ func TestProjectCreateWithMemoryLimit(t *testing.T) {
 	projID := result["id"].(string)
 	req = testRequest("GET", "/api/projects/"+projID, nil)
 	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_memory_limit"].(float64) != 2048 {
 		t.Fatalf("GET: expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
 	}
@@ -413,14 +413,14 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 	initGitRepo(t, dir)
 
 	// Create project with default memory limit
-	req := testRequest("POST", "/api/projects", map[string]interface{}{
+	req := testRequest("POST", "/api/projects", map[string]any{
 		"name":                      "Memory Update Project",
 		"path":                      dir,
 		"sandbox_enabled":           true,
 		"sandbox_network_isolation": false,
 	})
 	rr := testResponseAuth(t, s, req)
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	projID := result["id"].(string)
 
 	// Default should be 1024
@@ -429,24 +429,24 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 	}
 
 	// Update memory limit
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"sandbox_memory_limit": 4096,
 	})
 	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_memory_limit"].(float64) != 4096 {
 		t.Fatalf("expected sandbox_memory_limit 4096, got %v", result["sandbox_memory_limit"])
 	}
 
 	// Update to 0 (no limit)
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"sandbox_memory_limit": 0,
 	})
 	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]interface{}](t, rr.Body)
+	result = mustJSON[map[string]any](t, rr.Body)
 	if result["sandbox_memory_limit"].(float64) != 0 {
 		t.Fatalf("expected sandbox_memory_limit 0, got %v", result["sandbox_memory_limit"])
 	}

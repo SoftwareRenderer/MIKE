@@ -18,8 +18,8 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/types"
 
-	"github.com/creack/pty"
 	"github.com/coder/websocket"
+	"github.com/creack/pty"
 )
 
 const (
@@ -29,14 +29,14 @@ const (
 
 // taskTerminal holds a persistent PTY session for a single task.
 type taskTerminal struct {
-	cmd         *exec.Cmd
-	ptmx        *os.File
-	shell       *sandbox.ShellProcess // non-nil when running in sandbox
-	mu          sync.Mutex
-	conns       map[*websocket.Conn]bool
-	buf         [][]byte
-	lastActive  time.Time
-	onExit      func() // called when shell process exits, to remove session from manager
+	cmd        *exec.Cmd
+	ptmx       *os.File
+	shell      *sandbox.ShellProcess // non-nil when running in sandbox
+	mu         sync.Mutex
+	conns      map[*websocket.Conn]bool
+	buf        [][]byte
+	lastActive time.Time
+	onExit     func() // called when shell process exits, to remove session from manager
 }
 
 // TerminalManager manages per-task persistent terminal sessions.

@@ -42,12 +42,12 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 				Name:        "read_file",
 				DisplayName: "Read",
 				Description: "Read the contents of a file from the worktree. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"path":   map[string]interface{}{"type": "string", "description": "Path to the file relative to worktree root"},
-						"offset": map[string]interface{}{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
-						"limit":  map[string]interface{}{"type": "integer", "description": "Maximum number of lines to read"},
+					"properties": map[string]any{
+						"path":   map[string]any{"type": "string", "description": "Path to the file relative to worktree root"},
+						"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
+						"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
 					},
 					"required": []string{"path"},
 				},
@@ -59,11 +59,11 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 				Name:        "bash",
 				DisplayName: "Execute",
 				Description: "Execute a read-only shell command in the worktree directory. Only safe, non-destructive commands are allowed: ls, cat, grep, find, head, tail, wc, diff, git log, git status, git diff, git show, git branch, git remote, env, echo, pwd, tree, file, stat, du, which, man, help. Do NOT use write commands (rm, mv, cp, chmod, chown, touch, install, build, test, etc.). Always set timeout: 2s for fast commands.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"command": map[string]interface{}{"type": "string", "description": "Read-only shell command to execute"},
-						"timeout": map[string]interface{}{"type": "integer", "description": "Timeout in seconds (max 300)"},
+					"properties": map[string]any{
+						"command": map[string]any{"type": "string", "description": "Read-only shell command to execute"},
+						"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
 					},
 					"required": []string{"command"},
 				},
@@ -75,12 +75,12 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 				Name:        "create_task",
 				DisplayName: "Create Task",
 				Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. The new task inherits the parent's settings (model, provider, auto_commit). Returns the created task_id, which can be used as parent_task_id for nested subtasks.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"title":          map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
-						"prompt":         map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
-						"parent_task_id": map[string]interface{}{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
+					"properties": map[string]any{
+						"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
+						"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
+						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
 				},
@@ -92,10 +92,10 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 				Name:        "task_complete",
 				DisplayName: "Done",
 				Description: "Signal that the planning is complete. Call this after all subtasks have been created.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"summary": map[string]interface{}{"type": "string", "description": "Brief summary of the plan (subtasks created, key decisions)"},
+					"properties": map[string]any{
+						"summary": map[string]any{"type": "string", "description": "Brief summary of the plan (subtasks created, key decisions)"},
 					},
 					"required": []string{"summary"},
 				},
@@ -113,12 +113,12 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "read_file",
 				DisplayName: "Read",
 				Description: "Read the contents of a file from the worktree. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"path":   map[string]interface{}{"type": "string", "description": "Path to the file relative to worktree root"},
-						"offset": map[string]interface{}{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
-						"limit":  map[string]interface{}{"type": "integer", "description": "Maximum number of lines to read"},
+					"properties": map[string]any{
+						"path":   map[string]any{"type": "string", "description": "Path to the file relative to worktree root"},
+						"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
+						"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
 					},
 					"required": []string{"path"},
 				},
@@ -130,7 +130,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "write_file",
 				DisplayName: "Write",
 				Description: "Write content to a file in the worktree (creates directories as needed)",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
 					// ensure that the LLM sees path before content
 					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file"},"content":{"type":"string","description":"Content to write"}}`),
@@ -144,7 +144,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "edit_file",
 				DisplayName: "Edit",
 				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type":       "object",
 					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit (relative to worktree root)"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
 					"required":   []string{"path", "edits"},
@@ -157,11 +157,11 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "bash",
 				DisplayName: "Execute",
 				Description: "Execute a shell command in the worktree directory. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"command": map[string]interface{}{"type": "string", "description": "Shell command to execute"},
-						"timeout": map[string]interface{}{"type": "integer", "description": "Timeout in seconds (max 300)"},
+					"properties": map[string]any{
+						"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+						"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
 					},
 					"required": []string{"command"},
 				},
@@ -173,10 +173,10 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "task_complete",
 				DisplayName: "Done",
 				Description: "Signal that the task is complete",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"summary": map[string]interface{}{"type": "string", "description": "Brief summary of the changes made (files created/modified, key decisions, issues encountered)"},
+					"properties": map[string]any{
+						"summary": map[string]any{"type": "string", "description": "Brief summary of the changes made (files created/modified, key decisions, issues encountered)"},
 					},
 					"required": []string{"summary"},
 				},
@@ -188,12 +188,12 @@ func GetToolDefinitions() []types.ChatTool {
 				Name:        "create_task",
 				DisplayName: "Create Task",
 				Description: "Create a new task on the Kanban board. In plan mode, use this to decompose work into subtasks. The new task inherits the parent's settings (model, provider, auto_commit). Returns the created task_id, which can be used as parent_task_id for nested subtasks.",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"title":          map[string]interface{}{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
-						"prompt":         map[string]interface{}{"type": "string", "description": "Detailed description of what the task should accomplish"},
-						"parent_task_id": map[string]interface{}{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
+					"properties": map[string]any{
+						"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
+						"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
+						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
 				},

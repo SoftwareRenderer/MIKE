@@ -20,8 +20,8 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
-	"kanban/backend/stream"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/term"
 	"kanban/backend/types"
 )
@@ -79,7 +79,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request, project
 		var task types.Task
 		var attachments string
 		// Parse attachments separately (not a field on Task type)
-		var rawBody map[string]interface{}
+		var rawBody map[string]any
 		if err := json.Unmarshal(body, &rawBody); err == nil {
 			if att, ok := rawBody["attachments"]; ok {
 				attachments = att.(string)
@@ -260,7 +260,7 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request, pr
 		deleted++
 	}
 
-	httputil.JSONResponse(w, http.StatusOK, map[string]interface{}{"deleted": deleted})
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
 
 // HandleMove moves a task to a different column.
@@ -605,7 +605,7 @@ func (h *TaskHandler) getConflictedFiles(projectID string) []string {
 		return nil
 	}
 	var files []string
-	for _, line := range strings.Split(statusOut, "\n") {
+	for line := range strings.SplitSeq(statusOut, "\n") {
 		f := strings.TrimSpace(line)
 		if f != "" {
 			files = append(files, f)
@@ -682,7 +682,7 @@ END_SUMMARY`, task.Title, task.Prompt, conflictContext)
 	inResolve := false
 	inSummary := false
 
-	for _, line := range strings.Split(response, "\n") {
+	for line := range strings.SplitSeq(response, "\n") {
 		if strings.HasPrefix(line, "RESOLVE ") {
 			// Write previous file if any
 			if currentFile != "" && inResolve {
@@ -783,12 +783,12 @@ func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFile
 	// Broadcast to task stream clients for real-time display
 	task, _ := h.store.GetTaskByTaskID(taskID)
 	if task != nil && h.boardStreamMgr != nil {
-		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]interface{}{
-			"id":              msgID,
+		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
+			"id":               msgID,
 			"conflicted_files": conflictedFiles,
-			"summary":         summary,
-			"content":         content,
-			"created_at":      time.Now().UTC().Format(time.RFC3339),
+			"summary":          summary,
+			"content":          content,
+			"created_at":       time.Now().UTC().Format(time.RFC3339),
 		}})
 	}
 }
@@ -1131,5 +1131,3 @@ func isHex(s string) bool {
 	}
 	return true
 }
-
-

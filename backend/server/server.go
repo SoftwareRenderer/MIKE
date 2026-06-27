@@ -15,8 +15,8 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/managers"
 	"kanban/backend/sandbox"
-	"kanban/backend/stream"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/term"
 )
 

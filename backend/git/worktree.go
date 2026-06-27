@@ -20,25 +20,25 @@ import (
 // watched or shown in diffs. Covers directories found in virtually every
 // .gitignore file.
 var ignoredDirs = map[string]struct{}{
-	"node_modules":    {},
-	".next":           {},
-	"dist":            {},
-	"build":           {},
-	".cache":          {},
-	"__pycache__":     {},
-	".venv":           {},
-	"target":          {},
-	"vendor":          {},
-	".gradle":         {},
-	".mypy_cache":     {},
-	".pytest_cache":   {},
-	"coverage":        {},
-	".nuxt":           {},
-	".output":         {},
-	".svelte-kit":     {},
-	".turbo":          {},
-	".vercel":         {},
-	".docker":         {},
+	"node_modules":  {},
+	".next":         {},
+	"dist":          {},
+	"build":         {},
+	".cache":        {},
+	"__pycache__":   {},
+	".venv":         {},
+	"target":        {},
+	"vendor":        {},
+	".gradle":       {},
+	".mypy_cache":   {},
+	".pytest_cache": {},
+	"coverage":      {},
+	".nuxt":         {},
+	".output":       {},
+	".svelte-kit":   {},
+	".turbo":        {},
+	".vercel":       {},
+	".docker":       {},
 }
 
 // IgnoredDirs returns the set of well-known directory names to always skip.
@@ -50,7 +50,7 @@ func IgnoredDirs() map[string]struct{} {
 // given path matches a known ignored directory. Uses full component match only
 // (e.g., "node_modules" matches "a/node_modules/b.js" but NOT "my_node_modules/b.js").
 func ShouldIgnorePath(path string) bool {
-	for _, component := range strings.Split(path, string(filepath.Separator)) {
+	for component := range strings.SplitSeq(path, string(filepath.Separator)) {
 		if _, ok := ignoredDirs[component]; ok {
 			return true
 		}
@@ -60,10 +60,10 @@ func ShouldIgnorePath(path string) bool {
 
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
-	store        *store.Store
-	configStore  *config.ConfigStore
-	worktreeMu   sync.Map // per-project mutex for worktree creation
-	stashMu      sync.Map // per-project mutex for stash operations
+	store       *store.Store
+	configStore *config.ConfigStore
+	worktreeMu  sync.Map // per-project mutex for worktree creation
+	stashMu     sync.Map // per-project mutex for stash operations
 
 }
 
@@ -340,7 +340,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(branchesOut, "\n") {
+		for line := range strings.SplitSeq(branchesOut, "\n") {
 			branch := strings.TrimSpace(line)
 			if branch == "" || !strings.HasPrefix(branch, "task/") {
 				continue
@@ -460,7 +460,7 @@ func (wm *WorktreeManager) GitShortstat(taskID, baseRef string) (string, error) 
 // When any untracked file is created, deleted, or modified (size changes), this string changes.
 func (wm *WorktreeManager) buildUntrackedSnapshot(worktreePath, untrackedList string) string {
 	var parts []string
-	for _, line := range strings.Split(untrackedList, "\n") {
+	for line := range strings.SplitSeq(untrackedList, "\n") {
 		path := strings.TrimSpace(line)
 		if path == "" {
 			continue
@@ -525,18 +525,18 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 // Since untracked files are always new, we store raw lines instead of a unified diff.
 type UntrackedFile struct {
 	Path      string   `json:"path"`
-	Lines     []string `json:"lines,omitempty"`       // file content lines (set for text files)
-	FileSize  int64    `json:"file_size,omitempty"`   // set when file is binary or >1MB (lines omitted)
-	Truncated bool     `json:"truncated,omitempty"`   // true when lines were truncated to maxChangeLines
-	OrigAdded int      `json:"orig_added,omitempty"`  // original line count before truncation
+	Lines     []string `json:"lines,omitempty"`      // file content lines (set for text files)
+	FileSize  int64    `json:"file_size,omitempty"`  // set when file is binary or >1MB (lines omitted)
+	Truncated bool     `json:"truncated,omitempty"`  // true when lines were truncated to maxChangeLines
+	OrigAdded int      `json:"orig_added,omitempty"` // original line count before truncation
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
 type TaskDiff struct {
-	Diff             string          `json:"diff"`
-	Untracked        []UntrackedFile `json:"untracked"`
-	ShortStat        string          `json:"short_stat"`
-	TruncatedFiles   []string        `json:"truncated_files,omitempty"`
+	Diff              string                     `json:"diff"`
+	Untracked         []UntrackedFile            `json:"untracked"`
+	ShortStat         string                     `json:"short_stat"`
+	TruncatedFiles    []string                   `json:"truncated_files,omitempty"`
 	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
 }
 
@@ -689,7 +689,7 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 	}
 
 	var currentPath string
-	for _, line := range strings.Split(diff, "\n") {
+	for line := range strings.SplitSeq(diff, "\n") {
 		if strings.HasPrefix(line, "diff --git ") {
 			match := fileRe.FindStringSubmatch(line)
 			currentPath = "unknown"
@@ -800,7 +800,7 @@ func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchNam
 	branchPrefix := "On " + branchName + ":"
 	// Find stash indices that belong to this branch (newest first)
 	var dropIndices []int
-	for _, line := range strings.Split(listOut, "\n") {
+	for line := range strings.SplitSeq(listOut, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -897,7 +897,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		}
 
 		const maxDiffSize = 1 << 20 // 1MB
-		for _, line := range strings.Split(statusOut, "\n") {
+		for line := range strings.SplitSeq(statusOut, "\n") {
 			if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
 				path := strings.TrimSpace(line[3:])
 				if path == "" {
@@ -906,7 +906,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 				// Expand directories into individual file paths
 				filePaths := walkUntrackedEntries(worktreePath, path)
 				for _, filePath := range filePaths {
-									// Skip files in ignored directories (safety net for tracked files)
+					// Skip files in ignored directories (safety net for tracked files)
 					if ShouldIgnorePath(filePath) {
 						continue
 					}
@@ -976,7 +976,7 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..HEAD", target))
 	}
 	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
-	for _, line := range strings.Split(statusOut, "\n") {
+	for line := range strings.SplitSeq(statusOut, "\n") {
 		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
 			path := strings.TrimSpace(line[3:])
 			if path == "" {
@@ -1067,10 +1067,7 @@ func isBinaryFile(path string, size int64) bool {
 	if size == 0 {
 		return false
 	}
-	limit := int64(8192)
-	if size < limit {
-		limit = size
-	}
+	limit := min(size, int64(8192))
 	f, err := os.Open(path)
 	if err != nil {
 		return false
@@ -1078,7 +1075,7 @@ func isBinaryFile(path string, size int64) bool {
 	defer f.Close()
 	buf := make([]byte, limit)
 	n, _ := f.Read(buf)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if buf[i] == 0 {
 			return true
 		}
@@ -1166,8 +1163,8 @@ type TaskCommit struct {
 
 // TaskCommitsResult holds the base commit info and list of task-specific commits.
 type TaskCommitsResult struct {
-	BaseCommit *TaskCommit    `json:"base_commit,omitempty"` // commit at the divergence point
-	Commits    []TaskCommit   `json:"commits"`
+	BaseCommit *TaskCommit  `json:"base_commit,omitempty"` // commit at the divergence point
+	Commits    []TaskCommit `json:"commits"`
 }
 
 // GetTaskCommits returns the commit log for a task's worktree branch.
@@ -1213,7 +1210,7 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 		return nil, fmt.Errorf("git log: %w", err)
 	}
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1338,7 +1335,7 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 	// Parse stash list and find entries matching this branch.
 	// Use null byte as separator between gd, H, and subject.
 	var branchEntries []string // hashes belonging to this branch, newest first
-	for _, line := range strings.Split(listOut, "\n") {
+	for line := range strings.SplitSeq(listOut, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1383,4 +1380,3 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
 var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
-

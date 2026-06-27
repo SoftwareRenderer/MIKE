@@ -26,7 +26,7 @@ type readFunc func(path string) ([]byte, error)
 // writeFunc writes content to a file. When sandboxed, runs via container exec with stdin.
 type writeFunc func(path, content string) error
 
-func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, worktreePath string, task *types.Task, state *executionState, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
+func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
 	switch name {
 	case "read_file":
 		path, _ := args["path"].(string)
@@ -277,8 +277,8 @@ func (te *TaskExecutor) executeTool(name string, args map[string]interface{}, wo
 	}
 }
 
-func parseToolArgs(s string) map[string]interface{} {
-	result := make(map[string]interface{})
+func parseToolArgs(s string) map[string]any {
+	result := make(map[string]any)
 	s = strings.TrimSpace(s)
 	if s == "" || s == "{}" {
 		return result
@@ -301,7 +301,7 @@ func parseToolArgs(s string) map[string]interface{} {
 			return result
 		}
 		log.Printf("[tool] failed to parse args: %v (raw: %q)", err, s)
-		return map[string]interface{}{"raw": s}
+		return map[string]any{"raw": s}
 	}
 	return result
 }
@@ -376,7 +376,7 @@ func validateWorktreePath(worktreePath, path string) string {
 
 // handleCreateTask creates a new task on the board, used by the LLM in plan mode
 // to decompose work into subtasks. The new task inherits settings from the parent.
-func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *types.Task, state *executionState) string {
+func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task, state *executionState) string {
 	title, _ := args["title"].(string)
 	prompt, _ := args["prompt"].(string)
 	parentTaskID, _ := args["parent_task_id"].(string)
@@ -412,22 +412,22 @@ func (te *TaskExecutor) handleCreateTask(args map[string]interface{}, parent *ty
 	}
 
 	newTask := &types.Task{
-		ID:                      newTaskID,
-		ProjectID:               parent.ProjectID,
-		Title:                   title,
-		Prompt:                  prompt,
-		Status:                  "backlog",
-		StatusState:             "idle",
-		LlamaServerURL:          parent.LlamaServerURL,
-		ModelName:               parent.ModelName,
-		ReasoningEffort:         parent.ReasoningEffort,
+		ID:                        newTaskID,
+		ProjectID:                 parent.ProjectID,
+		Title:                     title,
+		Prompt:                    prompt,
+		Status:                    "backlog",
+		StatusState:               "idle",
+		LlamaServerURL:            parent.LlamaServerURL,
+		ModelName:                 parent.ModelName,
+		ReasoningEffort:           parent.ReasoningEffort,
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
-		AutoCommit:              parent.AutoCommit,
-		AutoPR:                  parent.AutoPR,
-		PlanMode:                false,
-		ParentTaskID:            actualParentID,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		AutoCommit:                parent.AutoCommit,
+		AutoPR:                    parent.AutoPR,
+		PlanMode:                  false,
+		ParentTaskID:              actualParentID,
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}
 
 	if err := te.store.CreateTask(newTask); err != nil {

@@ -160,8 +160,9 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request, id 
 
 // applyPricing computes cost for each model in stats using provider pricing from config.
 // Cost formula (USD):
-//   input_rate = cache_write_price if > 0, else input_price
-//   cost = (processed_tokens * input_rate + cache_tokens * cache_read_price + generated_tokens * output_rate) / 1,000,000
+//
+//	input_rate = cache_write_price if > 0, else input_price
+//	cost = (processed_tokens * input_rate + cache_tokens * cache_read_price + generated_tokens * output_rate) / 1,000,000
 func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	cfg, err := h.configStore.GetConfig()
 	if err != nil {

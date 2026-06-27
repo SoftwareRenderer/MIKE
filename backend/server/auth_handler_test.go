@@ -213,9 +213,9 @@ func TestAuthSessionWrongMethod(t *testing.T) {
 func extractCookieValue(setCookie, name string) string {
 	parts := strings.Split(setCookie, ";")[0]
 	parts = strings.TrimSpace(parts)
-	eq := strings.Index(parts, "=")
-	if eq < 0 {
+	before, _, ok := strings.Cut(parts, "=")
+	if !ok {
 		return parts
 	}
-	return parts[:eq]
+	return before
 }

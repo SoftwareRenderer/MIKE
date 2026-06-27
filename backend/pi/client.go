@@ -49,21 +49,21 @@ func (c *Client) ModelName() string {
 
 // PiEvent represents an event from the Pi RPC protocol.
 type PiEvent struct {
-	Type              string                 `json:"type"`                  // agent_start, agent_end, message_update, tool_execution_*, etc.
-	AssistantEventType string                 `json:"assistantMessageEvent"` // nested event type for message_update
-	TextDelta         string                 `json:"-"`                     // extracted text delta
-	ThinkingDelta     string                 `json:"-"`                     // extracted thinking delta
-	ToolName          string                 `json:"toolName"`              // from tool_execution_*
-	ToolCallID        string                 `json:"toolCallId"`            // from tool_execution_*
-	ToolArgs          map[string]interface{} `json:"args"`                  // from tool_execution_start
-	ToolResult        string                 `json:"-"`                     // extracted tool result text
-	ToolIsError       bool                   `json:"isError"`               // from tool_execution_end
-	Messages          []map[string]interface{} `json:"messages"`            // from agent_end
-	StopReason        string                 `json:"-"`                     // extracted from last assistant message
-	Error             string                 `json:"error"`                 // from response errors
-	Success           bool                   `json:"success"`               // from response
-	Command           string                 `json:"command"`               // from response
-	ResponseID        string                 `json:"id"`                    // from response (correlation id)
+	Type               string           `json:"type"`                  // agent_start, agent_end, message_update, tool_execution_*, etc.
+	AssistantEventType string           `json:"assistantMessageEvent"` // nested event type for message_update
+	TextDelta          string           `json:"-"`                     // extracted text delta
+	ThinkingDelta      string           `json:"-"`                     // extracted thinking delta
+	ToolName           string           `json:"toolName"`              // from tool_execution_*
+	ToolCallID         string           `json:"toolCallId"`            // from tool_execution_*
+	ToolArgs           map[string]any   `json:"args"`                  // from tool_execution_start
+	ToolResult         string           `json:"-"`                     // extracted tool result text
+	ToolIsError        bool             `json:"isError"`               // from tool_execution_end
+	Messages           []map[string]any `json:"messages"`              // from agent_end
+	StopReason         string           `json:"-"`                     // extracted from last assistant message
+	Error              string           `json:"error"`                 // from response errors
+	Success            bool             `json:"success"`               // from response
+	Command            string           `json:"command"`               // from response
+	ResponseID         string           `json:"id"`                    // from response (correlation id)
 	// Extension UI
 	ExtMethod string `json:"method"` // from extension_ui_request
 	ExtID     string `json:"-"`      // from extension_ui_request (id field)
@@ -179,7 +179,7 @@ func (c *Client) PID() int {
 // Prompt sends a user prompt to Pi.
 // Returns immediately after the prompt is accepted. Events stream via EventChan().
 func (c *Client) Prompt(ctx context.Context, message string) error {
-	cmd := map[string]interface{}{
+	cmd := map[string]any{
 		"type":    "prompt",
 		"message": message,
 		"id":      fmt.Sprintf("prompt-%d", time.Now().UnixNano()),
@@ -206,7 +206,7 @@ func (c *Client) Prompt(ctx context.Context, message string) error {
 
 // Abort sends an abort command to Pi and waits for it to stop.
 func (c *Client) Abort(ctx context.Context) error {
-	cmd := map[string]interface{}{
+	cmd := map[string]any{
 		"type": "abort",
 	}
 	data, _ := json.Marshal(cmd)
@@ -239,7 +239,7 @@ func (c *Client) Abort(ctx context.Context) error {
 // QueryModel sends get_state and waits for the response to discover the active model.
 // Returns the model name (e.g., "anthropic/claude-sonnet-4-20250514") or "Pi" on error.
 func (c *Client) QueryModel(ctx context.Context) string {
-	cmd := map[string]interface{}{
+	cmd := map[string]any{
 		"type": "get_state",
 		"id":   fmt.Sprintf("get_state-%d", time.Now().UnixNano()),
 	}
@@ -325,9 +325,9 @@ func (c *Client) kill() {
 
 // sendExtensionUIResponse sends a response to an extension UI request (e.g., cancel a dialog).
 func (c *Client) sendExtensionUIResponse(extID string, cancelled bool) {
-	resp := map[string]interface{}{
-		"type":     "extension_ui_response",
-		"id":       extID,
+	resp := map[string]any{
+		"type":      "extension_ui_response",
+		"id":        extID,
 		"cancelled": cancelled,
 	}
 	data, _ := json.Marshal(resp)
@@ -353,7 +353,7 @@ func (c *Client) readEvents() {
 		// Strip trailing \r for cross-platform compatibility
 		line = strings.TrimRight(line, "\r")
 
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			log.Printf("[pi] parse error: %v (line=%q)", err, line[:min(len(line), 200)])
 			continue
@@ -387,8 +387,8 @@ func (c *Client) readEvents() {
 			}
 			// Extract model name from get_state response
 			if command, ok := raw["command"].(string); ok && command == "get_state" {
-				if data, ok := raw["data"].(map[string]interface{}); ok {
-					if model, ok := data["model"].(map[string]interface{}); ok {
+				if data, ok := raw["data"].(map[string]any); ok {
+					if model, ok := data["model"].(map[string]any); ok {
 						provider, _ := model["provider"].(string)
 						modelID, _ := model["modelId"].(string)
 						if provider != "" && modelID != "" {
@@ -407,7 +407,7 @@ func (c *Client) readEvents() {
 
 		case "message_update":
 			// Extract assistantMessageEvent
-			if ame, ok := raw["assistantMessageEvent"].(map[string]interface{}); ok {
+			if ame, ok := raw["assistantMessageEvent"].(map[string]any); ok {
 				if etype, ok := ame["type"].(string); ok {
 					event.AssistantEventType = etype
 					switch etype {
@@ -430,7 +430,7 @@ func (c *Client) readEvents() {
 			if toolCallID, ok := raw["toolCallId"].(string); ok {
 				event.ToolCallID = toolCallID
 			}
-			if args, ok := raw["args"].(map[string]interface{}); ok {
+			if args, ok := raw["args"].(map[string]any); ok {
 				event.ToolArgs = args
 			}
 
@@ -444,12 +444,12 @@ func (c *Client) readEvents() {
 			if isError, ok := raw["isError"].(bool); ok {
 				event.ToolIsError = isError
 			}
-			if result, ok := raw["result"].(map[string]interface{}); ok {
+			if result, ok := raw["result"].(map[string]any); ok {
 				// Extract text content from result
-				if content, ok := result["content"].([]interface{}); ok {
+				if content, ok := result["content"].([]any); ok {
 					var texts []string
 					for _, item := range content {
-						if cm, ok := item.(map[string]interface{}); ok {
+						if cm, ok := item.(map[string]any); ok {
 							if cm["type"] == "text" {
 								if text, ok := cm["text"].(string); ok {
 									texts = append(texts, text)
@@ -462,10 +462,10 @@ func (c *Client) readEvents() {
 			}
 
 		case "agent_end":
-			if messages, ok := raw["messages"].([]interface{}); ok {
-				event.Messages = make([]map[string]interface{}, 0, len(messages))
+			if messages, ok := raw["messages"].([]any); ok {
+				event.Messages = make([]map[string]any, 0, len(messages))
 				for _, m := range messages {
-					if mm, ok := m.(map[string]interface{}); ok {
+					if mm, ok := m.(map[string]any); ok {
 						event.Messages = append(event.Messages, mm)
 					}
 				}
@@ -535,7 +535,7 @@ func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
 	case "tool_execution_start":
 		return types.StreamEvent{
 			Type: types.WSTypeToolCall,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"tool_id":   event.ToolCallID,
 				"tool_name": event.ToolName,
 				"args":      event.ToolArgs,
@@ -546,7 +546,7 @@ func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
 	case "tool_execution_end":
 		return types.StreamEvent{
 			Type: types.WSTypeToolResult,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"tool_id": event.ToolCallID,
 				"success": !event.ToolIsError,
 				"output":  event.ToolResult,
@@ -595,12 +595,4 @@ func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
 	}
 
 	return types.StreamEvent{}
-}
-
-// min returns the minimum of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

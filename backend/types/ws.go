@@ -29,7 +29,7 @@ const (
 // StreamEvent carries a typed payload to broadcast.
 type StreamEvent struct {
 	Type WSMessageType
-	Data interface{}
+	Data any
 }
 
 // WSMessage is the envelope for all WebSocket frames.
@@ -55,10 +55,10 @@ type StreamReasoningEndEvent struct {
 
 // StreamToolCallEvent is an AI tool invocation request.
 type StreamToolCallEvent struct {
-	ToolID          string                 `json:"tool_id"`
-	ToolName        string                 `json:"tool_name"`
-	ToolDisplayName string                 `json:"tool_display_name"`
-	Args            map[string]interface{} `json:"args"`
+	ToolID          string         `json:"tool_id"`
+	ToolName        string         `json:"tool_name"`
+	ToolDisplayName string         `json:"tool_display_name"`
+	Args            map[string]any `json:"args"`
 }
 
 // StreamToolResultEvent is the result of a tool invocation.

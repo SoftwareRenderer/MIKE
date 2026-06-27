@@ -9,7 +9,7 @@ func TestTaskCreate(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt": "Add login feature",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -17,7 +17,7 @@ func TestTaskCreate(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	taskID := result["id"].(string)
 	if taskID == "" {
 		t.Fatal("task ID should not be empty")
@@ -38,7 +38,7 @@ func TestTaskCreateWithTitle(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt": "Add login feature",
 		"title":  "Custom Title",
 	})
@@ -47,7 +47,7 @@ func TestTaskCreateWithTitle(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["title"] != "Custom Title" {
 		t.Fatalf("expected custom title, got %s", result["title"])
 	}
@@ -79,7 +79,7 @@ func TestTaskList(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	tasks := mustJSON[[]map[string]interface{}](t, rr.Body)
+	tasks := mustJSON[[]map[string]any](t, rr.Body)
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(tasks))
 	}
@@ -96,7 +96,7 @@ func TestTaskGetByID(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["id"] != taskID {
 		t.Fatalf("wrong task ID: %s", result["id"])
 	}
@@ -119,7 +119,7 @@ func TestTaskUpdate(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Update me")
 
 	// Update the task title
-	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]interface{}{
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
 		"title": "Updated Title",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -127,7 +127,7 @@ func TestTaskUpdate(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["title"] != "Updated Title" {
 		t.Fatalf("expected updated title, got %s", result["title"])
 	}
@@ -159,7 +159,7 @@ func TestTaskMove(t *testing.T) {
 	taskID := createTestTask(t, s, projID, "Move me")
 
 	// Move to in_progress
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
 		"status": "in_progress",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -167,7 +167,7 @@ func TestTaskMove(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["status"] != "in_progress" {
 		t.Fatalf("expected status=in_progress, got %s", result["status"])
 	}
@@ -179,12 +179,12 @@ func TestTaskReorder(t *testing.T) {
 
 	// Create 3 tasks
 	taskIDs := make([]string, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		taskIDs[i] = createTestTask(t, s, projID, "Task "+string(rune('A'+i)))
 	}
 
 	// Reorder: set explicit column_order values
-	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/reorder", []map[string]interface{}{
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/reorder", []map[string]any{
 		{"id": taskIDs[0], "column_order": 10},
 		{"id": taskIDs[1], "column_order": 20},
 		{"id": taskIDs[2], "column_order": 0},
@@ -197,7 +197,7 @@ func TestTaskReorder(t *testing.T) {
 	// Verify new order: taskIDs[2] (order=0) first, taskIDs[0] (order=10) last
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
 	rr = testResponseAuth(t, s, req)
-	tasks := mustJSON[[]map[string]interface{}](t, rr.Body)
+	tasks := mustJSON[[]map[string]any](t, rr.Body)
 	if tasks[0]["id"] != taskIDs[2] || tasks[1]["id"] != taskIDs[0] || tasks[2]["id"] != taskIDs[1] {
 		t.Fatalf("reorder failed: expected [%s, %s, %s], got [%s, %s, %s]",
 			taskIDs[2], taskIDs[0], taskIDs[1],
@@ -213,7 +213,7 @@ func TestTaskParentValidation(t *testing.T) {
 	parentID := createTestTask(t, s, projID, "Parent task")
 
 	// Create a child with valid parent
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt":         "Child task",
 		"parent_task_id": parentID,
 	})
@@ -223,13 +223,13 @@ func TestTaskParentValidation(t *testing.T) {
 	}
 
 	// Move parent to in_progress (no longer valid for subtasks)
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/move", map[string]interface{}{
+	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/move", map[string]any{
 		"status": "in_progress",
 	})
 	testResponseAuth(t, s, req)
 
 	// Try to create another child — should fail
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req = testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt":         "Another child",
 		"parent_task_id": parentID,
 	})
@@ -243,7 +243,7 @@ func TestTaskParentNotFound(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt":         "Child with missing parent",
 		"parent_task_id": "nonexistent-parent",
 	})
@@ -256,7 +256,7 @@ func TestTaskParentNotFound(t *testing.T) {
 // Helper: create a task with LLM config so the executor can start
 func createTestTaskWithLLM(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()
-	task := map[string]interface{}{
+	task := map[string]any{
 		"prompt":           prompt,
 		"llama_server_url": "http://localhost:9999/v1",
 		"model_name":       "mock-model",
@@ -266,14 +266,14 @@ func createTestTaskWithLLM(t *testing.T, s *Server, projectID string, prompt str
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
 }
 
 // Helper: create a subtask via API
 func createTestSubtask(t *testing.T, s *Server, projectID string, parentTaskID string, prompt string) string {
 	t.Helper()
-	task := map[string]interface{}{
+	task := map[string]any{
 		"prompt":         prompt,
 		"parent_task_id": parentTaskID,
 	}
@@ -282,7 +282,7 @@ func createTestSubtask(t *testing.T, s *Server, projectID string, parentTaskID s
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create subtask: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
 }
 
@@ -294,7 +294,7 @@ func getTaskStatus(t *testing.T, s *Server, projectID string, taskID string) str
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["status"].(string)
 }
 
@@ -306,7 +306,7 @@ func getTaskStatusState(t *testing.T, s *Server, projectID string, taskID string
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if ss, ok := result["status_state"].(string); ok {
 		return ss
 	}
@@ -316,7 +316,7 @@ func getTaskStatusState(t *testing.T, s *Server, projectID string, taskID string
 // Helper: move a task to a status via API
 func moveTask(t *testing.T, s *Server, projectID string, taskID string, status string) {
 	t.Helper()
-	req := testRequest("POST", "/api/projects/"+projectID+"/tasks/"+taskID+"/move", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projectID+"/tasks/"+taskID+"/move", map[string]any{
 		"status": status,
 	})
 	rr := testResponseAuth(t, s, req)
@@ -326,7 +326,7 @@ func moveTask(t *testing.T, s *Server, projectID string, taskID string, status s
 }
 
 // Helper: update a task directly via PUT
-func updateTask(t *testing.T, s *Server, projectID string, taskID string, updates map[string]interface{}) {
+func updateTask(t *testing.T, s *Server, projectID string, taskID string, updates map[string]any) {
 	t.Helper()
 	req := testRequest("PUT", "/api/projects/"+projectID+"/tasks/"+taskID, updates)
 	rr := testResponseAuth(t, s, req)
@@ -389,7 +389,7 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 	moveTask(t, s, projID, parentID, "in_progress")
 
 	// Try to move subtask to backlog — should be blocked
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+subID+"/move", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+subID+"/move", map[string]any{
 		"status": "backlog",
 	})
 	rr := testResponseAuth(t, s, req)
@@ -438,9 +438,9 @@ func TestSubtaskSiblingIsolation(t *testing.T) {
 	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
 
 	// Set all three to in_progress/idle via direct PUT (bypasses move endpoint's executor)
-	updateTask(t, s, projID, parentID, map[string]interface{}{"status": "in_progress", "status_state": "idle"})
-	updateTask(t, s, projID, subA, map[string]interface{}{"status": "in_progress", "status_state": "idle"})
-	updateTask(t, s, projID, subB, map[string]interface{}{"status": "in_progress", "status_state": "idle"})
+	updateTask(t, s, projID, parentID, map[string]any{"status": "in_progress", "status_state": "idle"})
+	updateTask(t, s, projID, subA, map[string]any{"status": "in_progress", "status_state": "idle"})
+	updateTask(t, s, projID, subB, map[string]any{"status": "in_progress", "status_state": "idle"})
 
 	// Move subA to review
 	moveTask(t, s, projID, subA, "review")
@@ -622,12 +622,12 @@ func TestProjectSandboxToggle(t *testing.T) {
 	// Get project
 	req := testRequest("GET", "/api/projects/"+projID, nil)
 	rr := testResponseAuth(t, s, req)
-	proj := mustJSON[map[string]interface{}](t, rr.Body)
+	proj := mustJSON[map[string]any](t, rr.Body)
 
 	initialSandbox := proj["sandbox_enabled"].(bool)
 
 	// Toggle sandbox via PUT on project
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]interface{}{
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"sandbox_enabled": !initialSandbox,
 	})
 	rr = testResponseAuth(t, s, req)
@@ -638,7 +638,7 @@ func TestProjectSandboxToggle(t *testing.T) {
 	// Verify toggle
 	req = testRequest("GET", "/api/projects/"+projID, nil)
 	rr = testResponseAuth(t, s, req)
-	proj = mustJSON[map[string]interface{}](t, rr.Body)
+	proj = mustJSON[map[string]any](t, rr.Body)
 	if proj["sandbox_enabled"].(bool) == initialSandbox {
 		t.Fatal("sandbox should have toggled")
 	}
@@ -660,7 +660,7 @@ func TestClearDoneTasks(t *testing.T) {
 	// Verify: 2 done, 1 backlog
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
 	rr := testResponseAuth(t, s, req)
-	tasks := mustJSON[[]map[string]interface{}](t, rr.Body)
+	tasks := mustJSON[[]map[string]any](t, rr.Body)
 	if len(tasks) != 3 {
 		t.Fatalf("expected 3 tasks, got %d", len(tasks))
 	}
@@ -675,7 +675,7 @@ func TestClearDoneTasks(t *testing.T) {
 	// Verify: only backlog task remains
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
 	rr = testResponseAuth(t, s, req)
-	tasks = mustJSON[[]map[string]interface{}](t, rr.Body)
+	tasks = mustJSON[[]map[string]any](t, rr.Body)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after clear done, got %d", len(tasks))
 	}
@@ -690,7 +690,7 @@ func TestCreateSubtaskWithLLM(t *testing.T) {
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-llm")
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt":           "subtask with llm",
 		"parent_task_id":   parentID,
 		"llama_server_url": "http://localhost:9999/v1",
@@ -701,7 +701,7 @@ func TestCreateSubtaskWithLLM(t *testing.T) {
 		t.Fatalf("create subtask with LLM: %d %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["parent_task_id"] != parentID {
 		t.Fatalf("expected parent_task_id=%s, got %s", parentID, result["parent_task_id"])
 	}
@@ -727,8 +727,8 @@ func TestBoardEndpointSubtasks(t *testing.T) {
 		t.Fatalf("get board: %d %s", rr.Code, rr.Body.String())
 	}
 
-	board := mustJSON[map[string]interface{}](t, rr.Body)
-	tasks := board["tasks"].([]interface{})
+	board := mustJSON[map[string]any](t, rr.Body)
+	tasks := board["tasks"].([]any)
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks on board, got %d", len(tasks))
 	}
@@ -747,7 +747,7 @@ func TestCommitAndDone(t *testing.T) {
 		t.Fatalf("commit-and-done: %d %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	if result["status"] != "done" {
 		t.Fatalf("expected status=done, got %s", result["status"])
 	}

@@ -11,9 +11,9 @@ import (
 
 // assertFlatJSON verifies that a JSON frame is flat (no double-encoded data field).
 // It checks that the given key exists and is an object (not a string).
-func assertFlatJSON(t *testing.T, frame []byte, typeKey, dataKey string, expectedType string) map[string]interface{} {
+func assertFlatJSON(t *testing.T, frame []byte, typeKey, dataKey string, expectedType string) map[string]any {
 	t.Helper()
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(frame, &msg); err != nil {
 		t.Fatalf("unmarshal frame: %v: %s", err, string(frame))
 	}
@@ -25,7 +25,7 @@ func assertFlatJSON(t *testing.T, frame []byte, typeKey, dataKey string, expecte
 		if !ok {
 			t.Fatalf("expected '%s' field in message: %s", dataKey, string(frame))
 		}
-		if _, ok := data.(map[string]interface{}); !ok {
+		if _, ok := data.(map[string]any); !ok {
 			t.Fatalf("expected '%s' to be an object (not double-encoded), got %T: %s", dataKey, data, string(frame))
 		}
 	}
@@ -41,7 +41,7 @@ func TestTaskUpdatedWireFormat(t *testing.T) {
 		Title:     "Test task",
 		Status:    "backlog",
 	}
-	frame, err := json.Marshal(map[string]interface{}{
+	frame, err := json.Marshal(map[string]any{
 		"type": "task_updated",
 		"task": task,
 	})
@@ -50,7 +50,7 @@ func TestTaskUpdatedWireFormat(t *testing.T) {
 	}
 
 	msg := assertFlatJSON(t, frame, "type", "task", "task_updated")
-	taskData := msg["task"].(map[string]interface{})
+	taskData := msg["task"].(map[string]any)
 	if taskData["id"] != "test-task" {
 		t.Fatalf("expected task.id=test-task, got %v", taskData["id"])
 	}
@@ -59,7 +59,7 @@ func TestTaskUpdatedWireFormat(t *testing.T) {
 // TestTaskEventWireFormat verifies that a task_event serializes as flat JSON
 // with type, task_id, event, and data at the top level.
 func TestTaskEventWireFormat(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"type":    "task_event",
 		"task_id": "test-task",
 		"event":   "token",
@@ -77,7 +77,7 @@ func TestTaskEventWireFormat(t *testing.T) {
 	if msg["event"] != "token" {
 		t.Fatalf("expected event=token, got %v", msg["event"])
 	}
-	dataMap := msg["data"].(map[string]interface{})
+	dataMap := msg["data"].(map[string]any)
 	if dataMap["text"] != "hello" {
 		t.Fatalf("expected data.text=hello, got %v", dataMap["text"])
 	}
@@ -105,12 +105,12 @@ func TestCommitStatusWireFormat(t *testing.T) {
 
 // TestDiffWireFormat verifies task_diff is flat JSON.
 func TestDiffWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]interface{}{
+	frame, err := json.Marshal(map[string]any{
 		"type":       "task_diff",
 		"task_id":    "test-task",
 		"diff":       "diff content",
 		"short_stat": "1 file changed",
-		"untracked":  []interface{}{},
+		"untracked":  []any{},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -127,15 +127,15 @@ func TestDiffWireFormat(t *testing.T) {
 
 // TestProjectCountsWireFormat verifies project_counts is flat JSON.
 func TestProjectCountsWireFormat(t *testing.T) {
-	counts := map[string]interface{}{
-		"test-project": map[string]interface{}{
+	counts := map[string]any{
+		"test-project": map[string]any{
 			"backlog":     1,
 			"in_progress": 2,
 			"review":      0,
 			"completed":   3,
 		},
 	}
-	frame, err := json.Marshal(map[string]interface{}{
+	frame, err := json.Marshal(map[string]any{
 		"type": "project_counts",
 		"data": counts,
 	})
@@ -144,8 +144,8 @@ func TestProjectCountsWireFormat(t *testing.T) {
 	}
 
 	msg := assertFlatJSON(t, frame, "type", "data", "project_counts")
-	dataMap := msg["data"].(map[string]interface{})
-	projCounts := dataMap["test-project"].(map[string]interface{})
+	dataMap := msg["data"].(map[string]any)
+	projCounts := dataMap["test-project"].(map[string]any)
 	if projCounts["backlog"].(float64) != 1 {
 		t.Fatalf("expected backlog=1, got %v", projCounts["backlog"])
 	}
@@ -153,7 +153,7 @@ func TestProjectCountsWireFormat(t *testing.T) {
 
 // TestBranchWireFormat verifies project_branch is flat JSON.
 func TestBranchWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]interface{}{
+	frame, err := json.Marshal(map[string]any{
 		"type":   "project_branch",
 		"branch": "main",
 	})
@@ -180,7 +180,7 @@ func TestBoardRefreshWireFormat(t *testing.T) {
 
 // TestTaskDeletedWireFormat verifies task_deleted is flat JSON.
 func TestTaskDeletedWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]interface{}{
+	frame, err := json.Marshal(map[string]any{
 		"type":    "task_deleted",
 		"task_id": "test-task",
 	})
@@ -198,7 +198,7 @@ func TestTaskDeletedWireFormat(t *testing.T) {
 // placed task inside msg.data instead of msg.task (regression reference).
 func TestOldStyleBroken(t *testing.T) {
 	// This is what the OLD code did: wrap in WSMessage{Type, Data: json.Marshal(payload)}
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"type": "task_updated",
 		"task": map[string]string{"id": "test-task"},
 	})
@@ -207,14 +207,14 @@ func TestOldStyleBroken(t *testing.T) {
 
 	// The old style produces: {"type":"task_updated","data":{"type":"task_updated","task":{...}}}
 	// Client checks msg.task which is undefined (task is inside msg.data)
-	var msg map[string]interface{}
+	var msg map[string]any
 	json.Unmarshal(frame, &msg)
 
 	// Old style: msg.task is undefined, task is at msg.data.task
 	if _, ok := msg["task"]; ok {
 		t.Fatal("old-style should NOT have top-level 'task' field")
 	}
-	data, ok := msg["data"].(map[string]interface{})
+	data, ok := msg["data"].(map[string]any)
 	if !ok {
 		t.Fatal("old-style should have 'data' as object")
 	}
@@ -226,18 +226,18 @@ func TestOldStyleBroken(t *testing.T) {
 
 // TestClientParseTaskUpdated verifies the client can parse a task_updated frame.
 func TestClientParseTaskUpdated(t *testing.T) {
-	frame, _ := json.Marshal(map[string]interface{}{
+	frame, _ := json.Marshal(map[string]any{
 		"type": "task_updated",
-		"task": map[string]interface{}{
-			"id":        "test-task",
-			"title":     "Test",
-			"status":    "backlog",
+		"task": map[string]any{
+			"id":         "test-task",
+			"title":      "Test",
+			"status":     "backlog",
 			"project_id": "test-project",
 		},
 	})
 
 	// Simulate client-side parsing (matches frontend api.ts logic)
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(frame, &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestClientParseTaskUpdated(t *testing.T) {
 	if !ok {
 		t.Fatal("client expects msg.task to exist")
 	}
-	taskMap, ok := task.(map[string]interface{})
+	taskMap, ok := task.(map[string]any)
 	if !ok {
 		t.Fatalf("client expects msg.task to be an object, got %T", task)
 	}
@@ -261,7 +261,7 @@ func TestClientParseTaskUpdated(t *testing.T) {
 
 // TestClientParseTaskEvent verifies the client can parse a task_event frame.
 func TestClientParseTaskEvent(t *testing.T) {
-	frame, _ := json.Marshal(map[string]interface{}{
+	frame, _ := json.Marshal(map[string]any{
 		"type":    "task_event",
 		"task_id": "test-task",
 		"event":   "token",
@@ -269,7 +269,7 @@ func TestClientParseTaskEvent(t *testing.T) {
 	})
 
 	// Simulate client-side parsing (matches frontend api.ts logic)
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(frame, &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestClientParseTaskEvent(t *testing.T) {
 	if msg["event"] != "token" {
 		t.Fatalf("client expects msg.event=token, got %v", msg["event"])
 	}
-	dataMap, ok := msg["data"].(map[string]interface{})
+	dataMap, ok := msg["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("client expects msg.data to be an object, got %T", msg["data"])
 	}

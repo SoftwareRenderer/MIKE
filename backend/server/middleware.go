@@ -24,9 +24,9 @@ var GetEnv = managers.GetEnv
 
 // Paths that don't require authentication.
 var publicPaths = map[string]map[string]struct{}{
-	"/api/health":        {http.MethodGet: {}},
-	"/api/auth/login":    {http.MethodPost: {}},
-	"/api/auth/session":  {http.MethodGet: {}},
+	"/api/health":       {http.MethodGet: {}},
+	"/api/auth/login":   {http.MethodPost: {}},
+	"/api/auth/session": {http.MethodGet: {}},
 }
 
 // isPublicPath returns true if the given path+method combination is publicly accessible.

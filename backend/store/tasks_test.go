@@ -64,7 +64,7 @@ func TestGetTasksByProject(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		task := newTask("task-1", "proj-1")
 		task.ID = "task-1"
 		task.ColumnOrder = 0

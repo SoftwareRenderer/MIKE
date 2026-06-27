@@ -20,9 +20,9 @@ type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrack
 
 // worktreeInfo tracks the state of a watched worktree.
 type worktreeInfo struct {
-	projectID  string
-	path       string
-	baseRef    string
+	projectID   string
+	path        string
+	baseRef     string
 	ignoredDirs map[string]struct{} // merged set: hardcoded + git-ignored directory names
 }
 
@@ -73,9 +73,9 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 
 	// Track worktree info
 	ww.worktrees[taskID] = worktreeInfo{
-		projectID:  projectID,
-		path:       path,
-		baseRef:    baseRef,
+		projectID:   projectID,
+		path:        path,
+		baseRef:     baseRef,
 		ignoredDirs: ignored,
 	}
 
@@ -237,11 +237,12 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
 		// Compute hash from tracked diff + untracked file contents
-		hashInput := diffResult.Diff
+		var hashInput strings.Builder
+		hashInput.WriteString(diffResult.Diff)
 		for _, u := range diffResult.Untracked {
-			hashInput += u.Path + strings.Join(u.Lines, "\n")
+			hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
 		}
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
 		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else {
@@ -312,7 +313,7 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 	}
 
 	// Parse output: each line is an ignored path
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	for line := range strings.SplitSeq(stdout.String(), "\n") {
 		name := strings.TrimSpace(line)
 		if name != "" {
 			result[name] = struct{}{}
@@ -344,5 +345,3 @@ func (ww *WorktreeWatcher) addRecursive(dir string, ignoredDirs map[string]struc
 		return nil
 	})
 }
-
-

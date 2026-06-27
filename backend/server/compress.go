@@ -17,10 +17,10 @@ const minCompressSize = 1024
 
 // compressionLevel maps encoding name to its preference rank (lower = preferred).
 var encodingPriority = map[string]int{
-	"br":   1,
-	"gzip": 2,
+	"br":      1,
+	"gzip":    2,
 	"deflate": 3,
-	"*":    4,
+	"*":       4,
 }
 
 // selectEncoding picks the best compression encoding the client supports.
@@ -33,7 +33,7 @@ func selectEncoding(acceptEncoding string) string {
 	best := ""
 	bestRank := 5 // worse than wildcard
 
-	for _, part := range strings.Split(acceptEncoding, ",") {
+	for part := range strings.SplitSeq(acceptEncoding, ",") {
 		part = strings.TrimSpace(part)
 		// Strip quality factor (e.g. "br;q=0.8" -> "br")
 		encoding := strings.TrimSpace(strings.Split(part, ";")[0])

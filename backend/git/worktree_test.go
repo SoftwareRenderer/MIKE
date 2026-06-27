@@ -455,7 +455,13 @@ func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
 	if len(result.Untracked) != 3 {
 		t.Fatalf("expected 3 untracked files, got %d: paths=%v",
 			len(result.Untracked),
-			func() []string { paths := make([]string, len(result.Untracked)); for i, u := range result.Untracked { paths[i] = u.Path }; return paths }())
+			func() []string {
+				paths := make([]string, len(result.Untracked))
+				for i, u := range result.Untracked {
+					paths[i] = u.Path
+				}
+				return paths
+			}())
 	}
 
 	pathSet := make(map[string]bool)

@@ -15,7 +15,7 @@ func createTestProjectWithPath(t *testing.T, s *Server) (string, string) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)
-	proj := map[string]interface{}{
+	proj := map[string]any{
 		"name": "test-project",
 		"path": dir,
 	}
@@ -25,7 +25,7 @@ func createTestProjectWithPath(t *testing.T, s *Server) (string, string) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
 	}
-	result := mustJSON[map[string]interface{}](t, rr.Body)
+	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string), dir
 }
 
@@ -51,7 +51,7 @@ func TestGitLogBasic(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	commits := mustJSON[[]map[string]interface{}](t, rr.Body)
+	commits := mustJSON[[]map[string]any](t, rr.Body)
 	if len(commits) != 2 {
 		t.Fatalf("expected 2 commits, got %d", len(commits))
 	}
@@ -76,7 +76,7 @@ func TestGitLogFull(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	commits := mustJSON[[]map[string]interface{}](t, rr.Body)
+	commits := mustJSON[[]map[string]any](t, rr.Body)
 	if len(commits) != 3 {
 		t.Fatalf("expected 3 commits, got %d", len(commits))
 	}
@@ -98,7 +98,7 @@ func TestGitLogFull(t *testing.T) {
 	// Parents - the first commit (most recent) has one parent
 	parents := first["parents"]
 	if parents != nil {
-		parentSlice := parents.([]interface{})
+		parentSlice := parents.([]any)
 		if len(parentSlice) != 1 {
 			t.Fatalf("expected 1 parent, got %d", len(parentSlice))
 		}
@@ -108,7 +108,7 @@ func TestGitLogFull(t *testing.T) {
 	last := commits[len(commits)-1]
 	parents = last["parents"]
 	if parents != nil {
-		parentSlice := parents.([]interface{})
+		parentSlice := parents.([]any)
 		if len(parentSlice) != 0 {
 			t.Fatalf("expected 0 parents for root commit, got %d", len(parentSlice))
 		}
@@ -131,7 +131,7 @@ func TestGitLogFullWithBranch(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	commits := mustJSON[[]map[string]interface{}](t, rr.Body)
+	commits := mustJSON[[]map[string]any](t, rr.Body)
 	if len(commits) != 3 {
 		t.Fatalf("expected 3 commits on feature branch, got %d", len(commits))
 	}
@@ -159,7 +159,7 @@ func TestGitCheckout(t *testing.T) {
 	mustRunGit(t, dir, "checkout", "-b", "develop")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
-	req := testRequest("POST", "/api/projects/"+projID+"/git/checkout", map[string]interface{}{
+	req := testRequest("POST", "/api/projects/"+projID+"/git/checkout", map[string]any{
 		"branch": "master",
 	})
 	withAuthCSRF(req, cookie, csrfToken)
@@ -194,7 +194,7 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 	}
 
 	// Decode as raw JSON to check parents field
-	var commits []map[string]interface{}
+	var commits []map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&commits); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 	if parents == nil {
 		t.Fatal("expected parents field on non-root commit")
 	}
-	parentSlice := parents.([]interface{})
+	parentSlice := parents.([]any)
 	if len(parentSlice) != 1 {
 		t.Fatalf("expected 1 parent, got %d", len(parentSlice))
 	}

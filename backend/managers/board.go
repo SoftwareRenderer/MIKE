@@ -6,8 +6,8 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/httputil"
-	"kanban/backend/stream"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 

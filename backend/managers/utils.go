@@ -3,6 +3,7 @@ package managers
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -98,10 +99,5 @@ func GenerateProjectID(path string, existingIDs []string) string {
 
 // contains returns true if the slice contains the given string.
 func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, s)
 }

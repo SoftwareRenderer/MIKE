@@ -23,7 +23,7 @@ type queueEntry struct {
 // When all slots are in use, Acquire blocks until one becomes available.
 // Queue position and estimated wait time are tracked for status reporting.
 type ConcurrencyGate struct {
-	mu   sync.Mutex
+	mu     sync.Mutex
 	closed bool
 
 	// Per-provider state

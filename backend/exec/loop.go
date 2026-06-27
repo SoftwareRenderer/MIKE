@@ -61,22 +61,22 @@ const PiSentinelURL = "pi://agent"
 type LoopType int
 
 const (
-	LoopNone LoopType = iota
-	LoopTool // repeated read of same target
-	LoopText // repeated similar text-only responses
-	LoopPhrase // exact phrase repetition within a response
+	LoopNone   LoopType = iota
+	LoopTool            // repeated read of same target
+	LoopText            // repeated similar text-only responses
+	LoopPhrase          // exact phrase repetition within a response
 )
 
 const maxLoopHints = 3
 
 // loopDetector tracks tool call targets and text responses to detect LLM loops.
 type loopDetector struct {
-	lastReadTarget string    // normalized target of the most recent read-only call
-	lastReadTime   time.Time // when the last read occurred
-	textWindow     []string  // recent text-only responses (content, trimmed)
-	hintCount      int       // total hints injected for this task
+	lastReadTarget string          // normalized target of the most recent read-only call
+	lastReadTime   time.Time       // when the last read occurred
+	textWindow     []string        // recent text-only responses (content, trimmed)
+	hintCount      int             // total hints injected for this task
 	phraseDet      *phraseDetector // real-time phrase repetition tracker
-	phraseFired    bool      // phrase loop detected during current streaming response
+	phraseFired    bool            // phrase loop detected during current streaming response
 }
 
 // newLoopDetector creates a new loopDetector.
@@ -108,7 +108,7 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
 
 	if hasToolCalls {
-		d.resetText() // tool call breaks text-only streak
+		d.resetText()       // tool call breaks text-only streak
 		d.phraseDet.reset() // tool call resets phrase tracker
 
 		// Check each tool call
@@ -188,14 +188,14 @@ func mapPiToolName(piToolName string) string {
 func extractTarget(toolName, rawArgs string) string {
 	switch toolName {
 	case "read_file", "write_file", "edit_file":
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if p, ok := args["path"].(string); ok {
 				return normalizeTarget(p)
 			}
 		}
 	case "bash":
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {
 				return extractCommandTarget(cmd)
@@ -377,7 +377,7 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 	case "task_complete":
 		return false
 	case "bash":
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {
 				return isReadOnlyCommand(cmd)
@@ -430,10 +430,8 @@ func isReadOnlyCommand(cmd string) bool {
 		}
 	}
 
-	for _, ro := range readOnlyCommands {
-		if verb == ro {
-			return true
-		}
+	if slices.Contains(readOnlyCommands, verb) {
+		return true
 	}
 
 	stateChanging := []string{
@@ -444,13 +442,7 @@ func isReadOnlyCommand(cmd string) bool {
 		"install", "curl", "wget", "apt", "yum", "dnf", "brew",
 		"git", "docker", "kubectl", "terraform", "ansible",
 	}
-	for _, sc := range stateChanging {
-		if verb == sc {
-			return false
-		}
-	}
-
-	return true
+	return !slices.Contains(stateChanging, verb)
 }
 
 // buildHint generates a targeted system message based on loop type.
@@ -536,27 +528,27 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 		}
 		// Determine if agent config dir should be mounted (only for agent tasks)
-			piAgentDir := ""
-			if serverURL == PiSentinelURL {
-				piAgentDir = te.configStore.GetAgentConfigDir()
+		piAgentDir := ""
+		if serverURL == PiSentinelURL {
+			piAgentDir = te.configStore.GetAgentConfigDir()
+		}
+		// Reuse existing container if it's already running from a previous executor (lazy-start).
+		// Only create a new container and send status if one doesn't exist.
+		if !te.sandboxMgr.ContainerRunning(task.ID) {
+			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
+				task.StatusState = "failed"
+				task.Status = "review"
+				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
+				te.store.UpdateTask(task)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
+				return
 			}
-			// Reuse existing container if it's already running from a previous executor (lazy-start).
-			// Only create a new container and send status if one doesn't exist.
-			if !te.sandboxMgr.ContainerRunning(task.ID) {
-				if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
-					task.StatusState = "failed"
-					task.Status = "review"
-					task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
-					te.store.UpdateTask(task)
-					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
-					return
-				}
-				log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
-			} else {
-				log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
-			}
+			log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
+		} else {
+			log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
+		}
 
 		// Build sandbox exec function
 		execFn = func(command string) (string, error) {
@@ -664,12 +656,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: content})
 		case "tool_call":
 			if m.ToolResult != "" {
-				var resultMap map[string]interface{}
+				var resultMap map[string]any
 				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
 					output := resultMap["output"].(string)
 					toolID := ""
 					if m.ToolCalls != "" {
-						var tcMap map[string]interface{}
+						var tcMap map[string]any
 						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
 							if tid, ok := tcMap["tool_id"].(string); ok {
 								toolID = tid
@@ -783,8 +775,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				case <-tick.C:
 					pos := te.gate.Position(serverURL)
 					est := te.gate.EstimateWait(serverURL)
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]interface{}{
-						"position":             pos,
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]any{
+						"position":               pos,
 						"estimated_wait_seconds": est,
 					}})
 				}
@@ -828,25 +820,25 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
-				priorLen := len(pendingToolCalls)
-				pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
-				// Send tool_call event as soon as a new tool call appears in the stream
-				// so the frontend shows a spinner during LLM token generation
-				for i := priorLen; i < len(pendingToolCalls); i++ {
-					tc := pendingToolCalls[i]
-					if tc.ID != "" && tc.Function.Name != "" {
-						path := extractPathFromArgs(tc.Function.Arguments)
-						// During streaming, args may be partial JSON (e.g. just "{").
-						// Send raw_args and let the frontend parse when complete.
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]interface{}{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+					priorLen := len(pendingToolCalls)
+					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
+					// Send tool_call event as soon as a new tool call appears in the stream
+					// so the frontend shows a spinner during LLM token generation
+					for i := priorLen; i < len(pendingToolCalls); i++ {
+						tc := pendingToolCalls[i]
+						if tc.ID != "" && tc.Function.Name != "" {
+							path := extractPathFromArgs(tc.Function.Arguments)
+							// During streaming, args may be partial JSON (e.g. just "{").
+							// Send raw_args and let the frontend parse when complete.
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+						}
 					}
 				}
-			}
 				// Throttled progress updates for write_file (1 per 2 seconds)
 				if time.Since(lastProgressSend) > 2*time.Second {
 					for _, tc := range pendingToolCalls {
 						if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
 							lastProgressSend = time.Now()
 						}
 					}
@@ -855,7 +847,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 			// Retry on transient errors (skip if cancelled by user message).
 			if streamErr != nil && callCtx.Err() == nil {
-				for i := 0; i < 3; i++ {
+				for i := range 3 {
 					select {
 					case <-callCtx.Done():
 						close(streamDone)
@@ -885,7 +877,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case <-ctx.Done():
 			callCancel()
 			te.gate.Release(serverURL) // Release gate immediately so other tasks can proceed
-			<-streamDone // Then wait for goroutine to finish
+			<-streamDone               // Then wait for goroutine to finish
 			task.StatusState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
@@ -910,7 +902,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Drain all queued messages from channel (non-blocking).
 			var queuedMsgs []stream.UserMessage
 			queuedMsgs = append(queuedMsgs, um)
-			for i := 0; i < 16; i++ {
+			for range 16 {
 				select {
 				case q := <-userMsgChan:
 					queuedMsgs = append(queuedMsgs, q)
@@ -1025,7 +1017,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 					}
 					if path != "" {
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]interface{}{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": path}})
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": path}})
 					}
 				}
 				// tool_call event already sent during streaming, just execute and send result
@@ -1037,10 +1029,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
-				tcJSON, _ := json.Marshal(map[string]interface{}{
+				tcJSON, _ := json.Marshal(map[string]any{
 					"tool_id":           tc.ID,
 					"tool_name":         tc.Function.Name,
 					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
@@ -1048,7 +1040,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					"raw_args":          tc.Function.Arguments,
 					"sandbox":           sandboxEnabled && isSandboxableTool(tc.Function.Name),
 				})
-				resultJSON, _ := json.Marshal(map[string]interface{}{
+				resultJSON, _ := json.Marshal(map[string]any{
 					"output":   result,
 					"success":  success,
 					"duration": toolDuration,
@@ -1101,21 +1093,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task.Status = "review"
 					}
 					te.store.UpdateTask(task)
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
-						"state": task.StatusState,
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+						"state":                task.StatusState,
 						"assistant_message_id": assistantMsgID,
-						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
-						"prompt_ms": promptMs, "predicted_ms": predictedMs,
+						"prompt_ms":    promptMs, "predicted_ms": predictedMs,
 						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
 					}})
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 					// Broadcast diff so the frontend updates the diff panel
 					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-						untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+						untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
 						for i, u := range diffResult.Untracked {
-							untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+							untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 						}
 						te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 					}
@@ -1203,9 +1195,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+				untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
 				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+					untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 				}
 				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
@@ -1287,17 +1279,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Broadcast diff so the frontend updates the diff panel
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-				untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+				untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
 				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+					untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 				}
 				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 			}
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
 				"cache_tokens": cacheTokens,
-				"prompt_ms": promptMs, "predicted_ms": predictedMs,
+				"prompt_ms":    promptMs, "predicted_ms": predictedMs,
 				"model_name": activeModel, "duration": duration,
 			}})
 			// If this is a subtask, auto-start the next sibling
@@ -1317,11 +1309,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					lastCompressIdx = compressResult.newLastCompressIdx
 					// Persist compression checkpoint message
 					_ = te.store.CreateTaskMessage(&types.TaskMessage{
-						ID:       uuid.New().String(),
-						TaskID:   task.ID,
-						ThreadID: task.CurrentThreadID,
-						Role:     "compression",
-						Content:  compressResult.summary,
+						ID:        uuid.New().String(),
+						TaskID:    task.ID,
+						ThreadID:  task.CurrentThreadID,
+						Role:      "compression",
+						Content:   compressResult.summary,
 						CreatedAt: time.Now().UTC(),
 					})
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "compression", Data: map[string]string{"summary": compressResult.summary}})
@@ -1398,10 +1390,10 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 
 // compressResult holds the result of a context compression operation.
 type compressResult struct {
-	newMessages       []types.ChatMessage
+	newMessages        []types.ChatMessage
 	newLastCompressIdx int
-	summary           string
-	oldLen            int
+	summary            string
+	oldLen             int
 }
 
 // shouldCompress checks if the current context (estimated from messages) is approaching the context window limit.
@@ -1421,10 +1413,7 @@ func (te *TaskExecutor) compressContext(messages []types.ChatMessage, lastCompre
 	oldLen := len(messages)
 
 	// Build the summarization request: system prompt + all messages since last compression
-	compressFrom := 0
-	if lastCompressIdx > 0 {
-		compressFrom = lastCompressIdx
-	}
+	compressFrom := max(lastCompressIdx, 0)
 
 	compressMessages := []types.ChatMessage{
 		{Role: "system", Content: "Summarize the key events, decisions, and lessons learned in this conversation. " +
@@ -1854,7 +1843,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				// Prompt accepted (response success) — keep waiting for agent_start
 			default:
 				// Other events (turn_start, message_start, etc.) — keep waiting
-				}
+			}
 		case <-ctx.Done():
 			timer.Stop()
 			task.StatusState = "stopped"
@@ -1914,7 +1903,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				//   - Tool results: separate messages with role="toolResult", toolCallId, content, isError
 				if len(event.Messages) > 0 {
 					// Build a map of toolCallId -> tool_result from toolResult messages
-					toolResults := make(map[string]map[string]interface{})
+					toolResults := make(map[string]map[string]any)
 					for _, msg := range event.Messages {
 						role, _ := msg["role"].(string)
 						if role != "toolResult" {
@@ -1928,10 +1917,10 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						var resultText string
 						if contentVal, ok := msg["content"].(string); ok {
 							resultText = contentVal
-						} else if contentArr, ok := msg["content"].([]interface{}); ok {
+						} else if contentArr, ok := msg["content"].([]any); ok {
 							var parts []string
 							for _, item := range contentArr {
-								if itemMap, ok := item.(map[string]interface{}); ok {
+								if itemMap, ok := item.(map[string]any); ok {
 									if itemMap["type"] == "text" {
 										if t, ok := itemMap["text"].(string); ok {
 											parts = append(parts, t)
@@ -1942,7 +1931,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							resultText = strings.Join(parts, "\n")
 						}
 						isError, _ := msg["isError"].(bool)
-						toolResults[toolCallID] = map[string]interface{}{
+						toolResults[toolCallID] = map[string]any{
 							"output":  resultText,
 							"success": !isError,
 						}
@@ -1956,11 +1945,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 						// Extract text, reasoning, and toolCall from content blocks
 						var assistantText, reasoningText string
-						var toolCalls []map[string]interface{}
-						if content, ok := msg["content"].([]interface{}); ok {
+						var toolCalls []map[string]any
+						if content, ok := msg["content"].([]any); ok {
 							var texts []string
 							for _, c := range content {
-								if cm, ok := c.(map[string]interface{}); ok {
+								if cm, ok := c.(map[string]any); ok {
 									switch cm["type"] {
 									case "text":
 										if t, ok := cm["text"].(string); ok {
@@ -1980,7 +1969,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 						// Extract usage data if available
 						var promptTokens, predictedTokens int
-						if usage, ok := msg["usage"].(map[string]interface{}); ok {
+						if usage, ok := msg["usage"].(map[string]any); ok {
 							if input, ok := usage["input"].(float64); ok {
 								promptTokens = int(input)
 							}
@@ -2010,7 +1999,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						for _, tc := range toolCalls {
 							toolCallID, _ := tc["id"].(string)
 							toolName, _ := tc["name"].(string)
-							toolArgs, _ := tc["arguments"].(map[string]interface{})
+							toolArgs, _ := tc["arguments"].(map[string]any)
 							if toolCallID == "" {
 								continue
 							}
@@ -2025,7 +2014,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							result, hasResult := toolResults[toolCallID]
 
 							// Build tool_call JSON (same format as LLM path)
-							tcJSON, _ := json.Marshal(map[string]interface{}{
+							tcJSON, _ := json.Marshal(map[string]any{
 								"tool_id":           toolCallID,
 								"tool_name":         kanbanToolName,
 								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
@@ -2038,7 +2027,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							if hasResult {
 								resultJSON, _ = json.Marshal(result)
 							} else {
-								resultJSON, _ = json.Marshal(map[string]interface{}{
+								resultJSON, _ = json.Marshal(map[string]any{
 									"output":  "",
 									"success": true,
 								})
@@ -2068,14 +2057,14 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 									resultSuccess = suc
 								}
 							}
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]interface{}{
-								"tool_id":   toolCallID,
-								"success":   resultSuccess,
-								"output":    resultOutput,
-								"args":      toolArgs,
-								"raw_args":  string(rawArgs),
-								"path":      extractPathFromArgs(string(rawArgs)),
-								"sandbox":   sandboxEnabled && isSandboxableTool(kanbanToolName),
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{
+								"tool_id":  toolCallID,
+								"success":  resultSuccess,
+								"output":   resultOutput,
+								"args":     toolArgs,
+								"raw_args": string(rawArgs),
+								"path":     extractPathFromArgs(string(rawArgs)),
+								"sandbox":  sandboxEnabled && isSandboxableTool(kanbanToolName),
 							}})
 						}
 					}
@@ -2125,11 +2114,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		te.store.UpdateTask(task)
 
 		// Broadcast complete event
-		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]interface{}{
-			"state":    task.StatusState,
-			"summary":  "Pi Coding Agent finished",
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+			"state":      task.StatusState,
+			"summary":    "Pi Coding Agent finished",
 			"model_name": client.ModelName(),
-			"duration": duration.Milliseconds(),
+			"duration":   duration.Milliseconds(),
 		}})
 
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -2137,9 +2126,9 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		// Broadcast diff
 		baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 		if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+			untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
 			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+				untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 			}
 			te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
 		}

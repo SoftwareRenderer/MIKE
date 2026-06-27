@@ -70,7 +70,7 @@ func (s *Store) Close() error {
 }
 
 // Exec runs a raw SQL statement with arguments.
-func (s *Store) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (s *Store) Exec(query string, args ...any) (sql.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.db.Exec(query, args...)
@@ -239,10 +239,10 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN thread_id TEXT NULL`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`) // best-effort for existing tables
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`) // best-effort
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`)        // best-effort for existing tables
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`)   // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_commit_hash TEXT NULL`) // best-effort
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_commit_hash TEXT NULL`)  // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
@@ -429,7 +429,7 @@ func (s *Store) migrateDefaultModelToProviders() error {
 
 // scanner is the common interface for sql.Row and sql.Rows.
 type scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }
 
 // b2i converts bool to int (0 or 1).

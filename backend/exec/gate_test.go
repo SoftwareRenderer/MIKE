@@ -108,7 +108,7 @@ func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 	var orderMu sync.Mutex
 	var wg sync.WaitGroup
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -256,14 +256,14 @@ func TestEstimateWait_WithHistory(t *testing.T) {
 	ctx := context.Background()
 
 	// Build some history: acquire, hold for 100ms, release (repeat 3x)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		g.Acquire(ctx, "http://p", 5)
 		time.Sleep(100 * time.Millisecond)
 		g.Release("http://p")
 	}
 
 	// Now hold all slots and enqueue a waiter
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		g.Acquire(ctx, "http://p", 2)
 	}
 
@@ -297,12 +297,10 @@ func TestClose_ReleasesAllWaiters(t *testing.T) {
 
 	// Enqueue 3 waiters
 	var wg sync.WaitGroup
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 3 {
+		wg.Go(func() {
 			g.Acquire(ctx, "http://p", 1)
-		}()
+		})
 	}
 	time.Sleep(50 * time.Millisecond)
 

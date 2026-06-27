@@ -34,7 +34,7 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 	if model == "" {
 		model = "test"
 	}
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":      model,
 		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
 		"max_tokens": 1,
@@ -406,4 +406,3 @@ func (cs *ConfigStore) GetModelContextWindow(modelName, providerURL string) *int
 	}
 	return nil
 }
-

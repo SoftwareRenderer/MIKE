@@ -57,20 +57,20 @@ func (c *LlamaClient) setAuthHeader(req *http.Request) {
 // toAPIMessage converts a ChatMessage to the format expected by the LLM API.
 // If ContentParts is set, content is serialized as an array of parts (multi-modal).
 // Uses standard OpenAI format: {type: "image_url", image_url: {url: "data:..."}}
-func toAPIMessage(m types.ChatMessage) map[string]interface{} {
-	result := map[string]interface{}{
+func toAPIMessage(m types.ChatMessage) map[string]any {
+	result := map[string]any{
 		"role": m.Role,
 	}
 	if len(m.ContentParts) > 0 {
-		parts := make([]interface{}, len(m.ContentParts))
+		parts := make([]any, len(m.ContentParts))
 		for i, p := range m.ContentParts {
 			if p.Type == "text" {
-				parts[i] = map[string]interface{}{"type": "text", "text": p.Text}
+				parts[i] = map[string]any{"type": "text", "text": p.Text}
 			} else if p.ImageSource != nil {
 				dataURL := "data:" + p.ImageSource.MediaType + ";base64," + p.ImageSource.Data
-				parts[i] = map[string]interface{}{
+				parts[i] = map[string]any{
 					"type":      "image_url",
-					"image_url": map[string]interface{}{"url": dataURL},
+					"image_url": map[string]any{"url": dataURL},
 				}
 			}
 		}
@@ -91,8 +91,8 @@ func toAPIMessage(m types.ChatMessage) map[string]interface{} {
 }
 
 // toAPIMessages converts a slice of ChatMessages to the API format.
-func toAPIMessages(messages []types.ChatMessage) []map[string]interface{} {
-	result := make([]map[string]interface{}, len(messages))
+func toAPIMessages(messages []types.ChatMessage) []map[string]any {
+	result := make([]map[string]any, len(messages))
 	for i, m := range messages {
 		result[i] = toAPIMessage(m)
 	}
@@ -107,7 +107,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 	url := c.baseURL + "/chat/completions"
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":            c.modelName,
 		"messages":         toAPIMessages(messages),
 		"stream":           true,
@@ -127,12 +127,12 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		if ok {
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
-			reqBody["chat_template_kwargs"] = map[string]interface{}{
+			reqBody["chat_template_kwargs"] = map[string]any{
 				"enable_thinking": true,
 			}
 		}
 	} else {
-		reqBody["chat_template_kwargs"] = map[string]interface{}{
+		reqBody["chat_template_kwargs"] = map[string]any{
 			"enable_thinking": false,
 		}
 	}
@@ -240,7 +240,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 
 	url := c.baseURL + "/chat/completions"
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":            c.modelName,
 		"messages":         toAPIMessages(messages),
 		"stream":           false,
@@ -254,12 +254,12 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		if ok {
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
-			reqBody["chat_template_kwargs"] = map[string]interface{}{
+			reqBody["chat_template_kwargs"] = map[string]any{
 				"enable_thinking": true,
 			}
 		}
 	} else {
-		reqBody["chat_template_kwargs"] = map[string]interface{}{
+		reqBody["chat_template_kwargs"] = map[string]any{
 			"enable_thinking": false,
 		}
 	}
@@ -334,7 +334,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 // HealthCheck pings the llama server.
 func (c *LlamaClient) HealthCheck() error {
 	url := c.baseURL + "/chat/completions"
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":      c.modelName,
 		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
 		"max_tokens": 1,

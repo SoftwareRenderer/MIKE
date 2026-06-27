@@ -28,13 +28,11 @@ func TestCommitQueue_ConcurrentSameProjectBlocks(t *testing.T) {
 	release1 := cq.Acquire("proj-1")
 
 	// Second acquire — should block
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		release2 := cq.Acquire("proj-1")
 		order.Add(1)
 		release2()
-	}()
+	})
 
 	// Small delay to ensure the goroutine is blocked
 	time.Sleep(50 * time.Millisecond)
@@ -63,13 +61,11 @@ func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
 	release1 := cq.Acquire("proj-1")
 
 	// Concurrent acquire on proj-2 — should NOT block
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		release2 := cq.Acquire("proj-2")
 		order.Add(1)
 		release2()
-	}()
+	})
 
 	// proj-2 should proceed immediately
 	time.Sleep(50 * time.Millisecond)
@@ -88,14 +84,12 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Launch 3 sequential acquires
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 3 {
+		wg.Go(func() {
 			release := cq.Acquire("proj-1")
 			order.Add(1)
 			release()
-		}()
+		})
 	}
 
 	// Wait for all to complete

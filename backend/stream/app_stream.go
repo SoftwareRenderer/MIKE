@@ -75,12 +75,12 @@ type AppStreamSubscription struct {
 
 // AppStreamUserMessage is the data for user_message from the WS (fallback, primary is POST /send).
 type AppStreamUserMessage struct {
-	ProjectID     string `json:"project_id"`
-	TaskID        string `json:"task_id"`
-	Content       string `json:"content"`
-	ModelName     string `json:"model_name,omitempty"`
-	ServerURL     string `json:"server_url,omitempty"`
-	Attachments   string `json:"attachments,omitempty"`
+	ProjectID   string `json:"project_id"`
+	TaskID      string `json:"task_id"`
+	Content     string `json:"content"`
+	ModelName   string `json:"model_name,omitempty"`
+	ServerURL   string `json:"server_url,omitempty"`
+	Attachments string `json:"attachments,omitempty"`
 }
 
 // branchSnapshot holds the last-known branch for a project.
@@ -91,10 +91,10 @@ type branchSnapshot struct {
 // AppStreamManager manages a single WebSocket endpoint for all app events.
 // Clients connect once at /api/stream and subscribe to projects/tasks.
 type AppStreamManager struct {
-	mu      sync.RWMutex
-	clients map[*websocket.Conn]*clientState
-	writeMu sync.Mutex // serializes all writes to prevent concurrent Read/Write races
-	store   *store.Store
+	mu          sync.RWMutex
+	clients     map[*websocket.Conn]*clientState
+	writeMu     sync.Mutex // serializes all writes to prevent concurrent Read/Write races
+	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 
 	// Filesystem watcher for worktree changes
@@ -118,9 +118,9 @@ type AppStreamManager struct {
 	// Per-task ring buffer for reconnect sync.
 	// When a client subscribes to a task, it gets the buffered events so it can
 	// catch up on tokens/tool_calls that were streamed while it was disconnected.
-	taskBufMu     sync.Mutex
-	taskBuffers   map[string][][]byte // task key ("projectID:taskID") -> ring buffer
-	taskBufSize   int
+	taskBufMu   sync.Mutex
+	taskBuffers map[string][][]byte // task key ("projectID:taskID") -> ring buffer
+	taskBufSize int
 }
 
 // NewAppStreamManager creates a new AppStreamManager.
@@ -334,7 +334,7 @@ func (asm *AppStreamManager) SendBoardEvent(projectID string, event types.Stream
 
 // sendBoardPayload sends a payload directly to all clients subscribed to the project.
 // The payload is JSON-marshaled and sent as the WebSocket frame.
-func (asm *AppStreamManager) sendBoardPayload(projectID string, payload interface{}) {
+func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.mu.RLock()
 	targetConns := make([]*websocket.Conn, 0)
 	for conn, client := range asm.clients {
@@ -365,7 +365,7 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload interfac
 // The event includes task_id for client-side routing.
 func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types.StreamEvent) {
 	// Build flat JSON: {"type":"task_event","task_id":"...","type":"token","data":{...}}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"type":    "task_event",
 		"task_id": taskID,
 		"event":   string(event.Type),
@@ -389,7 +389,7 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 }
 
 // sendTaskPayload sends a payload to all clients subscribed to a task.
-func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload interface{}) {
+func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
 	asm.mu.RLock()
 	targetConns := make([]*websocket.Conn, 0)
 	key := projectID + ":" + taskID
@@ -442,7 +442,7 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 		return
 	}
 	counts := asm.store.GetAllProjectCounts()
-	msg, _ := json.Marshal(map[string]interface{}{
+	msg, _ := json.Marshal(map[string]any{
 		"type": "project_counts",
 		"data": counts,
 	})
@@ -469,7 +469,7 @@ func (asm *AppStreamManager) BroadcastCommitStatus(projectID, taskID, status str
 
 // BroadcastBranch sends a project_branch event to all clients of a project.
 func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type":   "project_branch",
 		"branch": branch,
 	})
@@ -478,7 +478,7 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 // BroadcastFsEvent sends a fs_event to all clients of a project.
 // op is "create" or "delete", path is the affected file/directory path.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type": "fs_event",
 		"op":   op,
 		"path": path,
@@ -489,7 +489,7 @@ func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
 // Used by the card UI to show file counts and the commit button.
 // The hash lets the frontend detect content changes without receiving the full diff.
 func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type":            "task_diff_stats",
 		"task_id":         taskID,
 		"hash":            diffHash,
@@ -500,8 +500,8 @@ func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, sho
 }
 
 // BroadcastDiff sends the full diff to all clients of a project.
-func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diff string, shortStat string, untrackedN int, untracked []map[string]interface{}) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diff string, shortStat string, untrackedN int, untracked []map[string]any) {
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type":       "task_diff",
 		"task_id":    taskID,
 		"diff":       diff,
@@ -512,8 +512,8 @@ func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diff string, short
 
 // BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project,
 // and a project_counts event to ALL connected clients across all projects.
-func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task interface{}) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task any) {
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type": "task_updated",
 		"task": task,
 	})
@@ -523,7 +523,7 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task interfa
 // BroadcastTaskDeleted sends a task_deleted event with the task ID to all clients of a project,
 // and a project_counts event to ALL connected clients across all projects.
 func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
-	asm.sendBoardPayload(projectID, map[string]interface{}{
+	asm.sendBoardPayload(projectID, map[string]any{
 		"type":    "task_deleted",
 		"task_id": taskID,
 	})
@@ -881,7 +881,7 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 				untrackedLines += len(u.Lines)
 			}
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(diffResult.Diff)))
-			statsMsg, _ := json.Marshal(map[string]interface{}{
+			statsMsg, _ := json.Marshal(map[string]any{
 				"type":            "task_diff_stats",
 				"task_id":         task.ID,
 				"hash":            hash,
@@ -894,11 +894,11 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			asm.writeMu.Unlock()
 
 			// Send full diff for detail view
-			untrackedMaps := make([]map[string]interface{}, len(diffResult.Untracked))
+			untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
 			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]interface{}{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+				untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
 			}
-			msg, _ := json.Marshal(map[string]interface{}{
+			msg, _ := json.Marshal(map[string]any{
 				"type":       "task_diff",
 				"task_id":    task.ID,
 				"diff":       diffResult.Diff,
@@ -914,7 +914,7 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 	branch, _ := asm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
 	branch = strings.TrimSpace(branch)
 	if branch != "" {
-		msg, _ := json.Marshal(map[string]interface{}{
+		msg, _ := json.Marshal(map[string]any{
 			"type":   "project_branch",
 			"branch": branch,
 		})
