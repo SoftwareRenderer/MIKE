@@ -31,6 +31,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
 
 	// Global utilities
+	s.mux.HandleFunc("/api/home", s.handleHome)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
 	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)

@@ -123,9 +123,12 @@
         }
     }
 
-    // Load home directory on mount
+    // Load user's home directory on mount
     $effect(() => {
-        loadDir('/home');
+        fetch('/api/home')
+            .then(r => r.json())
+            .then(data => loadDir(data.home || '/home'))
+            .catch(() => loadDir('/home'));
     });
 
     function formatPath(p: string): string {
@@ -163,7 +166,7 @@
             <!-- Path bar -->
             <div class="path-bar">
                 <div class="path-bar-row">
-                    <button class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">
+                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
                         <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
                     </button>
                     <input

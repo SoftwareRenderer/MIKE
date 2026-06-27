@@ -7,6 +7,7 @@
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
+    import { loadExplorerLayout, saveExplorerLayout } from '$lib/storage';
 
     let { projectId, projectPath, currentBranch, initialFile, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
@@ -45,16 +46,22 @@
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
 
-    // Column widths (resizable)
-    let leftWidth = $state(250);
-    let rightWidth = $state(180);
+    // Column widths (resizable) — loaded from localStorage with defaults
+    const savedLayout = loadExplorerLayout();
+    let leftWidth = $state(savedLayout.leftWidth);
+    let rightWidth = $state(savedLayout.rightWidth);
     const MIN_LEFT = 180;
     const MAX_LEFT = 500;
     const MIN_RIGHT = 120;
     const MAX_RIGHT = 400;
 
     // Resize state for left column split (file browser / git graph)
-    let splitRatio = $state(0.5);
+    let splitRatio = $state(savedLayout.splitRatio);
+
+    /** Persist explorer layout to localStorage */
+    function persistExplorerLayout() {
+        saveExplorerLayout({ leftWidth, rightWidth, splitRatio });
+    }
 
     // Active resize handle: 'left', 'right', 'split', or null
     let activeResize = $state<'left' | 'right' | 'split' | null>(null);
@@ -171,6 +178,7 @@
 
     function handleMouseUp() {
         activeResize = null;
+        persistExplorerLayout();
     }
 
     // Prevent text selection during resize

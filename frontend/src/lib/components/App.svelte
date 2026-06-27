@@ -744,14 +744,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     {/if}
                 </button>
                 <span class="project-title">
-                    {toHomeRelative(currentProject.path)}
+                    <span class="project-path">{toHomeRelative(currentProject.path)}</span>
                     {#if currentBranch}
                         <button
-                            class="branch-badge"
+                            class="icon-btn branch-btn"
                             onclick={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}
                             title={`Branch: ${currentBranch} (click to explore)`}
                         >
-                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <circle cx="6" cy="6" r="2.5"/>
                                 <circle cx="10" cy="10" r="2.5"/>
                                 <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
@@ -1233,26 +1233,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         text-overflow: ellipsis;
         gap: 6px;
     }
-    .branch-badge {
-        display: inline-flex;
-        align-items: center;
+    .branch-btn {
         gap: 4px;
-        padding: 3px 10px;
-        border-radius: 999px;
-        background: rgba(163, 113, 247, 0.15);
-        color: var(--color-status-purple);
-        font-size: 0.8125rem;
         font-weight: 500;
         font-family: var(--font-mono);
-        cursor: pointer;
-        border: 1px solid rgba(163, 113, 247, 0.3);
-        flex-shrink: 0;
-        white-space: nowrap;
-    }
-    .branch-badge:hover {
-        background: rgba(163, 113, 247, 0.25);
-        border-color: rgba(163, 113, 247, 0.5);
-        opacity: 1;
     }
     .actions {
         display: flex;
@@ -1363,8 +1347,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         .project-list {
             padding: 4px;
         }
-        .project-title {
+        .project-path {
             flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
     }
 </style>

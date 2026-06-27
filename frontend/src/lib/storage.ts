@@ -13,6 +13,7 @@
 //     kanban:terminal:height   — Terminal panel resize height
 //     kanban:detail:boardRatio — CardDetail board/chat split ratio
 //     kanban:detail:chatRatio  — CardDetail chat/stream split ratio
+//     kanban:explorer:layout   — Explorer column widths and split ratio
 //     diff_collapsed_files     — Set<string> of collapsed diff file paths
 //   IndexedDB (kanban-drafts):
 //     attachments store        — Draft image attachments per task (key: taskId)
@@ -29,6 +30,7 @@ const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
 const QUEUE_KEY = 'kanban-offline-queue';
 const DRAFT_KEY_PREFIX = 'kanban:draft:';
 const EDITOR_DRAFT_KEY_PREFIX = 'kanban:editor-draft:';
+const EXPLORER_LAYOUT_KEY = 'kanban:explorer:layout';
 
 const DB_NAME = 'kanban-drafts';
 const DB_VERSION = 1;
@@ -97,6 +99,45 @@ export function clearEditorDraft(path: string): void {
     try {
         if (typeof localStorage === 'undefined') return;
         localStorage.removeItem(EDITOR_DRAFT_KEY_PREFIX + path);
+    } catch { /* ignore */ }
+}
+
+// ─── Explorer layout (localStorage) ──────────────────────────────────────────
+
+interface ExplorerLayout {
+    leftWidth: number;
+    rightWidth: number;
+    splitRatio: number;
+}
+
+const DEFAULT_EXPLORER_LAYOUT: ExplorerLayout = {
+    leftWidth: 250,
+    rightWidth: 180,
+    splitRatio: 0.5,
+};
+
+/** Load saved explorer column layout from localStorage. Returns defaults if none saved. */
+export function loadExplorerLayout(): ExplorerLayout {
+    try {
+        if (typeof localStorage === 'undefined') return { ...DEFAULT_EXPLORER_LAYOUT };
+        const raw = localStorage.getItem(EXPLORER_LAYOUT_KEY);
+        if (raw) {
+            const saved = JSON.parse(raw) as Partial<ExplorerLayout>;
+            return {
+                leftWidth: saved.leftWidth ?? DEFAULT_EXPLORER_LAYOUT.leftWidth,
+                rightWidth: saved.rightWidth ?? DEFAULT_EXPLORER_LAYOUT.rightWidth,
+                splitRatio: saved.splitRatio ?? DEFAULT_EXPLORER_LAYOUT.splitRatio,
+            };
+        }
+    } catch { /* ignore */ }
+    return { ...DEFAULT_EXPLORER_LAYOUT };
+}
+
+/** Save explorer column layout to localStorage. */
+export function saveExplorerLayout(layout: ExplorerLayout): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem(EXPLORER_LAYOUT_KEY, JSON.stringify(layout));
     } catch { /* ignore */ }
 }
 
