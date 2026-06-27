@@ -120,7 +120,7 @@
     }
 
     function createEditor() {
-        if (!editorEl || !content) return;
+        if (!editorEl) return;
         const langSupport = getLanguageSupport(filePath);
         const extensions = [
             basicSetup,
@@ -270,10 +270,10 @@
 
     // Create editor after DOM is ready (editorEl is in a conditional block)
     $effect(() => {
-        if (!loading && !fileTooLarge && !view && editorEl && content) {
+        if (!loading && !fileTooLarge && !view && editorEl) {
             // Use rAF to ensure the DOM has been painted after the conditional block renders
             requestAnimationFrame(() => {
-                if (editorEl && !view && content) {
+                if (editorEl && !view) {
                     createEditor();
                 }
             });

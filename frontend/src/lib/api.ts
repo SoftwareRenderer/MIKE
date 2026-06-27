@@ -654,6 +654,7 @@ export interface AppStreamCallbacks {
     onDiffStats?: (task_id: string, hash: string, short_stat: string, untracked_n: number, untracked_lines: number) => void;
     onDiff?: (task_id: string, diff: string, untracked: Array<{ path: string; diff: string; file_size?: number }>) => void;
     onBranch?: (branch: string) => void;
+    onFsEvent?: (op: 'create' | 'delete', path: string) => void;
     onTaskUpdated?: (task: Task) => void;
     onTaskDeleted?: (task_id: string) => void;
     onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void;
@@ -747,6 +748,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             }
             if (msg.type === 'project_branch' && callbacks.onBranch) {
                 callbacks.onBranch(msg.branch);
+            }
+            if (msg.type === 'fs_event' && callbacks.onFsEvent) {
+                callbacks.onFsEvent(msg.op, msg.path);
             }
             if (msg.type === 'task_updated' && callbacks.onTaskUpdated) {
                 callbacks.onTaskUpdated(msg.task);

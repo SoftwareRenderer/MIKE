@@ -1,12 +1,50 @@
 <script lang="ts">
+    import { ensureCsrfToken } from '$lib/api';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
-    let { projectPath, unsavedFiles, onFileSelected }: {
+    let { projectPath, unsavedFiles, pendingFsEvent, onFileSelected }: {
         projectPath: string;
         unsavedFiles: string[];
+        pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
         onFileSelected: (path: string) => void;
     } = $props();
+
+    // New file creation
+    let showNewFile = $state(false);
+    let newFileName = $state('');
+    let creating = $state(false);
+    let createError = $state('');
+
+    async function handleCreateFile() {
+        const name = newFileName.trim();
+        if (!name || creating) return;
+        creating = true;
+        createError = '';
+        try {
+            const csrfToken = await ensureCsrfToken();
+            const res = await fetch('/api/fs/write', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+                },
+                body: JSON.stringify({ path: currentPath + '/' + name, content: '' }),
+                credentials: 'include',
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to create file');
+            }
+            showNewFile = false;
+            newFileName = '';
+            loadDir(currentPath);
+        } catch (e) {
+            createError = String(e);
+        } finally {
+            creating = false;
+        }
+    }
 
     let currentPath = $state(projectPath);
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
@@ -68,6 +106,30 @@
         }
     }
 
+    // Called from parent when fs events arrive
+    function handleFsEvent(op: 'create' | 'delete', relPath: string) {
+        // Check if the event is in or under the current directory
+        const currentPrefix = currentPath + '/';
+        const eventFullPath = projectPath + '/' + relPath;
+        const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));
+        const shouldRefresh = eventFullPath.startsWith(currentPrefix) || eventDir === currentPath;
+        if (shouldRefresh) {
+            loadDir(currentPath);
+        }
+    }
+
+    // Consume pending fs events from parent
+    let lastFsEventKey = $state('');
+    $effect(() => {
+        if (pendingFsEvent) {
+            const key = pendingFsEvent.op + ':' + pendingFsEvent.path;
+            if (key !== lastFsEventKey) {
+                handleFsEvent(pendingFsEvent.op, pendingFsEvent.path);
+                lastFsEventKey = key;
+            }
+        }
+    });
+
     $effect(() => {
         loadDir(projectPath);
     });
@@ -76,7 +138,31 @@
 <div class="file-browser">
     <div class="file-browser-header">
         <span class="file-browser-label">Files</span>
+        {#if !showNewFile}
+            <button class="new-file-btn" onclick={() => { showNewFile = true; newFileName = ''; createError = ''; }} title="New file" aria-label="Create new file">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                    <line x1="8" y1="3" x2="8" y2="13"/>
+                    <line x1="3" y1="8" x2="13" y2="8"/>
+                </svg>
+            </button>
+        {:else}
+            <div class="new-file-input-row">
+                <input
+                    type="text"
+                    class="new-file-input"
+                    placeholder="filename"
+                    value={newFileName}
+                    oninput={(e) => newFileName = e.target.value}
+                    onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
+                    onblur={() => { showNewFile = false; newFileName = ''; }}
+                    autofocus
+                />
+            </div>
+        {/if}
     </div>
+    {#if createError}
+        <div class="file-browser-error">{createError}</div>
+    {/if}
 
     {#if error}
         <div class="file-browser-error">{error}</div>
@@ -134,6 +220,9 @@
     }
 
     .file-browser-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         padding: 6px 10px;
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
@@ -145,6 +234,44 @@
         color: var(--color-text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
+    }
+
+    .new-file-btn {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+    }
+    .new-file-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+
+    .new-file-input-row {
+        margin-left: auto;
+    }
+
+    .new-file-input {
+        width: 120px;
+        padding: 2px 6px;
+        font-size: 0.6875rem;
+        font-family: var(--font-mono);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        outline: none;
+    }
+    .new-file-input:focus {
+        border-color: var(--color-accent);
     }
 
     .file-browser-error {

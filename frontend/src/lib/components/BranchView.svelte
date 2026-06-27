@@ -7,11 +7,12 @@
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
 
-    let { projectId, projectPath, currentBranch, onClose }: {
+    let { projectId, projectPath, currentBranch, onClose, fsEventQueue }: {
         projectId: string;
         projectPath: string;
         currentBranch: string;
         onClose: () => void;
+        fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
@@ -104,6 +105,18 @@
         }
     }
 
+    // Consume fs events from the shared queue
+    let pendingFsEvent = $state<{ op: 'create' | 'delete'; path: string } | null>(null);
+    let lastQueueLen = $state(0);
+    $effect(() => {
+        const len = fsEventQueue.length;
+        if (len > lastQueueLen && len > 0) {
+            // Use the latest event (most relevant)
+            pendingFsEvent = fsEventQueue[len - 1];
+            lastQueueLen = len;
+        }
+    });
+
     // Handle Escape key — only close if editor is not focused
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape' && !editorFocused) {
@@ -188,6 +201,7 @@
                     <BranchFileBrowser
                         projectPath={projectPath}
                         unsavedFiles={unsavedFiles}
+                        pendingFsEvent={pendingFsEvent}
                         onFileSelected={handleFileSelected}
                     />
                 </div>

@@ -100,6 +100,9 @@ type AppStreamManager struct {
 	// Filesystem watcher for worktree changes
 	watcher *WorktreeWatcher
 
+	// Filesystem watcher for project directory changes (create/delete)
+	projectWatcher *ProjectWatcher
+
 	// Branch pollers — one per project, for detecting branch switches
 	branchPollersMu sync.Mutex
 	branchPollers   map[string]context.CancelFunc
@@ -130,9 +133,14 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		taskBuffers:   make(map[string][][]byte),
 		taskBufSize:   DefaultBufferSize,
 	}
-	// Initialize the filesystem watcher
+	// Initialize the filesystem watcher for task worktrees
 	asm.watcher, _ = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
 	go asm.watcher.StartEventLoop()
+
+	// Initialize the project directory watcher
+	asm.projectWatcher, _ = NewProjectWatcher(asm.BroadcastFsEvent)
+	go asm.projectWatcher.StartEventLoop()
+
 	return asm
 }
 
@@ -202,9 +210,14 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 	wasEmpty := len(client.projectSub) == 1 // first project subscription
 	asm.mu.Unlock()
 
-	// Start branch poller if this is the first subscriber to this project
+	// Start branch poller and project watcher if this is the first subscriber to this project
 	if wasEmpty {
 		asm.startBranchPoller(projectID)
+		// Watch project directory for file create/delete events
+		project, err := asm.store.GetProject(projectID)
+		if err == nil && project != nil && project.Path != "" {
+			_ = asm.projectWatcher.Watch(projectID, project.Path)
+		}
 	}
 }
 
@@ -228,9 +241,10 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 	hasSubs := len(client.projectSub) > 0
 	asm.mu.Unlock()
 
-	// Stop branch poller if no clients are subscribed to this project
+	// Stop branch poller and project watcher if no clients are subscribed to this project
 	if !hasSubs {
 		asm.stopBranchPoller(projectID)
+		asm.projectWatcher.Unwatch(projectID)
 	}
 }
 
@@ -458,6 +472,16 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 	asm.sendBoardPayload(projectID, map[string]interface{}{
 		"type":   "project_branch",
 		"branch": branch,
+	})
+}
+
+// BroadcastFsEvent sends a fs_event to all clients of a project.
+// op is "create" or "delete", path is the affected file/directory path.
+func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
+	asm.sendBoardPayload(projectID, map[string]interface{}{
+		"type": "fs_event",
+		"op":   op,
+		"path": path,
 	})
 }
 

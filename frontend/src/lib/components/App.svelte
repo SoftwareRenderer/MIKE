@@ -107,6 +107,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let showSandboxConfigVal = $state(false);
     let showFileBrowserVal = $state(false);
     let showBranchViewVal = $state(false);
+    let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
     let selectedTaskVal: Task | null = $state(null);
@@ -319,6 +320,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                             if (params.get('view') === 'branch') {
                                 showBranchViewVal = true;
                             }
+                        }
+                    },
+                    onFsEvent: (op, path) => {
+                        if (showBranchViewVal) {
+                            fsEventQueue = [...fsEventQueue, { op, path }];
                         }
                     },
                     onTaskUpdated: (updatedTask: Task) => {
@@ -760,7 +766,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
-                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null }, false, true); }}
+                        fsEventQueue={fsEventQueue}
+                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {
