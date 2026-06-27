@@ -268,6 +268,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
@@ -354,6 +355,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.StatusState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped while waiting for LLM slot", "stopped")
 			return
@@ -474,6 +476,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			return
 		case <-streamDone:
@@ -923,6 +926,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
@@ -1157,6 +1161,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			return
 		case <-timer.C:
@@ -1178,6 +1183,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return

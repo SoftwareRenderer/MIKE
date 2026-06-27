@@ -134,7 +134,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
-    let suppressEvents = $state(true); // suppresses buffer replay entries during initial load to avoid flicker
+    // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
+    // For in_progress tasks, buffer events are legitimate and must be replayed.
+    let suppressEvents = $state(taskStatus !== 'in_progress');
     let queueStatus = $derived(commitQueueStatus[projectId]?.taskID === taskId ? commitQueueStatus[projectId].status : null);
 
     // Thread state
@@ -1514,23 +1516,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             stream.subscribeTask(projectId, taskId);
         }
 
-        // 4. If task is actively streaming, pause for buffer replay to arrive.
-        // Buffer events travel: server WS → onTaskEvent → taskEvent.set → handleEvent.
-        // For idle/completed tasks, no buffer exists so no delay needed.
-        if (taskStatus === 'in_progress' || taskStatus === 'review') {
-            await new Promise(r => setTimeout(r, 200));
-        }
-
-        // 5. After buffer replay, clear stale streaming state again for non-running tasks.
-        // Buffer events may have re-added the task via a 'running' event.
-        if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
-            markNotStreaming();
-        }
-
-        // 6. Load history from DB (merges with buffer entries via ID-based dedup).
+        // 4. Load history from DB (merges with buffer entries via ID-based dedup).
         await loadHistory();
 
-        // 7. Allow live events — buffer replay is done, DB state is loaded.
+        // 5. Allow live events — buffer replay is done, DB state is loaded.
         suppressEvents = false;
 
         // Override model selection with task-specific values if set
