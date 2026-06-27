@@ -569,7 +569,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 // optimistic user message entry before the echo arrives.
                 // loadHistory will be called after the LLM response completes.
                 if (!isRegenerating) {
-                    loadHistory();
+                    // Clear streaming state to prevent old thread's entries from leaking
+                    closeCurrentAssistant();
+                    activeToolCalls.clear();
+                    entries = [];
+                    currentAssistantId = null;
+                    streamTokenCount = 0;
+                    awaitingResponse = false;
+                    loadHistory(true);
                 }
                 break;
             }
@@ -916,6 +923,17 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Refresh threads list from server to pick up any changes (deletions, etc.)
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = switched.id;
+            // Clear streaming state before loading new thread's messages.
+            // loadHistory() merges DB entries with existing non-DB entries,
+            // so old thread's streaming entries would leak into the new thread.
+            closeCurrentAssistant();
+            activeToolCalls.clear();
+            entries = [];
+            currentAssistantId = null;
+            streamTokenCount = 0;
+            awaitingResponse = false;
+            // Load messages for the new thread immediately (don't wait for WS event)
+            await loadHistory(true);
             // Notify parent to refresh the diff panel for the new thread
             onThreadSwitch?.();
             // Update URL with new thread param
@@ -934,6 +952,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Refresh threads list from server to ensure consistency
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
+            // Clear streaming state before loading new thread's messages.
+            closeCurrentAssistant();
+            activeToolCalls.clear();
+            entries = [];
+            currentAssistantId = null;
+            streamTokenCount = 0;
+            awaitingResponse = false;
+            // Load messages for the new thread immediately
+            await loadHistory(true);
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
             // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
@@ -1267,7 +1294,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
-            await loadHistory();
+            // Clear streaming state before loading new thread's messages.
+            closeCurrentAssistant();
+            activeToolCalls.clear();
+            entries = [];
+            currentAssistantId = null;
+            streamTokenCount = 0;
+            // Load messages for the new thread
+            await loadHistory(true);
             updateThreadUrl(forked.id);
             onThreadSwitch?.();
             lastSentMessage = newContent;
