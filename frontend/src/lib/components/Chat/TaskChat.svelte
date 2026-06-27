@@ -134,6 +134,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
+    let suppressEvents = $state(true); // suppresses buffer replay entries during initial load to avoid flicker
     let queueStatus = $derived(commitQueueStatus[projectId]?.taskID === taskId ? commitQueueStatus[projectId].status : null);
 
     // Thread state
@@ -180,6 +181,15 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         taskStatus === 'in_progress' &&
         !isLoading &&
         queuePosition === 0 &&
+        entries.length > 0 &&
+        entries[entries.length - 1].role === 'user'
+    );
+
+    // Show "Resume" button in review bar when the last message is from the user
+    // (agent hasn't responded yet — user sent a follow-up before moving to review).
+    let showResumeButton = $derived(
+        taskStatus === 'review' &&
+        !isLoading &&
         entries.length > 0 &&
         entries[entries.length - 1].role === 'user'
     );
@@ -279,6 +289,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     function handleEvent(event: StreamEvent) {
         switch (event.type) {
             case 'token': {
+                if (suppressEvents) break;
                 clearAwaiting();
                 markStreaming();
                 // First token of a new turn — reset counter
@@ -295,6 +306,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'reasoning': {
+                if (suppressEvents) break;
                 clearAwaiting();
                 // First reasoning chunk of a new turn — reset counter
                 if (!currentAssistantId) {
@@ -309,6 +321,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 break;
             }
             case 'tool_call': {
+                if (suppressEvents) break;
                 clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
@@ -518,15 +531,19 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
+                    // Executor is actively running — no longer awaiting LLM
+                    awaitingResponse = false;
                 } else if (data.state === 'cancelled') {
                     // Response was cancelled by new user message — clear streaming state.
                     closeCurrentAssistant();
                     activeToolCalls.clear();
                     entries = entries.filter(e => !e.isStreaming);
                     markNotStreaming();
+                    awaitingResponse = false;
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
                     // Executor finished — clear streaming state
                     markNotStreaming();
+                    awaitingResponse = false;
                 }
                 break;
             }
@@ -731,6 +748,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (m.role === 'tool_call' && m.tool_calls) {
                     const tc = JSON.parse(m.tool_calls);
                     const result = m.tool_result ? JSON.parse(m.tool_result) : null;
+                    // Skip incomplete tool calls (no result) — left over from a stopped task
+                    if (!result) return null;
                     return {
                         ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
                         toolCalls: [{
@@ -777,6 +796,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             const dbIds = new Set(messages.map(m => m.id));
             const existingNonDb = entries.filter(e => !dbIds.has(e.id));
             entries = [...mergedDbEntries, ...existingNonDb];
+            // Remove entries with pending tool calls — these are incomplete tool calls
+            // from a stopped task, replayed from the WebSocket buffer.
+            // DB entries always have results (filtered above); only buffer entries have pending.
+            entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
             // Restore context usage from the last assistant message.
             // Use total context (prompt + predicted) to reflect full window consumed.
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
@@ -1188,7 +1211,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     async function handleStop() {
         markNotStreaming();
         awaitingResponse = false;
+        // Save the streaming assistant ID before closeCurrentAssistant() clears it
+        const streamingId = currentAssistantId;
         closeCurrentAssistant();
+        // Remove the streaming assistant entry (incomplete response) and entries with
+        // pending tool calls so they don't leak through loadHistory's merge.
+        // loadHistory preserves non-DB entries, and streaming entries have random
+        // genId() IDs that aren't in the DB.
+        entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
+        // Clear active tool calls (immediate UI update)
+        activeToolCalls.clear();
         try {
             await stopTask(projectId, taskId);
         } catch (e) {
@@ -1467,7 +1499,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             }
         });
 
-        // 2. Subscribe to this task directly (triggers buffer replay from server).
+        // 2. Clear stale streaming state for non-running tasks.
+        // The global streamingTaskIds store may have a leftover entry from a previous
+        // visit if the user navigated away while the task was streaming.
+        if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
+            markNotStreaming();
+        }
+
+        // 3. Subscribe to this task directly (triggers buffer replay from server).
         // Handler is already set up above, so buffer events won't be missed.
         // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
         const stream = getAppStreamRef();
@@ -1475,15 +1514,24 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             stream.subscribeTask(projectId, taskId);
         }
 
-        // 3. If task is actively streaming, pause for buffer replay to arrive.
+        // 4. If task is actively streaming, pause for buffer replay to arrive.
         // Buffer events travel: server WS → onTaskEvent → taskEvent.set → handleEvent.
         // For idle/completed tasks, no buffer exists so no delay needed.
         if (taskStatus === 'in_progress' || taskStatus === 'review') {
             await new Promise(r => setTimeout(r, 200));
         }
 
-        // 4. Load history from DB (merges with buffer entries via ID-based dedup).
+        // 5. After buffer replay, clear stale streaming state again for non-running tasks.
+        // Buffer events may have re-added the task via a 'running' event.
+        if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
+            markNotStreaming();
+        }
+
+        // 6. Load history from DB (merges with buffer entries via ID-based dedup).
         await loadHistory();
+
+        // 7. Allow live events — buffer replay is done, DB state is loaded.
+        suppressEvents = false;
 
         // Override model selection with task-specific values if set
         try {
@@ -1506,7 +1554,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         scroll();
         // If task was started externally (e.g., from board) and is running with no
         // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
-        if (taskStatus === 'in_progress' || taskStatus === 'review') {
+        // Only for in_progress — review tasks have no active executor.
+        if (taskStatus === 'in_progress') {
             const lastEntry = entries[entries.length - 1];
             if (lastEntry?.role === 'user') {
                 awaitingResponse = true;
@@ -1739,21 +1788,32 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                         </button>
                     </div>
                 {/if}
-                <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move task to Done'}>
-                    {#if queueStatus === 'queued'}
-                        <span class="spinner-inline"></span> In queue...
-                    {:else if queueStatus === 'processing' || isCommitting}
-                        <span class="spinner-inline"></span> {hasChanges ? 'Committing...' : 'Moving...'}
-                    {:else}
-                        {#if hasChanges}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            Commit and move to Done
+                {#if showResumeButton}
+                    <button class="btn-commit-done" onclick={handleStartTask} disabled={isStarting || disabled} title="Resume the task from the last user message">
+                        {#if isStarting}
+                            <span class="spinner-inline"></span> Resuming...
                         {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            Move to Done
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
+                            Resume
                         {/if}
-                    {/if}
-                </button>
+                    </button>
+                {:else}
+                    <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move to Done'}>
+                        {#if queueStatus === 'queued'}
+                            <span class="spinner-inline"></span> In queue...
+                        {:else if queueStatus === 'processing' || isCommitting}
+                            <span class="spinner-inline"></span> {hasChanges ? 'Committing...' : 'Moving...'}
+                        {:else}
+                            {#if hasChanges}
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                Commit and move to Done
+                            {:else}
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                Move to Done
+                            {/if}
+                        {/if}
+                    </button>
+                {/if}
             </div>
         {/if}
         {#if showRestartButton}

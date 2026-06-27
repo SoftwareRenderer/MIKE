@@ -88,6 +88,12 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && isLoading) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleStop();
+            return;
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (canSend) {
