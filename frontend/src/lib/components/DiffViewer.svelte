@@ -598,8 +598,7 @@
         z-index: 10;
     }
     .diff-file-header:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
+        filter: brightness(1.2);
     }
 
     .diff-chevron {
