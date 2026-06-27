@@ -81,7 +81,7 @@
     }
 
     .symbol-label {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -89,7 +89,7 @@
     }
 
     .symbol-count {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 1px 5px;
@@ -112,7 +112,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         text-align: left;
         cursor: pointer;
     }
@@ -125,7 +125,7 @@
         flex-shrink: 0;
         width: 14px;
         text-align: center;
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         font-weight: 700;
         font-family: var(--font-mono);
         line-height: 1;
@@ -142,7 +142,7 @@
 
     .symbol-line {
         flex-shrink: 0;
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.5;
         font-family: var(--font-mono);

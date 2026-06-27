@@ -167,7 +167,7 @@
     }
 
     .git-graph-label {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -187,7 +187,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         cursor: pointer;
         border: 1px solid transparent;
@@ -329,13 +329,13 @@
     }
 
     .git-commit-hash {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         color: var(--color-text-tertiary);
     }
 
     .git-commit-date {
-        font-size: 0.625rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.7;
     }

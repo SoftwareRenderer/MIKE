@@ -66,20 +66,23 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
      * @param clearThread Also remove the `thread` param (use when leaving task detail).
      * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
      */
-    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null }, clearThread = false, push = false) {
+    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null; file?: string | null }, clearThread = false, push = false) {
         const current = new URLSearchParams(location.search);
         // project/task: explicitly provided or cleared; view: preserve if omitted
         const project = params.project;
         const task = params.task;
         const view = params.view !== undefined ? params.view : current.get('view');
+        const file = params.file !== undefined ? params.file : current.get('file');
         const thread = clearThread ? null : current.get('thread');
-        // Build query in canonical order: project, task, view, thread
-        const next = new URLSearchParams();
-        if (project) next.set('project', project);
-        if (task) next.set('task', task);
-        if (view) next.set('view', view);
-        if (thread) next.set('thread', thread);
-        const newUrl = location.pathname + (next.toString() ? '?' + next.toString() : '');
+        // Build query in canonical order: project, task, view, file, thread
+        // Use manual encoding to keep / unencoded in file paths
+        const parts: string[] = [];
+        if (project) parts.push('project=' + encodeURIComponent(project));
+        if (task) parts.push('task=' + encodeURIComponent(task));
+        if (view) parts.push('view=' + encodeURIComponent(view));
+        if (file) parts.push('file=' + file); // keep / unencoded
+        if (thread) parts.push('thread=' + encodeURIComponent(thread));
+        const newUrl = location.pathname + (parts.length ? '?' + parts.join('&') : '');
         if (location.pathname + location.search !== newUrl) {
             if (push) {
                 history.pushState(null, '', newUrl);
@@ -110,6 +113,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
+    let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let selectedTaskVal: Task | null = $state(null);
     let creatingChildOfVal: string | null = $state(null);
     let mobileMenuOpen = $state(false);
@@ -178,6 +182,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         const params = new URLSearchParams(location.search);
         const projectId = params.get('project');
         const taskId = params.get('task');
+        urlFileId = params.get('file') || '';
 
         // If URL has no project param, go back to project list
         if (!projectId && currentProject) {
@@ -787,9 +792,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
+                        initialFile={urlFileId || ''}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null }, false, true); fsEventQueue = []; }}
+                        onUpdateFile={(path) => updateUrl({ project: currentProject?.id, view: 'branch', file: path })}
+                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {

@@ -3,11 +3,13 @@
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
-    let { projectPath, unsavedFiles, pendingFsEvent, onFileSelected }: {
+    let { projectPath, initialPath, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
         projectPath: string;
+        initialPath?: string;
         unsavedFiles: string[];
         pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
         onFileSelected: (path: string) => void;
+        onPathChange: (path: string) => void;
     } = $props();
 
     // New file creation
@@ -46,7 +48,7 @@
         }
     }
 
-    let currentPath = $state(projectPath);
+    let currentPath = $state(initialPath || projectPath);
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
     let loading = $state(true);
     let error = $state('');
@@ -63,6 +65,7 @@
         loading = true;
         error = '';
         currentPath = path;
+        onPathChange(path);
         try {
             const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1`);
             if (!res.ok) {
@@ -131,7 +134,7 @@
     });
 
     $effect(() => {
-        loadDir(projectPath);
+        loadDir(initialPath || projectPath);
     });
 </script>
 
@@ -174,7 +177,7 @@
                 type="text"
                 class="file-browser-path-input"
                 value={currentPath}
-                oninput={(e) => currentPath = e.target.value}
+                oninput={(e) => { currentPath = e.target.value; onPathChange(e.target.value); }}
                 onkeydown={(e) => e.key === 'Enter' && handlePathInput()}
                 onblur={handlePathInput}
                 title={currentPath}
@@ -229,7 +232,7 @@
     }
 
     .file-browser-label {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -262,7 +265,7 @@
     .new-file-input {
         width: 120px;
         padding: 2px 6px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
@@ -295,7 +298,7 @@
     .file-browser-path-input {
         width: 100%;
         padding: 2px 4px;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-family: var(--font-mono);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);

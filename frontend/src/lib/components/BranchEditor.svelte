@@ -301,16 +301,12 @@
     });
 
     onMount(() => {
-        if (editorEl) {
-            editorEl.addEventListener('jump-to-line', handleJumpToLine);
-        }
+        window.addEventListener('jump-to-line', handleJumpToLine);
     });
 
     onDestroy(() => {
         view?.destroy();
-        if (editorEl) {
-            editorEl.removeEventListener('jump-to-line', handleJumpToLine);
-        }
+        window.removeEventListener('jump-to-line', handleJumpToLine);
     });
 </script>
 
@@ -412,7 +408,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
     }
 
     .editor-dirty {

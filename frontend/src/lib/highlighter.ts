@@ -1,5 +1,5 @@
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
-import type { Language } from '@codemirror/language';
+import { syntaxTree, Language } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
 import { go } from '@codemirror/lang-go';
@@ -211,65 +211,85 @@ export function highlightLines(lines: string[], path: string): string[] {
 export function getLanguageTreeFromView(view: any): Array<{ name: string; kind: string; line: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
     try {
-        const tree = view.state.tree;
-        if (!tree) return symbols;
-
+        const tree = syntaxTree(view.state);
         const doc = view.state.doc;
 
-        // Tags that represent symbol definitions
-        const { tags } = require('@lezer/highlight');
-        const symbolTags = [
-            tags.function(tags.variableName),
-            tags.className,
-            tags.definition(tags.variableName),
-            tags.variableName,
-            tags.propertyName,
-            tags.tagName,
-        ];
+        // Map from declaration node types to symbol kinds
+        const kindMap: Record<string, string> = {
+            // C/C++
+            'FunctionDefinition': 'function',
+            'FunctionDeclarator': 'function',
+            'StructSpecifier': 'class',
+            'TypeDefinition': 'class',
+            'Declaration': 'variable',
+            'FieldDeclaration': 'property',
+            'PreprocDirective': 'constant',
+            'ParameterDeclaration': 'variable',
+            // JavaScript/TypeScript
+            'FunctionDeclaration': 'function',
+            'MethodDeclaration': 'function',
+            'ClassDeclaration': 'class',
+            'VariableDeclaration': 'variable',
+            'VariableDefinition': 'variable',
+            'PropertyDefinition': 'property',
+            'PropertyName': 'property',
+        };
 
-        // Walk the top-level nodes of the syntax tree
+        // Track parent stack as we iterate
+        const parentStack: string[] = [];
+
         tree.iterate({
-            minWidth: 1,
             enter(node) {
-                const from = node.from;
-                const to = node.to;
-                const line = doc.lineAt(from).number;
+                const name = node.type.name;
 
-                // Only collect top-level or near-top-level nodes
-                const depth = node.depth;
-                if (depth > 3) return; // skip deeply nested nodes
+                // Check if this is an identifier with a symbol-kind parent
+                if (name === 'Identifier' || name === 'TypeIdentifier' || name === 'FieldIdentifier' || name === 'VariableName' || name === 'PropertyName' || name === 'VariableDefinition' || name === 'PropertyDefinition') {
+                    const text = doc.sliceString(node.from, node.to).trim();
+                    if (!text || text.length > 60) return;
+                    // Skip keywords
+                    if (/^(if|for|while|return|static|const|struct|typedef|sizeof|void|int|char|bool|true|false|else|break|continue|case|default|switch|do|goto|enum|union|volatile|register|extern|auto|signed|unsigned|short|long|double|float|include|define|ifdef|ifndef|endif|undef|let|var|class|function|new|this|super|import|export|from|extends|implements|interface|type|async|await|yield|try|catch|finally|throw|delete|typeof|instanceof|in|of|with|debugger|null|undefined|constructor|get|set|then|catch|finally|finally|console|log|error|warn|info)$/.test(text)) return;
 
-                // Get the text content
-                const text = doc.sliceString(from, to).trim();
-                if (!text || text.length > 60) return; // skip empty or very long identifiers
-
-                // Check if this node matches a symbol tag
-                for (const tag of symbolTags) {
-                    if (node.type.isTagged && node.type.isTagged(tag)) {
-                        // Determine kind from the tag
-                        let kind = 'variable';
-                        if (tag === tags.function(tags.variableName)) kind = 'function';
-                        else if (tag === tags.className) kind = 'class';
-                        else if (tag === tags.definition(tags.variableName)) kind = 'constant';
-                        else if (tag === tags.propertyName) kind = 'property';
-
-                        // Avoid duplicates
-                        if (!symbols.some(s => s.name === text && s.line === line)) {
-                            symbols.push({
-                                name: text,
-                                kind,
-                                line,
-                                indent: depth - 1,
-                            });
+                    // Find the nearest declaration parent
+                    // Only keep functions and variables
+                    let kind: string | null = null;
+                    const priority: Record<string, number> = { 'function': 5, 'variable': 2 };
+                    let bestPriority = 0;
+                    for (let i = parentStack.length - 1; i >= 0; i--) {
+                        const pKind = kindMap[parentStack[i]];
+                        if (pKind && priority[pKind] && priority[pKind] > bestPriority) {
+                            kind = pKind;
+                            bestPriority = priority[pKind];
                         }
-                        break;
+                    }
+                    if (!kind) return;
+
+                    // Only keep top-level (global) symbols
+                    // The declaration must be at index 1 (direct child of Program/Script)
+                    // and the identifier must be within 3 levels of it
+                    if (!kindMap[parentStack[1]]) return;
+                    const identDepth = parentStack.length;
+                    if ((identDepth - 1) > 3) return;
+
+                    const line = doc.lineAt(node.from).number;
+                    if (!symbols.some(s => s.name === text && s.line === line)) {
+                        symbols.push({ name: text, kind, line, indent: 0 });
                     }
                 }
+
+                parentStack.push(name);
+            },
+            leave(node) {
+                parentStack.pop();
             },
         });
 
-        // Sort by line number
-        symbols.sort((a, b) => a.line - b.line);
+        // Sort: variables first, then functions, each group alphabetically
+        symbols.sort((a, b) => {
+            const kindOrder = a.kind === 'variable' ? 0 : 1;
+            const bKindOrder = b.kind === 'variable' ? 0 : 1;
+            if (kindOrder !== bKindOrder) return kindOrder - bKindOrder;
+            return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        });
 
         // Deduplicate by name (keep first occurrence)
         const seen = new Set<string>();

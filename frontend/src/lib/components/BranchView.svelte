@@ -8,13 +8,15 @@
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
 
-    let { projectId, projectPath, currentBranch, onClose, fsEventQueue, onOpenTerminal }: {
+    let { projectId, projectPath, currentBranch, initialFile, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
         projectPath: string;
         currentBranch: string;
+        initialFile: string;
         onClose: () => void;
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
         onOpenTerminal: () => void;
+        onUpdateFile: (path: string | null) => void;
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
@@ -25,13 +27,14 @@
     let checkoutLoading = $state(false);
 
     // Selected file state
-    let selectedFilePath = $state('');
+    let selectedFilePath = $state(initialFile || '');
     let unsavedFiles = $state<string[]>([]);
     let editorFocused = $state(false);
 
     // Mobile layout
     let isMobile = $state(false);
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
+    let currentFolderPath = $state(initialFile ? initialFile.substring(0, initialFile.lastIndexOf('/')) : projectPath);
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
@@ -91,6 +94,7 @@
 
     function handleFileSelected(path: string) {
         selectedFilePath = path;
+        onUpdateFile(path);
         if (isMobile) activeTab = 'editor';
     }
 
@@ -176,6 +180,11 @@
         }
     }
 
+    function getFolderName(path: string): string {
+        const parts = path.split('/');
+        return parts[parts.length - 1] || '/';
+    }
+
     onMount(() => {
         loadCommits();
         loadBranches();
@@ -224,7 +233,7 @@
                 title="File browser"
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h4l2 2v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2h4l2 2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                Files
+                <span class="tab-label">{getFolderName(currentFolderPath)}</span>
             </button>
             <button
                 class="tab-btn {activeTab === 'editor' ? 'active' : ''}"
@@ -254,9 +263,11 @@
                 <div class="branch-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
                     <BranchFileBrowser
                         projectPath={projectPath}
+                        initialPath={currentFolderPath}
                         unsavedFiles={unsavedFiles}
                         pendingFsEvent={pendingFsEvent}
                         onFileSelected={handleFileSelected}
+                        onPathChange={(p) => currentFolderPath = p}
                     />
                 </div>
 
@@ -306,7 +317,7 @@
                 onFocused={handleEditorFocused}
                 onSymbolsUpdate={handleSymbolsUpdate}
                 onHasChanges={handleHasChanges}
-                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); if (isMobile) activeTab = 'files'; }}
+                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; }}
             />
         </div>
 
@@ -325,10 +336,7 @@
             <BranchSymbols
                 symbols={symbols}
                 onSymbolClick={(line: number) => {
-                    const editorEl = document.querySelector('.branch-editor');
-                    if (editorEl) {
-                        editorEl.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
-                    }
+                    window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
                 }}
             />
         </div>
