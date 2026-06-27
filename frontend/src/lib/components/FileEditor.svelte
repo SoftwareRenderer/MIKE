@@ -336,9 +336,10 @@
     <!-- Header -->
     <div class="editor-header">
         <div class="header-left">
-            <button class="btn-back" onclick={requestClose} aria-label="Close editor" title="Close editor">
+            <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close editor" title="Close editor">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
+                    <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
             </button>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -346,9 +347,6 @@
                 <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
             </svg>
             <span class="file-path" title={filePath}>{displayPath}</span>
-            {#if hasChanges}
-                <span class="unsaved-dot" title="Unsaved changes">●</span>
-            {/if}
         </div>
         <button
             class="btn-save"
@@ -460,13 +458,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .unsaved-dot {
-        align-self: center;
-        color: var(--color-status-yellow, #f0c000);
-        font-size: 0.875rem;
-        line-height: 0;
-        flex-shrink: 0;
-    }
     .btn-back {
         background: none;
         border: none;
@@ -478,9 +469,35 @@
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
+        position: relative;
     }
     .btn-back:hover {
         background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    /* Unsaved indicator — yellow circle, X appears on hover */
+    .btn-back .unsaved-circle {
+        display: none;
+    }
+    .btn-back .close-x {
+        display: block;
+    }
+    .btn-back.unsaved .unsaved-circle {
+        display: block;
+    }
+    .btn-back.unsaved .close-x {
+        display: none;
+    }
+    .btn-back.unsaved {
+        color: var(--color-status-yellow, #f0c000);
+    }
+    .btn-back.unsaved:hover .unsaved-circle {
+        display: none;
+    }
+    .btn-back.unsaved:hover .close-x {
+        display: block;
+    }
+    .btn-back.unsaved:hover {
         color: var(--color-text-primary);
     }
 
