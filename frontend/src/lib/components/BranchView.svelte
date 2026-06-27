@@ -257,6 +257,7 @@
                 onFocused={handleEditorFocused}
                 onSymbolsUpdate={handleSymbolsUpdate}
                 onHasChanges={handleHasChanges}
+                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); }}
             />
         </div>
 

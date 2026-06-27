@@ -44,7 +44,7 @@
         '&.cm-focused': { outline: 'none' },
         '.cm-scroller': {
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.75rem',
+            fontSize: '14px',
             lineHeight: '1.5',
             tabSize: 4,
         },
@@ -64,11 +64,12 @@
         '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     });
 
-    let { filePath, onFocused, onSymbolsUpdate, onHasChanges }: {
+    let { filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
         filePath: string;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
         onHasChanges: (hasChanges: boolean) => void;
+        onClose: () => void;
     } = $props();
 
     let content = $state('');
@@ -81,11 +82,28 @@
 
     let hasChanges = $derived(content !== originalContent);
     let originalContent = $state('');
+    let showConfirm = $state(false);
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
         onHasChanges(hasChanges);
     });
+
+    function requestClose() {
+        if (hasChanges) {
+            showConfirm = true;
+        } else {
+            onClose();
+        }
+    }
+
+    function confirmClose(discard: boolean) {
+        showConfirm = false;
+        if (discard) {
+            clearEditorDraft(filePath);
+            onClose();
+        }
+    }
 
     let editorEl: HTMLDivElement | null = null;
     let view: EditorView | null = null;
@@ -299,14 +317,13 @@
         <!-- File tab header -->
         <div class="editor-header">
             <div class="editor-tab">
+                <button class="btn-close-file" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close file" title="Close file">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
+                        <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
                 <span class="editor-filename" title={filePath}>{fileName}</span>
-                {#if hasChanges}
-                    <span class="editor-dirty" title="Unsaved changes">
-                        <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-                            <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
-                        </svg>
-                    </span>
-                {/if}
             </div>
             <div class="editor-actions">
                 <button
@@ -343,6 +360,20 @@
             <div class="editor-wrapper" bind:this={editorEl}></div>
         {/if}
     </div>
+
+    <!-- Confirm close dialog -->
+    {#if showConfirm}
+        <div class="confirm-overlay" onclick={() => showConfirm = false}>
+            <div class="confirm-dialog" onclick={(e) => e.stopPropagation()}>
+                <h3>Unsaved changes</h3>
+                <p id="confirm-desc">You have unsaved changes. Discard them?</p>
+                <div class="confirm-actions">
+                    <button class="btn-cancel" onclick={() => showConfirm = false}>Cancel</button>
+                    <button class="btn-discard" onclick={() => confirmClose(true)}>Discard</button>
+                </div>
+            </div>
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -389,6 +420,45 @@
         line-height: 1;
     }
 
+    .btn-close-file {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 2px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        position: relative;
+    }
+    .btn-close-file:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .btn-close-file .unsaved-circle {
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    .btn-close-file .close-x {
+        opacity: 1;
+        transition: opacity 0.15s;
+    }
+    .btn-close-file.unsaved .unsaved-circle {
+        opacity: 1;
+        color: var(--color-status-yellow, #f0c000);
+    }
+    .btn-close-file.unsaved .close-x {
+        opacity: 0;
+    }
+    .btn-close-file.unsaved:hover .unsaved-circle {
+        opacity: 0;
+    }
+    .btn-close-file.unsaved:hover .close-x {
+        opacity: 1;
+    }
+
     .editor-actions {
         display: flex;
         gap: 4px;
@@ -403,10 +473,12 @@
         cursor: pointer;
         border: none;
     }
-    .editor-save-btn:hover:not(:disabled) {
+    .editor-save-btn:not(:disabled) {
         background: var(--color-accent);
         color: white;
-        opacity: 1;
+    }
+    .editor-save-btn:hover:not(:disabled) {
+        opacity: 0.9;
     }
     .editor-save-btn:disabled {
         opacity: 0.4;
@@ -446,5 +518,62 @@
     .editor-wrapper {
         flex: 1;
         overflow: hidden;
+    }
+
+    .confirm-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+    }
+    .confirm-dialog {
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 20px;
+        min-width: 300px;
+        max-width: 400px;
+    }
+    .confirm-dialog h3 {
+        margin: 0 0 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+    }
+    .confirm-dialog p {
+        margin: 0 0 16px;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+    }
+    .confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .btn-cancel {
+        padding: 4px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        border: none;
+        cursor: pointer;
+        font-size: 0.75rem;
+    }
+    .btn-cancel:hover {
+        background: var(--color-surface-2);
+    }
+    .btn-discard {
+        padding: 4px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--color-status-red);
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-size: 0.75rem;
+    }
+    .btn-discard:hover {
+        opacity: 0.9;
     }
 </style>

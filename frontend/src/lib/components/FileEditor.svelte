@@ -520,7 +520,8 @@
         background: var(--color-accent-hover);
     }
     .btn-save:disabled {
-        opacity: 0.4;
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
         cursor: not-allowed;
     }
     .save-spinner {
