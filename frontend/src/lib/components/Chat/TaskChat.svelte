@@ -468,6 +468,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (code === 'ws_error') {
                     break;
                 }
+                // Skip "Task stopped" — the status badge already reflects the change
+                if (code === 'stopped') {
+                    break;
+                }
                 const message = data.message || 'An error occurred';
                 const entry: ChatEntry = {
                     id: genId(),
@@ -709,6 +713,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
                     const code = match ? match[1] : 'error';
                     const message = match ? match[2] : content;
+                    // Skip "Task stopped" errors — the status badge reflects the change
+                    if (code === 'stopped') return null;
                     return {
                         ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
                         error: { code, message },
@@ -754,8 +760,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     } : undefined,
                 };
             });
+            // Filter out null entries (e.g., skipped "stopped" errors)
+            const validDbEntries = dbEntries.filter((e: ChatEntry | null): e is ChatEntry => e !== null);
             // Merge toolCalls entries into the preceding assistant entry
-            const mergedDbEntries = mergeToolCallsIntoAssistant(dbEntries);
+            const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries);
             // Merge with existing entries (e.g., from buffer replay).
             // DB entries have backend UUIDs; buffer entries have random genId() IDs.
             // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
