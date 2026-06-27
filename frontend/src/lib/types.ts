@@ -165,6 +165,7 @@ export interface GitCommit {
     subject: string;
     author: string;
     date: string;
+    parents?: string[];
 }
 
 /** A commit from a task's worktree history. */

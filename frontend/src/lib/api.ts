@@ -1090,9 +1090,37 @@ export async function getGitLog(projectId: string, branch?: string): Promise<Git
     return res.json();
 }
 
+/** Fetch git log with full commit details (hash, parents, date). */
+export async function getGitLogFull(projectId: string, branch?: string): Promise<GitCommit[]> {
+    const params = new URLSearchParams({ full: '1' });
+    if (branch) params.set('branch', branch);
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
+    return res.json();
+}
+
 export async function getGitStatus(projectId: string): Promise<GitStatus> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
+    return res.json();
+}
+
+/** List all branches for a project. */
+export async function getGitBranches(projectId: string): Promise<string[]> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch branches');
+    return res.json();
+}
+
+/** Checkout a branch in a project. */
+export async function checkoutBranch(projectId: string, branch: string): Promise<{ branch: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ branch }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to checkout branch');
     return res.json();
 }
 

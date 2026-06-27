@@ -203,4 +203,89 @@ export function highlightLines(lines: string[], path: string): string[] {
     }
 }
 
+/**
+ * Extract global symbols (functions, classes, variables) from a CodeMirror EditorView.
+ * Walks the language syntax tree and collects top-level definitions.
+ * Returns an array of { name, kind, line, indent } sorted by line number.
+ */
+export function getLanguageTreeFromView(view: any): Array<{ name: string; kind: string; line: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+    try {
+        const tree = view.state.tree;
+        if (!tree) return symbols;
+
+        const doc = view.state.doc;
+
+        // Tags that represent symbol definitions
+        const { tags } = require('@lezer/highlight');
+        const symbolTags = [
+            tags.function(tags.variableName),
+            tags.className,
+            tags.definition(tags.variableName),
+            tags.variableName,
+            tags.propertyName,
+            tags.tagName,
+        ];
+
+        // Walk the top-level nodes of the syntax tree
+        tree.iterate({
+            minWidth: 1,
+            enter(node) {
+                const from = node.from;
+                const to = node.to;
+                const line = doc.lineAt(from).number;
+
+                // Only collect top-level or near-top-level nodes
+                const depth = node.depth;
+                if (depth > 3) return; // skip deeply nested nodes
+
+                // Get the text content
+                const text = doc.sliceString(from, to).trim();
+                if (!text || text.length > 60) return; // skip empty or very long identifiers
+
+                // Check if this node matches a symbol tag
+                for (const tag of symbolTags) {
+                    if (node.type.isTagged && node.type.isTagged(tag)) {
+                        // Determine kind from the tag
+                        let kind = 'variable';
+                        if (tag === tags.function(tags.variableName)) kind = 'function';
+                        else if (tag === tags.className) kind = 'class';
+                        else if (tag === tags.definition(tags.variableName)) kind = 'constant';
+                        else if (tag === tags.propertyName) kind = 'property';
+
+                        // Avoid duplicates
+                        if (!symbols.some(s => s.name === text && s.line === line)) {
+                            symbols.push({
+                                name: text,
+                                kind,
+                                line,
+                                indent: depth - 1,
+                            });
+                        }
+                        break;
+                    }
+                }
+            },
+        });
+
+        // Sort by line number
+        symbols.sort((a, b) => a.line - b.line);
+
+        // Deduplicate by name (keep first occurrence)
+        const seen = new Set<string>();
+        const unique: typeof symbols = [];
+        for (const s of symbols) {
+            if (!seen.has(s.name)) {
+                seen.add(s.name);
+                unique.push(s);
+            }
+        }
+
+        // Limit to reasonable number
+        return unique.slice(0, 200);
+    } catch {
+        return symbols;
+    }
+}
+
 

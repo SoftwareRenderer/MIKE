@@ -8,6 +8,7 @@
 //   localStorage:
 //     kanban-collapsed-tasks   — Set<string> of collapsed parent task IDs
 //     kanban:draft:<taskId>    — Draft chat text per task
+//     kanban:editor-draft:<path> — Draft file content per file path (branch editor)
 //     kanban-offline-queue     — Queued write actions (managed by api.ts)
 //     kanban:terminal:height   — Terminal panel resize height
 //     kanban:detail:boardRatio — CardDetail board/chat split ratio
@@ -17,8 +18,9 @@
 //     attachments store        — Draft image attachments per task (key: taskId)
 //
 // Garbage collection:
-//   Call `gc(allTaskIds)` after the board is loaded. It removes all stale
+//   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
 //   entries for task IDs that no longer exist (deleted tasks, etc.).
+//   If `allProjectPaths` is provided, also cleans stale branch editor drafts.
 // =============================================================================
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -26,6 +28,7 @@
 const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
 const QUEUE_KEY = 'kanban-offline-queue';
 const DRAFT_KEY_PREFIX = 'kanban:draft:';
+const EDITOR_DRAFT_KEY_PREFIX = 'kanban:editor-draft:';
 
 const DB_NAME = 'kanban-drafts';
 const DB_VERSION = 1;
@@ -64,6 +67,54 @@ export function clearDraftText(taskId: string): void {
     try {
         if (typeof localStorage === 'undefined') return;
         localStorage.removeItem(DRAFT_KEY_PREFIX + taskId);
+    } catch { /* ignore */ }
+}
+
+// ─── Branch editor drafts (localStorage) ────────────────────────────────────
+
+/** Get saved draft content for a file. Returns `null` if no draft exists. */
+export function getEditorDraft(path: string): string | null {
+    try {
+        if (typeof localStorage === 'undefined') return null;
+        return localStorage.getItem(EDITOR_DRAFT_KEY_PREFIX + path);
+    } catch {
+        return null;
+    }
+}
+
+/** Save draft content for a file. */
+export function setEditorDraft(path: string, text: string): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem(EDITOR_DRAFT_KEY_PREFIX + path, text);
+    } catch {
+        // localStorage full or unavailable — silently ignore
+    }
+}
+
+/** Remove draft content for a file. */
+export function clearEditorDraft(path: string): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.removeItem(EDITOR_DRAFT_KEY_PREFIX + path);
+    } catch { /* ignore */ }
+}
+
+/** Remove all stale editor draft entries for paths that no longer exist. */
+export function gcEditorDrafts(allPaths: Set<string>): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const prefix = EDITOR_DRAFT_KEY_PREFIX;
+        const prefixLen = prefix.length;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(prefix)) {
+                const path = key.slice(prefixLen);
+                if (!allPaths.has(path)) {
+                    localStorage.removeItem(key);
+                }
+            }
+        }
     } catch { /* ignore */ }
 }
 
@@ -221,8 +272,9 @@ export async function clearDraftAttachments(taskId: string): Promise<void> {
  * Call this after the board is loaded to clean up data for deleted tasks.
  *
  * @param allTaskIds  Set of currently existing task IDs
+ * @param allProjectPaths  Optional set of valid project paths; if provided, also cleans stale editor drafts
  */
-export async function gc(allTaskIds: Set<string>): Promise<void> {
+export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>): Promise<void> {
     // 1. Clean collapsed tasks
     cleanCollapsedTasks(allTaskIds);
 
@@ -234,6 +286,11 @@ export async function gc(allTaskIds: Set<string>): Promise<void> {
 
     // 4. Clean draft attachments (IndexedDB)
     await cleanDraftAttachments(allTaskIds);
+
+    // 5. Clean editor drafts (if project paths provided)
+    if (allProjectPaths) {
+        cleanEditorDraftsByProject(allProjectPaths);
+    }
 }
 
 /** Remove collapsed task entries for deleted tasks. */
@@ -299,5 +356,26 @@ async function cleanDraftAttachments(allTaskIds: Set<string>): Promise<void> {
             tx.oncomplete = () => resolve();
             tx.onerror = () => resolve(); // best-effort
         });
+    } catch { /* ignore */ }
+}
+
+/** Remove editor drafts for files in projects that no longer exist. */
+function cleanEditorDraftsByProject(allProjectPaths: Set<string>): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const prefix = EDITOR_DRAFT_KEY_PREFIX;
+        const prefixLen = prefix.length;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(prefix)) {
+                const path = key.slice(prefixLen);
+                // Check if the file path belongs to any known project
+                const belongsToProject = allProjectPaths.has(path) ||
+                    [...allProjectPaths].some(p => path.startsWith(p + '/'));
+                if (!belongsToProject) {
+                    localStorage.removeItem(key);
+                }
+            }
+        }
     } catch { /* ignore */ }
 }

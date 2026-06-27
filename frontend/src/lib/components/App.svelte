@@ -20,6 +20,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
+    import BranchView from './BranchView.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -58,18 +59,27 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     /**
      * Update the URL to reflect the current navigation state.
-     * Sets project/task as provided, leaves other params (e.g., `thread`) untouched.
+     * Params are always ordered: project, task, view, thread.
+     * - project/task: must be explicitly provided; omitted = cleared
+     * - view: preserved if omitted; null = cleared
+     * - thread: preserved unless clearThread=true
      * @param clearThread Also remove the `thread` param (use when leaving task detail).
      * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
      */
-    function updateUrl(params: { project?: string | null; task?: string | null }, clearThread = false, push = false) {
-        const url = new URL(location.href);
-        url.searchParams.delete('project');
-        url.searchParams.delete('task');
-        if (clearThread) url.searchParams.delete('thread');
-        if (params.project) url.searchParams.set('project', params.project);
-        if (params.task) url.searchParams.set('task', params.task);
-        const newUrl = location.pathname + (url.search || '');
+    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null }, clearThread = false, push = false) {
+        const current = new URLSearchParams(location.search);
+        // project/task: explicitly provided or cleared; view: preserve if omitted
+        const project = params.project;
+        const task = params.task;
+        const view = params.view !== undefined ? params.view : current.get('view');
+        const thread = clearThread ? null : current.get('thread');
+        // Build query in canonical order: project, task, view, thread
+        const next = new URLSearchParams();
+        if (project) next.set('project', project);
+        if (task) next.set('task', task);
+        if (view) next.set('view', view);
+        if (thread) next.set('thread', thread);
+        const newUrl = location.pathname + (next.toString() ? '?' + next.toString() : '');
         if (location.pathname + location.search !== newUrl) {
             if (push) {
                 history.pushState(null, '', newUrl);
@@ -96,6 +106,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let showCardDetailVal = $state(false);
     let showSandboxConfigVal = $state(false);
     let showFileBrowserVal = $state(false);
+    let showBranchViewVal = $state(false);
     let addProjectError = $state('');
     let currentBranch = $state('');
     let selectedTaskVal: Task | null = $state(null);
@@ -302,6 +313,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     },
                     onBranch: (branch) => {
                         currentBranch = branch;
+                        // Restore branch view from URL when branch becomes available
+                        if (branch && !showBranchViewVal) {
+                            const params = new URLSearchParams(location.search);
+                            if (params.get('view') === 'branch') {
+                                showBranchViewVal = true;
+                            }
+                        }
                     },
                     onTaskUpdated: (updatedTask: Task) => {
                         const idx = tasks.findIndex(t => t.id === updatedTask.id);
@@ -694,7 +712,25 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         <img src={shieldOffIcon} width="14" height="14" alt="" />
                     {/if}
                 </button>
-                <span class="project-title">{getHomeRelativePath(currentProject.path)}{currentBranch ? ` (${currentBranch})` : ''}</span>
+                <span class="project-title">
+                    {getHomeRelativePath(currentProject.path)}
+                    {#if currentBranch}
+                        <button
+                            class="branch-badge"
+                            onclick={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}
+                            title={`Branch: ${currentBranch} (click to explore)`}
+                        >
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="6" cy="6" r="2.5"/>
+                                <circle cx="10" cy="10" r="2.5"/>
+                                <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
+                                <line x1="6" y1="3.5" x2="6" y2="2"/>
+                                <line x1="10" y1="12.5" x2="10" y2="14"/>
+                            </svg>
+                            <span>{currentBranch}</span>
+                        </button>
+                    {/if}
+                </span>
                 <div class="actions">
                     <button class="icon-btn" onclick={() => { loadTerminalPanel(); showTerminal.set(true); }} aria-label="Open terminal" title="Open terminal">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -719,7 +755,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             </header>
             {/if}
             <section class="board-container" aria-label="Kanban board">
-                {#if showCardDetailVal && selectedTaskVal}
+                {#if showBranchViewVal && currentProject}
+                    <BranchView
+                        projectId={currentProject.id}
+                        projectPath={currentProject.path}
+                        currentBranch={currentBranch}
+                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null }, false, true); }}
+                    />
+                {:else if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
@@ -731,9 +774,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         selectedTask.set(t);
                     }} onRefreshBoard={() => refreshBoard()} />
                 {:else}
-                    <Board 
-                        {tasks} 
+                    <Board
+                        {tasks}
                         projectId={currentProject.id}
+                        projectPath={currentProject.path}
                         onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
                         onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
                         onRefreshBoard={() => refreshBoard()}
@@ -1128,6 +1172,28 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        gap: 6px;
+    }
+    .branch-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--color-status-purple);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        font-family: var(--font-mono);
+        cursor: pointer;
+        border: 1px solid rgba(163, 113, 247, 0.3);
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+    .branch-badge:hover {
+        background: rgba(163, 113, 247, 0.25);
+        border-color: rgba(163, 113, 247, 0.5);
+        opacity: 1;
     }
     .actions {
         display: flex;

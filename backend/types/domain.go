@@ -164,11 +164,12 @@ type ReviewComment struct {
 
 // GitCommit represents a git commit in the log.
 type GitCommit struct {
-	Hash    string `json:"hash"`
-	Short   string `json:"short"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	Date    string `json:"date"`
+	Hash    string   `json:"hash"`
+	Short   string   `json:"short"`
+	Subject string   `json:"subject"`
+	Author  string   `json:"author"`
+	Date    string   `json:"date"`
+	Parents []string `json:"parents,omitempty"`
 }
 
 // GitBranch represents a git branch.

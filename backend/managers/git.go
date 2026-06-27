@@ -25,6 +25,7 @@ func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHan
 }
 
 // HandleLog returns commit log for a project.
+// With ?full=1 query param, returns extended fields: hash, author, date, parents.
 func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request, projectID string) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -35,6 +36,43 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request, projectID
 	if branch == "" {
 		branch = "HEAD"
 	}
+
+	full := r.URL.Query().Get("full") == "1"
+
+	if full {
+		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI|%P", branch)
+		out, err := c.CombinedOutput()
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+			return
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		var commits []types.GitCommit
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "|", 5)
+			if len(parts) < 4 {
+				continue
+			}
+			commit := types.GitCommit{
+				Hash:    parts[0],
+				Short:   parts[1],
+				Subject: parts[2],
+				Author:  "",
+				Date:    parts[3],
+			}
+			if len(parts) == 5 && parts[4] != "" {
+				commit.Parents = strings.Fields(parts[4])
+			}
+			commits = append(commits, commit)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(commits)
+		return
+	}
+
 	c := exec.Command("git", "-C", project.Path, "log", "--oneline", "--decorate", branch)
 	out, err := c.CombinedOutput()
 	if err != nil {

@@ -5,7 +5,7 @@
     import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
     import { gc } from '$lib/storage';
 
-    let { tasks, projectId, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
+    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
 
     // Build a lookup map for children of each task
     const childrenMap = $derived.by(() => {
@@ -66,7 +66,8 @@
             cleanupCollapsedTasks(allIds);
             expandedTasksStore.set(initExpandedTasks(parentTaskIds));
             // Garbage-collect stale localStorage/IndexedDB entries for deleted tasks
-            gc(allIds).catch(() => {});
+            const projectPaths = projectPath ? new Set([projectPath]) : undefined;
+            gc(allIds, projectPaths).catch(() => {});
         }
     });
 
