@@ -189,6 +189,31 @@ export function clearCollapsedTask(taskId: string): void {
     saveCollapsedTasks(collapsed);
 }
 
+// ─── Collapsed board sections (localStorage) ────────────────────────────────
+
+const COLLAPSED_SECTIONS_KEY = 'kanban-collapsed-sections';
+
+/** Load collapsed board section IDs from localStorage. */
+export function loadCollapsedSections(): Set<string> {
+    try {
+        if (typeof localStorage === 'undefined') return new Set();
+        const raw = localStorage.getItem(COLLAPSED_SECTIONS_KEY);
+        if (raw) {
+            const ids = JSON.parse(raw) as string[];
+            return new Set(ids);
+        }
+    } catch { /* ignore */ }
+    return new Set();
+}
+
+/** Save collapsed board section IDs to localStorage. */
+export function saveCollapsedSections(ids: Set<string>): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify([...ids]));
+    } catch { /* ignore */ }
+}
+
 // ─── Offline queue (localStorage) ────────────────────────────────────────────
 
 interface QueuedAction {

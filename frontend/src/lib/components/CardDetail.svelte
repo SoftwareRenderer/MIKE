@@ -8,6 +8,7 @@
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
+    import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -30,7 +31,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     ];
 
     // Collapsible sections
-    let collapsedSections: Set<string> = $state(new Set());
+    let collapsedSections: Set<string> = $state(loadCollapsedSections());
 
     function toggleSection(sectionId: string) {
         const next = new Set(collapsedSections);
@@ -40,6 +41,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             next.add(sectionId);
         }
         collapsedSections = next;
+        saveCollapsedSections(next);
     }
 
     // --- Drag-and-drop for board overview ---
