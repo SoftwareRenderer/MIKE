@@ -215,8 +215,54 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         return ids;
     })()));
 
+    // Precomputed per-entry metadata — avoids O(n²) lookups inside {#each}.
+    interface EntryMeta {
+        cpState: { isPending: boolean; commitLabel?: string; commitHash?: string } | null;
+        cpThread: Thread | null;
+        isLastUserMessage: boolean;
+    }
+    let entryMetas = $derived(((() => {
+        const metas: EntryMeta[] = new Array(entries.length);
+        const streaming = isLoading;
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            metas[i] = entry.role === 'user'
+                ? {
+                    cpState: getCheckpointEntryCheckpointState(i),
+                    cpThread: threads.length > 0 ? getCheckpointThreads(entry, i === 0) : null,
+                    isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
+                }
+                : { cpState: null, cpThread: null, isLastUserMessage: false };
+        }
+        // Force tracking of checkpointHashesVersion so meta rebuilds on checkpoint changes
+        void checkpointHashesVersion;
+        return metas;
+    })()));
+
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
+    }
+
+    // Stable callback handlers — prevents unnecessary ChatMessage re-renders.
+    function handleMsgDelete(entry: ChatEntry) {
+        const idx = entries.findIndex(e => e.id === entry.id);
+        if (idx === 0) return; // first message cannot be deleted
+        handleDeleteRequest(entry.id, entries.length - idx);
+    }
+    function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        handleEditFork(msgId, origContent, newContent, atts);
+    }
+    function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        handleEditSend(msgId, origContent, newContent, atts);
+    }
+    function handleMsgNavigateTask(targetTaskId: string) {
+        const task = $boardStore?.tasks.find(t => t.id === targetTaskId);
+        if (task) {
+            const url = new URL(location.href);
+            url.searchParams.set('task', targetTaskId);
+            history.pushState(null, '', url);
+            selectedTask.set(task);
+        }
     }
 
     // Watch for task config changes from the board store (e.g., inline edit)
@@ -1068,19 +1114,28 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         });
     }
 
-    function checkScroll() {
+    // rAF-throttled scroll handler — at most once per frame.
+    let scrollRafPending = false;
+    function onScroll() {
+        markUserInput();
+        if (scrollRafPending) return;
+        scrollRafPending = true;
+        requestAnimationFrame(doCheckScroll);
+    }
+    function doCheckScroll() {
+        scrollRafPending = false;
         if (!scrollEl) return;
         // Find the latest user message whose top has scrolled into/above the header zone.
-        const userMsgEls = scrollEl.querySelectorAll('.sticky-user-message');
+        const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
         let latestScrolled: HTMLElement | null = null;
+        const containerRect = scrollEl.getBoundingClientRect();
         for (const el of userMsgEls) {
             const firstLine = el.getAttribute('data-user-msg-first-line');
             if (!firstLine) continue;
             const rect = el.getBoundingClientRect();
-            const containerRect = scrollEl.getBoundingClientRect();
             const elTop = rect.top - containerRect.top;
             if (elTop <= 0) {
-                latestScrolled = el as HTMLElement;
+                latestScrolled = el;
             }
         }
         stickyUserMessage = latestScrolled?.getAttribute('data-user-msg-first-line') || '';
@@ -1660,7 +1715,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 <span class="chat-sticky-bubble">{stickyUserMessage}</span>
             </div>
         {/if}
-        <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages" tabindex="0">
+        <div class="chat-messages" bind:this={scrollEl} onscroll={onScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages" tabindex="0">
         {#if entries.length === 0}
             <div class="chat-empty">
                 <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
@@ -1671,20 +1726,18 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             </div>
         {:else}
             {#each entries as entry, entryIdx (entry.id)}
+                {@const meta = entryMetas[entryIdx]}
                 {#if entry.role === 'user'}
-                    {@const _hv = checkpointHashesVersion}
-                    {@const cpState = getCheckpointEntryCheckpointState(entryIdx)}
-                    {@const cpThread = threads.length > 0 ? getCheckpointThreads(entry, entryIdx === 0) : null}
-                    {#if cpThread || cpState}
+                    {#if meta.cpThread || meta.cpState}
                         <CheckpointDivider
                             timestamp={entry.createdAt}
                             threadId={entry.threadId || activeThreadId}
                             threads={threads}
-                            activeThreadId={cpThread?.id || ''}
+                            activeThreadId={meta.cpThread?.id || ''}
                             onSwitch={handleThreadSwitch}
-                            isPending={cpState?.isPending || false}
-                            commitLabel={cpState?.commitLabel || undefined}
-                            commitHash={cpState?.commitHash || cpThread?.checkpoint_commit_hash || undefined}
+                            isPending={meta.cpState?.isPending || false}
+                            commitLabel={meta.cpState?.commitLabel || undefined}
+                            commitHash={meta.cpState?.commitHash || meta.cpThread?.checkpoint_commit_hash || undefined}
                             onViewChanges={onViewChanges}
                         />
                     {/if}
@@ -1752,10 +1805,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     </div>
                 {:else if entry.role === 'user'}
                     <div class="sticky-user-message" data-user-msg-first-line={entry.content.split('\n')[0]}>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => handleMsgDelete(entry)} onFork={handleMsgFork} onSend={handleMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={handleMsgNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
                     </div>
                 {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => handleMsgDelete(entry)} onFork={handleMsgFork} onSend={handleMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={handleMsgNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
                 {/if}
             {/each}
         {/if}
@@ -2011,7 +2064,11 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
 
     /* Error entry styles */
-    .error-entry { padding: 6px 0; }
+    .error-entry {
+        padding: 6px 0;
+        content-visibility: auto;
+        contain-intrinsic-size: 1px 100px;
+    }
     .error-card {
         background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
         border: 1px solid color-mix(in srgb, var(--color-status-red) 30%, transparent);
@@ -2240,6 +2297,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
     .compression-entry {
         padding: 8px 0;
+        content-visibility: auto;
+        contain-intrinsic-size: 1px 100px;
     }
     .compression-divider {
         display: flex;
@@ -2281,6 +2340,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     }
     .merge-resolution-entry {
         padding: 8px 0;
+        content-visibility: auto;
+        contain-intrinsic-size: 1px 100px;
     }
     .merge-resolution-card {
         background: color-mix(in srgb, var(--color-status-green) 6%, transparent);

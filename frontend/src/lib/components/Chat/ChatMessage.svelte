@@ -210,6 +210,7 @@
     // Generated token count for stats display
     let genTokens = $derived(stats?.predicted_tokens ?? 0);
 
+    // Markdown rendering — marked.parse() is fast enough on typical message sizes.
     let renderedHtml = $derived(
         (role === 'assistant' || role === 'system')
             ? (marked.parse(content || '', { async: false }) as string)
@@ -525,6 +526,9 @@
 <style>
     .chat-message {
         padding: 8px 0;
+        /* Skip layout/paint for off-screen messages */
+        content-visibility: auto;
+        contain-intrinsic-size: 1px 300px;
     }
     .message-wrapper {
         display: flex;
