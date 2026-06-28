@@ -370,6 +370,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
                 const ref = activeToolCalls.get(data.tool_id);
                 activeToolCalls.delete(data.tool_id);
+                let updated = false;
                 if (ref) {
                     const entry = entries.find(e => e.id === ref.entryId);
                     if (entry && entry.toolCalls) {
@@ -379,11 +380,33 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             tc.success = data.success;
                             tc.duration = data.duration;
                             tc.isPending = false;
-                            // Update with final args (streaming event had partial args)
                             if (data.args) tc.args = data.args;
                             if (data.raw_args) tc.raw_args = data.raw_args;
                             if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
                             if (data.path) tc.path = data.path;
+                            updated = true;
+                        }
+                    }
+                }
+                // Fallback: search all entries for a pending tool call with this tool_id.
+                // This handles the case where the tool call was loaded from DB (after page refresh)
+                // and is not yet in activeToolCalls.
+                if (!updated) {
+                    for (const entry of entries) {
+                        if (entry.toolCalls) {
+                            const tc = entry.toolCalls.find(t => t.toolId === data.tool_id && t.isPending);
+                            if (tc) {
+                                tc.result = data.output;
+                                tc.success = data.success;
+                                tc.duration = data.duration;
+                                tc.isPending = false;
+                                if (data.args) tc.args = data.args;
+                                if (data.raw_args) tc.raw_args = data.raw_args;
+                                if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                                if (data.path) tc.path = data.path;
+                                updated = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -751,8 +774,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                 if (m.role === 'tool_call' && m.tool_calls) {
                     const tc = JSON.parse(m.tool_calls);
                     const result = m.tool_result ? JSON.parse(m.tool_result) : null;
-                    // Skip incomplete tool calls (no result) — left over from a stopped task
-                    if (!result) return null;
+                    const isPending = !result;
                     return {
                         ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
                         toolCalls: [{
@@ -765,7 +787,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             result: result?.output,
                             success: result?.success ?? true,
                             duration: result?.duration,
-                            isPending: false,
+                            isPending,
                         }],
                     };
                 }
@@ -798,11 +820,30 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
             const dbIds = new Set(messages.map(m => m.id));
             const existingNonDb = entries.filter(e => !dbIds.has(e.id));
-            entries = [...mergedDbEntries, ...existingNonDb];
-            // Remove entries with pending tool calls — these are incomplete tool calls
-            // from a stopped task, replayed from the WebSocket buffer.
-            // DB entries always have results (filtered above); only buffer entries have pending.
-            entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+            // Collect tool_ids from DB entries to deduplicate buffer entries.
+            // Buffer replay may create duplicate tool call entries (random IDs vs DB UUIDs).
+            const dbToolIds = new Set<string>();
+            for (const e of mergedDbEntries) {
+                if (e.toolCalls) {
+                    for (const tc of e.toolCalls) {
+                        dbToolIds.add(tc.toolId);
+                    }
+                }
+            }
+            // Remove buffer entries whose tool calls are already in the DB.
+            const dedupedNonDb = existingNonDb.filter(e => {
+                if (e.toolCalls) {
+                    return !e.toolCalls.some(tc => dbToolIds.has(tc.toolId));
+                }
+                return true;
+            });
+            entries = [...mergedDbEntries, ...dedupedNonDb];
+            // Remove entries with pending tool calls from non-running tasks.
+            // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
+            // For stopped/completed tasks, pending calls are stale leftovers.
+            if (taskStatus !== 'in_progress') {
+                entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+            }
             // Restore context usage from the last assistant message.
             // Use total context (prompt + predicted) to reflect full window consumed.
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
