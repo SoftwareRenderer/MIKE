@@ -92,6 +92,7 @@
     let editorFocused = $state(false);
 
     let hasChanges = $derived(content !== originalContent);
+    let lineCount = $derived(content.split('\n').length);
     let originalContent = $state('');
     let showConfirm = $state(false);
 
@@ -451,6 +452,25 @@
         {/if}
     </div>
 
+    <!-- Footer with line/char count -->
+    {#if !loading && !error && !fileTooLarge && filePath}
+        <div class="editor-footer">
+            <div class="footer-left">
+                <span class="line-info">{lineCount} lines · {content.length} chars</span>
+                {#if hasChanges}
+                    <span class="unsaved-info">Unsaved changes</span>
+                {/if}
+            </div>
+            <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                Find
+            </button>
+        </div>
+    {/if}
+
     <!-- Confirm close dialog -->
     {#if showConfirm}
         <div class="confirm-overlay" onclick={() => showConfirm = false}>
@@ -583,6 +603,49 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        position: relative;
+    }
+
+    .editor-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 4px 10px;
+        border-top: 1px solid var(--color-border);
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+        background: var(--color-surface-2);
+    }
+    .footer-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .line-info {
+        font-family: var(--font-mono);
+    }
+    .unsaved-info {
+        color: var(--color-status-yellow, #f0c000);
+    }
+    .footer-find-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--color-surface-3);
+        border: none;
+        color: var(--color-text-secondary);
+        border-radius: var(--radius-sm);
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 0.6875rem;
+        font-family: inherit;
+        flex-shrink: 0;
+    }
+    .footer-find-btn:hover {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
     }
 
     .editor-placeholder {

@@ -204,6 +204,10 @@
         loadCommits();
         loadBranches();
         checkMobile();
+        // If a file is already open, switch to editor tab
+        if (selectedFilePath) {
+            activeTab = 'editor';
+        }
         window.addEventListener('resize', checkMobile);
         window.addEventListener('keydown', handleKeydown);
         document.addEventListener('mousemove', handleMouseMove);

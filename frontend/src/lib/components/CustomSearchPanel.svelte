@@ -12,6 +12,7 @@
 
     let inputEl: HTMLInputElement | null = null;
     let replaceEl: HTMLInputElement | null = null;
+    let containerEl: HTMLDivElement | null = null;
     let visible = $state(false);
 
     let matchCase = $state(false);
@@ -180,10 +181,39 @@
     onMount(() => {
         visible = true;
         inputEl?.focus();
+
+        // On mobile, position panel above the keyboard using visualViewport
+        function updatePosition() {
+            if (!containerEl) return;
+            const vv = typeof visualViewport !== 'undefined' ? visualViewport : null;
+            if (vv && window.innerWidth <= 768) {
+                const keyboardHeight = Math.max(0, window.innerHeight - vv.height);
+                containerEl.style.position = 'fixed';
+                containerEl.style.bottom = (keyboardHeight - 1) + 'px';
+            } else {
+                containerEl.style.position = '';  
+                containerEl.style.bottom = '';
+            }
+        }
+
+        const vv = typeof visualViewport !== 'undefined' ? visualViewport : null;
+        vv?.addEventListener('resize', updatePosition);
+        window.addEventListener('resize', updatePosition);
+        // Initial position after focus triggers keyboard
+        setTimeout(updatePosition, 100);
+
+        return () => {
+            vv?.removeEventListener('resize', updatePosition);
+            window.removeEventListener('resize', updatePosition);
+            if (containerEl) {
+                containerEl.style.position = '';
+                containerEl.style.bottom = '';
+            }
+        };
     });
 </script>
 
-<div class="search-panel-container">
+<div class="search-panel-container" bind:this={containerEl}>
     <div class="search-panel" class:visible={visible}>
         <!-- Search row -->
         <div class="search-row">
@@ -298,13 +328,11 @@
         border-top: 1px solid var(--color-border);
         padding: 6px 12px;
         opacity: 0;
-        transform: translateY(100%);
-        transition: opacity 0.15s ease, transform 0.15s ease;
+        transition: opacity 0.15s ease;
         pointer-events: auto;
     }
     .search-panel.visible {
         opacity: 1;
-        transform: translateY(0);
     }
 
     .search-row {
@@ -460,5 +488,51 @@
     .toggle-replace-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
+    }
+
+    @media (max-width: 768px) {
+        .search-panel {
+            padding: 4px 4px;
+        }
+        .search-row {
+            gap: 0;
+        }
+        .search-input-wrap {
+            min-height: 44px;
+            padding: 0 2px 0 8px;
+            flex: 1 1 0;
+            min-width: 0;
+        }
+        .search-input {
+            font-size: 16px;
+            padding: 8px 0;
+        }
+        .toggle-btn {
+            padding: 8px 6px;
+            min-width: 44px;
+            flex-shrink: 0;
+        }
+        .nav-btn {
+            padding: 8px;
+            min-width: 44px;
+            flex-shrink: 0;
+        }
+        .search-nav {
+            gap: 0;
+        }
+        .match-count {
+            display: none;
+        }
+        .replace-row {
+            gap: 4px;
+        }
+        .replace-wrap {
+            min-height: 44px;
+        }
+        .action-btn {
+            min-width: 44px;
+            min-height: 44px;
+            padding: 8px 12px;
+        }
     }
 </style>
