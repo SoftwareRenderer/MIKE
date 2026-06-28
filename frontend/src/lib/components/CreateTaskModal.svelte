@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { Provider, Task } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
-    import { config as configStore, showCreateTask, board as boardStore } from '$lib/store';
+    import { config as configStore, showCreateTask, board as boardStore, selectedProject } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -15,7 +15,7 @@
     let autoCommit = $state(false);
 
     let planMode = $state(false);
-    let mergeOnCommit = $state(true);
+    let mergeOnCommit = $state(false);
     let mergeChildren = $state(true);
     let loading = $state(false);
     let error = $state('');
@@ -158,6 +158,7 @@
     // $configStore syntax auto-subscribes to store changes
     let cfg = $state(null);
     const unsubConfig = configStore.subscribe(val => { cfg = val; });
+    let targetBranch = $derived($selectedProject?.origin_branch || 'main');
     let configLoaded = $state(false);
     $effect(() => {
         if (cfg?.providers) {
@@ -361,7 +362,13 @@
                     <div class="config-info">
                         <div class="config-text">
                             <span class="config-label">Auto-merge</span>
-                            <span class="config-desc">{parentId ? 'Merge changes into parent task when complete' : 'Merge changes into main when complete'}</span>
+                            <span class="config-desc">
+                                {#if parentId}
+                                Merge changes into parent task when complete
+                                {:else}
+                                Merge changes into <span class="branch-badge" title={`Branch: ${targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{targetBranch}</span> when complete
+                                {/if}
+                            </span>
                         </div>
                     </div>
                     <ToggleSwitch bind:checked={mergeOnCommit} ariaLabel="Auto-merge on completion" />
@@ -563,15 +570,34 @@
     .config-text {
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 2px;
+    }
+    .config-label-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
     .config-label {
         font-size: 0.8125rem;
         font-weight: 500;
         color: var(--color-text-primary);
     }
+    .branch-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 0 5px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        font-family: var(--font-mono);
+        vertical-align: baseline;
+        line-height: 1.2;
+    }
     .config-desc {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
     .radio-group {

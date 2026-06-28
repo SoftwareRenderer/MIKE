@@ -1,8 +1,9 @@
 <script lang="ts">
-    let { checked = $bindable(false), disabled = false, ariaLabel = '' }: {
+    let { checked = $bindable(false), disabled = false, ariaLabel = '', ariaDescribedby = '' }: {
         checked: boolean;
         disabled?: boolean;
         ariaLabel?: string;
+        ariaDescribedby?: string;
     } = $props();
 </script>
 
@@ -14,6 +15,7 @@
     role="switch"
     aria-checked={checked}
     aria-label={ariaLabel}
+    aria-describedby={ariaDescribedby}
     disabled={disabled}
 >
     <span class="toggle-knob"></span>
@@ -42,7 +44,7 @@
         width: 16px;
         height: 16px;
         border-radius: 50%;
-        background: white;
+        background: #E0E0E0;
         transition: transform 0.2s ease;
     }
 
@@ -53,5 +55,10 @@
     .toggle-switch:disabled {
         cursor: not-allowed;
         opacity: 0.5;
+    }
+
+    .toggle-switch:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
     }
 </style>

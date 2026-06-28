@@ -60,6 +60,7 @@ type Config struct {
 	DefaultProvider       string     `json:"default_provider"`
 	DefaultAutoCommit     *bool      `json:"default_auto_commit"`
 	DefaultMergeOnCommit  *bool      `json:"default_merge_on_commit"`
+	DefaultMergeChildren  *bool      `json:"default_merge_children"`
 	DefaultPlanMode       *bool      `json:"default_plan_mode"`
 	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
 }

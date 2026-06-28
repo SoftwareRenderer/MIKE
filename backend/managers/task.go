@@ -116,6 +116,9 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				if cfg.DefaultMergeOnCommit != nil && !hasField(rawBody, "merge_on_commit") {
 					task.MergeOnCommit = *cfg.DefaultMergeOnCommit
 				}
+				if cfg.DefaultMergeChildren != nil && !hasField(rawBody, "merge_children") {
+					task.MergeChildren = *cfg.DefaultMergeChildren
+				}
 				if cfg.DefaultPlanMode != nil && !hasField(rawBody, "plan_mode") {
 					task.PlanMode = *cfg.DefaultPlanMode
 				}

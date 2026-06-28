@@ -3,7 +3,7 @@
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
-    import { config as configStore, showConfig } from '$lib/store';
+    import { config as configStore, showConfig, selectedProject } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -26,7 +26,8 @@
     let workspaceDir = $state('');
     let defaultProvider = $state('');
     let defaultAutoCommit = $state(false);
-    let defaultMergeOnCommit = $state(true);
+    let defaultMergeOnCommit = $state(false);
+    let defaultMergeChildren = $state(true);
     let defaultPlanMode = $state(false);
     let defaultMaxFailedTurns = $state(3);
     let loading = $state(false);
@@ -163,6 +164,7 @@
         defaultProvider = config?.default_provider || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
         defaultMergeOnCommit = config?.default_merge_on_commit ?? true;
+        defaultMergeChildren = config?.default_merge_children ?? true;
         defaultPlanMode = config?.default_plan_mode ?? false;
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
@@ -490,6 +492,7 @@
                 default_provider: defaultProvider,
                 default_auto_commit: defaultMergeOnCommit, // auto-commit is prerequisite for auto-merge
                 default_merge_on_commit: defaultMergeOnCommit,
+                default_merge_children: defaultMergeChildren,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
             });
@@ -895,31 +898,40 @@
 
                 <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span id="toggle-planmode" class="toggle-label">Plan mode</span>
-                        <span class="toggle-desc">AI decomposes work into subtasks on the board before executing</span>
+                        <span id="toggle-planmode-label" class="toggle-label">Plan mode</span>
+                        <span id="toggle-planmode-desc" class="toggle-desc">AI decomposes work into subtasks on the board before executing</span>
                     </div>
-                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" />
+                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" ariaDescribedby="toggle-planmode-desc" />
                 </div>
 
                 <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span id="toggle-mergeoncommit" class="toggle-label">Auto-merge into main</span>
-                        <span class="toggle-desc">Default for new tasks: commit and merge changes into main when complete</span>
+                        <span id="toggle-mergeoncommit-label" class="toggle-label">Auto-merge</span>
+                        <span id="toggle-mergeoncommit-desc" class="toggle-desc">Merge changes into <span class="branch-badge" title={`Branch: {$selectedProject?.origin_branch || 'main'}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{$selectedProject?.origin_branch || 'main'}</span> when complete</span>
                     </div>
-                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Auto-merge into main" />
+                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Auto-merge into main" ariaDescribedby="toggle-mergeoncommit-desc" />
+                </div>
+
+                <div class="toggle-field">
+                    <div class="toggle-label-group">
+                        <span id="toggle-mergechildren-label" class="toggle-label">Allow subtasks to auto-merge</span>
+                        <span id="toggle-mergechildren-desc" class="toggle-desc">Subtasks created under a task will auto-merge into it</span>
+                    </div>
+                    <ToggleSwitch bind:checked={defaultMergeChildren} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" />
                 </div>
 
                 <div class="field-row">
                     <div class="option-label-group">
                         <label class="field-label-inline" for="default-max-failed">Max failed turns</label>
-                        <span class="help-icon" title="Stop task after this many consecutive LLM failures">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <button type="button" class="help-icon" aria-label="Stop task after this many consecutive LLM failures">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                             </svg>
-                        </span>
+                        </button>
                     </div>
-                    <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
+                    <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" aria-describedby="max-failed-help" />
+                    <span id="max-failed-help" class="sr-only">Stop task after this many consecutive LLM failures</span>
                 </div>
             </fieldset>
 
@@ -1198,8 +1210,22 @@
         color: var(--color-text-primary);
     }
     .toggle-desc {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
+    }
+    .branch-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 0 5px;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        font-family: var(--font-mono);
+        vertical-align: baseline;
+        line-height: 1.2;
     }
     /* Field row (inline label + input) */
     .field-row {
@@ -1676,9 +1702,17 @@
         color: var(--color-text-tertiary);
         cursor: help;
         position: relative;
+        background: none;
+        border: none;
+        padding: 2px;
     }
     .help-icon:hover {
         color: var(--color-text-secondary);
+    }
+    .help-icon:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+        border-radius: 2px;
     }
 
     /* Pricing section */
@@ -2057,7 +2091,7 @@
         }
         .default-model-badge {
             max-width: 80px;
-            font-size: 0.6875rem;
+            font-size: 0.75rem;
         }
         /* Icon-only buttons should not be stretched to 44px */
         button.btn-remove-provider,

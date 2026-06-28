@@ -68,6 +68,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultMergeOnCommitRaw, _ := cs.store.GetConfigValue("default_merge_on_commit")
+	defaultMergeChildrenRaw, _ := cs.store.GetConfigValue("default_merge_children")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
@@ -82,6 +83,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(defaultMergeOnCommitRaw); err == nil && v != nil {
 		cfg.DefaultMergeOnCommit = v
+	}
+	if v, err := parseBoolPtr(defaultMergeChildrenRaw); err == nil && v != nil {
+		cfg.DefaultMergeChildren = v
 	}
 	if v, err := parseBoolPtr(defaultPlanModeRaw); err == nil && v != nil {
 		cfg.DefaultPlanMode = v
@@ -131,6 +135,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.DefaultMergeChildren != nil {
+		if err := cs.store.SetConfigValue("default_merge_children", fmt.Sprintf("%t", *c.DefaultMergeChildren)); err != nil {
+			return err
+		}
+	}
 	if c.DefaultPlanMode != nil {
 		if err := cs.store.SetConfigValue("default_plan_mode", fmt.Sprintf("%t", *c.DefaultPlanMode)); err != nil {
 			return err
@@ -152,6 +161,7 @@ type configResponse struct {
 	DefaultProvider       string           `json:"default_provider"`
 	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
 	DefaultMergeOnCommit  *bool            `json:"default_merge_on_commit"`
+	DefaultMergeChildren  *bool            `json:"default_merge_children"`
 	DefaultPlanMode       *bool            `json:"default_plan_mode"`
 	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
 	EncryptionEnabled     bool             `json:"encryption_enabled"`
@@ -187,6 +197,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultProvider:       cfg.DefaultProvider,
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
 			DefaultMergeOnCommit:  cfg.DefaultMergeOnCommit,
+			DefaultMergeChildren:  cfg.DefaultMergeChildren,
 			DefaultPlanMode:       cfg.DefaultPlanMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),
@@ -243,6 +254,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultMergeOnCommit = &v
 			}
 		}
+		if dmc, ok := updates["default_merge_children"]; ok {
+			if v, ok := dmc.(bool); ok {
+				current.DefaultMergeChildren = &v
+			}
+		}
 		if dpm, ok := updates["default_plan_mode"]; ok {
 			if v, ok := dpm.(bool); ok {
 				current.DefaultPlanMode = &v
@@ -267,6 +283,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultProvider:       current.DefaultProvider,
 			DefaultAutoCommit:     current.DefaultAutoCommit,
 			DefaultMergeOnCommit:  current.DefaultMergeOnCommit,
+			DefaultMergeChildren:  current.DefaultMergeChildren,
 			DefaultPlanMode:       current.DefaultPlanMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),

@@ -79,6 +79,7 @@ export interface Config {
     default_provider: string;
     default_auto_commit?: boolean;
     default_merge_on_commit?: boolean;
+    default_merge_children?: boolean;
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
     encryption_enabled?: boolean;

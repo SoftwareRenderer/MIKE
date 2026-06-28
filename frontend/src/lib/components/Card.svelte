@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Task, Provider } from '$lib/types';
-    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
+    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast, selectedProject } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
@@ -181,6 +181,7 @@
     let modelBadgeRef: HTMLButtonElement | null = $state(null);
     let pickerRect = $state<{ top: number; left: number } | null>(null);
     let providers = $derived($configStore?.providers || []);
+    let targetBranch = $derived($selectedProject?.origin_branch || 'main');
     let isConfigurable = $derived(columnId === 'backlog');
 
     // Diff stats: pushed via WebSocket from the backend
@@ -634,7 +635,7 @@
                     <div class="config-row">
                         <div class="config-info">
                             <span class="config-label">Auto-merge</span>
-                            <span class="help-icon" title={task.parent_task_id ? 'Merge changes into parent task when complete' : 'Merge changes into main when complete'}>
+                            <span class="help-icon" title={task.parent_task_id ? 'Merge changes into parent task when complete' : `Merge changes into ${targetBranch} when complete`}>
                                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                     <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                     <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
@@ -1228,7 +1229,7 @@
         color: var(--color-text-secondary);
     }
     .config-desc {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
     .radio-group {
