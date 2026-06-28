@@ -648,7 +648,7 @@
                                         <div class="url-and-key-row">
                                             <div class="url-field">
                                                 <label class="url-label">Provider URL</label>
-                                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} />
+                                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
                                             </div>
                                             <div class="api-key-field">
                                                 <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
@@ -767,7 +767,7 @@
                                                         {#if model.readonly}
                                                             <span class="model-name-label">{model.name}</span>
                                                         {:else}
-                                                            <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" />
+                                                            <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" aria-label="Model name" />
                                                         {/if}
                                                         {#if model.context_window}
                                                             <span class="context-window-badge" title="Context window: {model.context_window} tokens">
@@ -875,7 +875,7 @@
                 <h3 class="section-label">General</h3>
                 <label class="field-label">
                     Workspace Directory
-                    <input type="text" bind:value={workspaceDir} placeholder="./workspace" />
+                    <input type="text" bind:value={workspaceDir} placeholder="./workspace" aria-label="Workspace directory" />
                     <span class="field-help">Directory where task worktrees are created</span>
                 </label>
                 <div class="field-label">

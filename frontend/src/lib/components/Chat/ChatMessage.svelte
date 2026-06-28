@@ -244,6 +244,7 @@
                         bind:value={editContent}
                         onkeydown={handleKeydown}
                         rows="3"
+                        aria-label="Edit message content"
                     ></textarea>
                     <div class="edit-actions">
                         <input type="file" accept="image/*" multiple bind:this={editFileInput} onchange={handleEditFileSelect} style="display:none" />
@@ -365,7 +366,7 @@
             {#if stats && stats.predicted_tokens > 0}
                 <div class="message-stats">
                     <span class="stats-model-name">{stats.model_name || 'model'}</span>
-                    <span class="stat-separator">·</span>
+                    <span class="stat-separator" aria-hidden="true">·</span>
                     <span class="stat-item">{genTokens} tokens</span>
                 </div>
             {/if}
@@ -445,7 +446,7 @@
     }
     .message-bubble {
         max-width: 80%;
-        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         border-radius: 1.125rem;
         padding: 8px 14px;
         display: flex;
@@ -454,16 +455,16 @@
     }
     .queued-indicator {
         flex-shrink: 0;
-        color: var(--color-text-tertiary);
-        opacity: 0.7;
+        color: var(--color-text-secondary);
         display: flex;
         align-items: center;
     }
     .assistant .message-bubble {
         max-width: 100%;
-        background: var(--color-surface-2);
+        background: var(--color-surface-3);
         border-radius: var(--radius-md);
         padding: 10px 14px;
+        border: 1px solid var(--color-border);
     }
     .message-text {
         font-size: 1rem;
@@ -659,15 +660,15 @@
     }
     .stats-model-name {
         font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        opacity: 0.7;
+        color: var(--color-text-secondary);
     }
     .stat-separator {
         font-size: 0.75rem;
-        opacity: 0.5;
+        color: var(--color-text-tertiary);
     }
     .stat-item {
         font-size: 0.75rem;
+        color: var(--color-text-secondary);
     }
     .message-actions {
         display: flex;
@@ -685,8 +686,7 @@
         display: flex;
         align-items: center;
         font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        opacity: 0.6;
+        color: var(--color-text-secondary);
         white-space: nowrap;
         margin: 0 4px;
         padding: 4px 0;

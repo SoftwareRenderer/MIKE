@@ -1967,7 +1967,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .chat-sticky-bubble {
         font-size: 0.8125rem;
         color: var(--color-text-primary);
-        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         border-radius: 1.125rem;
         padding: 6px 12px;
         max-width: 80%;
@@ -2249,7 +2249,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         flex: 1;
         height: 1px;
         background: var(--color-accent);
-        opacity: 0.4;
+        opacity: 0.7;
     }
     .compression-divider .divider-content {
         display: flex;

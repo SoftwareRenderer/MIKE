@@ -1071,7 +1071,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .project-prefix {
         font-size: 0.875rem;
         font-weight: 400;
-        color: var(--color-text-tertiary);
+        color: var(--color-text-secondary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

@@ -592,6 +592,7 @@
                         oninput={(e) => e.stopPropagation()}
                         bind:this={titleInputRef}
                         placeholder="Task title"
+                        aria-label="Task title"
                     />
                 </label>
                 {#if editProviders.length > 0}

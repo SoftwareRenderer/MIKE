@@ -129,7 +129,7 @@
         flex: 1;
         height: 1px;
         background: var(--color-accent);
-        opacity: 0.6;
+        opacity: 0.7;
     }
     .divider-content {
         display: flex;
@@ -147,7 +147,7 @@
         white-space: nowrap;
     }
     .checkpoint-label svg {
-        opacity: 0.5;
+        opacity: 0.7;
     }
     .checkpoint-spinner {
         animation: checkpoint-spin 1s linear infinite;
@@ -240,7 +240,7 @@
         color: var(--color-text-primary);
     }
     .thread-menu-item.active {
-        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         color: var(--color-accent);
     }
     .thread-name {
@@ -249,6 +249,5 @@
     .thread-active {
         font-size: 0.75rem;
         color: var(--color-accent);
-        opacity: 0.7;
     }
 </style>

@@ -155,7 +155,7 @@
         color: var(--color-text-primary);
     }
     .sel-option.selected {
-        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         color: var(--color-accent);
     }
     .opt-label {

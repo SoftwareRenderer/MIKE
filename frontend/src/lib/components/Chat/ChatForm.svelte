@@ -231,6 +231,7 @@
             bind:value
             {disabled}
             {placeholder}
+            aria-label="Message input"
             rows="1"
             onkeydown={handleKeydown}
             oninput={autoResize}

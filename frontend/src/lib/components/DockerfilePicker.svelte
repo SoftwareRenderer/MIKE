@@ -116,6 +116,7 @@
                         bind:value={currentPath}
                         onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
                         placeholder="Enter path or browse..."
+                        aria-label="File path"
                     />
                 </div>
             </div>

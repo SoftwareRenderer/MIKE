@@ -1,14 +1,14 @@
 :root {
-    --color-surface-0: #1F2428;
-    --color-surface-1: #24292E;
-    --color-surface-2: #2D3339;
-    --color-surface-3: #353C43;
-    --color-surface-4: #3E464E;
-    --color-border: #30363D;
-    --color-border-bright: #444C56;
-    --color-text-primary: #E6EDF3;
-    --color-text-secondary: #AEB2B8;
-    --color-text-tertiary: #AEB2B8;
+    --color-surface-0: #141414;
+    --color-surface-1: #1C1C1C;
+    --color-surface-2: #262626;
+    --color-surface-3: #313131;
+    --color-surface-4: #3C3C3C;
+    --color-border: rgba(255, 255, 255, 0.1);
+    --color-border-bright: rgba(255, 255, 255, 0.2);
+    --color-text-primary: #ECECEC;
+    --color-text-secondary: #A0A0A0;
+    --color-text-tertiary: #7E7E7E;
     --color-accent: #0084FF;
     --color-accent-hover: #339DFF;
     --color-status-blue: #4C9AFF;
@@ -98,7 +98,7 @@ a:hover {
     height: 8px;
 }
 ::-webkit-scrollbar-track {
-    background: var(--color-surface-1);
+    background: transparent;
 }
 ::-webkit-scrollbar-thumb {
     background: var(--color-surface-3);

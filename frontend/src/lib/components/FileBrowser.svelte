@@ -175,6 +175,7 @@
                         bind:value={currentPath}
                         onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
                         placeholder="Enter path or browse..."
+                        aria-label="File path"
                     />
                     <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -194,6 +195,7 @@
                             placeholder="Folder name"
                             onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
                             autofocus
+                            aria-label="New folder name"
                         />
                         <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
                         <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>

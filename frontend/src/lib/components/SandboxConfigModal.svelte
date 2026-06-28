@@ -260,7 +260,7 @@
                     </div>
                 </div>
                 <div class="memory-input-group">
-                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} />
+                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} aria-label="Maximum container memory in MB" />
                     <span class="memory-unit">MB</span>
                 </div>
             </div>
@@ -301,7 +301,7 @@
                         <span class="config-desc">Docker image for sandbox containers</span>
                     </div>
                 </div>
-                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="ubuntu:latest" disabled={isLocked} />
+                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="ubuntu:latest" disabled={isLocked} aria-label="Sandbox image name" />
             </div>
             {:else}
             <!-- Dockerfile section -->

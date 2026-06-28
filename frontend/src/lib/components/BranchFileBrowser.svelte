@@ -176,6 +176,7 @@
                     oninput={(e) => newFileName = e.target.value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
                     onblur={() => { showNewFile = false; newFileName = ''; }}
+                    aria-label="New file name"
                     autofocus
                 />
             </div>
@@ -196,6 +197,7 @@
                 class="file-browser-path-input"
                 value={currentPath}
                 oninput={(e) => { currentPath = e.target.value; onPathChange(e.target.value); }}
+                aria-label="File path"
                 onkeydown={(e) => e.key === 'Enter' && handlePathInput()}
                 onblur={handlePathInput}
                 title={currentPath}
