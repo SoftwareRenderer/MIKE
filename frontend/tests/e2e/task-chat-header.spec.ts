@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import {getProjectId, navigateToTask, csrfFetch, apiGetConfig} from './helpers';
 
-test.describe.serial('Task Chat Sticky Header', () => {
+test.describe.serial('Task Chat Sticky User Message', () => {
   test.use({ viewport: { width: 1280, height: 600 } });
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -36,64 +36,40 @@ test.describe.serial('Task Chat Sticky Header', () => {
     return result.data.id;
   }
 
-  test('should show first line of user message in sticky header', async ({ page }) => {
+  test('should show sticky bubble when user message scrolled past', async ({ page }) => {
     const taskId = await createScrollableTask(page);
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.chat-message')).toBeVisible({ timeout: 10000 });
 
-    const header = page.locator('.chat-task-header');
-    const stickyMsg = page.locator('.chat-sticky-message');
-
-    // At top: header should be hidden (opacity 0)
-    await expect(header).toHaveCSS('opacity', '0');
-
-    // Scroll down to trigger the sticky header
+    const stickyHeader = page.locator('.chat-sticky-header');
+    const stickyBubble = page.locator('.chat-sticky-bubble');
     const chatMessages = page.locator('.chat-messages');
-    await chatMessages.click({ position: { x: 10, y: 10 } });
+
+    // At top: header should not be visible
+    await expect(stickyHeader).not.toBeVisible();
+
+    // Scroll down past the user message
+    await chatMessages.focus();
     await page.waitForTimeout(100);
     await page.keyboard.press('PageDown');
     await page.keyboard.press('PageDown');
     await page.waitForTimeout(500);
 
-    // Header should be visible with the first line of the user message
-    await expect(header).toHaveCSS('opacity', '1');
-    await expect(stickyMsg).toContainText('Implement a comprehensive feature that includes:');
-  });
-
-  test('should show header when scrolled and hide when at top', async ({ page }) => {
-    const taskId = await createScrollableTask(page);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.chat-message')).toBeVisible({ timeout: 10000 });
-
-    const header = page.locator('.chat-task-header');
-    const chatMessages = page.locator('.chat-messages');
-
-    // Verify initially hidden
-    await expect(header).toHaveCSS('opacity', '0');
-
-    // Click the element to give it focus, then PageDown
-    await chatMessages.click({ position: { x: 10, y: 10 } });
-    await page.waitForTimeout(100);
-    await page.keyboard.press('PageDown');
-    await page.keyboard.press('PageDown');
-    await page.keyboard.press('PageDown');
-    await page.waitForTimeout(300);
-
-    // Check scroll position changed
+    // Verify scroll position changed
     const scrollTop = await chatMessages.evaluate(el => el.scrollTop);
     expect(scrollTop).toBeGreaterThan(60);
 
-    // Header should be visible
-    await expect(header).toHaveCSS('opacity', '1');
+    // Sticky header should now be visible with the user message text
+    await expect(stickyHeader).toBeVisible();
+    await expect(stickyBubble).toContainText('Implement a comprehensive feature that includes:');
 
-    // Scroll back to top with Home
+    // Scroll back to top
     await chatMessages.focus();
     await page.keyboard.press('Home');
     await page.waitForTimeout(300);
 
     // Header should be hidden again
-    await expect(header).toHaveCSS('opacity', '0');
+    await expect(stickyHeader).not.toBeVisible();
   });
 });
