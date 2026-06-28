@@ -137,7 +137,7 @@
                 cache_write_price: p.cache_write_price || 0,
                 fetchingModels: false,
                 fetchError: '',
-                expanded: !p.default_model, // collapse if already configured
+                expanded: false,
                 testingConnection: false,
                 testResult: null,
                 models: isAgent ? [] : (p.models || []).map(m => {

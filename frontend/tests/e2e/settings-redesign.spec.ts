@@ -394,8 +394,10 @@ test.describe.serial('Settings Redesign', () => {
     await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
-    // Verify existing models are present
+    // Expand the first provider card
     const card = page.locator('.provider-card').first();
+    await card.locator('.btn-expand').click();
+    // Verify existing models are present
     await expect(card.locator('.model-row')).toHaveCount(2);
 
     // Mock the fetch-models API to return a different set of models
