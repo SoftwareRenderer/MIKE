@@ -320,6 +320,7 @@
     let editPlanMode = $state(false);
     let editAutoCommit = $state(false);
     let editMergeOnCommit = $state(true);
+    let editMergeChildren = $state(true);
     let editModel = $state('');
     let editUrl = $state('');
     let editReasoningEffort = $state('');
@@ -337,6 +338,7 @@
         editPlanMode = task.plan_mode ?? false;
         editAutoCommit = task.auto_commit ?? false;
         editMergeOnCommit = task.merge_on_commit ?? true;
+        editMergeChildren = task.merge_children ?? true;
         editModel = task.model_name ?? '';
         editUrl = task.llama_server_url ?? '';
         editReasoningEffort = task.reasoning_effort ?? '';
@@ -352,8 +354,9 @@
         }
         const updates: Record<string, unknown> = { title: trimmed };
         updates.plan_mode = editPlanMode;
-        updates.auto_commit = editAutoCommit;
+        updates.auto_commit = editMergeOnCommit; // auto-commit is prerequisite for auto-merge
         updates.merge_on_commit = editMergeOnCommit;
+        updates.merge_children = editMergeChildren;
         if (editModel) updates.model_name = editModel;
         if (editUrl) updates.llama_server_url = editUrl;
         if (editReasoningEffort) updates.reasoning_effort = editReasoningEffort;
@@ -361,6 +364,7 @@
         task.plan_mode = editPlanMode;
         task.auto_commit = editAutoCommit;
         task.merge_on_commit = editMergeOnCommit;
+        task.merge_children = editMergeChildren;
         if (editModel) task.model_name = editModel;
         if (editUrl) task.llama_server_url = editUrl;
         if (editReasoningEffort) task.reasoning_effort = editReasoningEffort;
@@ -380,6 +384,7 @@
         editPlanMode = false;
         editAutoCommit = false;
         editMergeOnCommit = true;
+        editMergeChildren = true;
         editModel = '';
         editUrl = '';
         editReasoningEffort = '';
@@ -626,39 +631,32 @@
                 </div>
                 <div class="card-edit-section">
                     <div class="section-label">Repository</div>
-                    <div class="config-row config-row-stacked">
-                        <div class="config-info">
-                            <span class="config-label">Work branch</span>
-                            <span class="help-icon" title="Merge changes into main when the task is complete, or keep them on a separate branch">
-                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
-                        </div>
-                        <div class="radio-group">
-                            <label class="radio-label" class:active={editMergeOnCommit}>
-                                <input type="radio" name="edit-branch-mode" checked={editMergeOnCommit} onchange={() => editMergeOnCommit = true} />
-                                <span class="radio-text">Merge to main</span>
-                            </label>
-                            <label class="radio-label" class:active={!editMergeOnCommit}>
-                                <input type="radio" name="edit-branch-mode" checked={!editMergeOnCommit} onchange={() => editMergeOnCommit = false} />
-                                <span class="radio-text">Keep separate</span>
-                            </label>
-                        </div>
-                    </div>
                     <div class="config-row">
                         <div class="config-info">
-                            <span class="config-label">Auto-commit</span>
-                            <span class="help-icon" title="Automatically commit changes when the task completes">
+                            <span class="config-label">Auto-merge</span>
+                            <span class="help-icon" title={task.parent_task_id ? 'Merge changes into parent task when complete' : 'Merge changes into main when complete'}>
                                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                     <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                     <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
                                 </svg>
                             </span>
                         </div>
-                        <ToggleSwitch bind:checked={editAutoCommit} ariaLabel="Auto-commit on completion" />
+                        <ToggleSwitch bind:checked={editMergeOnCommit} ariaLabel="Auto-merge on completion" />
                     </div>
+                    {#if !task.parent_task_id}
+                    <div class="config-row">
+                        <div class="config-info">
+                            <span class="config-label">Allow subtasks to auto-merge</span>
+                            <span class="help-icon" title="Subtasks created under this task will auto-merge into it">
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                </svg>
+                            </span>
+                        </div>
+                        <ToggleSwitch bind:checked={editMergeChildren} ariaLabel="Allow subtasks to auto-merge" />
+                    </div>
+                    {/if}
                 </div>
             </div>
             <div class="card-edit-footer">

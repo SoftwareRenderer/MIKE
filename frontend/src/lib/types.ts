@@ -46,6 +46,7 @@ export interface Task {
     max_consecutive_failed_turns: number;
     auto_commit: boolean;
     merge_on_commit: boolean;
+    merge_children: boolean;
     plan_mode: boolean;
     parent_task_id?: string;
     title_generating: boolean;

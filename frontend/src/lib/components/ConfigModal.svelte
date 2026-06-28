@@ -488,7 +488,7 @@
                 workspace_dir: workspaceDir.trim(),
                 providers: savedProviders,
                 default_provider: defaultProvider,
-                default_auto_commit: defaultAutoCommit,
+                default_auto_commit: defaultMergeOnCommit, // auto-commit is prerequisite for auto-merge
                 default_merge_on_commit: defaultMergeOnCommit,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
@@ -903,18 +903,10 @@
 
                 <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span id="toggle-mergeoncommit" class="toggle-label">Merge to main</span>
-                        <span class="toggle-desc">Merge changes into main when the task is complete</span>
+                        <span id="toggle-mergeoncommit" class="toggle-label">Auto-merge into main</span>
+                        <span class="toggle-desc">Default for new tasks: commit and merge changes into main when complete</span>
                     </div>
-                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Merge to main" />
-                </div>
-
-                <div class="toggle-field">
-                    <div class="toggle-label-group">
-                        <span id="toggle-autocommit" class="toggle-label">Auto-commit</span>
-                        <span class="toggle-desc">Automatically commit changes when the task completes</span>
-                    </div>
-                    <ToggleSwitch bind:checked={defaultAutoCommit} ariaLabel="Auto-commit" />
+                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Auto-merge into main" />
                 </div>
 
                 <div class="field-row">

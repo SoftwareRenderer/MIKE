@@ -22,6 +22,7 @@ type Task struct {
 	MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"`
 	AutoCommit                bool      `json:"auto_commit"`
 	MergeOnCommit             bool      `json:"merge_on_commit"`
+	MergeChildren             bool      `json:"merge_children"` // parent-only: children inherit this as merge_on_commit
 	PlanMode                  bool      `json:"plan_mode"`
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`

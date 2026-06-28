@@ -16,6 +16,7 @@
 
     let planMode = $state(false);
     let mergeOnCommit = $state(true);
+    let mergeChildren = $state(true);
     let loading = $state(false);
     let error = $state('');
     let parentTitle = $state('');
@@ -186,11 +187,14 @@
 
     onMount(async () => {
         triggerEl = document.activeElement as HTMLElement;
-        // Fetch parent task title if creating a subtask
+        // Fetch parent task title and defaults if creating a subtask
         if (parentId && projectId) {
             try {
                 const parentTask = await getTask(projectId, parentId);
                 parentTitle = parentTask.title;
+                // Inherit auto_commit and merge_on_commit from parent
+                autoCommit = parentTask.auto_commit ?? autoCommit;
+                mergeOnCommit = parentTask.merge_children ?? mergeOnCommit;
             } catch {
                 parentTitle = 'Parent task';
             }
@@ -222,9 +226,10 @@
         error = '';
         const taskData: Record<string, unknown> = {
             prompt: prompt.trim(),
-            auto_commit: autoCommit,
+            auto_commit: mergeOnCommit, // auto-commit is prerequisite for auto-merge
             plan_mode: planMode,
             merge_on_commit: mergeOnCommit,
+            merge_children: mergeChildren,
         };
         if (attachments.length > 0) {
             taskData.attachments = JSON.stringify(attachments);
@@ -355,30 +360,23 @@
                 <div class="config-row">
                     <div class="config-info">
                         <div class="config-text">
-                            <span class="config-label">Work branch</span>
-                            <span class="config-desc">Merge changes into main when the task is complete, or keep them on a separate branch</span>
+                            <span class="config-label">Auto-merge</span>
+                            <span class="config-desc">{parentId ? 'Merge changes into parent task when complete' : 'Merge changes into main when complete'}</span>
                         </div>
                     </div>
-                    <div class="radio-group">
-                        <label class="radio-label" class:active={mergeOnCommit}>
-                            <input type="radio" name="branch-mode" checked={mergeOnCommit} onchange={() => mergeOnCommit = true} />
-                            <span class="radio-text">Merge to main</span>
-                        </label>
-                        <label class="radio-label" class:active={!mergeOnCommit}>
-                            <input type="radio" name="branch-mode" checked={!mergeOnCommit} onchange={() => mergeOnCommit = false} />
-                            <span class="radio-text">Keep separate</span>
-                        </label>
-                    </div>
+                    <ToggleSwitch bind:checked={mergeOnCommit} ariaLabel="Auto-merge on completion" />
                 </div>
+                {#if !parentId}
                 <div class="config-row">
                     <div class="config-info">
                         <div class="config-text">
-                            <span class="config-label">Auto-commit</span>
-                            <span class="config-desc">Automatically commit changes when the task completes</span>
+                            <span class="config-label">Allow subtasks to auto-merge</span>
+                            <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
                         </div>
                     </div>
-                    <ToggleSwitch bind:checked={autoCommit} ariaLabel="Auto-commit on completion" />
+                    <ToggleSwitch bind:checked={mergeChildren} ariaLabel="Allow subtasks to auto-merge" />
                 </div>
+                {/if}
             </div>
             {#if error}
                 <div id="task-error" class="error" role="alert">{error}</div>

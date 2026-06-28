@@ -124,6 +124,18 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// If this is a child task, inherit auto_commit/merge_on_commit from parent
+		if task.ParentTaskID != "" {
+			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
+			if err == nil {
+				if !hasField(rawBody, "auto_commit") {
+					task.AutoCommit = parent.AutoCommit
+				}
+				if !hasField(rawBody, "merge_on_commit") {
+					task.MergeOnCommit = parent.MergeChildren
+				}
+			}
+		}
 		// Validate parent_task_id if provided
 		if task.ParentTaskID != "" {
 			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
@@ -225,6 +237,10 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		task.ID = taskID
 		task.ProjectID = projectID
 		task.UpdatedAt = time.Now()
+		// Auto-commit is a prerequisite for auto-merge
+		if task.MergeOnCommit {
+			task.AutoCommit = true
+		}
 		if err := h.store.UpdateTask(task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
