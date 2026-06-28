@@ -68,7 +68,7 @@ func TestBranchPollerLifecycle(t *testing.T) {
 	}
 
 	wm := git.NewWorktreeManager(s, cfgStore)
-	_, _, err = wm.CreateWorktree(projID, taskID, branchName)
+	_, _, err = wm.CreateWorktree(projID, taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 
 	wm := git.NewWorktreeManager(s, cfgStore)
-	_, _, err = wm.CreateWorktree(projID, taskID, branchName)
+	_, _, err = wm.CreateWorktree(projID, taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}

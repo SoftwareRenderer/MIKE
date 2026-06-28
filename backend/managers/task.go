@@ -37,6 +37,12 @@ type TaskHandler struct {
 	commitQueue    *bkg.CommitQueue
 }
 
+// hasField checks if a key exists in a map[string]any.
+func hasField(m map[string]any, key string) bool {
+	_, ok := m[key]
+	return ok
+}
+
 // NewTaskHandler creates a new TaskHandler.
 func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *bkg.CommitQueue) *TaskHandler {
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
@@ -103,16 +109,17 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
-				if cfg.DefaultAutoCommit != nil && task.AutoCommit == false {
+				// Only apply defaults for fields NOT sent by the client
+				if cfg.DefaultAutoCommit != nil && !hasField(rawBody, "auto_commit") {
 					task.AutoCommit = *cfg.DefaultAutoCommit
 				}
-				if cfg.DefaultMergeOnCommit != nil && task.MergeOnCommit == false {
+				if cfg.DefaultMergeOnCommit != nil && !hasField(rawBody, "merge_on_commit") {
 					task.MergeOnCommit = *cfg.DefaultMergeOnCommit
 				}
-				if cfg.DefaultPlanMode != nil && task.PlanMode == false {
+				if cfg.DefaultPlanMode != nil && !hasField(rawBody, "plan_mode") {
 					task.PlanMode = *cfg.DefaultPlanMode
 				}
-				if cfg.DefaultMaxFailedTurns != nil && task.MaxConsecutiveFailedTurns == 0 {
+				if cfg.DefaultMaxFailedTurns != nil && !hasField(rawBody, "max_consecutive_failed_turns") {
 					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns
 				}
 			}

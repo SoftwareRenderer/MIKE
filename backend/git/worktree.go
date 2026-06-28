@@ -100,8 +100,9 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 }
 
 // CreateWorktree creates a git worktree for a task, capturing the current working tree state.
+// If sourceBranch is non-empty, the worktree is created from that branch instead of HEAD.
 // Returns (worktreePath, originalBranch, error).
-func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) (string, string, error) {
+func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceBranch string) (string, string, error) {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
 		return "", "", fmt.Errorf("get project: %w", err)
@@ -204,6 +205,10 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName string) 
 		sourceRef = "HEAD"
 		defer cleanup()
 	}
+	// If a source branch is specified (e.g., parent branch for child tasks), use it instead
+	if sourceBranch != "" {
+		sourceRef = sourceBranch
+	}
 
 	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
 	cmd.Dir = project.Path
@@ -237,12 +242,13 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 		return err
 	}
 
+	// Always delete the branch from the project repo, even if worktree dir is gone
+	wm.gitRun(project.Path, "branch", "-D", branchName)
+	wm.gitRun(project.Path, "worktree", "prune")
+
 	if err := os.RemoveAll(worktreePath); err != nil {
 		return fmt.Errorf("remove worktree dir: %w", err)
 	}
-
-	wm.gitRun(project.Path, "branch", "-D", branchName)
-	wm.gitRun(project.Path, "worktree", "prune")
 
 	return nil
 }

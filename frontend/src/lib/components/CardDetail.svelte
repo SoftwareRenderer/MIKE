@@ -5,7 +5,7 @@
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats } from '$lib/store';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask, clearDoneTasks } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
 import { getWorktreeDisplayPath } from '$lib/utils/path';
     import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
@@ -117,6 +117,23 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             showToast('Failed to move task: ' + String(err), 'error');
         }
         draggedTaskId = null;
+    }
+
+    async function handleClearDone(count: number) {
+        if (!task.project_id) return;
+        const confirmed = await showConfirm({
+            title: 'Clear Done Tasks',
+            message: `Permanently delete ${count} done task${count > 1 ? 's' : ''}? This cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
+        if (!confirmed) return;
+        try {
+            await clearDoneTasks(task.project_id);
+            // Board stream WebSocket will push the update
+        } catch (e) {
+            showToast('Failed to clear done tasks: ' + String(e), 'error');
+        }
     }
 
     function getSectionColor(id: string): string {
@@ -897,7 +914,17 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                     {/if}
                                     {section.title}
                                 </span>
-                                <span class="section-count">{sectionTasks.length}</span>
+                                <div class="header-right">
+                                    <span class="section-count">{sectionTasks.length}</span>
+                                    {#if section.id === 'done' && sectionTasks.length > 0}
+                                        <button class="clear-btn" onclick={(e) => { e.stopPropagation(); handleClearDone(sectionTasks.length); }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
+                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                    {/if}
+                                </div>
                                 <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             </button>
                             {#if !collapsedSections.has(section.id)}
@@ -1240,6 +1267,30 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     .task-item-add:hover {
         background: var(--color-accent);
         color: #fff;
+    }
+    .header-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .clear-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        padding: 0;
+        flex-shrink: 0;
+    }
+    .clear-btn:hover {
+        background: var(--color-status-red)22;
+        color: var(--color-status-red);
     }
     .task-item {
         padding: 6px 8px;

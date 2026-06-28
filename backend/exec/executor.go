@@ -605,7 +605,15 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			branchName = branchName + "-" + taskID[:8]
 		}
 	}
-	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
+	// If this is a child task, branch from the parent's branch
+	sourceBranch := ""
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch != "" {
+			sourceBranch = parent.Branch
+		}
+	}
+	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
@@ -784,7 +792,8 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
 }
 
-// mergeBranch merges the task's branch into the origin branch.
+// mergeBranch merges the task's branch into the target branch.
+// For child tasks, merges into the parent's branch. For root tasks, merges into origin.
 // Returns nil on success or if merge is not applicable.
 func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := te.store.GetProject(projectID)
@@ -792,23 +801,33 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		return fmt.Errorf("get project: %w", err)
 	}
 
-	// Determine origin branch
-	originBranch := project.OriginBranch
-	if originBranch == "" {
-		originBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil {
-			log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
-			return nil
-		}
-	}
-	originBranch = strings.TrimSpace(originBranch)
-	if originBranch == "" || originBranch == "HEAD" {
-		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
-		return nil
-	}
 	taskBranch := task.Branch
 	if taskBranch == "" {
 		log.Printf("[merge] task=%s no task branch set, skipping merge", taskID)
+		return nil
+	}
+
+	// Determine target branch: parent's branch for child tasks, origin for root tasks
+	var targetBranch string
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch != "" {
+			targetBranch = parent.Branch
+		}
+	}
+	if targetBranch == "" {
+		targetBranch = project.OriginBranch
+		if targetBranch == "" {
+			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+			if err != nil {
+				log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
+				return nil
+			}
+		}
+	}
+	targetBranch = strings.TrimSpace(targetBranch)
+	if targetBranch == "" || targetBranch == "HEAD" {
+		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
 		return nil
 	}
 
@@ -823,9 +842,9 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		}
 	}()
 
-	// Checkout origin branch
-	if err := te.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", originBranch); err != nil {
-		return fmt.Errorf("checkout origin branch %s: %w", originBranch, err)
+	// Checkout target branch
+	if err := te.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", targetBranch); err != nil {
+		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
 	}
 
 	// Merge the task branch
@@ -835,7 +854,7 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		return fmt.Errorf("merge failed: %w (output: %s)", mergeErr, mergeOut)
 	}
 
-	log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, originBranch)
+	log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
 	return nil
 }
 

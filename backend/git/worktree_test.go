@@ -122,7 +122,7 @@ func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
 
 	// Create the worktree first
 	branchName := "task/" + taskID
-	_, _, err := wm.CreateWorktree("test-project", taskID, branchName)
+	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 
 	// Create the worktree normally first
 	branchName := "task/" + taskID
-	_, _, err := wm.CreateWorktree("test-project", taskID, branchName)
+	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 	// checking that the early return path sanitizes the value.
 	// The actual sanitization is tested via ResolveDiffBaseline above.
 	// Here we just verify the early return works without error.
-	_, baseRef, err := wm.CreateWorktree("test-project", taskID, branchName)
+	_, baseRef, err := wm.CreateWorktree("test-project", taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree (early return): %v", err)
 	}
@@ -309,7 +309,7 @@ func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create worktree
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
 func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestWalkUntrackedEntries_Directory(t *testing.T) {
 func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
 func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task")
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
