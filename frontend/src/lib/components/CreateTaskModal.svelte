@@ -4,7 +4,9 @@
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
     import { config as configStore, showCreateTask, board as boardStore } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
+    import FileMentionDropdown from './FileMentionDropdown.svelte';
     import { createFocusTrap } from '$lib/a11y';
+    import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
     let { projectId, onClose, onTaskCreated, parentId, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
@@ -17,6 +19,105 @@
     let parentTitle = $state('');
     let attachments = $state<Array<{ mimeType: string; data: string }>>([]);
     let fileInput: HTMLInputElement | null = $state(null);
+
+    // @ file mention state
+    let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
+    let mentionResults = $state<Array<{ path: string }>>([]);
+    let mentionPosition = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);
+    let mentionActiveIndex = $state(0);
+    let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+    let promptTextarea: HTMLTextAreaElement | null = $state(null);
+    const MENTION_DEBOUNCE_MS = 150;
+
+    function handleMentionInput() {
+        if (!promptTextarea) return;
+        const cursorPos = promptTextarea.selectionStart ?? 0;
+        const trigger = detectMentionAtCursor(prompt, cursorPos);
+
+        if (trigger) {
+            mentionTrigger = trigger;
+            mentionActiveIndex = 0;
+            const rect = getInputRect(promptTextarea);
+            mentionPosition = rect;
+
+            if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+            mentionSearchTimer = setTimeout(() => {
+                searchFiles(trigger.query);
+            }, MENTION_DEBOUNCE_MS);
+        } else {
+            closeMention();
+        }
+    }
+
+    async function searchFiles(query: string) {
+        if (!projectId) return;
+        const params = new URLSearchParams({ q: query, project: projectId });
+        try {
+            const res = await fetch(`/api/fs/search?${params.toString()}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            mentionResults = data.results || [];
+        } catch {
+            mentionResults = [];
+        }
+    }
+
+    function closeMention() {
+        mentionTrigger = null;
+        mentionResults = [];
+        mentionPosition = null;
+        mentionActiveIndex = 0;
+        if (mentionSearchTimer) {
+            clearTimeout(mentionSearchTimer);
+            mentionSearchTimer = null;
+        }
+    }
+
+    function handleMentionSelect(path: string) {
+        if (!mentionTrigger || !promptTextarea) return;
+        const { value: newValue, cursorPos } = insertMention(prompt, mentionTrigger.atIndex, mentionTrigger.query, path);
+        prompt = newValue;
+        closeMention();
+        requestAnimationFrame(() => {
+            if (promptTextarea) {
+                promptTextarea.focus();
+                promptTextarea.setSelectionRange(cursorPos, cursorPos);
+            }
+        });
+    }
+
+    function handleMentionClose() {
+        closeMention();
+        promptTextarea?.focus();
+    }
+
+    function handlePromptKeydown(e: KeyboardEvent) {
+        if (mentionTrigger && mentionResults.length > 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                mentionActiveIndex = (mentionActiveIndex + 1) % mentionResults.length;
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                mentionActiveIndex = (mentionActiveIndex - 1 + mentionResults.length) % mentionResults.length;
+                return;
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (mentionActiveIndex >= 0 && mentionActiveIndex < mentionResults.length) {
+                    handleMentionSelect(mentionResults[mentionActiveIndex].path);
+                }
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                closeMention();
+                return;
+            }
+        }
+    }
 
     function handleFileSelect(e: Event) {
         const files = (e.target as HTMLInputElement).files;
@@ -217,7 +318,7 @@
                         {/each}
                     </div>
                 {/if}
-                <textarea id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined}></textarea>
+                <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown}></textarea>
             </label>
             <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
             {#if hasProviders}
@@ -262,6 +363,14 @@
             </div>
         </form>
     </div>
+    <!-- @ file mention dropdown -->
+    <FileMentionDropdown
+        results={mentionResults}
+        position={mentionPosition}
+        activeIndex={mentionActiveIndex}
+        onSelect={handleMentionSelect}
+        onClose={handleMentionClose}
+    />
 </div>
 
 <style>

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -140,6 +141,14 @@ func mustJSON[T any](t *testing.T, body io.Reader) T {
 		t.Fatalf("decode JSON: %v", err)
 	}
 	return dest
+}
+
+// toAnySlice converts a nil or []any interface to []any safely.
+func toAnySlice(v any) []any {
+	if v == nil {
+		return []any{}
+	}
+	return v.([]any)
 }
 
 // createTestProject creates a project via the API and returns its ID.
@@ -432,6 +441,146 @@ func TestHandleFSPathValidation(t *testing.T) {
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+}
+
+func TestHandleFSSearch(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	// Create a test project with files
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, "src", "components"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "node_modules", "pkg"), 0o755)
+	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("readme"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "app.ts"), []byte("app"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "components", "Button.svelte"), []byte("button"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "utils.ts"), []byte("utils"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "node_modules", "pkg", "index.js"), []byte("pkg"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, ".hidden"), []byte("hidden"), 0o644)
+
+	// Register project
+	projectID := "test-search-project"
+	if err := s.store.CreateProject(&types.Project{ID: projectID, Name: "Test Search", Path: tmpDir}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	t.Run("searches files by name", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=app&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+		first := results[0].(map[string]any)
+		if first["path"] != "src/app.ts" {
+			t.Fatalf("expected src/app.ts, got %v", first["path"])
+		}
+	})
+
+	t.Run("searches files by path segment", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=src&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		if len(results) < 2 {
+			t.Fatalf("expected at least 2 results, got %d", len(results))
+		}
+	})
+
+	t.Run("returns all files with empty query", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		// Should have README.md, src/app.ts, src/utils.ts, src/components/Button.svelte (4 files)
+		// Excludes: node_modules/*, .hidden
+		if len(results) != 4 {
+			paths := make([]string, len(results))
+			for i, r := range results {
+				paths[i] = r.(map[string]any)["path"].(string)
+			}
+			t.Fatalf("expected 4 results, got %d: %v", len(results), paths)
+		}
+	})
+
+	t.Run("excludes ignored directories", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=pkg&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := toAnySlice(result["results"])
+		if len(results) != 0 {
+			t.Fatalf("expected 0 results (node_modules excluded), got %d", len(results))
+		}
+	})
+
+	t.Run("excludes hidden files", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=hidden&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := toAnySlice(result["results"])
+		if len(results) != 0 {
+			t.Fatalf("expected 0 results (.hidden excluded), got %d", len(results))
+		}
+	})
+
+	t.Run("rejects missing project parameter", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=test", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects path traversal via project param", func(t *testing.T) {
+		// Try to search a nonexistent project that would resolve outside allowed path
+		req := testRequest(http.MethodGet, "/api/fs/search?q=test&project=../../etc", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("limits results to 10", func(t *testing.T) {
+		// Create many files
+		for i := 0; i < 20; i++ {
+			filename := filepath.Join(tmpDir, fmt.Sprintf("file%02d.txt", i))
+			os.WriteFile(filename, []byte(fmt.Sprintf("content %d", i)), 0o644)
+		}
+		req := testRequest(http.MethodGet, "/api/fs/search?q=file&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		if len(results) > 10 {
+			t.Fatalf("expected at most 10 results, got %d", len(results))
 		}
 	})
 }

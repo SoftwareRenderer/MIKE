@@ -37,6 +37,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)
 	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
 	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
+	s.mux.HandleFunc("/api/fs/search", s.handleFSSearch)
 	s.mux.HandleFunc("/api/fs", s.handleFS)
 
 	// Projects

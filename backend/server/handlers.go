@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kanban/backend/git"
 	"kanban/backend/managers"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
@@ -386,6 +387,145 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 
 	JSONResponse(w, http.StatusOK, result)
 }
+
+// handleFSSearch recursively searches for files under a project or task worktree.
+// Query params: q (search term), project (project ID), task (task ID — optional, uses worktree).
+// Returns up to 10 matching files with paths relative to the search root.
+func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project")
+	if projectID == "" {
+		JSONError(w, http.StatusBadRequest, "project parameter is required")
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	taskID := r.URL.Query().Get("task")
+
+	// Resolve search root from project or task worktree
+	var searchRoot string
+	var err error
+
+	if taskID != "" {
+		// Search within task worktree.
+		// Verify the task belongs to this project first.
+		if _, lookupErr := s.store.GetProject(projectID); lookupErr != nil {
+			JSONError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		task, taskErr := s.store.GetTask(projectID, taskID)
+		if taskErr != nil {
+			JSONError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		_ = task // task exists and belongs to project
+		searchRoot, err = s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, "failed to resolve worktree path: "+err.Error())
+			return
+		}
+		// Worktree path is derived from server-side config — no need for client-side path validation.
+		// Just ensure it's under the workspace directory.
+		searchRoot = filepath.Clean(searchRoot)
+		cfg, cfgErr := s.configStore.GetConfig()
+		if cfgErr == nil && cfg.WorkspaceDir != "" {
+			wtDir := cfg.WorkspaceDir
+			if wtOverride := os.Getenv("WORKTREES_DIR"); wtOverride != "" {
+				wtDir = wtOverride
+			}
+			cleanWT := filepath.Clean(wtDir)
+			if !strings.HasPrefix(searchRoot, cleanWT+string(os.PathSeparator)) && searchRoot != cleanWT {
+				JSONError(w, http.StatusForbidden, "worktree path outside allowed workspace")
+				return
+			}
+		}
+	} else {
+		// Search within project root
+		project, lookupErr := s.store.GetProject(projectID)
+		if lookupErr != nil {
+			JSONError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		searchRoot = project.Path
+		// Validate the resolved search root is within the allowed project directory
+		searchRoot = filepath.Clean(searchRoot)
+		if err := s.validateFSPath(searchRoot, r); err != nil {
+			JSONError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+
+	// Check that the search root exists
+	if _, statErr := os.Stat(searchRoot); statErr != nil {
+		JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
+		return
+	}
+
+	// Recursively walk and collect matching files
+	type searchResult struct {
+		Path string `json:"path"` // relative to search root
+	}
+	var results []searchResult
+
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		rel, _ := filepath.Rel(searchRoot, path)
+		if rel == "." {
+			return nil
+		}
+
+		// Skip hidden files/dirs (starting with .)
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip ignored directories
+		if git.ShouldIgnorePath(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Match: filename or relative path contains query (case-insensitive)
+		if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
+			return nil
+		}
+
+		results = append(results, searchResult{Path: rel})
+		if len(results) >= 10 {
+			return errStopWalk
+		}
+		return nil
+	})
+	_ = err // ignore errStopWalk
+
+	// Sort results for deterministic output
+	sort.SliceStable(results, func(i, j int) bool {
+		return strings.ToLower(results[i].Path) < strings.ToLower(results[j].Path)
+	})
+
+	JSONResponse(w, http.StatusOK, map[string]any{
+		"root":    searchRoot,
+		"results": results,
+	})
+}
+
+// errStopWalk is a sentinel error to stop filepath.WalkDir early.
+var errStopWalk = fmt.Errorf("stop walk: limit reached")
 
 // validateFSPath checks that the requested path is within an allowed root.
 // If a "project" query param is present, it looks up the project and restricts

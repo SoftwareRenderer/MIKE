@@ -1,6 +1,8 @@
 <script lang="ts">
     import { marked } from 'marked';
     import ToolCall from './ToolCall.svelte';
+    import FileMentionDropdown from '../FileMentionDropdown.svelte';
+    import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
     interface ToolCallInfo {
         toolId: string;
@@ -38,9 +40,11 @@
         taskStatus?: string;
         onNavigateTask?: (taskId: string) => void;
         queued?: boolean; // true if message is pending (sent while offline)
+        projectId?: string;
+        taskId?: string;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false }: Props = $props();
+    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
 
     let reasoningUserToggled = $state(false);
     let reasoningUserValue = $state(false);
@@ -105,6 +109,77 @@
     let textareaEl: HTMLTextAreaElement | null = $state(null);
     let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
     let editFileInput: HTMLInputElement | null = $state(null);
+
+    // @ file mention state (for edit mode)
+    let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
+    let mentionResults = $state<Array<{ path: string }>>([]);
+    let mentionPosition = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);
+    let mentionActiveIndex = $state(0);
+    let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+    const MENTION_DEBOUNCE_MS = 150;
+
+    function handleMentionInput() {
+        if (!textareaEl || !isEditing) return;
+        const cursorPos = textareaEl.selectionStart ?? 0;
+        const trigger = detectMentionAtCursor(editContent, cursorPos);
+
+        if (trigger) {
+            mentionTrigger = trigger;
+            mentionActiveIndex = 0;
+            const rect = getInputRect(textareaEl);
+            mentionPosition = rect;
+
+            if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+            mentionSearchTimer = setTimeout(() => {
+                searchFiles(trigger.query);
+            }, MENTION_DEBOUNCE_MS);
+        } else {
+            closeMention();
+        }
+    }
+
+    async function searchFiles(query: string) {
+        if (!projectId) return;
+        const params = new URLSearchParams({ q: query, project: projectId });
+        if (msgTaskId) params.set('task', msgTaskId);
+        try {
+            const res = await fetch(`/api/fs/search?${params.toString()}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            mentionResults = data.results || [];
+        } catch {
+            mentionResults = [];
+        }
+    }
+
+    function closeMention() {
+        mentionTrigger = null;
+        mentionResults = [];
+        mentionPosition = null;
+        mentionActiveIndex = 0;
+        if (mentionSearchTimer) {
+            clearTimeout(mentionSearchTimer);
+            mentionSearchTimer = null;
+        }
+    }
+
+    function handleMentionSelect(path: string) {
+        if (!mentionTrigger || !textareaEl) return;
+        const { value: newValue, cursorPos } = insertMention(editContent, mentionTrigger.atIndex, mentionTrigger.query, path);
+        editContent = newValue;
+        closeMention();
+        requestAnimationFrame(() => {
+            if (textareaEl) {
+                textareaEl.focus();
+                textareaEl.setSelectionRange(cursorPos, cursorPos);
+            }
+        });
+    }
+
+    function handleMentionClose() {
+        closeMention();
+        textareaEl?.focus();
+    }
 
     $effect(() => {
         editContent = content;
@@ -208,6 +283,32 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        // Handle @ mention dropdown navigation
+        if (mentionTrigger && mentionResults.length > 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                mentionActiveIndex = (mentionActiveIndex + 1) % mentionResults.length;
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                mentionActiveIndex = (mentionActiveIndex - 1 + mentionResults.length) % mentionResults.length;
+                return;
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (mentionActiveIndex >= 0 && mentionActiveIndex < mentionResults.length) {
+                    handleMentionSelect(mentionResults[mentionActiveIndex].path);
+                }
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                closeMention();
+                return;
+            }
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submitEdit();
@@ -243,6 +344,7 @@
                         bind:this={textareaEl}
                         bind:value={editContent}
                         onkeydown={handleKeydown}
+                        oninput={handleMentionInput}
                         rows="3"
                         aria-label="Edit message content"
                     ></textarea>
@@ -284,6 +386,14 @@
                         </button>
                     </div>
                 </div>
+                <!-- @ file mention dropdown (edit mode) -->
+                <FileMentionDropdown
+                    results={mentionResults}
+                    position={mentionPosition}
+                    activeIndex={mentionActiveIndex}
+                    onSelect={handleMentionSelect}
+                    onClose={handleMentionClose}
+                />
             {:else}
                 {#if attachments && attachments.length > 0}
                     <div class="message-images">
