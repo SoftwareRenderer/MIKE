@@ -2,10 +2,18 @@
     import { onMount, onDestroy } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft } from '$lib/storage';
-    import { EditorView, basicSetup } from 'codemirror';
+    import { EditorView } from 'codemirror';
     import { EditorState } from '@codemirror/state';
+    import { keymap, ViewPlugin } from '@codemirror/view';
+    import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+    import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle } from '@codemirror/language';
+    import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+    import { highlightSelectionMatches } from '@codemirror/search';
+    import { drawSelection, dropCursor, lineNumbers, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
     import { tags } from '@lezer/highlight';
+    import CustomSearchPanel from './CustomSearchPanel.svelte';
+    import { mount, unmount } from 'svelte';
     import { javascript } from '@codemirror/lang-javascript';
     import { python } from '@codemirror/lang-python';
     import { go } from '@codemirror/lang-go';
@@ -109,7 +117,10 @@
     }
 
     let editorEl: HTMLDivElement | null = null;
+    let searchContainerEl: HTMLDivElement | null = null;
     let view: EditorView | null = null;
+    let searchVisible = $state(false);
+    let searchApp: any = null;
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -140,11 +151,86 @@
         onSymbolsUpdate(symbols);
     }
 
+    function openSearchPanel() {
+        if (!view || !searchContainerEl) return;
+        searchVisible = true;
+        requestAnimationFrame(() => {
+            if (searchContainerEl && !searchApp) {
+                searchApp = mount(CustomSearchPanel, {
+                    target: searchContainerEl,
+                    props: {
+                        view: view,
+                        onClose: () => {
+                            searchVisible = false;
+                            unmount(searchApp);
+                            searchApp = null;
+                            view?.focus();
+                        },
+                    },
+                });
+            }
+        });
+    }
+
+    function closeSearchPanel() {
+        searchVisible = false;
+        if (searchApp) {
+            unmount(searchApp);
+            searchApp = null;
+        }
+        view?.focus();
+    }
+
+    // Custom keymap to replace default search with our panel
+    const searchKeymapOverride = keymap.of([
+        {
+            key: 'Ctrl-f',
+            macKey: 'Cmd-f',
+            run: () => {
+                openSearchPanel();
+                return true;
+            },
+        },
+        {
+            key: 'Ctrl-h',
+            macKey: 'Cmd-h',
+            run: () => {
+                openSearchPanel();
+                return true;
+            },
+        },
+    ]);
+
     function createEditor() {
         if (!editorEl) return;
         const langSupport = getLanguageSupport(filePath);
         const extensions = [
-            basicSetup,
+            // Explicit setup (replaces basicSetup, excludes searchKeymap)
+            lineNumbers(),
+            highlightActiveLineGutter(),
+            highlightSpecialChars(),
+            history(),
+            foldGutter(),
+            drawSelection(),
+            dropCursor(),
+            EditorState.allowMultipleSelections.of(true),
+            indentOnInput(),
+            syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+            bracketMatching(),
+            closeBrackets(),
+            autocompletion(),
+            rectangularSelection(),
+            crosshairCursor(),
+            highlightActiveLine(),
+            highlightSelectionMatches({ style: true }),
+            searchKeymapOverride,
+            keymap.of([
+                ...closeBracketsKeymap,
+                ...defaultKeymap,
+                ...historyKeymap,
+                ...foldKeymap,
+                ...completionKeymap,
+            ]),
             githubDarkTheme,
             syntaxHighlighting(githubDarkHighlight),
             EditorView.updateListener.of((update) => {
@@ -306,6 +392,10 @@
     });
 
     onDestroy(() => {
+        if (searchApp) {
+            unmount(searchApp);
+            searchApp = null;
+        }
         view?.destroy();
         window.removeEventListener('jump-to-line', handleJumpToLine);
     });
@@ -357,6 +447,7 @@
             </div>
         {:else}
             <div class="editor-wrapper" bind:this={editorEl}></div>
+            <div class="search-container" bind:this={searchContainerEl}></div>
         {/if}
     </div>
 
@@ -517,6 +608,18 @@
     .editor-wrapper {
         flex: 1;
         overflow: hidden;
+    }
+
+    .search-container {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        pointer-events: none;
+    }
+    .search-container > * {
+        pointer-events: auto;
     }
 
     .confirm-overlay {
