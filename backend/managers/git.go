@@ -3,6 +3,7 @@ package managers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -265,6 +266,11 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 		if task.Branch != "" && strings.Contains(err.Error(), "worktree not found") {
 			result, err = h.getTaskCommitsFromProject(projectID, task, baseRef)
 		}
+		// Orphaned worktree — return 404
+		if strings.Contains(err.Error(), "exit status 128") {
+			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
+			return
+		}
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
 			return
@@ -309,7 +315,9 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 	ref := fmt.Sprintf("%s..%s", baseRef, target)
 	out, err := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI", ref).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("git log from project: %s: %w", string(out), err)
+		// Branch may not exist (e.g., orphaned worktree). Return empty commits.
+		log.Printf("[git] task=%s branch %s not found in project, returning empty commits: %v", task.ID, target, err)
+		return result, nil
 	}
 
 	for line := range strings.SplitSeq(string(out), "\n") {
@@ -382,6 +390,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		// Fall back to project repo if task has a branch.
 		if task.Branch != "" && strings.Contains(err.Error(), "worktree not found") {
 			taskDiff, err = h.getTaskDiffFromProject(projectID, taskID, task, baseRef, headRef)
+		}
+		// Orphaned worktree — return 404
+		if strings.Contains(err.Error(), "exit status 128") {
+			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
+			return
 		}
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))

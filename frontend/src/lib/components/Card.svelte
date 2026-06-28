@@ -2,6 +2,7 @@
     import type { Task, Provider } from '$lib/types';
     import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
+    import ToggleSwitch from './ToggleSwitch.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { fade } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
@@ -318,7 +319,7 @@
     let titleInputRef: HTMLInputElement | null = $state(null);
     let editPlanMode = $state(false);
     let editAutoCommit = $state(false);
-    let editAutoPr = $state(false);
+    let editMergeOnCommit = $state(true);
     let editModel = $state('');
     let editUrl = $state('');
     let editReasoningEffort = $state('');
@@ -335,7 +336,7 @@
         titleDraft = task.title;
         editPlanMode = task.plan_mode ?? false;
         editAutoCommit = task.auto_commit ?? false;
-        editAutoPr = task.auto_pr ?? false;
+        editMergeOnCommit = task.merge_on_commit ?? true;
         editModel = task.model_name ?? '';
         editUrl = task.llama_server_url ?? '';
         editReasoningEffort = task.reasoning_effort ?? '';
@@ -352,14 +353,14 @@
         const updates: Record<string, unknown> = { title: trimmed };
         updates.plan_mode = editPlanMode;
         updates.auto_commit = editAutoCommit;
-        updates.auto_pr = editAutoPr;
+        updates.merge_on_commit = editMergeOnCommit;
         if (editModel) updates.model_name = editModel;
         if (editUrl) updates.llama_server_url = editUrl;
         if (editReasoningEffort) updates.reasoning_effort = editReasoningEffort;
         task.title = trimmed;
         task.plan_mode = editPlanMode;
         task.auto_commit = editAutoCommit;
-        task.auto_pr = editAutoPr;
+        task.merge_on_commit = editMergeOnCommit;
         if (editModel) task.model_name = editModel;
         if (editUrl) task.llama_server_url = editUrl;
         if (editReasoningEffort) task.reasoning_effort = editReasoningEffort;
@@ -378,7 +379,7 @@
         titleDraft = '';
         editPlanMode = false;
         editAutoCommit = false;
-        editAutoPr = false;
+        editMergeOnCommit = true;
         editModel = '';
         editUrl = '';
         editReasoningEffort = '';
@@ -609,22 +610,55 @@
                 {/if}
                 <div class="card-edit-options">
                     {#if !isAgentSelected()}
-                    <label class="card-edit-checkbox">
-                        <input type="checkbox" bind:checked={editPlanMode} />
-                        <span class="card-edit-option-text">
-                            <span class="card-edit-option-title">Plan mode</span>
-                            <span class="card-edit-option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
-                        </span>
-                    </label>
+                    <div class="config-row">
+                        <div class="config-info">
+                            <span class="config-label">Plan mode</span>
+                            <span class="help-icon" title="AI decomposes work into subtasks on the board, then executes after approval">
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                </svg>
+                            </span>
+                        </div>
+                        <ToggleSwitch bind:checked={editPlanMode} ariaLabel="Plan mode" />
+                    </div>
                     {/if}
-                    <label class="card-edit-checkbox">
-                        <input type="checkbox" bind:checked={editAutoCommit} />
-                        <span>Auto-commit on completion</span>
-                    </label>
-                    <label class="card-edit-checkbox" class:disabled={!editAutoCommit}>
-                        <input type="checkbox" bind:checked={editAutoPr} disabled={!editAutoCommit} />
-                        <span>Auto-create PR branch</span>
-                    </label>
+                </div>
+                <div class="card-edit-section">
+                    <div class="section-label">Repository</div>
+                    <div class="config-row config-row-stacked">
+                        <div class="config-info">
+                            <span class="config-label">Work branch</span>
+                            <span class="help-icon" title="Merge changes into main when the task is complete, or keep them on a separate branch">
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                </svg>
+                            </span>
+                        </div>
+                        <div class="radio-group">
+                            <label class="radio-label" class:active={editMergeOnCommit}>
+                                <input type="radio" name="edit-branch-mode" checked={editMergeOnCommit} onchange={() => editMergeOnCommit = true} />
+                                <span class="radio-text">Merge to main</span>
+                            </label>
+                            <label class="radio-label" class:active={!editMergeOnCommit}>
+                                <input type="radio" name="edit-branch-mode" checked={!editMergeOnCommit} onchange={() => editMergeOnCommit = false} />
+                                <span class="radio-text">Keep separate</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="config-row">
+                        <div class="config-info">
+                            <span class="config-label">Auto-commit</span>
+                            <span class="help-icon" title="Automatically commit changes when the task completes">
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                </svg>
+                            </span>
+                        </div>
+                        <ToggleSwitch bind:checked={editAutoCommit} ariaLabel="Auto-commit on completion" />
+                    </div>
                 </div>
             </div>
             <div class="card-edit-footer">
@@ -757,22 +791,6 @@
                         </svg>
                         Pi Coding Agent
                     </div>
-                {:else if isConfigurable}
-                    <button
-                        type="button"
-                        class="badge model-badge"
-                        class:open={modelPickerOpen}
-                        style="background: {modelBadge.color}22; color: {modelBadge.color}"
-                        onclick={togglePicker}
-                        bind:this={modelBadgeRef}
-                        aria-label="Change model"
-                        aria-haspopup="listbox"
-                        aria-expanded={modelPickerOpen}
-                        title="Change model"
-                    >
-                        {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
-                        <svg class="badge-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
                 {:else}
                     <div class="badge model-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
                         {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
@@ -1154,6 +1172,103 @@
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         font-weight: 400;
+    }
+    .card-edit-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+    .section-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-tertiary);
+    }
+    .config-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .config-row-stacked {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .config-info {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+    }
+    .config-text {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .config-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+    .config-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .help-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-text-tertiary);
+        cursor: help;
+        flex-shrink: 0;
+    }
+    .help-icon:hover {
+        color: var(--color-text-secondary);
+    }
+    .config-desc {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+    }
+    .radio-group {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+    .radio-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        user-select: none;
+        flex: 1;
+        justify-content: center;
+    }
+    .radio-label:first-child {
+        border-right: 1px solid var(--color-border);
+    }
+    .radio-label.active {
+        background: var(--color-accent);
+        color: white;
+    }
+    .radio-label:hover:not(.active) {
+        background: var(--color-surface-3);
+    }
+    .radio-label input[type="radio"] {
+        display: none;
+    }
+    .radio-text {
+        white-space: nowrap;
     }
     .card-edit-footer {
         display: flex;

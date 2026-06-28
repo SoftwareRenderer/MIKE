@@ -45,7 +45,7 @@ export interface Task {
     reasoning_effort?: string;
     max_consecutive_failed_turns: number;
     auto_commit: boolean;
-    auto_pr: boolean;
+    merge_on_commit: boolean;
     plan_mode: boolean;
     parent_task_id?: string;
     title_generating: boolean;
