@@ -67,6 +67,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		return nil, err
 	}
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
+	defaultMergeOnCommitRaw, _ := cs.store.GetConfigValue("default_merge_on_commit")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
@@ -78,6 +79,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(defaultAutoCommitRaw); err == nil && v != nil {
 		cfg.DefaultAutoCommit = v
+	}
+	if v, err := parseBoolPtr(defaultMergeOnCommitRaw); err == nil && v != nil {
+		cfg.DefaultMergeOnCommit = v
 	}
 	if v, err := parseBoolPtr(defaultPlanModeRaw); err == nil && v != nil {
 		cfg.DefaultPlanMode = v
@@ -122,6 +126,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.DefaultMergeOnCommit != nil {
+		if err := cs.store.SetConfigValue("default_merge_on_commit", fmt.Sprintf("%t", *c.DefaultMergeOnCommit)); err != nil {
+			return err
+		}
+	}
 	if c.DefaultPlanMode != nil {
 		if err := cs.store.SetConfigValue("default_plan_mode", fmt.Sprintf("%t", *c.DefaultPlanMode)); err != nil {
 			return err
@@ -141,8 +150,9 @@ type configResponse struct {
 	DatabasePath          string           `json:"database_path"`
 	Providers             []types.Provider `json:"providers"`
 	DefaultProvider       string           `json:"default_provider"`
-	DefaultAutoCommit     *bool            `json:"default_auto_commit,omitempty"`
-	DefaultPlanMode       *bool            `json:"default_plan_mode,omitempty"`
+	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
+	DefaultMergeOnCommit  *bool            `json:"default_merge_on_commit"`
+	DefaultPlanMode       *bool            `json:"default_plan_mode"`
 	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
 	EncryptionEnabled     bool             `json:"encryption_enabled"`
 }
@@ -176,6 +186,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			Providers:             cfg.Providers,
 			DefaultProvider:       cfg.DefaultProvider,
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
+			DefaultMergeOnCommit:  cfg.DefaultMergeOnCommit,
 			DefaultPlanMode:       cfg.DefaultPlanMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),
@@ -227,6 +238,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultAutoCommit = &v
 			}
 		}
+		if dmc, ok := updates["default_merge_on_commit"]; ok {
+			if v, ok := dmc.(bool); ok {
+				current.DefaultMergeOnCommit = &v
+			}
+		}
 		if dpm, ok := updates["default_plan_mode"]; ok {
 			if v, ok := dpm.(bool); ok {
 				current.DefaultPlanMode = &v
@@ -250,6 +266,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			Providers:             current.Providers,
 			DefaultProvider:       current.DefaultProvider,
 			DefaultAutoCommit:     current.DefaultAutoCommit,
+			DefaultMergeOnCommit:  current.DefaultMergeOnCommit,
 			DefaultPlanMode:       current.DefaultPlanMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),

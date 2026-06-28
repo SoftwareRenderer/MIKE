@@ -82,7 +82,7 @@
     </div>
     <div class="card-list">
         {#if onAddTask}
-            <button class="add-task-btn" onclick={onAddTask} title="Add a new task">+ Add Task</button>
+            <button class="add-task-btn" onclick={onAddTask} title="Create a new task">+ Create Task</button>
         {/if}
         {#each tasks as task (task.id)}
             <div class="task-wrapper" transition:fade={{ duration: 200 }}>

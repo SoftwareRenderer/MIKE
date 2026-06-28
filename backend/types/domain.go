@@ -21,6 +21,7 @@ type Task struct {
 	ReasoningEffort           string    `json:"reasoning_effort"`
 	MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"`
 	AutoCommit                bool      `json:"auto_commit"`
+	MergeOnCommit             bool      `json:"merge_on_commit"`
 	PlanMode                  bool      `json:"plan_mode"`
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`
@@ -56,8 +57,9 @@ type Config struct {
 	DatabasePath          string     `json:"database_path"`
 	Providers             []Provider `json:"providers"`
 	DefaultProvider       string     `json:"default_provider"`
-	DefaultAutoCommit     *bool      `json:"default_auto_commit,omitempty"`
-	DefaultPlanMode       *bool      `json:"default_plan_mode,omitempty"`
+	DefaultAutoCommit     *bool      `json:"default_auto_commit"`
+	DefaultMergeOnCommit  *bool      `json:"default_merge_on_commit"`
+	DefaultPlanMode       *bool      `json:"default_plan_mode"`
 	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
 }
 

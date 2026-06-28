@@ -5,6 +5,7 @@
     import { config as configStore, showCreateTask, board as boardStore } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
+    import ToggleSwitch from './ToggleSwitch.svelte';
     import { createFocusTrap } from '$lib/a11y';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
@@ -12,8 +13,9 @@
 
     let prompt = $state('');
     let autoCommit = $state(false);
-    let autoPr = $state(false);
+
     let planMode = $state(false);
+    let mergeOnCommit = $state(true);
     let loading = $state(false);
     let error = $state('');
     let parentTitle = $state('');
@@ -173,9 +175,11 @@
                 }
             }
         }
-        // Set default plan mode from config on first load only
+        // Set defaults from config on first load only
         if (cfg && !configLoaded) {
             configLoaded = true;
+            autoCommit = cfg.default_auto_commit ?? false;
+            mergeOnCommit = cfg.default_merge_on_commit ?? true;
             planMode = cfg.default_plan_mode ?? false;
         }
     });
@@ -219,8 +223,8 @@
         const taskData: Record<string, unknown> = {
             prompt: prompt.trim(),
             auto_commit: autoCommit,
-            auto_pr: autoPr,
             plan_mode: planMode,
+            merge_on_commit: mergeOnCommit,
         };
         if (attachments.length > 0) {
             taskData.attachments = JSON.stringify(attachments);
@@ -335,22 +339,46 @@
             {/if}
             <div class="options">
                 {#if !isAgentSelected()}
-                <label class="checkbox-label">
-                    <input type="checkbox" bind:checked={planMode} />
-                    <span class="option-text">
-                        <span class="option-title">Plan mode</span>
-                        <span class="option-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
-                    </span>
-                </label>
+                <div class="config-row">
+                    <div class="config-info">
+                        <div class="config-text">
+                            <span class="config-label">Plan mode</span>
+                            <span class="config-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
+                        </div>
+                    </div>
+                    <ToggleSwitch bind:checked={planMode} ariaLabel="Plan mode" />
+                </div>
                 {/if}
-                <label class="checkbox-label">
-                    <input type="checkbox" bind:checked={autoCommit} />
-                    Auto-commit on completion
-                </label>
-                <label class="checkbox-label" class:disabled={!autoCommit}>
-                    <input type="checkbox" bind:checked={autoPr} disabled={!autoCommit} />
-                    Auto-create PR branch
-                </label>
+            </div>
+            <div class="options-section">
+                <div class="section-label">Repository</div>
+                <div class="config-row">
+                    <div class="config-info">
+                        <div class="config-text">
+                            <span class="config-label">Work branch</span>
+                            <span class="config-desc">Merge changes into main when the task is complete, or keep them on a separate branch</span>
+                        </div>
+                    </div>
+                    <div class="radio-group">
+                        <label class="radio-label" class:active={mergeOnCommit}>
+                            <input type="radio" name="branch-mode" checked={mergeOnCommit} onchange={() => mergeOnCommit = true} />
+                            <span class="radio-text">Merge to main</span>
+                        </label>
+                        <label class="radio-label" class:active={!mergeOnCommit}>
+                            <input type="radio" name="branch-mode" checked={!mergeOnCommit} onchange={() => mergeOnCommit = false} />
+                            <span class="radio-text">Keep separate</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="config-row">
+                    <div class="config-info">
+                        <div class="config-text">
+                            <span class="config-label">Auto-commit</span>
+                            <span class="config-desc">Automatically commit changes when the task completes</span>
+                        </div>
+                    </div>
+                    <ToggleSwitch bind:checked={autoCommit} ariaLabel="Auto-commit on completion" />
+                </div>
             </div>
             {#if error}
                 <div id="task-error" class="error" role="alert">{error}</div>
@@ -507,6 +535,83 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+    }
+    .options-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+    .section-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-tertiary);
+    }
+    .config-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .config-info {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+    }
+    .config-text {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .config-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+    .config-desc {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+    }
+    .radio-group {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+    .radio-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        user-select: none;
+        flex: 1;
+        justify-content: center;
+    }
+    .radio-label:first-child {
+        border-right: 1px solid var(--color-border);
+    }
+    .radio-label.active {
+        background: var(--color-accent);
+        color: white;
+    }
+    .radio-label:hover:not(.active) {
+        background: var(--color-surface-3);
+    }
+    .radio-label input[type="radio"] {
+        display: none;
+    }
+    .radio-text {
+        white-space: nowrap;
     }
     .model-select-row {
         display: flex;

@@ -596,7 +596,15 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		modelName = task.ModelName
 	}
 
+	// Generate branch name: use slugified title for separate branches, task ID for merge-to-main
 	branchName := fmt.Sprintf("task/%s", task.ID)
+	if !task.MergeOnCommit && task.Title != "" {
+		branchName = "task/" + slugifyBranchName(task.Title)
+		// Ensure uniqueness: append task ID suffix if branch already exists
+		if te.branchExists(projectID, branchName) {
+			branchName = branchName + "-" + taskID[:8]
+		}
+	}
 	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
@@ -776,6 +784,61 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
 }
 
+// mergeBranch merges the task's branch into the origin branch.
+// Returns nil on success or if merge is not applicable.
+func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) error {
+	project, err := te.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+
+	// Determine origin branch
+	originBranch := project.OriginBranch
+	if originBranch == "" {
+		originBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
+			return nil
+		}
+	}
+	originBranch = strings.TrimSpace(originBranch)
+	if originBranch == "" || originBranch == "HEAD" {
+		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
+		return nil
+	}
+	taskBranch := task.Branch
+	if taskBranch == "" {
+		log.Printf("[merge] task=%s no task branch set, skipping merge", taskID)
+		return nil
+	}
+
+	// Stash any working tree changes
+	hadStash := false
+	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban auto-merge stash"); err == nil {
+		hadStash = true
+	}
+	defer func() {
+		if hadStash {
+			_ = te.worktreeMgr.GitRunInProject(projectID, "stash", "pop")
+		}
+	}()
+
+	// Checkout origin branch
+	if err := te.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", originBranch); err != nil {
+		return fmt.Errorf("checkout origin branch %s: %w", originBranch, err)
+	}
+
+	// Merge the task branch
+	mergeOut, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
+	if mergeErr != nil {
+		_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+		return fmt.Errorf("merge failed: %w (output: %s)", mergeErr, mergeOut)
+	}
+
+	log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, originBranch)
+	return nil
+}
+
 // -- Helper functions --
 
 var wordRe = regexp.MustCompile(`\S+`)
@@ -796,6 +859,36 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 
 func estimateTotalTokens(content, reasoning string) int {
 	return estimateTokensFromText(content) + estimateTokensFromText(reasoning)
+}
+
+// branchExists checks if a git branch exists in the project.
+func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
+	_, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--verify", branchName)
+	return err == nil
+}
+
+// slugifyBranchName converts a task title into a git-friendly branch name.
+// E.g. "Fix login bug #123" -> "fix-login-bug-123"
+func slugifyBranchName(title string) string {
+	// Convert to lowercase
+	s := strings.ToLower(title)
+	// Replace non-alphanumeric chars (except hyphens) with hyphens
+	var result []rune
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			result = append(result, r)
+		} else if len(result) > 0 && result[len(result)-1] != '-' {
+			result = append(result, '-')
+		}
+	}
+	// Trim leading/trailing hyphens
+	out := string(result)
+	out = strings.Trim(out, "-")
+	// Truncate to 78 chars (git branch name limit is 255, leave room for "task/" prefix)
+	if len(out) > 78 {
+		out = out[:78]
+	}
+	return out
 }
 
 

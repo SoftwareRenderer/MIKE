@@ -106,6 +106,9 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				if cfg.DefaultAutoCommit != nil && task.AutoCommit == false {
 					task.AutoCommit = *cfg.DefaultAutoCommit
 				}
+				if cfg.DefaultMergeOnCommit != nil && task.MergeOnCommit == false {
+					task.MergeOnCommit = *cfg.DefaultMergeOnCommit
+				}
 				if cfg.DefaultPlanMode != nil && task.PlanMode == false {
 					task.PlanMode = *cfg.DefaultPlanMode
 				}
@@ -467,8 +470,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Merge worktree into origin branch
-	mergeErr := h.mergeWorktreeIntoOrigin(projectID, taskID, task)
+	// Merge worktree into origin branch (skip if merge_on_commit is false)
+	var mergeErr error
+	if task.MergeOnCommit {
+		mergeErr = h.mergeWorktreeIntoOrigin(projectID, taskID, task)
+	}
 	if mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
 		// Log merge error as system message in the task thread

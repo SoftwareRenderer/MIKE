@@ -923,7 +923,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                                     </div>
                                 {/each}
                                 {#if section.id === 'backlog'}
-                                    <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Add a new task">+ Add Task</button>
+                                    <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Create a new task">+ Create Task</button>
                                 {/if}
                             </div>
                             {/if}

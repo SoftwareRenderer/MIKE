@@ -26,6 +26,7 @@
     let workspaceDir = $state('');
     let defaultProvider = $state('');
     let defaultAutoCommit = $state(false);
+    let defaultMergeOnCommit = $state(true);
     let defaultPlanMode = $state(false);
     let defaultMaxFailedTurns = $state(3);
     let loading = $state(false);
@@ -161,6 +162,7 @@
         workspaceDir = config?.workspace_dir || '';
         defaultProvider = config?.default_provider || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
+        defaultMergeOnCommit = config?.default_merge_on_commit ?? true;
         defaultPlanMode = config?.default_plan_mode ?? false;
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
@@ -487,6 +489,7 @@
                 providers: savedProviders,
                 default_provider: defaultProvider,
                 default_auto_commit: defaultAutoCommit,
+                default_merge_on_commit: defaultMergeOnCommit,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
             });
@@ -892,28 +895,26 @@
 
                 <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span id="toggle-autocommit" class="toggle-label">Auto-commit</span>
-                        <span class="help-icon" title="Automatically commit changes when the task completes">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                            </svg>
-                        </span>
+                        <span id="toggle-planmode" class="toggle-label">Plan mode</span>
+                        <span class="toggle-desc">AI decomposes work into subtasks on the board before executing</span>
                     </div>
-                    <ToggleSwitch bind:checked={defaultAutoCommit} ariaLabel="Auto-commit" />
+                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" />
                 </div>
 
                 <div class="toggle-field">
                     <div class="toggle-label-group">
-                        <span id="toggle-planmode" class="toggle-label">Plan mode</span>
-                        <span class="help-icon" title="AI decomposes work into subtasks on the board before executing">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                            </svg>
-                        </span>
+                        <span id="toggle-mergeoncommit" class="toggle-label">Merge to main</span>
+                        <span class="toggle-desc">Merge changes into main when the task is complete</span>
                     </div>
-                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" />
+                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Merge to main" />
+                </div>
+
+                <div class="toggle-field">
+                    <div class="toggle-label-group">
+                        <span id="toggle-autocommit" class="toggle-label">Auto-commit</span>
+                        <span class="toggle-desc">Automatically commit changes when the task completes</span>
+                    </div>
+                    <ToggleSwitch bind:checked={defaultAutoCommit} ariaLabel="Auto-commit" />
                 </div>
 
                 <div class="field-row">
@@ -1196,13 +1197,17 @@
     }
     .toggle-label-group {
         display: flex;
-        align-items: center;
-        gap: 8px;
+        flex-direction: column;
+        gap: 2px;
     }
     .toggle-label {
         font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
+    }
+    .toggle-desc {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
     }
     /* Field row (inline label + input) */
     .field-row {
