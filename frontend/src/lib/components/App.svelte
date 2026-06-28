@@ -119,6 +119,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let mobileMenuOpen = $state(false);
     let isMobile = $derived(false);
     let isAuthenticated = $state(false);
+    let isLoadingAuth = $state(true);
     let hasProviders = $derived(!!cfg?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
@@ -381,8 +382,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 setAppStreamRef(appStream);
                 await loadAppData();
             }
+            isLoadingAuth = false;
         } catch (e) {
             console.error('Failed to check auth:', e);
+            isLoadingAuth = false;
         }
     });
 
@@ -603,7 +606,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 </script>
 
 <!-- Login gate -->
-{#if !isAuthenticated}
+{#if isLoadingAuth}
+    <div class="loading-screen"></div>
+{:else if !isAuthenticated}
     <LoginModal onClose={async () => {
         isAuthenticated = true;
         await loadAppData();
@@ -899,6 +904,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 </svelte:head>
 
 <style>
+    /* -- Loading screen -- */
+    .loading-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: #000;
+    }
+
     /* -- Reconnecting banner -- */
     .reconnecting-banner {
         position: fixed;
