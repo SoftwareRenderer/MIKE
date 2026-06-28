@@ -74,6 +74,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     let userInputPending = false;
     let showHeader = $state(false);
     let inputTimeout: ReturnType<typeof setTimeout> | null = null;
+    let stickyUserMessage = $state(''); // first line of latest user message scrolled past
     let inputValue = $state('');
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
@@ -1028,8 +1029,21 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     function checkScroll() {
         if (!scrollEl) return;
-        // Update sticky header visibility on every scroll
-        showHeader = scrollEl.scrollTop > 60;
+        // Update sticky header: find the latest user message whose top has scrolled
+        // into or above the header zone (first 60px of the scroll container).
+        const userMsgEls = scrollEl.querySelectorAll('[data-user-msg-first-line]');
+        let latestScrolled: HTMLElement | null = null;
+        for (const el of userMsgEls) {
+            const rect = el.getBoundingClientRect();
+            const containerRect = scrollEl.getBoundingClientRect();
+            // Element's top relative to container top (viewport coordinates)
+            const elTop = rect.top - containerRect.top;
+            if (elTop <= 60) {
+                latestScrolled = el as HTMLElement;
+            }
+        }
+        stickyUserMessage = latestScrolled?.getAttribute('data-user-msg-first-line') || '';
+        showHeader = scrollEl.scrollTop > 60 && !!stickyUserMessage;
         if (!userInputPending) return;
         // Don't clear flag here — keep it active during inertial scrolling.
         // Reset a timeout instead; flag clears when scrolling settles.
@@ -1600,9 +1614,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
     <div class="chat-messages-wrapper">
-        {#if taskTitle && entries.length > 0}
+        {#if entries.length > 0}
             <div class="chat-task-header" class:visible={showHeader} role="status" aria-live="polite">
-                <span class="chat-task-title">{taskTitle}</span>
+                <span class="chat-sticky-message">{stickyUserMessage}</span>
             </div>
         {/if}
         <div class="chat-messages" bind:this={scrollEl} onscroll={checkScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages" tabindex="0">
@@ -1694,6 +1708,10 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                             </div>
                             <div class="merge-resolution-content">{entry.content}</div>
                         </div>
+                    </div>
+                {:else if entry.role === 'user'}
+                    <div data-user-msg-first-line={entry.content.split('\n')[0]}>
+                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} queued={entry.queued || false} />
                     </div>
                 {:else}
                     <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={entryIdx === 0 ? undefined : () => { const idx = entries.findIndex(e => e.id === entry.id); handleDeleteRequest(entry.id, entries.length - idx); }} onFork={(msgId, origContent, newContent, atts) => handleEditFork(msgId, origContent, newContent, atts)} onSend={(msgId, origContent, newContent, atts) => handleEditSend(msgId, origContent, newContent, atts)} isLastUserMessage={lastUserMessageIds.has(entry.id) && !isLoading} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={(taskId) => { const task = $boardStore?.tasks.find(t => t.id === taskId); if (task) { const url = new URL(location.href); url.searchParams.set('task', taskId); history.pushState(null, '', url); selectedTask.set(task); } }} queued={entry.queued || false} />
@@ -1910,13 +1928,14 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     .chat-task-header.visible {
         opacity: 1;
     }
-    .chat-task-title {
+    .chat-sticky-message {
         font-size: 0.8125rem;
         font-weight: 500;
         color: var(--color-text-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        max-width: 100%;
     }
     .chat-empty {
         display: flex;
