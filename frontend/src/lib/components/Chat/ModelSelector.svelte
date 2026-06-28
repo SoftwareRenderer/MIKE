@@ -76,9 +76,16 @@
 
     $effect(() => {
         if (currentModel && providers.length > 0) {
-            const providerWithModel = providers.find(p => p.models.some(m => (typeof m === 'string' ? m : m.name) === currentModel));
-            if (providerWithModel && providerWithModel.url !== selectedProviderUrl) {
-                selectedProviderUrl = providerWithModel.url;
+            // Only override the provider URL if the current provider (from currentUrl)
+            // doesn't have the model. This avoids conflicts when multiple providers
+            // share the same model name.
+            const currentProvider = providers.find(p => p.url === currentUrl);
+            const hasModel = currentProvider?.models.some(m => (typeof m === 'string' ? m : m.name) === currentModel);
+            if (!hasModel) {
+                const providerWithModel = providers.find(p => p.models.some(m => (typeof m === 'string' ? m : m.name) === currentModel));
+                if (providerWithModel && providerWithModel.url !== selectedProviderUrl) {
+                    selectedProviderUrl = providerWithModel.url;
+                }
             }
         }
     });

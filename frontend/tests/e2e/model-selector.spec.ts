@@ -3,7 +3,10 @@ import {getProjectId,
   createTaskViaApi,
   apiPutConfig,
   apiGetConfig,
-  waitForConfig, navigateToTask} from './helpers';
+  waitForConfig,
+  navigateToTask,
+  getTaskData,
+} from './helpers';
 
 // Create a task via API with a unique title and open it via URL navigation.
 // If waitForModelTrigger is true, verifies config has providers before navigating
@@ -264,6 +267,68 @@ test.describe.serial('Config Providers', () => {
     await expect(fetchBtn).toBeVisible();
     await expect(fetchBtn).toBeEnabled();
     await expect(fetchBtn).toContainText('Fetch Models');
+  });
+});
+
+test.describe.serial('Duplicate model names across providers', () => {
+  test('should only highlight the correct provider when two providers share a model name', async ({ page }) => {
+    // Set up two providers that share a model name ("shared-model").
+    // Provider X is listed FIRST, Provider Y is the default_provider.
+    // Provider Y's default_model is "shared-model".
+    // When a task is created, it gets model=shared-model, url=provider-y.
+    // The bug: the effect in ModelSelector searches ALL providers for the model name,
+    // finds Provider X first (also has "shared-model"), and overrides the URL.
+    await apiPutConfig(page, {
+      providers: [
+        { name: 'provider-x', display_name: 'Provider X', url: 'http://x.example/v1', models: ['shared-model', 'x-only'], default_model: 'x-only' },
+        { name: 'provider-y', display_name: 'Provider Y', url: 'http://y.example/v1', models: ['shared-model', 'y-only'], default_model: 'shared-model' },
+      ],
+      default_provider: 'provider-y',
+    });
+    await waitForConfig(page, c =>
+      c.providers && c.providers.length === 2 &&
+      c.default_provider === 'provider-y'
+    );
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    const projectId = await getProjectId(page);
+    // Create a task via API (inherits model/url from default_provider = provider-y)
+    const title = `task-${Date.now()}`;
+    const taskId = await createTaskViaApi(page, projectId, title);
+    // Verify the task got the correct model/url
+    const taskData = await getTaskData(page, projectId, taskId);
+    expect(taskData.model_name).toBe('shared-model');
+    expect(taskData.llama_server_url).toBe('http://y.example/v1');
+
+    await navigateToTask(page, taskId);
+    await page.waitForSelector('.task-detail-page', { timeout: 10000 });
+    // Handle "Start Task" button if task is new
+    const startBtn = page.locator('.btn-start-task');
+    if (await startBtn.isVisible().catch(() => false)) {
+      await startBtn.click({ timeout: 5000 }).catch(() => {});
+      await expect(page.locator('.chat-form')).toBeVisible({ timeout: 5000 }).catch(() => {});
+    }
+    // Wait for model trigger
+    await expect(page.locator('.model-trigger')).toBeVisible({ timeout: 15000 });
+
+    // Provider trigger should show Provider Y (the one with matching URL)
+    await expect(page.locator('.provider-trigger')).toBeVisible();
+    await expect(page.locator('.provider-trigger')).toContainText('Provider Y');
+
+    // Model trigger should show shared-model
+    await expect(page.locator('.model-trigger')).toContainText('shared-model');
+
+    // Open model dropdown - only Provider Y's models should be visible
+    await page.locator('.model-trigger').click();
+    await expect(page.locator('.portal-model-dropdown')).toBeVisible();
+    const modelOptions = page.locator('.portal-model-dropdown .model-option');
+    await expect(modelOptions).toHaveCount(2);
+
+    // Only the "shared-model" from Provider Y should be active
+    const activeModels = page.locator('.portal-model-dropdown .model-option.active');
+    await expect(activeModels).toHaveCount(1);
+    await expect(activeModels.first()).toContainText('shared-model');
   });
 });
 
