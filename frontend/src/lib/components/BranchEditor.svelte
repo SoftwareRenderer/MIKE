@@ -183,7 +183,7 @@
         view?.focus();
     }
 
-    // Custom keymap to replace default search with our panel
+    // Custom keymap to replace default search with our panel + save shortcut
     const searchKeymapOverride = keymap.of([
         {
             key: 'Ctrl-f',
@@ -199,6 +199,17 @@
             run: () => {
                 openSearchPanel();
                 return true;
+            },
+        } as any,
+        {
+            key: 'Ctrl-s',
+            macKey: 'Cmd-s',
+            run: () => {
+                if (hasChanges && !fileTooLarge) {
+                    handleSave();
+                    return true;
+                }
+                return false;
             },
         } as any,
     ]);

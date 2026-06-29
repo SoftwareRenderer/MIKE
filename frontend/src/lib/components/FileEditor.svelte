@@ -386,7 +386,6 @@
                 throw new Error(err.error || 'Failed to save file');
             }
             originalContent = content;
-            showToast('File saved', 'success');
         } catch (e) {
             showToast('Failed to save: ' + String(e), 'error');
         } finally {
