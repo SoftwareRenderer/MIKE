@@ -122,8 +122,9 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		taskBufSize:   DefaultBufferSize,
 	}
 	// Initialize the filesystem watcher for task worktrees
+	// Cache update callback is set later via SetDiffCacheUpdate (after GitHandler is created)
 	var err error
-	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats)
+	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats, nil)
 	if err == nil {
 		go asm.watcher.StartEventLoop()
 	}
@@ -464,11 +465,20 @@ func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
 	})
 }
 
+// SetDiffCacheUpdate sets a callback to update the GitHandler's diff cache
+// when the worktree watcher computes a new diff. Must be called before diff
+// events are processed.
+func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff *git.TaskDiff)) {
+	if asm.watcher != nil {
+		asm.watcher.updateCache = fn
+	}
+}
+
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 // Used by the card UI to show file counts and the commit button.
 // The hash lets the frontend detect content changes without receiving the full diff.
 // fileHashes is a per-file hash map for incremental updates.
-func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, fileHashes map[string]string) {
+func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":            "task_diff_stats",
 		"task_id":         taskID,
@@ -476,7 +486,8 @@ func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, sho
 		"short_stat":      shortStat,
 		"untracked_n":     untrackedN,
 		"untracked_lines": untrackedLines,
-		"file_hashes":     fileHashes,
+		"file_hashes":     changedHashes,
+		"removed_files":   removedFiles,
 	})
 }
 

@@ -27,6 +27,12 @@ func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHan
 	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
 }
 
+// UpdateDiffCache stores a precomputed TaskDiff in the cache.
+// Called by the worktree watcher so that on-demand file fetches work without a full /diff call.
+func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
+	h.diffCache.Store(taskID, taskDiff)
+}
+
 // HandleLog returns commit log for a project.
 // With ?full=1 query param, returns extended fields: hash, author, date, parents.
 func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
@@ -410,8 +416,8 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	h.diffCache.Store(taskID, taskDiff)
 
 	// For default working tree diff, return a manifest (per-file metadata only).
-	// Custom ref comparisons (checkpoints, commit-to-commit) return full content.
-	if headRef == "" && customBase == "" {
+	// Custom ref comparisons and explicit full=1 requests return full content.
+	if headRef == "" && customBase == "" && !fullDiff {
 		manifest := buildDiffManifest(taskDiff)
 		httputil.JSONResponse(w, http.StatusOK, manifest)
 		return
@@ -497,6 +503,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	}
 	taskID := r.PathValue("taskID")
 	filePath := r.URL.Query().Get("path")
+	fullFile := r.URL.Query().Get("full") == "1"
 	if filePath == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "path is required")
 		return
@@ -509,6 +516,18 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	taskDiff := cached.(*git.TaskDiff)
 	// Check tracked files first
 	if f, ok := taskDiff.Tracked[filePath]; ok {
+		// If full=1 and file was truncated, recompute diff without truncation
+		if fullFile && f.Truncated {
+			task, err := h.store.GetTaskByTaskID(taskID)
+			if err == nil && h.worktreeMgr != nil {
+				baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, "")
+				if fullDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, "", true); err == nil {
+					if ff, ok := fullDiff.Tracked[filePath]; ok {
+						f = ff
+					}
+				}
+			}
+		}
 		httputil.JSONResponse(w, http.StatusOK, map[string]any{
 			"rows":        f.Rows,
 			"truncated":   f.Truncated,

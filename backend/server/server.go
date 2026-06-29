@@ -87,6 +87,8 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
+	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
+	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 
 	// Run garbage collector on startup
 	dryRun := os.Getenv("KANBAN_GC_DRY_RUN") == "1"

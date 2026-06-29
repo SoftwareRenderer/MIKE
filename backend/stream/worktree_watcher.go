@@ -15,7 +15,12 @@ import (
 )
 
 // diffBroadcastFn is a callback to broadcast diff stats to clients.
-type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, fileHashes map[string]string)
+// changedHashes contains only files that are new or modified (path -> hash).
+// removedFiles lists paths that were deleted.
+type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string)
+
+// diffCacheUpdateFn is a callback to update the GitHandler's diff cache.
+type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
 
 // worktreeInfo tracks the state of a watched worktree.
 type worktreeInfo struct {
@@ -33,12 +38,14 @@ type WorktreeWatcher struct {
 	watcher     *fsnotify.Watcher
 	worktrees   map[string]worktreeInfo // taskID -> info
 	debounces   map[string]*time.Timer  // taskID -> debounce timer
+	diffCache   sync.Map                // taskID -> *git.TaskDiff (previous state for delta computation)
 	broadcast   diffBroadcastFn
+	updateCache diffCacheUpdateFn       // callback to update GitHandler's diffCache
 	worktreeMgr *git.WorktreeManager
 }
 
 // NewWorktreeWatcher creates a new WorktreeWatcher.
-func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcastFn) (*WorktreeWatcher, error) {
+func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcastFn, updateCache diffCacheUpdateFn) (*WorktreeWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -48,6 +55,7 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 		worktrees:   make(map[string]worktreeInfo),
 		debounces:   make(map[string]*time.Timer),
 		broadcast:   broadcast,
+		updateCache: updateCache,
 		worktreeMgr: worktreeMgr,
 	}, nil
 }
@@ -183,6 +191,11 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 			}
 		}
 	}
+	// Skip temporary/backup files (*.swp, *~, .DS_Store, etc.)
+	if git.ShouldIgnoreFile(event.Name) {
+		ww.mu.Unlock()
+		return
+	}
 
 	// If a new directory was created, start watching it recursively
 	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
@@ -236,13 +249,53 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
 		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-		fileHashes := diffResult.GetPerFileHashes()
-		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, fileHashes)
+		newHashes := diffResult.GetPerFileHashes()
+
+		// Compute delta against previous state
+		changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
+		// Update GitHandler's diffCache so on-demand file fetches work
+		if ww.updateCache != nil {
+			ww.updateCache(taskID, diffResult)
+		}
+		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, changedHashes, removedFiles)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else {
 		// No changes — broadcast empty hash to clear
-		ww.broadcast(projectID, taskID, "", "", 0, 0, nil)
+		ww.broadcast(projectID, taskID, "", "", 0, 0, nil, nil)
 	}
+}
+
+// computeDiffDelta compares new file hashes with the cached previous state.
+// Returns changedHashes (new or modified files) and removedFiles (deleted paths).
+// Updates the cache with the new state.
+func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.TaskDiff, cache *sync.Map) (changedHashes map[string]string, removedFiles []string) {
+	// Get previous state
+	prevRaw, hasPrev := cache.Load(taskID)
+	prevHashes := map[string]string{}
+	if hasPrev {
+		prevDiff := prevRaw.(*git.TaskDiff)
+		prevHashes = prevDiff.GetPerFileHashes()
+	}
+
+	// Find changed files (new or hash changed)
+	changedHashes = make(map[string]string)
+	for path, newHash := range newHashes {
+		prevHash, exists := prevHashes[path]
+		if !exists || prevHash != newHash {
+			changedHashes[path] = newHash
+		}
+	}
+
+	// Find removed files (in previous but not in new)
+	for path := range prevHashes {
+		if _, exists := newHashes[path]; !exists {
+			removedFiles = append(removedFiles, path)
+		}
+	}
+
+	// Update cache
+	cache.Store(taskID, newDiff)
+	return
 }
 
 // countUntrackedLines sums the line counts from untracked file entries.

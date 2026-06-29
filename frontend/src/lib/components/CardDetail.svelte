@@ -446,7 +446,7 @@
     let expandedTasksContext = getExpandedTasksContext();
     let taskDiffStats = getTaskDiffStatsContext();
     // Sync store to reactive state for $effect tracking
-    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number }>>({});
+    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[] }>>({});
 
     $effect(() => {
         if (editingTaskId && editingTitleInput) {
@@ -750,41 +750,41 @@
     // Plain object (not $state) to avoid re-triggering $effect on writes
     let diffTracker = { hash: null as string | null };
     // Per-file hash tracker for incremental updates
-    let diffFileHashes = {} as Record<string, string>;
+    let diffFileHashes = $state<Record<string, string>>({});
     $effect(() => {
         const stat = diffStatsMap[task.id];
         const currentHash = stat?.hash || null;
         if (currentHash !== diffTracker.hash) {
             diffTracker.hash = currentHash;
-            // Per-file incremental update: compare file_hashes with local cache
             const fileHashes = stat?.file_hashes;
+            const removedFiles = stat?.removed_files || [];
             if (fileHashes) {
-                // Determine which files changed
-                const changedFiles: string[] = [];
-                const removedFiles: string[] = [];
-                const allPaths = new Set([...Object.keys(fileHashes), ...Object.keys(diffFileHashes)]);
-                for (const path of allPaths) {
-                    const remoteHash = fileHashes[path];
-                    const localHash = diffFileHashes[path];
-                    // File removed from remote
-                    if (!remoteHash) {
-                        if (localHash) removedFiles.push(path);
-                        continue;
-                    }
-                    // File is new or hash changed
-                    if (!localHash || localHash !== remoteHash) {
-                        changedFiles.push(path);
-                    }
-                }
+                // Delta update: file_hashes only contains changed/new files
                 // Remove deleted files from cache
-                for (const path of removedFiles) {
-                    delete diffFileCache[path];
-                    delete untrackedCache[path];
-                    delete diffFileHashes[path];
+                if (removedFiles.length > 0) {
+                    const newDiff = { ...diffFileCache };
+                    const newUntracked = { ...untrackedCache };
+                    const newHashes = { ...diffFileHashes };
+                    for (const path of removedFiles) {
+                        delete newDiff[path];
+                        delete newUntracked[path];
+                        delete newHashes[path];
+                    }
+                    diffFileCache = newDiff;
+                    untrackedCache = newUntracked;
+                    diffFileHashes = newHashes;
                 }
-                // Fetch manifest for metadata + fetch only changed files
-                if (changedFiles.length > 0 || Object.keys(diffFileCache).length === 0) {
+                // Initial load: fetch full manifest + files
+                if (Object.keys(diffFileCache).length === 0) {
+                    diffFileHashes = { ...diffFileHashes, ...fileHashes };
                     loadDiff();
+                    return;
+                }
+                // Delta: fetch only changed files directly (skip manifest)
+                if (Object.keys(fileHashes).length > 0) {
+                    const prevHashes = { ...diffFileHashes };
+                    diffFileHashes = { ...diffFileHashes, ...fileHashes };
+                    fetchDeltaFiles(fileHashes, prevHashes);
                 }
                 return;
             }
@@ -965,6 +965,8 @@
     /** Fetch individual files whose hash changed (or are new). */
     async function fetchChangedFiles(manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number }>) {
         if (!task) return;
+        const updatedDiff: Record<string, DiffFile> = {};
+        const updatedUntracked: Record<string, boolean> = {};
         const fetches: Promise<void>[] = [];
         for (const [path, entry] of Object.entries(manifest)) {
             const localHash = diffFileHashes[path];
@@ -978,12 +980,10 @@
                 try {
                     const data = await getDiffFile(task.project_id, task.id, path);
                     if (data.rows) {
-                        diffFileCache[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
+                        updatedDiff[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
                     } else if (data.lines) {
-                        diffFileCache[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
-                        if (untrackedCache[path]) {
-                            untrackedCache[path] = { ...untrackedCache[path], loading: false };
-                        }
+                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
+                        updatedUntracked[path] = true;
                     }
                 } catch (e) {
                     // Silently fail for individual file fetches
@@ -991,16 +991,82 @@
             })());
         }
         await Promise.all(fetches);
+        if (Object.keys(updatedDiff).length > 0) {
+            diffFileCache = { ...diffFileCache, ...updatedDiff };
+        }
+        if (Object.keys(updatedUntracked).length > 0) {
+            const newUntracked = { ...untrackedCache };
+            for (const path of Object.keys(updatedUntracked)) {
+                newUntracked[path] = { ...(untrackedCache[path] || {}), loading: false };
+            }
+            untrackedCache = newUntracked;
+        }
     }
 
-    async function handleExpandDiff() {
+    /** Fetch only changed files directly (no manifest fetch). Used for delta updates. */
+    async function fetchDeltaFiles(changedHashes: Record<string, string>, prevHashes: Record<string, string>) {
+        if (!task) return;
+        const updatedDiff: Record<string, DiffFile> = {};
+        const updatedUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
+        const fetches: Promise<void>[] = [];
+        for (const path of Object.keys(changedHashes)) {
+            // Skip only if hash unchanged from previous (no actual change)
+            if (diffFileCache[path]?.rows.length && prevHashes[path] === changedHashes[path]) continue;
+            fetches.push((async () => {
+                try {
+                    const data = await getDiffFile(task.project_id, task.id, path);
+                    if (data.rows) {
+                        const added = data.rows.filter((r: any) => r.variant === 'added').length;
+                        const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
+                        updatedDiff[path] = { path, rows: data.rows, added, removed, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
+                    } else if (data.lines) {
+                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
+                        updatedUntracked[path] = { loading: false };
+                    }
+                } catch (e) {
+                    // Silently fail for individual file fetches
+                }
+            })());
+        }
+        await Promise.all(fetches);
+        // Reassign for Svelte 5 reactivity (new keys on $state records need reassignment)
+        if (Object.keys(updatedDiff).length > 0) {
+            diffFileCache = { ...diffFileCache, ...updatedDiff };
+        }
+        if (Object.keys(updatedUntracked).length > 0) {
+            untrackedCache = { ...untrackedCache, ...updatedUntracked };
+        }
+    }
+
+    async function handleExpandDiff(path?: string) {
         if (!task || task.status === 'backlog') return;
         try {
+            // If a specific file path is provided, fetch only that file's full diff
+            if (path) {
+                await expandTruncatedFile(path);
+                return;
+            }
+            // Fallback: fetch full diff for all files
             const headRef = diffTo === 'working' ? undefined : diffTo;
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef, full: true });
             const isDefaultMode = !headRef && !baseRef;
             updateDiff(result, isDefaultMode ? 'http' : 'http-force');
+        } catch (e) {
+            // Silently fail
+        }
+    }
+
+    /** Fetch full (un-truncated) rows for a single tracked file. */
+    async function expandTruncatedFile(path: string) {
+        if (!task) return;
+        try {
+            const data = await getDiffFile(task.project_id, task.id, path, true);
+            if (data.rows) {
+                const added = data.rows.filter((r: any) => r.variant === 'added').length;
+                const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
+                diffFileCache = { ...diffFileCache, [path]: { path, rows: data.rows, added, removed, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved } };
+            }
         } catch (e) {
             // Silently fail
         }
@@ -1012,26 +1078,20 @@
         // Already loaded
         if (diffFileCache[path]?.rows.length) return;
         // Mark as loading
-        if (untrackedCache[path]) {
-            untrackedCache[path] = { ...untrackedCache[path], loading: true };
-        }
+        untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: true } };
         try {
             const data = await getDiffFile(task.project_id, task.id, path);
             if (data.lines) {
-                diffFileCache[path] = {
+                diffFileCache = { ...diffFileCache, [path]: {
                     path,
                     rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
                     added: data.lines.length,
                     removed: 0,
-                };
+                }};
             }
-            if (untrackedCache[path]) {
-                untrackedCache[path] = { ...untrackedCache[path], loading: false };
-            }
+            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false } };
         } catch (e) {
-            if (untrackedCache[path]) {
-                untrackedCache[path] = { ...untrackedCache[path], loading: false };
-            }
+            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false } };
         }
     }
 

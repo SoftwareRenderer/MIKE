@@ -30,7 +30,7 @@ export function getStreamingContext(): Writable<Set<string>> {
 const TASK_DIFF_STATS_KEY = Symbol('taskDiffStats');
 const TASK_DIFF_KEY = Symbol('taskDiff');
 
-export type DiffStatsEntry = { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string> };
+export type DiffStatsEntry = { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[] };
 export type DiffEntry = { hash: string; diff?: string; untracked?: Array<{ path: string; diff: string; file_size?: number; line_count?: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number }>; updated_at: number };
 
 export function createTaskDiffContext() {

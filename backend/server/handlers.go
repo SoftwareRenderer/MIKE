@@ -689,8 +689,8 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	return project, nil
 }
 
-// validateFSPath checks that the requested path is within the project root.
-// Accepts both host paths and sandbox paths (/sandbox/<basename>/...).
+// validateFSPath checks that the requested path is within the project root
+// or an allowed worktree directory. Accepts both host paths and sandbox paths.
 // If a "project" query param is present, access is restricted to that project.
 // Without a project param, access is unrestricted (for pre-project operations).
 func (s *Server) validateFSPath(path string, r *http.Request) error {
@@ -706,22 +706,27 @@ func (s *Server) validateFSPath(path string, r *http.Request) error {
 	cleanRoot := filepath.Clean(project.Path)
 
 	// Handle sandbox paths: /sandbox/<basename>/... → convert to host path
-	mountPath := "/sandbox/" + filepath.Base(project.Path)
-	if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-		// Strip sandbox prefix and prepend host path
-		rel := cleanPath[len(mountPath):]
-		if rel == "" {
-			cleanPath = cleanRoot
-		} else {
-			cleanPath = filepath.Join(cleanRoot, rel)
-		}
+	// The sandbox mounts the worktree, not the project. The worktree basename
+	// is the task ID. We can't resolve the exact worktree here, so we check
+	// if the path is within the workspace directory instead.
+	cfg, cfgErr := s.configStore.GetConfig()
+	var workspaceDir string
+	if cfgErr == nil && cfg.WorkspaceDir != "" {
+		workspaceDir = filepath.Clean(cfg.WorkspaceDir)
+	}
+	if workspaceDir != "" && strings.HasPrefix(cleanPath, "/sandbox/") {
+		// Sandbox path — allow if workspace is configured (worktree will be resolved by caller)
+		return nil
 	}
 
-	// Ensure path is within the project root
-	if !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) && cleanPath != cleanRoot {
-		return fmt.Errorf("path outside allowed project directory")
+	// Host path: allow if within project root or workspace directory
+	if strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) || cleanPath == cleanRoot {
+		return nil
 	}
-	return nil
+	if workspaceDir != "" && (strings.HasPrefix(cleanPath, workspaceDir+string(os.PathSeparator)) || cleanPath == workspaceDir) {
+		return nil
+	}
+	return fmt.Errorf("path outside allowed project directory")
 }
 
 // handleFSInitGit initializes a git repository in the given path.

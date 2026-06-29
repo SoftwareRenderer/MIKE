@@ -304,7 +304,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectCounts = counts;
                     },
                     onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines, file_hashes) => {
+                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines, file_hashes, removed_files) => {
                         const stat = short_stat || '';
                         const fileMatch = stat.match(/(\d+) file\w* changed/);
                         const insMatch = stat.match(/(\d+) insertion\w*/);
@@ -316,7 +316,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
                         if (hash) {
                             taskDiffStatsContext.update(map => {
-                                map[task_id] = { hash, files: totalFiles, additions, deletions, file_hashes };
+                                map[task_id] = { hash, files: totalFiles, additions, deletions, file_hashes, removed_files };
                                 return { ...map }; // new ref for Svelte 5 $state reactivity
                             });
                         } else {

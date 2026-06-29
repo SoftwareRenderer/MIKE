@@ -59,6 +59,32 @@ func ShouldIgnorePath(path string) bool {
 	return false
 }
 
+// ShouldIgnoreFile returns true if the filename matches a known temporary/backup
+// pattern that should not trigger diff broadcasts.
+func ShouldIgnoreFile(path string) bool {
+	base := filepath.Base(path)
+	// Vim swap/undo files: .file.swp, .file.swo, .file.ssn, .file.uno
+	if strings.HasPrefix(base, ".") && (strings.HasSuffix(base, ".swp") || strings.HasSuffix(base, ".swo") || strings.HasSuffix(base, ".ssn") || strings.HasSuffix(base, ".uno")) {
+		return true
+	}
+	// Emacs auto-save: #file# or .#file
+	if strings.HasPrefix(base, "#") && strings.HasSuffix(base, "#") {
+		return true
+	}
+	if strings.HasPrefix(base, ".#") {
+		return true
+	}
+	// Backup files: file~ or file.bak
+	if strings.HasSuffix(base, "~") || strings.HasSuffix(base, ".bak") {
+		return true
+	}
+	// OS metadata
+	if base == ".DS_Store" || base == "Thumbs.db" || base == "desktop.ini" {
+		return true
+	}
+	return false
+}
+
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
 	store       *store.Store
@@ -492,6 +518,9 @@ func walkUntrackedEntries(worktreePath, path string) []string {
 		return nil
 	}
 	if info.Mode().IsRegular() {
+		if ShouldIgnoreFile(path) {
+			return nil
+		}
 		return []string{path}
 	}
 	// It's a directory — walk it recursively
@@ -502,6 +531,9 @@ func walkUntrackedEntries(worktreePath, path string) []string {
 		}
 		rel, err := filepath.Rel(worktreePath, fp)
 		if err != nil {
+			return nil
+		}
+		if ShouldIgnoreFile(rel) {
 			return nil
 		}
 		files = append(files, rel)

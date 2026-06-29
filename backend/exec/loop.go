@@ -712,7 +712,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						for _, u := range diffResult.Untracked {
 							untrackedLines += len(u.Lines)
 						}
-						te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
+						te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
 					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
@@ -804,7 +804,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for _, u := range diffResult.Untracked {
 					untrackedLines += len(u.Lines)
 				}
-				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
+				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
 			}
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
@@ -890,7 +890,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for _, u := range diffResult.Untracked {
 					untrackedLines += len(u.Lines)
 				}
-				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
+				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
 			}
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
@@ -1463,7 +1463,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			for _, u := range diffResult.Untracked {
 				untrackedLines += len(u.Lines)
 			}
-			te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
+			te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
 		}
 
 		// Auto-start next sibling if subtask
