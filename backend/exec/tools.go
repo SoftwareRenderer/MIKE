@@ -335,10 +335,12 @@ func validateWorktreePath(worktreePath, path string) string {
 
 	// Handle absolute paths
 	if filepath.IsAbs(cleaned) {
-		// In sandbox mode, the LLM sees /worktree as the worktree root.
+		// In sandbox mode, the LLM sees /sandbox/<basename> as the worktree root.
 		// Strip that prefix so the relative path can be validated normally.
-		if cleaned == "/worktree" || strings.HasPrefix(cleaned, "/worktree/") {
-			cleaned = cleaned[len("/worktree"):]
+		mountPath := "/sandbox/" + filepath.Base(worktreePath)
+		mountPrefix := mountPath + "/"
+		if cleaned == mountPath || strings.HasPrefix(cleaned, mountPrefix) {
+			cleaned = cleaned[len(mountPath):]
 			if cleaned == "" {
 				return worktreePath
 			}

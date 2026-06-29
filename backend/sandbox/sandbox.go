@@ -24,8 +24,6 @@ const (
 	ProjectImagePrefix = "sandbox"
 	// BaseImage is the default container image.
 	BaseImage = "docker.io/library/ubuntu:latest"
-	// SandboxMountPath is where the worktree is bind-mounted inside the container.
-	SandboxMountPath = "/worktree"
 	// PiConfigMount is where ~/.pi/agent/ is bind-mounted inside the container (for Pi agent tasks).
 	// Mounted at /root/.pi/agent so Pi finds it at its default config location.
 	PiConfigMount = "/root/.pi/agent"
@@ -35,15 +33,17 @@ const (
 
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
-	mu        sync.Mutex
-	active    map[string]string // taskID -> containerName
-	available bool
+	mu         sync.Mutex
+	active     map[string]string // taskID -> containerName
+	mountPaths map[string]string // taskID -> mount path inside container
+	available  bool
 }
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
 func NewSandboxManager() *SandboxManager {
 	sm := &SandboxManager{
-		active: make(map[string]string),
+		active:     make(map[string]string),
+		mountPaths: make(map[string]string),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -91,7 +91,7 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 }
 
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted read-write at SandboxMountPath inside the container.
+// The worktree is bind-mounted read-write at /sandbox/<basename> inside the container.
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
@@ -131,6 +131,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
+	// Compute mount path: /sandbox/<basename-of-worktree>
+	mountPath := "/sandbox/" + filepath.Base(absWorktree)
 
 	// Create container with gVisor runtime
 	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
@@ -159,8 +161,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		"--cap-add", "CAP_SETGID", // apt drops privileges via setegid()
 		"--cap-add", "CAP_FOWNER", // apt chmod on /var/lib/apt/lists/
 		"--security-opt", "no-new-privileges",
-		"--workdir", SandboxMountPath,
-		"-v", absWorktree + ":" + SandboxMountPath + ":rprivate,rw",
+		"--workdir", mountPath,
+		"-v", absWorktree + ":" + mountPath + ":rprivate,rw",
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
@@ -200,6 +202,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	}
 
 	sm.active[taskID] = containerName
+	sm.mountPaths[taskID] = mountPath
 	return nil
 }
 
@@ -220,6 +223,7 @@ func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, en
 func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []string) (string, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
+	mountPath := sm.mountPaths[taskID]
 	sm.mu.Unlock()
 
 	if !ok {
@@ -234,7 +238,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		execArgs = append(execArgs, "-i") // keep STDIN open
 	}
 	execArgs = append(execArgs,
-		"-w", SandboxMountPath,
+		"-w", mountPath,
 		containerName,
 	)
 
@@ -296,6 +300,7 @@ func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage s
 func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
+	mountPath := sm.mountPaths[taskID]
 	sm.mu.Unlock()
 
 	if !ok {
@@ -308,6 +313,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		}
 		sm.mu.Lock()
 		containerName = sm.active[taskID]
+		mountPath = sm.mountPaths[taskID]
 		sm.mu.Unlock()
 	}
 
@@ -322,7 +328,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	// -t: allocate a pseudo-TTY
 	cmd := exec.Command(
 		"podman", "exec", "-it",
-		"-w", SandboxMountPath,
+		"-w", mountPath,
 		containerName,
 		shell,
 	)
@@ -380,6 +386,7 @@ func (sp *ShellProcess) Close() error {
 func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*ProcessHandle, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
+	mountPath := sm.mountPaths[taskID]
 	sm.mu.Unlock()
 
 	if !ok {
@@ -389,7 +396,7 @@ func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*
 	// Build exec arguments: -i keeps STDIN open, no -t (no PTY)
 	execArgs := []string{
 		"exec", "-i",
-		"-w", SandboxMountPath,
+		"-w", mountPath,
 		containerName,
 		command,
 	}

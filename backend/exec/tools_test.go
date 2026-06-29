@@ -770,18 +770,18 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 }
 
 func TestValidateWorktreePath_SandboxMountPath(t *testing.T) {
-	// Sandbox mode: LLM uses /worktree/... paths
+	// Sandbox mode: LLM uses /sandbox/<basename>/... paths
 	tests := []struct {
 		name   string
 		path   string
 		wantOK bool
 	}{
-		{"sandbox valid", "/worktree/hello.c", true},
-		{"sandbox nested", "/worktree/src/main.go", true},
-		{"sandbox root", "/worktree", true},
-		{"sandbox escape", "/worktree/../etc/passwd", false},
+		{"sandbox valid", "/sandbox/worktree/hello.c", true},
+		{"sandbox nested", "/sandbox/worktree/src/main.go", true},
+		{"sandbox root", "/sandbox/worktree", true},
+		{"sandbox escape", "/sandbox/worktree/../etc/passwd", false},
 		{"sandbox absolute escape", "/etc/passwd", false},
-		{"sandbox sibling", "/worktree-other/file.txt", false},
+		{"sandbox sibling", "/sandbox-other/file.txt", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

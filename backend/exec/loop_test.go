@@ -2,10 +2,10 @@ package exec
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
 
@@ -471,11 +471,11 @@ func TestPromptPath_SandboxEnabled(t *testing.T) {
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = sandbox.SandboxMountPath
+		promptPath = "/sandbox/" + filepath.Base(worktreePath)
 	}
 
-	if promptPath != "/worktree" {
-		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/worktree")
+	if promptPath != "/sandbox/alpha-bravo-charlie" {
+		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/sandbox/alpha-bravo-charlie")
 	}
 }
 
@@ -486,7 +486,7 @@ func TestPromptPath_SandboxDisabled(t *testing.T) {
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = sandbox.SandboxMountPath
+		promptPath = "/sandbox/" + filepath.Base(worktreePath)
 	}
 
 	if promptPath != worktreePath {
