@@ -271,9 +271,9 @@
         display: flex;
         align-items: center;
         gap: 2px;
-        font-size: 0.6875rem;
+        font-size: 12px;
         font-weight: 500;
-        opacity: 0.7;
+        opacity: 1;
     }
     .project-remove-btn {
         flex-shrink: 0;

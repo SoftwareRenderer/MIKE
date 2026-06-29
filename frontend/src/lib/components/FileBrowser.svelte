@@ -124,7 +124,7 @@
     }
 
     // Load user's home directory on mount
-    $effect(() => {
+    onMount(() => {
         fetch('/api/home')
             .then(r => r.json())
             .then(data => loadDir(data.home || '/home'))

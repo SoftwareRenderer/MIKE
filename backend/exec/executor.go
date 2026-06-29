@@ -74,14 +74,6 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		tasks:        make(map[string]*executionState),
 	}
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
-	te.appStreamMgr.SetUserMessageHandler(func(um stream.AppStreamUserMessage) {
-		te.forwardUserMessage(um.ProjectID, um.TaskID, stream.UserMessage{
-			Content:     um.Content,
-			ModelName:   um.ModelName,
-			ServerURL:   um.ServerURL,
-			Attachments: um.Attachments,
-		})
-	})
 	return te
 }
 

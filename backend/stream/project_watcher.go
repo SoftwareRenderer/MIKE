@@ -147,8 +147,7 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 	// Determine operation
 	var op string
 	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
-		// Check if it's actually a file (not a directory being watched)
-		if info, err := os.Stat(event.Name); err == nil && !info.IsDir() {
+		if _, err := os.Stat(event.Name); err == nil {
 			op = "create"
 		}
 	} else if event.Op&fsnotify.Remove != 0 {

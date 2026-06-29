@@ -7,7 +7,7 @@
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
-    import { loadExplorerLayout, saveExplorerLayout } from '$lib/storage';
+    import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
     let { projectId, projectPath, currentBranch, initialFile, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
@@ -37,8 +37,14 @@
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
     let initialFileRef = $derived(initialFile);
-    let unsavedFiles = $state<string[]>([]);
+    let unsavedFiles = $state<string[]>(loadUnsavedFiles(projectId));
     let editorFocused = $state(false);
+
+    // Persist unsaved files to localStorage
+    $effect(() => {
+        unsavedFiles;
+        saveUnsavedFiles(projectId, unsavedFiles);
+    });
 
     // Mobile layout
     let isMobile = $state(false);

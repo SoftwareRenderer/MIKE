@@ -223,6 +223,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             selectedTask.set(null);
             showCardDetail.set(false);
         }
+        // Restore branch view from URL
+        const viewParam = params.get('view');
+        if (viewParam === 'branch') {
+            showBranchViewVal = true;
+        } else {
+            showBranchViewVal = false;
+        }
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
     }
@@ -391,6 +398,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 });
                 // Expose appStream so TaskChat can subscribe after handler setup
                 setAppStreamRef(appStream);
+                // Restore branch view state before loadAppData (which calls selectProject)
+                const urlParams = new URLSearchParams(location.search);
+                if (urlParams.get('view') === 'branch') {
+                    showBranchViewVal = true;
+                }
                 await loadAppData();
             }
             isLoadingAuth = false;
@@ -517,13 +529,23 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     async function selectProject(p: Project) {
         disconnectBoardStream();
+        const wasBranchViewOpen = showBranchViewVal;
+        const wasProjectSwitch = !!currentProject;
         currentProject = p;
         currentBranch = '';
         selectedProject.set(p);
+        // Re-mount branch view for the new project (only on project switch, not initial load)
+        if (wasProjectSwitch && wasBranchViewOpen) {
+            showBranchViewVal = false;
+            fsEventQueue = [];
+        }
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId }, false, true);
+        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId, view: wasBranchViewOpen ? 'branch' : null, file: null }, false, true);
+        if (wasProjectSwitch && wasBranchViewOpen) {
+            queueMicrotask(() => { showBranchViewVal = true; });
+        }
         try {
             const b = await getBoard(p.id);
             tasks = b.tasks || [];

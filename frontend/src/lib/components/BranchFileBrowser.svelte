@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
@@ -131,12 +132,26 @@
 
     // Called from parent when fs events arrive
     function handleFsEvent(op: 'create' | 'delete', relPath: string) {
-        // Check if the event is in or under the current directory
+        // Only refresh if the event would change the current directory listing.
+        // Skip 'create' events for files that may already be in the listing
+        // (e.g. from the initial load triggering the server-side fs watcher).
         const currentPrefix = currentPath + '/';
         const eventFullPath = projectPath + '/' + relPath;
         const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));
-        const shouldRefresh = eventFullPath.startsWith(currentPrefix) || eventDir === currentPath;
-        if (shouldRefresh) {
+
+        // Event is for something directly in the current directory
+        if (eventDir === currentPath) {
+            // Always refresh on delete (entry removed)
+            // For create, check if it's already in the listing (skip redundant refresh)
+            if (op === 'delete' || !entries.some(e => e.path === eventFullPath)) {
+                loadDir(currentPath);
+            }
+            return;
+        }
+
+        // New directory created as a direct child of current directory
+        const childName = eventFullPath.substring(currentPrefix.length);
+        if (op === 'create' && childName && !childName.includes('/') && !entries.some(e => e.name === childName && e.isDir)) {
             loadDir(currentPath);
         }
     }
@@ -153,7 +168,7 @@
         }
     });
 
-    $effect(() => {
+    onMount(() => {
         loadDir(initialPath || projectPath);
     });
 </script>
@@ -221,7 +236,7 @@
                         <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
                     {/if}
                     <span class="file-name">{entry.name}</span>
-                    {#if !entry.isDir && unsavedFiles.includes(entry.path)}
+                    {#if (!entry.isDir && unsavedFiles.includes(entry.path)) || (entry.isDir && unsavedFiles.some(p => p.startsWith(entry.path + '/')))}
                         <span class="unsaved-dot" title="Unsaved changes">
                             <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
                                 <circle cx="4" cy="4" r="3.5" fill="currentColor"/>

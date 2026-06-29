@@ -73,15 +73,7 @@ type AppStreamSubscription struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
-// AppStreamUserMessage is the data for user_message from the WS (fallback, primary is POST /send).
-type AppStreamUserMessage struct {
-	ProjectID   string `json:"project_id"`
-	TaskID      string `json:"task_id"`
-	Content     string `json:"content"`
-	ModelName   string `json:"model_name,omitempty"`
-	ServerURL   string `json:"server_url,omitempty"`
-	Attachments string `json:"attachments,omitempty"`
-}
+
 
 // branchSnapshot holds the last-known branch for a project.
 type branchSnapshot struct {
@@ -106,10 +98,6 @@ type AppStreamManager struct {
 	// Branch pollers — one per project, for detecting branch switches
 	branchPollersMu sync.Mutex
 	branchPollers   map[string]context.CancelFunc
-
-	// User message handler — set by executor for forwarding WS user messages
-	userMsgHandler func(AppStreamUserMessage)
-	handlerMu      sync.RWMutex
 
 	// Lazy start handler — called when a user message arrives for a task with no active executor
 	lazyStartHandler LazyStartHandler
@@ -147,20 +135,6 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 	}
 
 	return asm
-}
-
-// SetUserMessageHandler sets the callback for forwarding user messages.
-func (asm *AppStreamManager) SetUserMessageHandler(h func(AppStreamUserMessage)) {
-	asm.handlerMu.Lock()
-	defer asm.handlerMu.Unlock()
-	asm.userMsgHandler = h
-}
-
-// GetUserMessageHandler returns the current user message handler.
-func (asm *AppStreamManager) GetUserMessageHandler() func(AppStreamUserMessage) {
-	asm.handlerMu.RLock()
-	defer asm.handlerMu.RUnlock()
-	return asm.userMsgHandler
 }
 
 // SetLazyStartHandler sets the callback for lazy-starting an executor.
@@ -849,16 +823,6 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				log.Printf("[app stream] unsubscribed from task=%s in project=%s", sub.TaskID, sub.ProjectID)
 			}
 
-		case "user_message":
-			var um AppStreamUserMessage
-			if err := json.Unmarshal(input.Data, &um); err == nil && um.Content != "" {
-				asm.handlerMu.RLock()
-				handler := asm.userMsgHandler
-				asm.handlerMu.RUnlock()
-				if handler != nil {
-					handler(um)
-				}
-			}
 		}
 	}
 }

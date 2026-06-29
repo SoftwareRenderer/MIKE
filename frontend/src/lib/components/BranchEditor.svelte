@@ -609,7 +609,7 @@
         padding: 4px 10px;
         border-top: 1px solid var(--color-border);
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: 12px;
         color: var(--color-text-tertiary);
         background: var(--color-surface-2);
     }
@@ -634,7 +634,7 @@
         border-radius: var(--radius-sm);
         padding: 3px 8px;
         cursor: pointer;
-        font-size: 0.6875rem;
+        font-size: 12px;
         font-family: inherit;
         flex-shrink: 0;
     }

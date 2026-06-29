@@ -30,6 +30,7 @@ const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
 const QUEUE_KEY = 'kanban-offline-queue';
 const DRAFT_KEY_PREFIX = 'kanban:draft:';
 const EDITOR_DRAFT_KEY_PREFIX = 'kanban:editor-draft:';
+const UNSAVED_FILES_KEY_PREFIX = 'kanban:unsaved-files:';
 const EXPLORER_LAYOUT_KEY = 'kanban:explorer:layout';
 
 const DB_NAME = 'kanban-drafts';
@@ -99,6 +100,34 @@ export function clearEditorDraft(path: string): void {
     try {
         if (typeof localStorage === 'undefined') return;
         localStorage.removeItem(EDITOR_DRAFT_KEY_PREFIX + path);
+    } catch { /* ignore */ }
+}
+
+// ─── Unsaved files (localStorage, per-project) ───────────────────────────────
+
+/** Load unsaved file paths for a project from localStorage. */
+export function loadUnsavedFiles(projectId: string): string[] {
+    try {
+        if (typeof localStorage === 'undefined') return [];
+        const raw = localStorage.getItem(UNSAVED_FILES_KEY_PREFIX + projectId);
+        if (raw) return JSON.parse(raw) as string[];
+    } catch { /* ignore */ }
+    return [];
+}
+
+/** Save unsaved file paths for a project to localStorage. */
+export function saveUnsavedFiles(projectId: string, paths: string[]): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem(UNSAVED_FILES_KEY_PREFIX + projectId, JSON.stringify(paths));
+    } catch { /* ignore */ }
+}
+
+/** Remove unsaved files entry for a project. */
+export function clearUnsavedFiles(projectId: string): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.removeItem(UNSAVED_FILES_KEY_PREFIX + projectId);
     } catch { /* ignore */ }
 }
 
