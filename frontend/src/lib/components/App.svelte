@@ -722,6 +722,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
                         initialFile={urlFileId || ''}
+                        sandboxEnabled={currentProject.sandbox_enabled}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
                         onUpdateFile={(path) => { if (path && path.startsWith(currentProject?.path || '')) updateUrl({ project: currentProject?.id, view: 'branch', file: path }); else updateUrl({ project: currentProject?.id, view: 'branch', file: null }); }}

@@ -9,11 +9,12 @@
     import BranchSymbols from './BranchSymbols.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
-    let { projectId, projectPath, currentBranch, initialFile, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
+    let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
         projectPath: string;
         currentBranch: string;
         initialFile: string;
+        sandboxEnabled: boolean;
         onClose: () => void;
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
         onOpenTerminal: () => void;
@@ -27,6 +28,13 @@
     let loadingCommits = $state(true);
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
+
+    // Sync selectedBranch when parent updates currentBranch via WebSocket
+    $effect(() => {
+        if (currentBranch && currentBranch !== selectedBranch) {
+            selectedBranch = currentBranch;
+        }
+    });
 
     // Branch selector dropdown
     let showDropdown = $state(false);
@@ -56,9 +64,15 @@
         }
     });
 
-    // Validate file path stays within project root
+    // Sandbox mount path for this project
+    let mountPath = $derived(sandboxEnabled ? '/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+
+    // Validate file path stays within project root (or sandbox mount)
     function isPathSafe(path: string): boolean {
-        return !!path && path.startsWith(projectPath);
+        if (!path) return false;
+        if (path.startsWith(projectPath)) return true;
+        if (sandboxEnabled && path.startsWith(mountPath)) return true;
+        return false;
     }
 
     // Selected file state
@@ -77,7 +91,7 @@
     // Mobile layout
     let isMobile = $state(false);
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
-    let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : projectPath);
+    let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath));
     let projectPathRef = $derived(projectPath);
 
     // Symbol outline state
@@ -373,6 +387,7 @@
                         projectId={projectId}
                         projectPath={projectPath}
                         initialPath={currentFolderPath}
+                        sandboxEnabled={sandboxEnabled}
                         unsavedFiles={unsavedFiles}
                         pendingFsEvent={pendingFsEvent}
                         onFileSelected={handleFileSelected}

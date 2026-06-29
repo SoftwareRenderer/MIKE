@@ -4,10 +4,11 @@
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
-    let { projectId, projectPath, initialPath, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
+    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
         projectId: string;
         projectPath: string;
         initialPath?: string;
+        sandboxEnabled: boolean;
         unsavedFiles: string[];
         pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
         onFileSelected: (path: string) => void;
@@ -50,12 +51,23 @@
         }
     }
 
-    let currentPath = $state(initialPath || projectPath);
+    // Sandbox mount path for this project
+    let mountPath = $derived(sandboxEnabled ? '/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+    // Current path: sandbox path when sandbox enabled, host path otherwise
+    let currentPath = $state('');
     // Reactive reference to projectPath for closures
     let currentProjectPath = $derived(projectPath);
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
     let loading = $state(true);
     let error = $state('');
+    let firstLoadComplete = $state(false);
+
+    // Initialize currentPath once props are available
+    $effect(() => {
+        if (!currentPath) {
+            currentPath = sandboxEnabled ? mountPath : (initialPath || projectPath);
+        }
+    });
 
     // Directories to never show (from backend ignoredDirs)
     const ignoredDirs = new Set([
@@ -66,9 +78,10 @@
     ]);
 
     async function loadDir(path: string) {
-        // Clamp to project root
-        if (!path.startsWith(projectPath)) {
-            path = projectPath;
+        // Clamp to root (sandbox mount path or project path)
+        const rootPath = sandboxEnabled ? mountPath : projectPath;
+        if (!path.startsWith(rootPath)) {
+            path = rootPath;
         }
         loading = true;
         error = '';
@@ -84,7 +97,8 @@
             entries = (data.entries || [])
                 .filter((e: any) => {
                     // Keep ".." only when not at project root
-                    if (e.name === '..') return currentPath !== projectPath;
+                    const rootPath = sandboxEnabled ? mountPath : projectPath;
+                    if (e.name === '..') return currentPath !== rootPath;
                     if (e.name.startsWith('.')) return false;
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
@@ -94,6 +108,7 @@
                     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
                     return a.name.localeCompare(b.name);
                 });
+                firstLoadComplete = true;
         } catch (e) {
             error = String(e);
             entries = [];
@@ -115,18 +130,19 @@
         if (p) {
             // Clamp to project root - resolve any .. that would escape
             const resolved = p.replace(/\/+/g, '/').replace(/\/$/, '');
-            // Walk segments, skip .. that would go above project root
-            const projectParts = projectPath.replace(/\/$/, '').split('/').filter(Boolean);
+            // Use mount path as root when sandbox enabled
+            const rootPath = sandboxEnabled ? mountPath : projectPath;
+            const rootParts = rootPath.replace(/\/$/, '').split('/').filter(Boolean);
             const pathParts = resolved.replace(/\/$/, '').split('/').filter(Boolean);
-            const stack = [...projectParts];
+            const stack = [...rootParts];
             for (const part of pathParts) {
                 if (part === '..') {
-                    if (stack.length > projectParts.length) stack.pop();
+                    if (stack.length > rootParts.length) stack.pop();
                 } else if (part !== '.') {
                     stack.push(part);
                 }
             }
-            loadDir(stack.join('/') || projectPath);
+            loadDir(stack.join('/') || (sandboxEnabled ? mountPath : projectPath));
         }
     }
 
@@ -135,8 +151,9 @@
         // Only refresh if the event would change the current directory listing.
         // Skip 'create' events for files that may already be in the listing
         // (e.g. from the initial load triggering the server-side fs watcher).
+        const basePath = sandboxEnabled ? mountPath : projectPath;
         const currentPrefix = currentPath + '/';
-        const eventFullPath = projectPath + '/' + relPath;
+        const eventFullPath = basePath + '/' + relPath;
         const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));
 
         // Event is for something directly in the current directory
@@ -169,7 +186,7 @@
     });
 
     onMount(() => {
-        loadDir(initialPath || projectPath);
+        loadDir(currentPath);
     });
 </script>
 
@@ -206,14 +223,14 @@
     {#if error}
         <div class="file-browser-error">{error}</div>
     {:else if loading && entries.length === 0}
-        <div class="file-browser-loading">Loading...</div>
+        <div class="file-browser-loading">{firstLoadComplete ? 'Loading...' : 'Initializing sandbox...'}</div>
     {:else}
         <div class="file-browser-path">
             <input
                 type="text"
                 class="file-browser-path-input"
                 value={currentPath}
-                oninput={(e) => { const v = (e.target as HTMLInputElement).value; currentPath = v; onPathChange(v); }}
+                oninput={(e) => { currentPath = (e.target as HTMLInputElement).value; onPathChange(currentPath); }}
                 aria-label="File path"
                 onkeydown={(e) => e.key === 'Enter' && handlePathInput()}
                 onblur={handlePathInput}

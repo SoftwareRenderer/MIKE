@@ -21,6 +21,7 @@
     let sandboxImage = $state(project.sandbox_image ?? '');
     let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
     let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
+    let dockerfileChanged = $derived(sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? ''));
     let showDockerfilePicker = $state(false);
     let imageTag = $derived(`sandbox-${project.name.replace(/ /g, '-').replace(/\//g, '-')}`);
     let saving = $state(false);
@@ -75,6 +76,8 @@
     function handleDockerfileSelected(path: string) {
         sandboxDockerfilePath = path;
         showDockerfilePicker = false;
+        // Auto-build when a new Dockerfile is selected
+        handleRebuild();
     }
 
     function handleDockerfilePickerClose() {
@@ -311,7 +314,8 @@
                         <span class="config-label">Dockerfile</span>
                         <span class="config-desc">Select a Dockerfile on the server</span>
                     </div>
-                    <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building || !sandboxDockerfilePath} title="Rebuild image">
+                    {#if sandboxDockerfilePath && !dockerfileChanged}
+                    <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title="Rebuild image">
                         {#if building}
                             <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                 <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
@@ -324,6 +328,7 @@
                         {/if}
                         {building ? 'Building...' : 'Rebuild'}
                     </button>
+                    {/if}
                 </div>
 
                 <div class="dockerfile-path-row">

@@ -244,12 +244,22 @@ func ensureGitRepo(t *testing.T, path string) {
 func TestHandleFSWrite(t *testing.T) {
 	s := testServer(t)
 
+	// Create a test project for FS write tests
+	tmpDir := t.TempDir()
+	project := &types.Project{
+		ID:   "test-project-write",
+		Name: "FS Write Test",
+		Path: tmpDir,
+	}
+	if err := s.store.CreateProject(project); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Run("writes file content", func(t *testing.T) {
-		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "test.txt")
 		content := "hello world\nline two\n"
 
-		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-write", map[string]string{
 			"path":    filePath,
 			"content": content,
 		})
@@ -276,11 +286,10 @@ func TestHandleFSWrite(t *testing.T) {
 	})
 
 	t.Run("creates parent directories", func(t *testing.T) {
-		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "a", "b", "c", "test.txt")
 		content := "nested content"
 
-		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-write", map[string]string{
 			"path":    filePath,
 			"content": content,
 		})
@@ -302,7 +311,7 @@ func TestHandleFSWrite(t *testing.T) {
 	})
 
 	t.Run("rejects missing path", func(t *testing.T) {
-		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-write", map[string]string{
 			"path":    "",
 			"content": "test",
 		})
@@ -319,7 +328,7 @@ func TestHandleFSWrite(t *testing.T) {
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "test.txt")
 
-		req := testRequest(http.MethodGet, "/api/fs/write?path="+filePath, nil)
+		req := testRequest(http.MethodGet, "/api/fs/write?path="+filePath+"&project=test-project-write", nil)
 		cookie := loginTest(t, s)
 		withAuth(req, cookie)
 		rr := testResponse(t, s, req)
@@ -330,11 +339,10 @@ func TestHandleFSWrite(t *testing.T) {
 	})
 
 	t.Run("rejects files larger than 1MB", func(t *testing.T) {
-		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "large.txt")
 		largeContent := strings.Repeat("x", 1_000_001)
 
-		req := testRequest(http.MethodPost, "/api/fs/write", map[string]string{
+		req := testRequest(http.MethodPost, "/api/fs/write?project=test-project-write", map[string]string{
 			"path":    filePath,
 			"content": largeContent,
 		})

@@ -297,6 +297,39 @@ func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage s
 	return sm.startShell(taskID, true, worktreePath, baseImage, networkIsolation, memoryLimit, piAgentDir)
 }
 
+// ExecProject runs a command inside the project's sandbox container,
+// creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
+// This is for project-level filesystem operations (read, write, search, etc.).
+func (sm *SandboxManager) ExecProject(projectID, projectPath, command string) (string, error) {
+	taskID := "proj:" + projectID
+	// Check if container already exists
+	sm.mu.Lock()
+	_, exists := sm.active[taskID]
+	sm.mu.Unlock()
+	if !exists {
+		if err := sm.Create(taskID, projectPath, BaseImage, false, 0, ""); err != nil {
+			return "", fmt.Errorf("create sandbox container: %w", err)
+		}
+	}
+	return sm.Exec(taskID, command, nil)
+}
+
+// ExecProjectWithInput runs a command inside the project's sandbox container
+// with stdin input, creating the container on demand if needed.
+func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, command string, stdin []byte) (string, error) {
+	taskID := "proj:" + projectID
+	// Check if container already exists
+	sm.mu.Lock()
+	_, exists := sm.active[taskID]
+	sm.mu.Unlock()
+	if !exists {
+		if err := sm.Create(taskID, projectPath, BaseImage, false, 0, ""); err != nil {
+			return "", fmt.Errorf("create sandbox container: %w", err)
+		}
+	}
+	return sm.ExecWithInput(taskID, command, stdin, nil)
+}
+
 func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]

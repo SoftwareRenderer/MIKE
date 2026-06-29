@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -268,7 +269,29 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Limit file size to 1MB to avoid loading huge files
+	project, _ := s.optionalProject(r)
+	// Enforce sandbox if enabled — no fallback to host
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		relPath, _ := filepath.Rel(project.Path, path)
+		sandboxPath := filepath.Join(mountPath, relPath)
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, "cat "+sandboxPath)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if len(output) > 1_000_000 {
+			JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
+			return
+		}
+		JSONResponse(w, http.StatusOK, map[string]string{"content": output})
+		return
+	}
+	// Host filesystem (no project or sandbox disabled)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		JSONError(w, http.StatusNotFound, err.Error())
@@ -305,7 +328,30 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
 		return
 	}
-	// Ensure parent directory exists
+	project, _ := s.optionalProject(r)
+	// Enforce sandbox if enabled — no fallback to host
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		relPath, _ := filepath.Rel(project.Path, req.Path)
+		sandboxPath := filepath.Join(mountPath, relPath)
+		sandboxDir := filepath.Dir(sandboxPath)
+		// Write content using base64, creating parent dir in single command
+		encoded := base64.StdEncoding.EncodeToString([]byte(req.Content))
+		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path,
+			"mkdir -p "+sandboxDir+" && base64 -d > "+sandboxPath,
+			[]byte(encoded+"\n"))
+		if err != nil {
+			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("write file: %v", err))
+			return
+		}
+		JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": req.Path})
+		return
+	}
+	// Host filesystem (no project or sandbox disabled)
 	dir := filepath.Dir(req.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
@@ -333,12 +379,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeFiles := r.URL.Query().Get("files") == "1"
-
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		JSONError(w, http.StatusNotFound, err.Error())
-		return
-	}
+	project, _ := s.optionalProject(r)
 
 	type fsEntry struct {
 		Name      string `json:"name"`
@@ -347,17 +388,79 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		IsGitRepo bool   `json:"isGitRepo"`
 	}
 
-	isGit := managers.IsGitRepo(path)
-
-	result := struct {
+	var result struct {
 		Path      string    `json:"path"`
 		IsGitRepo bool      `json:"isGitRepo"`
 		Entries   []fsEntry `json:"entries"`
-	}{
-		Path:      path,
-		IsGitRepo: isGit,
-		Entries:   []fsEntry{},
 	}
+	result.Path = path
+	result.Entries = []fsEntry{}
+
+	// Enforce sandbox if enabled — no fallback to host
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		// Convert path to sandbox path (accept both host and sandbox paths)
+		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		cleanPath := filepath.Clean(path)
+		var sandboxPath string
+		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
+			sandboxPath = cleanPath
+		} else {
+			relPath, _ := filepath.Rel(project.Path, cleanPath)
+			sandboxPath = filepath.Join(mountPath, relPath)
+		}
+		// Single command: ls -pA marks dirs with trailing /, one entry per line
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, "ls -pA "+sandboxPath)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		// Return sandbox path in result
+		result.Path = sandboxPath
+		// Note: IsGitRepo not needed for in-project browser (BranchFileBrowser doesn't use it)
+
+		// Add ".." entry when not at mount root
+		if sandboxPath != mountPath {
+			parent := filepath.Dir(sandboxPath)
+			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent})
+		}
+
+		for _, line := range strings.Split(output, "\n") {
+			entry := strings.TrimSpace(line)
+			if entry == "" || entry == "." || entry == ".." {
+				continue
+			}
+			if entry[0] == '.' {
+				continue
+			}
+			// ls -p appends '/' to directory names
+			isDir := strings.HasSuffix(entry, "/")
+			name := strings.TrimSuffix(entry, "/")
+			if !includeFiles && !isDir {
+				continue
+			}
+			// Return sandbox path in entry
+			sandboxFullPath := filepath.Join(sandboxPath, name)
+			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
+		}
+		sort.SliceStable(result.Entries, func(i, j int) bool {
+			return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
+		})
+		JSONResponse(w, http.StatusOK, result)
+		return
+	}
+	// Host filesystem (no project or sandbox disabled)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	isGit := managers.IsGitRepo(path)
+	result.IsGitRepo = isGit
 
 	if path != string(os.PathSeparator) {
 		if parent := filepath.Dir(path); parent != path {
@@ -408,12 +511,16 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve search root from project or task worktree
 	var searchRoot string
+	var project *types.Project
+	var sandboxPath string
+	var useSandbox bool
 	var err error
 
 	if taskID != "" {
 		// Search within task worktree.
 		// Verify the task belongs to this project first.
-		if _, lookupErr := s.store.GetProject(projectID); lookupErr != nil {
+		project, err = s.store.GetProject(projectID)
+		if err != nil {
 			JSONError(w, http.StatusNotFound, "project not found")
 			return
 		}
@@ -443,75 +550,121 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// Task sandbox
+		if project.SandboxEnabled {
+			if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+				JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+				return
+			}
+			useSandbox = true
+			sandboxPath = "/sandbox/" + filepath.Base(searchRoot)
+		}
 	} else {
 		// Search within project root
-		project, lookupErr := s.store.GetProject(projectID)
-		if lookupErr != nil {
+		project, err = s.store.GetProject(projectID)
+		if err != nil {
 			JSONError(w, http.StatusNotFound, "project not found")
 			return
 		}
 		searchRoot = project.Path
-		// Validate the resolved search root is within the allowed project directory
 		searchRoot = filepath.Clean(searchRoot)
 		if err := s.validateFSPath(searchRoot, r); err != nil {
 			JSONError(w, http.StatusForbidden, err.Error())
 			return
 		}
+		// Project sandbox
+		if project.SandboxEnabled {
+			if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+				JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+				return
+			}
+			useSandbox = true
+			sandboxPath = "/sandbox/" + filepath.Base(project.Path)
+		}
 	}
 
-	// Check that the search root exists
-	if _, statErr := os.Stat(searchRoot); statErr != nil {
-		JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
-		return
-	}
-
-	// Recursively walk and collect matching files
 	type searchResult struct {
 		Path string `json:"path"` // relative to search root
 	}
 	var results []searchResult
 
-	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
+	if useSandbox {
+		// Search inside the sandbox using find command
+		execID := projectID
+		execPath := searchRoot
+		if taskID != "" {
+			execID = taskID
+		}
+		cmd := "find " + sandboxPath + " -type f -not -path '*/.*'"
+		if q != "" {
+			cmd += " | grep -i '" + q + "'"
+		}
+		cmd += " | head -10"
+		output, err := s.sandboxMgr.ExecProject(execID, execPath, cmd)
 		if err != nil {
-			return nil // skip unreadable entries
+			JSONError(w, http.StatusInternalServerError, "search failed: "+err.Error())
+			return
 		}
-		rel, _ := filepath.Rel(searchRoot, path)
-		if rel == "." {
-			return nil
+		for _, line := range strings.FieldsFunc(output, func(r rune) bool { return r == '\n' }) {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			rel, _ := filepath.Rel(sandboxPath, line)
+			if rel != "" && rel != "." {
+				results = append(results, searchResult{Path: rel})
+			}
+		}
+	} else {
+		// Check that the search root exists
+		if _, statErr := os.Stat(searchRoot); statErr != nil {
+			JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
+			return
 		}
 
-		// Skip hidden files/dirs (starting with .)
-		if strings.HasPrefix(d.Name(), ".") {
+		// Recursively walk and collect matching files
+		err := filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip unreadable entries
+			}
+			rel, _ := filepath.Rel(searchRoot, path)
+			if rel == "." {
+				return nil
+			}
+
+			// Skip hidden files/dirs (starting with .)
+			if strings.HasPrefix(d.Name(), ".") {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			// Skip ignored directories
+			if git.ShouldIgnorePath(rel) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
 			if d.IsDir() {
-				return filepath.SkipDir
+				return nil
+			}
+
+			// Match: filename or relative path contains query (case-insensitive)
+			if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
+				return nil
+			}
+
+			results = append(results, searchResult{Path: rel})
+			if len(results) >= 10 {
+				return errStopWalk
 			}
 			return nil
-		}
-
-		// Skip ignored directories
-		if git.ShouldIgnorePath(rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Match: filename or relative path contains query (case-insensitive)
-		if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
-			return nil
-		}
-
-		results = append(results, searchResult{Path: rel})
-		if len(results) >= 10 {
-			return errStopWalk
-		}
-		return nil
-	})
-	_ = err // ignore errStopWalk
+		})
+		_ = err // ignore errStopWalk
+	}
 
 	// Sort results for deterministic output
 	sort.SliceStable(results, func(i, j int) bool {
@@ -527,22 +680,48 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 // errStopWalk is a sentinel error to stop filepath.WalkDir early.
 var errStopWalk = fmt.Errorf("stop walk: limit reached")
 
-// validateFSPath checks that the requested path is within an allowed root.
-// If a "project" query param is present, it looks up the project and restricts
-// access to its root directory. Without a project param, access is unrestricted
-// (for backwards compatibility with Dockerfile picker, project creation, etc.).
-func (s *Server) validateFSPath(path string, r *http.Request) error {
+// optionalProject looks up the project from the "project" query param if present.
+// Returns nil project and nil error if the param is missing.
+func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	projectID := r.URL.Query().Get("project")
 	if projectID == "" {
-		return nil // no project constraint
+		return nil, nil
 	}
 	project, err := s.store.GetProject(projectID)
 	if err != nil {
-		return fmt.Errorf("project not found")
+		return nil, fmt.Errorf("project not found")
 	}
-	// Clean both paths to prevent directory traversal
+	return project, nil
+}
+
+// validateFSPath checks that the requested path is within the project root.
+// Accepts both host paths and sandbox paths (/sandbox/<basename>/...).
+// If a "project" query param is present, access is restricted to that project.
+// Without a project param, access is unrestricted (for pre-project operations).
+func (s *Server) validateFSPath(path string, r *http.Request) error {
+	project, err := s.optionalProject(r)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return nil // no project constraint
+	}
+	// Clean the path
 	cleanPath := filepath.Clean(path)
 	cleanRoot := filepath.Clean(project.Path)
+
+	// Handle sandbox paths: /sandbox/<basename>/... → convert to host path
+	mountPath := "/sandbox/" + filepath.Base(project.Path)
+	if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
+		// Strip sandbox prefix and prepend host path
+		rel := cleanPath[len(mountPath):]
+		if rel == "" {
+			cleanPath = cleanRoot
+		} else {
+			cleanPath = filepath.Join(cleanRoot, rel)
+		}
+	}
+
 	// Ensure path is within the project root
 	if !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) && cleanPath != cleanRoot {
 		return fmt.Errorf("path outside allowed project directory")
@@ -565,6 +744,50 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Path = strings.TrimSpace(req.Path)
 
+	project, err := s.optionalProject(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Enforce sandbox if enabled — no fallback to host
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		// Initialize git repo inside the sandbox
+		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		relPath, _ := filepath.Rel(project.Path, req.Path)
+		sandboxPath := filepath.Join(mountPath, relPath)
+
+		// Check if already a git repo
+		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null")
+		if gitErr == nil {
+			JSONError(w, http.StatusBadRequest, "path is already a git repository")
+			return
+		}
+
+		// Create README.md content
+		readmeContent := "# "+managers.Basename(req.Path)+"\n"
+		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
+
+		// git init + create README + add + commit in single command
+		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path,
+			"git -C "+sandboxPath+" init && " +
+			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
+			"git -C "+sandboxPath+" add README.md && " +
+			"git -C "+sandboxPath+" -c user.email=kanban@local -c user.name=Kanban commit -m 'Initial commit'",
+			[]byte(encoded+"\n"))
+		if err != nil {
+			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
+			return
+		}
+		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
+		return
+	}
+	// Host filesystem (no project or sandbox disabled)
+	// Initialize git repo on host
 	info, err := os.Stat(req.Path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, "path does not exist: "+err.Error())
@@ -623,6 +846,54 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Path = strings.TrimSpace(req.Path)
 
+	project, err := s.optionalProject(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Enforce sandbox if enabled — no fallback to host
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		// Create directory inside the sandbox
+		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		relPath, _ := filepath.Rel(project.Path, req.Path)
+		sandboxPath := filepath.Join(mountPath, relPath)
+		sandboxParent := filepath.Dir(sandboxPath)
+
+		// Combined check + mkdir in single command
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path,
+			"if [ ! -d "+sandboxParent+" ]; then echo 'PARENT_MISSING'; " +
+			"elif [ -e "+sandboxPath+" ]; then echo 'ALREADY_EXISTS'; " +
+			"else mkdir "+sandboxPath+" && echo 'OK'; fi")
+		if err != nil {
+			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+			return
+		}
+		switch strings.TrimSpace(output) {
+		case "PARENT_MISSING":
+			JSONError(w, http.StatusBadRequest, "parent directory does not exist")
+			return
+		case "ALREADY_EXISTS":
+			JSONError(w, http.StatusBadRequest, "path already exists")
+			return
+		case "OK":
+			// success
+		default:
+			JSONError(w, http.StatusInternalServerError, "unexpected response from mkdir")
+			return
+		}
+		if err != nil {
+			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+			return
+		}
+		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
+		return
+	}
+	// Host filesystem (no project or sandbox disabled)
 	// Check parent exists
 	parent := filepath.Dir(req.Path)
 	info, err := os.Stat(parent)
