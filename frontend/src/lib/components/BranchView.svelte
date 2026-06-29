@@ -23,18 +23,20 @@
     let commits = $state<GitCommit[]>([]);
     let branches = $state<string[]>([]);
     let selectedBranch = $state(currentBranch);
+    let currentBranchRef = $derived(currentBranch);
     let loadingCommits = $state(true);
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
 
     // Validate file path stays within project root
     function isPathSafe(path: string): boolean {
-        return path && path.startsWith(projectPath);
+        return !!path && path.startsWith(projectPath);
     }
 
     // Selected file state
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
+    let initialFileRef = $derived(initialFile);
     let unsavedFiles = $state<string[]>([]);
     let editorFocused = $state(false);
 
@@ -42,6 +44,7 @@
     let isMobile = $state(false);
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
     let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : projectPath);
+    let projectPathRef = $derived(projectPath);
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
@@ -299,7 +302,8 @@
                     onmousedown={(e) => handleResizeStart('split', e)}
                     role="separator"
                     aria-label="Resize panels"
-                    tabindex="0"
+                    aria-orientation="horizontal"
+                    tabindex="-1"
                 ></div>
                 {/if}
 
@@ -327,7 +331,8 @@
             onmousedown={(e) => handleResizeStart('left', e)}
             role="separator"
             aria-label="Resize left panel"
-            tabindex="0"
+            aria-orientation="vertical"
+            tabindex="-1"
         ></div>
 
         <!-- Center column: File editor -->
@@ -349,7 +354,8 @@
             onmousedown={(e) => handleResizeStart('right', e)}
             role="separator"
             aria-label="Resize right panel"
-            tabindex="0"
+            aria-orientation="vertical"
+            tabindex="-1"
         ></div>
 
         <!-- Right column: Symbol outline -->
@@ -544,10 +550,6 @@
     .mobile-tab-bar {
         display: none;
     }
-    .column.hidden {
-        display: none;
-    }
-
     @media (max-width: 768px) {
         .mobile-tab-bar {
             display: flex;

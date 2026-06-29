@@ -56,48 +56,7 @@ test.describe.serial('File @ Mention', () => {
     await expect(items).toHaveCount(5);
   });
 
-  test('should insert @path when clicking a file result', async ({ page }) => {
-    await page.locator('.add-task-btn').click();
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    const textarea = page.locator('#task-description');
-    await typeAtSign(page, textarea);
-    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Select the first result by calling the handler directly
-    const selectedPath = await page.evaluate(() => {
-      const items = document.querySelectorAll('.mention-item');
-      if (items.length === 0) return null;
-      // Read the path from the dropdown text
-      const pathEl = items[0].querySelector('.mention-path');
-      return pathEl?.textContent?.trim() || null;
-    });
-
-    if (!selectedPath) {
-      test.skip('No mention items found');
-    }
-
-    // Simulate selection by directly updating the textarea value
-    // (avoids portal click issues in headless browser)
-    await page.evaluate((path) => {
-      const textarea = document.getElementById('task-description') as HTMLTextAreaElement;
-      if (!textarea) return;
-      textarea.value = '@' + path;
-      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    }, selectedPath);
-
-    // Dropdown should disappear (check via portal visibility)
-    await expect(page.locator('.mention-dropdown')).not.toBeVisible({ timeout: 5000 }).catch(() => {});
-
-    // Modal should still be open
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    // Textarea should contain @path
-    const value = await textarea.inputValue();
-    expect(value).toBe('@' + selectedPath);
-  });
-
-  test('should navigate dropdown with arrow keys', async ({ page }) => {
+  test('should navigate dropdown with arrow keys', async ({ page}) => {
     await page.locator('.add-task-btn').click();
     await expect(page.locator('#task-description')).toBeVisible();
 

@@ -3,7 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamSection } from '$lib/types';
     import { getToolDisplayName } from '$lib/types';
-    import { taskEvent } from '$lib/store';
+    import { getTaskEventContext } from '$lib/context';
     import StreamSectionComp from './StreamSection.svelte';
     import StreamActions from './StreamActions.svelte';
 
@@ -18,6 +18,7 @@
     let tokenStats = $state({ prompt: 0, completed: 0, total: 0, duration: 0 });
     let scrollEl: HTMLElement | null = null;
     let atBottom = $state(true);
+    let taskEventContext = getTaskEventContext();
     let prevScrollHeight = $state(0);
 
     let currentTextSection: StreamSection | null = $state(null);
@@ -89,7 +90,7 @@
                 break;
             }
             case 'tool_call': {
-                const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
+                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; sandbox?: boolean };
                 currentTextSection = null;
                 currentReasoningSection = null;
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
@@ -190,10 +191,10 @@
     onMount(() => {
         connecting = false;
         connected = true;
-        const unsub = taskEvent.subscribe((event) => {
+        const unsub = taskEventContext.subscribe((event) => {
             if (event && event.task_id === taskId) {
                 rawFrames.push(JSON.stringify(event));
-                handleEvent({ type: event.type, data: event.data });
+                handleEvent({ type: event.type as StreamEvent['type'], data: event.data });
             }
         });
         return () => unsub();
@@ -206,17 +207,12 @@
 
 <div class="task-stream">
     <!-- Content -->
-    <div class="content" bind:this={scrollEl} on:scroll={checkScroll}>
+    <div class="content" bind:this={scrollEl} onscroll={checkScroll}>
         {#if showRaw}
             <pre class="raw">{rawFrames.join('\n')}</pre>
         {:else}
             {#each sections as sec (sec.id)}
-                <StreamSectionComp
-                    type={sec.type}
-                    collapsible={sec.type === 'reasoning' && !sec.isStreaming}
-                    summary={sec.reasoningSummary}
-                    tokenCount={sec.tokenCount}
-                >
+                {#snippet children()}
                     {#if sec.type === 'text'}
                         <div class="stream-text" class:streaming={sec.isStreaming}>
                             {#each splitParagraphs(sec.content) as para}
@@ -249,7 +245,14 @@
                             {/if}
                         </div>
                     {/if}
-                </StreamSectionComp>
+                {/snippet}
+                <StreamSectionComp
+                    type={sec.type}
+                    collapsible={sec.type === 'reasoning' && !sec.isStreaming}
+                    summary={sec.reasoningSummary}
+                    tokenCount={sec.tokenCount}
+                    {children}
+                />
             {/each}
         {/if}
     </div>

@@ -2,10 +2,12 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
-    import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
+    let expandedTasksContext = getExpandedTasksContext();
 
     // Build a lookup map for children of each task
     const childrenMap = $derived.by(() => {
@@ -37,7 +39,7 @@
         for (const t of tasks) {
             if (!t.parent_task_id) continue;
             // Walk up the ancestor chain
-            let parentId = t.parent_task_id;
+            let parentId: string | undefined = t.parent_task_id;
             while (parentId) {
                 const ancestor = taskMap.get(parentId);
                 if (!ancestor) break;
@@ -45,7 +47,7 @@
                     consolidated.add(t.id);
                     break;
                 }
-                parentId = ancestor.parent_task_id ?? null;
+                parentId = ancestor.parent_task_id ?? undefined;
             }
         }
         return consolidated;
@@ -64,7 +66,7 @@
             expandedInitialized = true;
             const allIds = new Set(tasks.map(t => t.id));
             cleanupCollapsedTasks(allIds);
-            expandedTasksStore.set(initExpandedTasks(parentTaskIds));
+            expandedTasksContext.set(initExpandedTasks(parentTaskIds));
             // Garbage-collect stale localStorage/IndexedDB entries for deleted tasks
             const projectPaths = projectPath ? new Set([projectPath]) : undefined;
             gc(allIds, projectPaths).catch(() => {});
@@ -73,15 +75,19 @@
 
     // Auto-expand parent cards when new subtasks appear
     let lastExpandedParents = $state<Set<string>>(new Set());
+    let expandedTasks = $state<Set<string>>(new Set());
+    $effect(() => {
+        expandedTasksContext.subscribe(v => expandedTasks = v);
+    });
     $effect(() => {
         const currentParents = new Set(childrenMap.keys());
         for (const parentId of currentParents) {
             if (!lastExpandedParents.has(parentId)) {
-                const current = $expandedTasksStore;
+                const current = expandedTasks;
                 if (!current.has(parentId)) {
                     const next = new Set(current);
                     next.add(parentId);
-                    expandedTasksStore.set(next);
+                    expandedTasksContext.set(next);
                 }
                 lastExpandedParents.add(parentId);
             }
@@ -89,15 +95,14 @@
     });
 
     // Track which task cards are expanded (shared store for Board + CardDetail sync)
-    let expandedTasks = $derived($expandedTasksStore);
     function toggleTaskExpanded(taskId: string) {
-        const next = new Set($expandedTasksStore);
+        const next = new Set(expandedTasks);
         if (next.has(taskId)) {
             next.delete(taskId);
         } else {
             next.add(taskId);
         }
-        expandedTasksStore.set(next);
+        expandedTasksContext.set(next);
         // Persist collapsed state and clean stale entries
         const allIds = new Set(tasks.map(t => t.id));
         persistCollapsedTasks(next, parentTaskIds);
@@ -122,31 +127,35 @@
         { id: 'done', title: 'Done', color: 'var(--color-column-done)' },
     ];
 
-    /**
-     * Get root tasks for a column (tasks without a parent, or whose parent is not in this column).
-     * Subtasks are shown inline when the parent card is expanded.
-     * Consolidated subtasks (parent + all siblings in same column) are hidden.
-     */
+    /** Pre-built task lookup map (shared by hasAncestorInProgress and other functions). */
+    const taskMap = $derived(new Map(tasks.map(t => [t.id, t])));
+
+    /** Pre-computed column tasks (memoized per column status). */
+    const columnTasks = $derived.by(() => {
+        const cols: Record<string, Task[]> = { backlog: [], in_progress: [], review: [], done: [] };
+        for (const t of tasks) {
+            if (consolidatedSubtaskIds.has(t.id)) continue;
+            if (!cols[t.status]) cols[t.status] = [];
+            cols[t.status].push(t);
+        }
+        // Sort each column by column_order
+        for (const status of Object.keys(cols)) {
+            cols[status].sort((a, b) => a.column_order - b.column_order);
+        }
+        return cols;
+    });
+
+    /** Get tasks for a column (memoized via columnTasks). */
     function getTasksForColumn(status: string): Task[] {
-        return tasks
-            .filter(t => {
-                if (t.status !== status) return false;
-                // Hide consolidated subtasks (shown via parent's progress bar)
-                if (consolidatedSubtaskIds.has(t.id)) return false;
-                // Show root tasks always, subtasks only when not consolidated (parent in different column)
-                if (!subtaskIds.has(t.id)) return true;
-                return true;
-            })
-            .sort((a, b) => a.column_order - b.column_order);
+        return columnTasks[status] || [];
     }
 
     function handleDragStart(taskId: string) {
         draggedTaskId = taskId;
     }
 
-    /** Walk up the ancestor chain to check if any ancestor is In Progress. */
+    /** Walk up the ancestor chain to check if any ancestor is In Progress. Uses shared taskMap. */
     function hasAncestorInProgress(task: Task): boolean {
-        const taskMap = new Map(tasks.map(t => [t.id, t]));
         let current = task;
         while (current.parent_task_id) {
             const parent = taskMap.get(current.parent_task_id);

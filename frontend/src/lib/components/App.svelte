@@ -1,7 +1,8 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, taskDiffStats as taskDiffStatsStore, taskDiff as taskDiffStore, showConfirm, commitQueueStatus, showToast, taskEvent } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, showConfirm, showToast } from '$lib/store';
+import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
@@ -9,7 +10,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
-    let TerminalPanelComponent = $state(null);
+    let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
     import ConfigModal from './ConfigModal.svelte';
@@ -21,6 +22,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
     import BranchView from './BranchView.svelte';
+    import Sidebar from './App/Sidebar.svelte';
+    import TopBar from './App/TopBar.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -41,7 +44,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     function computePageTitle(): string {
         const name = currentProject?.name;
-        if (!name) return 'Kanban Board';
+        if (!name || !currentProject) return 'Kanban Board';
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
         // If current project has reviews, show it with count
         if (reviewCount > 0) {
@@ -100,7 +103,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let wsConnected = $state(false);
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
-    let taskDiffStats: Record<string, string> = $state({});
+    let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showCreateTaskVal = $state(false);
     let showConfigVal = $state(false);
@@ -120,7 +123,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let isMobile = $derived(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
-    let hasProviders = $derived(!!cfg?.providers?.length);
+    let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
     $effect(() => {
@@ -151,7 +154,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     }
                 }
             }),
-            taskDiffStatsStore.subscribe(v => taskDiffStats = v),
+            taskDiffStatsContext.subscribe(v => taskDiffStats = v),
         ].map(unsub => unsub);
         return () => unsub.forEach(u => u());
     });
@@ -272,6 +275,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         }
     }
 
+    // Initialize context providers
+    const { taskDiffStats: taskDiffStatsContext, taskDiff: taskDiffContext } = createTaskDiffContext();
+    const commitQueueStatusContext = createCommitQueueContext();
+    const expandedTasksContext = createExpandedTasksContext();
+    const taskEventContext = createTaskEventContext();
+    const streamingIdsContext = createStreamingContext();
+
     onMount(async () => {
         // Check auth status first
         try {
@@ -298,19 +308,19 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
                         if (hash) {
-                            taskDiffStatsStore.update(map => {
+                            taskDiffStatsContext.update(map => {
                                 map[task_id] = { hash, files: totalFiles, additions, deletions };
                                 return map;
                             });
                         } else {
-                            taskDiffStatsStore.update(map => {
+                            taskDiffStatsContext.update(map => {
                                 delete map[task_id];
                                 return map;
                             });
                         }
                     },
                     onDiff: (task_id, diff, untracked) => {
-                        taskDiffStore.update(map => {
+                        taskDiffContext.update(map => {
                             if (diff || untracked.length > 0) {
                                 map[task_id] = { diff, untracked };
                             } else {
@@ -363,14 +373,15 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         }
                     },
                     onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
-                        if (currentProject) {
-                            commitQueueStatus.update(map => ({ ...map, [currentProject.id]: { taskID: task_id, status } }));
+                        const proj = currentProject;
+                        if (proj) {
+                            commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
                         }
                     },
                     onTaskEvent: (task_id: string, event: StreamEvent) => {
                         // Forward task events to the task event store for TaskStream to consume
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
-                            taskEvent.set({ task_id, ...event });
+                            taskEventContext.set({ task_id, ...event });
                         }
                     },
                     onConnected: (connected) => {
@@ -395,22 +406,39 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             appStream.close();
             appStream = null;
         }
-        if (urlPollTimer) clearInterval(urlPollTimer);
+        if (urlRafId !== null) cancelAnimationFrame(urlRafId);
     });
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
-    // popstate handles browser back/forward. This handles same-origin navigations that
-    // don't trigger popstate (Playwright page.goto() to /?task=xxx while app is mounted).
-    let urlPollTimer: ReturnType<typeof setInterval> | null = null;
-    $effect(() => {
-        if (!isAuthenticated || !currentProject) return;
-        if (urlPollTimer) clearInterval(urlPollTimer);
-        urlPollTimer = setInterval(() => {
+    // Uses requestAnimationFrame with throttling — only checks when frame fires,
+    // skips if URL hasn't changed. ~10-60ms latency vs 500ms setInterval.
+    let urlRafId: number | null = null;
+    let lastUrlCheck = '';
+    let lastUrlCheckTime = 0;
+    const URL_CHECK_THROTTLE = 250; // ms between checks
+
+    function checkUrlChange() {
+        const now = Date.now();
+        if (now - lastUrlCheckTime < URL_CHECK_THROTTLE) {
+            urlRafId = requestAnimationFrame(checkUrlChange);
+            return;
+        }
+        if (location.search !== lastUrlCheck) {
+            lastUrlCheck = location.search;
+            lastUrlCheckTime = now;
             if (tasks.length > 0) {
                 restoreTaskFromUrl();
             }
-        }, 500);
-        return () => { if (urlPollTimer) clearInterval(urlPollTimer); };
+        }
+        urlRafId = requestAnimationFrame(checkUrlChange);
+    }
+
+    $effect(() => {
+        if (!isAuthenticated || !currentProject) return;
+        lastUrlCheck = location.search;
+        lastUrlCheckTime = Date.now();
+        urlRafId = requestAnimationFrame(checkUrlChange);
+        return () => { if (urlRafId !== null) cancelAnimationFrame(urlRafId); };
     });
 
     // Function to restore task from URL after board loads.
@@ -459,8 +487,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             tasks = b.tasks || [];
             boardStore.set(b);
             // Update selected task reference to point to fresh object from API
-            if (selectedTaskVal) {
-                const fresh = tasks.find(t => t.id === selectedTaskVal.id);
+            const task = selectedTaskVal;
+            if (task) {
+                const fresh = tasks.find(t => t.id === task.id);
                 if (fresh) {
                     selectedTaskVal = fresh;
                     selectedTask.set(fresh);
@@ -468,7 +497,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             }
         } catch (e) {
             // When offline, sync tasks from boardStore (has optimistic updates)
-            const b = boardStore.get() as any;
+            const b = (boardStore as any).get();
             if (b?.tasks) {
                 tasks = b.tasks;
             }
@@ -590,8 +619,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             const projs = await getProjects();
             projects = projs || [];
             projectsStore.set(projects);
-            if (currentProject) {
-                const updated = projects.find(p => p.id === currentProject.id);
+            const proj = currentProject;
+            if (proj) {
+                const updated = projects.find(p => p.id === proj.id);
                 if (updated) {
                     currentProject = updated;
                     selectedProject.set(updated);
@@ -631,166 +661,37 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     {/if}
 
     <!-- Sidebar -->
-    <aside id="sidebar" class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
-        <div class="sidebar-header">
-            <h2 class:collapsed>Projects</h2>
-            {#if isMobile}
-                <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
-            {:else}
-                <button class="toggle-btn" onclick={toggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                    {collapsed ? '▸' : '◂'}
-                </button>
-            {/if}
-        </div>
-        <nav class="project-list" aria-label="Projects">
-            {#each projects as p (p.id)}
-                <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
-                    <button
-                        class="project-item"
-                        onclick={() => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
-                        title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
-                    >
-                        {#if !collapsed}
-                            {#if p.sandbox_enabled}
-                                <span
-                                    class="sandbox-badge"
-                                    aria-label="Sandbox enabled (gVisor)"
-                                    title="Sandbox enabled (gVisor)"
-                                >
-                                    <img src={shieldIcon} width="14" height="14" alt="" />
-                                </span>
-                            {:else}
-                                <span
-                                    class="sandbox-badge sandbox-badge-off"
-                                    aria-label="Sandbox disabled"
-                                    title="Sandbox disabled"
-                                >
-                                    <img src={shieldOffIcon} width="14" height="14" alt="" />
-                                </span>
-                            {/if}
-                        {/if}
-                        <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>{getProjectAbbr(p.name)}</span>
-                        {#if !collapsed && projectCounts[p.id]}
-                            <span class="project-stats">
-                                <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-                                    {projectCounts[p.id].backlog}
-                                </span>
-                                <span class="stat-badge" style="color: var(--color-column-in-progress)" title="In Progress">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                                    {projectCounts[p.id].in_progress}
-                                </span>
-                                <span class="stat-badge" style="color: var(--color-column-review)" title="Review">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                                    {projectCounts[p.id].review}
-                                </span>
-                            </span>
-                        {/if}
-                    </button>
-                    {#if !collapsed}
-                    <button
-                        class="project-remove-btn"
-                        onclick={(e) => { e.stopPropagation(); removeProject(p); }}
-                        aria-label={`Remove project ${p.name}`}
-                        title={`Remove project ${p.name}`}
-                    >
-                        ✕
-                    </button>
-                    {/if}
-                </div>
-            {/each}
-        </nav>
-        {#if isMobile}
-        <div class="sidebar-menu">
-            <button class="sidebar-menu-item" onclick={() => { showStats.set(true); mobileMenuOpen = false; }} aria-label="Token usage stats" title="Token usage stats">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
-                    <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
-                    <rect x="12" y="1" width="3" height="13" rx="0.5" fill="currentColor"/>
-                </svg>
-                Token Usage
-            </button>
-            <button class="sidebar-menu-item" onclick={() => { showConfig.set(true); mobileMenuOpen = false; }} aria-label="Settings" title="Settings">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
-                </svg>
-                Settings
-            </button>
-        </div>
-        {/if}
-        {#if !collapsed}
-        <div class="sidebar-footer">
-            <button class="add-project-btn" onclick={openAddProject} aria-label="Add Project" title="Add Project">+ Project</button>
-        </div>
-        {/if}
-    </aside>
+    <Sidebar
+        {projects}
+        {currentProject}
+        {projectCounts}
+        {collapsed}
+        {isMobile}
+        {mobileMenuOpen}
+        {getProjectAbbr}
+        onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
+        onRemoveProject={removeProject}
+        onToggleSidebar={toggleSidebar}
+        onShowStats={() => { showStats.set(true); if (isMobile) mobileMenuOpen = false; }}
+        onShowConfig={() => { showConfig.set(true); if (isMobile) mobileMenuOpen = false; }}
+        onAddProject={openAddProject}
+    />
 
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
             {#if !(showCardDetailVal && selectedTaskVal) && !showBranchViewVal}
-            <header class="top-bar">
-                {#if isMobile}
-                    <button class="icon-btn hamburger" onclick={() => mobileMenuOpen = true} aria-label="Open menu" title="Open menu">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <line x1="3" y1="6" x2="21" y2="6"/>
-                            <line x1="3" y1="12" x2="21" y2="12"/>
-                            <line x1="3" y1="18" x2="21" y2="18"/>
-                        </svg>
-                    </button>
-                {/if}
-                <button class="icon-btn sandbox-config-btn" onclick={() => openSandboxConfig(currentProject)} aria-label="Sandbox configuration" title="Sandbox configuration">
-                    {#if currentProject.sandbox_enabled}
-                        <img src={shieldIcon} width="14" height="14" alt="" />
-                    {:else}
-                        <img src={shieldOffIcon} width="14" height="14" alt="" />
-                    {/if}
-                </button>
-                <span class="project-title">
-                    <span class="project-path">{toHomeRelative(currentProject.path)}</span>
-                    {#if currentBranch}
-                        <button
-                            class="icon-btn branch-btn"
-                            onclick={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}
-                            title={`Branch: ${currentBranch} (click to explore)`}
-                        >
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <circle cx="6" cy="6" r="2.5"/>
-                                <circle cx="10" cy="10" r="2.5"/>
-                                <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
-                                <line x1="6" y1="3.5" x2="6" y2="2"/>
-                                <line x1="10" y1="12.5" x2="10" y2="14"/>
-                            </svg>
-                            <span>{currentBranch}</span>
-                        </button>
-                    {/if}
-                </span>
-                <div class="actions">
-                    <button class="icon-btn" onclick={() => { loadTerminalPanel(); showTerminal.set(true); }} aria-label="Open terminal" title="Open terminal">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                            <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
-                    {#if !isMobile}
-                    <button class="icon-btn" onclick={() => showStats.set(true)} aria-label="Token usage stats" title="Token usage stats">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
-                            <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
-                            <rect x="12" y="1" width="3" height="13" rx="0.5" fill="currentColor"/>
-                        </svg>
-                    </button>
-                    <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings" title="Settings">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
-                        </svg>
-                    </button>
-                    {/if}
-                </div>
-            </header>
+            <TopBar
+                currentProject={currentProject}
+                {currentBranch}
+                {isMobile}
+                onOpenMenu={() => mobileMenuOpen = true}
+                onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
+                onOpenBranchView={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}
+                onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
+                onShowStats={() => showStats.set(true)}
+                onShowConfig={() => showConfig.set(true)}
+            />
             {/if}
             <section class="board-container" aria-label="Kanban board">
                 {#if showBranchViewVal && currentProject}
@@ -866,14 +767,17 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             onSignOut={handleLogout}
         />
     {/if}
-    {#if showTerminalVal}
+    {#if showTerminalVal && TerminalPanelComponent}
         {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
-            <svelte:component this={TerminalPanelComponent} />
+            {@const Terminal = TerminalPanelComponent}
+            {#if Terminal}
+                <Terminal />
+            {/if}
         {/key}
     {/if}
-    {#if showStatsVal}
+    {#if showStatsVal && currentProject}
         <StatsModal
-            projectId={currentProject?.id}
+            projectId={currentProject.id}
             onClose={() => showStats.set(false)}
         />
     {/if}
@@ -919,7 +823,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         left: 0;
         right: 0;
         z-index: 10001;
-        background: #552d00;
+        background: #550000;
         color: #d6d3d1;
         text-align: center;
         padding: 6px 16px;
@@ -1011,262 +915,15 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         height: 100dvh;
         overflow: hidden;
     }
-    .sidebar {
-        width: 240px;
-        background: var(--color-surface-1);
-        border-right: 1px solid var(--color-border);
-        display: flex;
-        flex-direction: column;
-        transition: width 0.2s ease;
-        flex-shrink: 0;
-    }
-    .app.collapsed .sidebar {
-        width: 48px;
-    }
-    .app.task-detail .sidebar {
+    .app.task-detail :global(aside#sidebar) {
         display: none;
-    }
-    .sidebar-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .sidebar-header h2 {
-        font-size: 1rem;
-        font-weight: 600;
-    }
-    .collapsed .sidebar-header h2 {
-        display: none;
-    }
-    .toggle-btn {
-        font-size: 0.875rem;
-        padding: 4px 8px;
-        color: var(--color-text-secondary);
-        background: transparent;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s ease, color 0.15s ease;
-    }
-    .toggle-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .project-list {
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px;
-    }
-    .project-item-wrapper {
-        display: flex;
-        align-items: center;
-        border-radius: var(--radius-md);
-        position: relative;
-    }
-    .project-item-wrapper:hover .project-remove-btn {
-        opacity: 1;
-    }
-    .project-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex: 1;
-        min-width: 0;
-        padding: 8px 12px;
-        border-radius: var(--radius-md);
-        text-align: left;
-        font-size: 0.875rem;
-        color: var(--color-text-primary);
-        background: transparent;
-    }
-    .collapsed .project-item {
-        padding: 8px 4px;
-    }
-    .collapsed .project-item-wrapper.has-review .project-item {
-        border-left: 3px solid var(--color-column-review);
-        border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    }
-    .project-name {
-        flex: 1 1 0;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .sandbox-badge {
-        flex-shrink: 0;
-        margin-right: 6px;
-        color: var(--color-primary);
-        display: flex;
-        align-items: center;
-        height: 1em;
-    }
-    .sandbox-badge-off {
-        color: var(--color-status-red, #f85149);
-    }
-    .project-item:hover {
-        background: var(--color-surface-2);
-    }
-    .project-item-wrapper.active .project-item {
-        background: var(--color-surface-3);
-    }
-    .project-remove-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        padding: 0;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-status-red);
-        font-size: 1.125rem;
-        opacity: 0;
-        transition: opacity 0.15s ease;
-        flex-shrink: 0;
-        cursor: pointer;
-    }
-    .project-remove-btn:hover {
-        background: var(--color-status-red);
-        color: white;
-    }
-    @media (hover: none) {
-        .project-remove-btn {
-            opacity: 1;
-            transition: none;
-        }
-    }
-    .project-name {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .project-abbr {
-        display: none;
-        font-size: 0.875rem;
-        font-weight: 600;
-        text-align: center;
-        width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .collapsed .project-name {
-        display: none;
-    }
-    .collapsed .project-abbr {
-        display: block;
-    }
-    .collapsed .project-abbr-no-sandbox {
-        color: var(--color-status-red, #f85149);
-    }
-    .project-stats {
-        display: flex;
-        gap: 6px;
-        margin-left: 8px;
-        flex-shrink: 0;
-    }
-    .stat-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        font-size: 0.75rem;
-        font-weight: 500;
-        font-variant-numeric: tabular-nums;
-        opacity: 1;
-    }
-    .stat-badge svg {
-        flex-shrink: 0;
-    }
-    .collapsed .project-stats {
-        display: none;
-    }
-    .sidebar-menu {
-        padding: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-    .sidebar-menu-item {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        border: none;
-        border-radius: var(--radius-md);
-        background: transparent;
-        color: var(--color-text-secondary);
-        font-size: 0.875rem;
-        cursor: pointer;
-    }
-    .sidebar-menu-item:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
     }
 
-    .sidebar-footer {
-        padding: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-    .add-project-btn {
-        width: 100%;
-        padding: 8px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        font-size: 0.875rem;
-        color: var(--color-text-secondary);
-    }
-    .add-project-btn:hover {
-        background: var(--color-surface-4);
-    }
     .main {
         flex: 1;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-    }
-    .top-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 16px;
-        border-bottom: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        gap: 8px;
-    }
-    .sandbox-config-btn {
-        flex-shrink: 0;
-    }
-    .project-title {
-        display: flex;
-        align-items: center;
-        font-size: 0.875rem;
-        font-weight: 600;
-        flex: 1;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        gap: 6px;
-    }
-    .branch-btn {
-        gap: 4px;
-        font-weight: 500;
-        font-family: var(--font-mono);
-    }
-    .actions {
-        display: flex;
-        gap: 8px;
-    }
-    .icon-btn {
-        padding: 6px 12px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        font-size: 0.875rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .icon-btn:hover {
-        background: var(--color-accent);
     }
     .board-container {
         flex: 1;
@@ -1318,55 +975,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     .sidebar-backdrop {
         display: none;
     }
-    .hamburger {
-        display: none;
-    }
 
     @media (max-width: 768px) {
-        .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            width: 280px;
-            z-index: 200;
-            transform: translateX(-100%);
-            transition: transform 0.25s ease;
-            box-shadow: none;
-        }
-        .sidebar.mobile-open {
-            transform: translateX(0);
-            box-shadow: 4px 0 24px rgba(0,0,0,0.4);
-        }
         .sidebar-backdrop {
             display: block;
             position: fixed;
             inset: 0;
             background: rgba(0,0,0,0.5);
             z-index: 199;
-        }
-        .hamburger {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .top-bar {
-            padding: 8px 12px;
-            gap: 8px;
-            justify-content: flex-start;
-        }
-        .sidebar-header {
-            padding: 10px 12px;
-        }
-        .project-list {
-            padding: 4px;
-        }
-        .project-path {
-            flex: 1;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
         }
     }
 </style>

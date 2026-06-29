@@ -291,7 +291,7 @@
                 currentUrl={selectedUrl}
                 currentReasoningEffort={selectedReasoningEffort}
                 {disabled}
-                onSelect={onModelSelect}
+                onSelect={onModelSelect!}
             />
             {#if !isAgent}
                 <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} />

@@ -95,16 +95,35 @@ function escapeHtml(text: string): string {
         .replace(/>/g, '&gt;');
 }
 
+/** Simple LRU cache for highlight results (keyed by path + content hash). */
+const highlightCache = new Map<string, string[]>();
+const HIGHLIGHT_CACHE_MAX = 50;
+
+/** Compute a simple hash for cache key. */
+function contentHash(lines: string[]): string {
+    let hash = 0;
+    for (const line of lines) {
+        hash = ((hash << 5) - hash + line.charCodeAt(0)) | 0;
+    }
+    return hash.toString(36);
+}
+
 /**
  * Highlight multiple lines of code and return an array of HTML fragments (one per line).
  * Uses Lezer parsers from CodeMirror language packages for token-level highlighting.
  * Returns empty string for lines that should fall back to plain text rendering.
+ * Results are cached per file path + content hash to avoid redundant parsing.
  */
 export function highlightLines(lines: string[], path: string): string[] {
     if (lines.length === 0) return [];
 
     const lang = getLanguage(path);
     if (!lang) return lines.map(() => '');
+
+    // Check cache
+    const cacheKey = `${path}\x00${contentHash(lines)}`;
+    const cached = highlightCache.get(cacheKey);
+    if (cached) return cached;
 
     try {
         const source = lines.join('\n');
@@ -197,6 +216,12 @@ export function highlightLines(lines: string[], path: string): string[] {
             }
         }
 
+        // Store in cache (evict oldest if full)
+        if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
+            const firstKey = highlightCache.keys().next().value as string;
+            highlightCache.delete(firstKey);
+        }
+        highlightCache.set(cacheKey, result);
         return result;
     } catch {
         return lines.map(() => '');

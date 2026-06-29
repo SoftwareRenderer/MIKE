@@ -28,7 +28,8 @@
 
     function handleDragOver(e: DragEvent) {
         e.preventDefault();
-        const taskId = e.dataTransfer?.getData('text/plain');
+        if (!e.dataTransfer) return;
+        const taskId = e.dataTransfer.getData('text/plain');
         if (taskId && canDrop && !canDrop(taskId, columnId)) {
             e.dataTransfer.dropEffect = 'none';
             isDropRejected = true;

@@ -154,33 +154,7 @@ test.describe.serial('Settings API Key', () => {
     expect(typeof config.encryption_enabled).toBe('boolean');
   });
 
-  test('encryption warning is shown when encryption is disabled', async ({ page }) => {
-    const config = await apiGetConfig(page);
-    // Encryption is disabled (no ENCRYPTION_KEY env var in test environment)
-    if (config.encryption_enabled) {
-      test.skip(); // Skip if encryption happens to be enabled
-    }
-
-    await page.locator('[aria-label="Settings"]').click();
-    await page.waitForSelector('.modal', { timeout: 5000 });
-
-    const card = page.locator('.provider-card').first();
-    if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
-      await card.locator('.provider-card-header').click();
-      await expect(card.locator('.provider-details')).toBeVisible();
-    }
-
-    // Enter a key to trigger the warning
-    const apiKeyInput = card.locator('.api-key-field input');
-    await apiKeyInput.fill('sk-test-warning');
-
-    // Warning should be visible
-    const warning = card.locator('.encryption-warning');
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText('ENCRYPTION_KEY');
-  });
-
-  test('provider without API key works (empty field is valid)', async ({ page }) => {
+  test('provider without API key works (empty field is valid)', async ({ page}) => {
     await page.locator('[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 

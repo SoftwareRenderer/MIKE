@@ -976,8 +976,5 @@
         50% { opacity: 0; }
     }
 
-    .tool-result-error {
-        background: rgba(248,81,73,0.08);
-        color: var(--color-status-red);
-    }
+
 </style>

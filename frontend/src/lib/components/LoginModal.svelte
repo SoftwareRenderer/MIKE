@@ -37,7 +37,7 @@
 </script>
 
 <div class="login-overlay" role="dialog" aria-modal="true" aria-label="Login">
-    <div class="login-modal" onclick={(e) => e.stopPropagation()}>
+    <div class="login-modal" onclick={(e) => e.stopPropagation()} role="presentation">
         <form class="login-form" onsubmit={(e) => handleSubmit(e)}>
             <h2>Sign in</h2>
             <p class="login-subtitle">Enter your password to continue</p>

@@ -1,18 +1,19 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
-    import type { StreamEvent, Provider, Thread } from '$lib/types';
+    import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, getOfflineStatus, onQueueChanged } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, streamingTaskIds, showConfirm, commitQueueStatus, selectedTask, taskEvent, taskDiffStats as taskDiffStatsStore } from '$lib/store';
+import { board as boardStore, config as configStore, showToast, showConfirm, selectedTask } from '$lib/store';
+import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
-    import ChatMessage from './ChatMessage.svelte';
-    import ModelSelector from './ModelSelector.svelte';
-    import CheckpointDivider from './CheckpointDivider.svelte';
+    import ChatEntries from './ChatEntries.svelte';
+    import ReviewBar from './ReviewBar.svelte';
+    import StartPanel from './StartPanel.svelte';
 
-    interface ChatEntry {
+    export interface ChatEntry {
         id: string;
         role: string;
         content: string;
@@ -96,10 +97,16 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     });
 
-    // Save draft text to localStorage on every change
+    // Save draft text to localStorage (debounced to avoid writes on every keystroke)
+    let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    const DRAFT_SAVE_DEBOUNCE = 100; // ms
     function handleInputSave(val: string) {
+        if (draftSaveTimer) clearTimeout(draftSaveTimer);
         if (val) {
-            setDraftText(taskId, val);
+            draftSaveTimer = setTimeout(() => {
+                setDraftText(taskId, val);
+                draftSaveTimer = null;
+            }, DRAFT_SAVE_DEBOUNCE);
         }
     }
 
@@ -138,7 +145,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
     // For in_progress tasks, buffer events are legitimate and must be replayed.
     let suppressEvents = $state(taskStatus !== 'in_progress');
-    let queueStatus = $derived(commitQueueStatus[projectId]?.taskID === taskId ? commitQueueStatus[projectId].status : null);
+    let commitQueueStatus = getCommitQueueContext();
+    let taskEventContext = getTaskEventContext();
+    let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
 
     // Thread state
     let threads: Thread[] = $state([]);
@@ -154,7 +163,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
-    let isLoading = $derived($streamingTaskIds.has(taskId));
+    let streamingIds = getStreamingContext();
+    let isLoading = $derived($streamingIds.has(taskId));
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
@@ -318,12 +328,12 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
 
     /** Mark this task as actively streaming tokens. */
     function markStreaming() {
-        streamingTaskIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
+        streamingIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
     }
 
     /** Mark this task as no longer streaming. */
     function markNotStreaming() {
-        streamingTaskIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
+        streamingIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
         queuePosition = 0;
         queueEstimatedWait = 0;
         streamTokenCount = 0;
@@ -372,7 +382,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             case 'tool_call': {
                 if (suppressEvents) break;
                 clearAwaiting();
-                const data = event.data as { tool_id: string; tool_name: string; args: Record<string, unknown> };
+                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
                 if (!data.tool_id || data.tool_id === '') {
                     break;
@@ -738,8 +748,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
                     let entryId = currentAssistantId;
                     if (!entryId) {
                         for (let i = entries.length - 1; i >= 0; i--) {
-                            if (entries[i].role === 'assistant' && entries[i].toolCalls && entries[i].toolCalls.length > 0) {
-                                entryId = entries[i].id;
+                            const entry = entries[i];
+                            if (entry && entry.role === 'assistant' && entry.toolCalls && entry.toolCalls.length > 0) {
+                                entryId = entry.id;
                                 break;
                             }
                         }
@@ -860,7 +871,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             // Filter out null entries (e.g., skipped "stopped" errors)
             const validDbEntries = dbEntries.filter((e: ChatEntry | null): e is ChatEntry => e !== null);
             // Merge toolCalls entries into the preceding assistant entry
-            const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries);
+            const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries as ChatEntry[]);
             // Merge with existing entries (e.g., from buffer replay).
             // DB entries have backend UUIDs; buffer entries have random genId() IDs.
             // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
@@ -1219,7 +1230,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
             await updateTask(projectId, taskId, {
                 model_name: modelName,
                 llama_server_url: providerUrl,
-                reasoning_effort: reasoningEffort || null,
+                reasoning_effort: reasoningEffort || undefined,
             });
         } catch (e) {
             console.error('Failed to update task model:', e);
@@ -1343,6 +1354,7 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         await loadHistory();
     }
 
+    let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
     let hasChanges = $derived(!!diffStats?.hash);
 
@@ -1546,8 +1558,9 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     function setupViewportListener() {
         const vv = window.visualViewport;
         if (!vv) return;
+        const vp = vv;
         function onResize() {
-            const diff = Math.max(0, window.innerHeight - vv.height);
+            const diff = Math.max(0, window.innerHeight - vp.height);
             keyboardOffset = diff;
         }
         vv.addEventListener('resize', onResize);
@@ -1576,110 +1589,114 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         }
     }
 
-    onMount(async () => {
-        // Providers loaded via configStore subscription (no separate fetch needed)
-        updateProvidersFromStore();
-        await loadThreads();
-        // If URL has a thread param, switch to that thread before loading history
-        const urlThread = readThreadFromUrl();
-        if (urlThread && threads.some(t => t.id === urlThread)) {
-            try {
-                const switched = await switchTaskThread(projectId, taskId, urlThread);
-                updateActiveThread(switched.id);
-            } catch (e) {
-                showToast(String(e));
-            }
-        } else if (!urlThread) {
-            // No thread param — use the last active thread (is_active flag).
-            // Only default to "Main" if no thread is marked active (first open).
-            if (!activeThreadId) {
-                const mainThread = threads.find(t => t.name === 'Main');
-                if (mainThread) {
-                    try {
-                        const switched = await switchTaskThread(projectId, taskId, mainThread.id);
-                        updateActiveThread(switched.id);
-                    } catch (e) {
-                        showToast(String(e));
-                    }
-                }
-            }
-        }
-        // 1. Set up task event handler FIRST (before subscribing to task).
-        const unsubTaskEvent = taskEvent.subscribe((event) => {
-            if (event && event.task_id === taskId) {
-                handleEvent({ type: event.type, data: event.data });
-            }
-        });
-
-        // 2. Clear stale streaming state for non-running tasks.
-        // The global streamingTaskIds store may have a leftover entry from a previous
-        // visit if the user navigated away while the task was streaming.
-        if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
-            markNotStreaming();
-        }
-
-        // 3. Subscribe to this task directly (triggers buffer replay from server).
-        // Handler is already set up above, so buffer events won't be missed.
-        // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
-        const stream = getAppStreamRef();
-        if (stream) {
-            stream.subscribeTask(projectId, taskId);
-        }
-
-        // 4. Load history from DB (merges with buffer entries via ID-based dedup).
-        await loadHistory();
-
-        // 5. Allow live events — buffer replay is done, DB state is loaded.
-        suppressEvents = false;
-
-        // Override model selection with task-specific values if set
-        try {
-            const task = await (await import('$lib/api')).getTask(projectId, taskId);
-            if (task.llama_server_url) {
-                selectedUrl = task.llama_server_url;
-            }
-            if (task.model_name) {
-                selectedModel = task.model_name;
-            }
-            if (task.reasoning_effort) {
-                selectedReasoningEffort = task.reasoning_effort;
-            }
-        } catch {
-            // Task may not exist yet
-        }
-        connect();
-        // Scroll to bottom after history is loaded and DOM has rendered.
-        // scroll() uses requestAnimationFrame internally so the DOM update is ready.
-        scroll();
-        // If task was started externally (e.g., from board) and is running with no
-        // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
-        // Only for in_progress — review tasks have no active executor.
-        if (taskStatus === 'in_progress') {
-            const lastEntry = entries[entries.length - 1];
-            if (lastEntry?.role === 'user') {
-                awaitingResponse = true;
-            }
-        }
-        // Listen for URL changes (e.g., browser Back/Forward)
+    onMount(() => {
+        // Run async init in a promise chain; cleanup is returned synchronously.
+        let unsubTaskEvent: (() => void) | null = null;
+        let unsubConfig: (() => void) | null = null;
+        let unsubViewport: (() => void) | null | undefined = null;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);
-        // Subscribe to config store to react to settings changes
-        const unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
-        // Track visualViewport for mobile keyboard awareness
-        const unsubViewport = setupViewportListener();
-        // Mark keyboard navigation as user input (arrow keys, page up/down, home/end)
+        unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
+        unsubViewport = setupViewportListener();
         const handleKeydown = (e: KeyboardEvent) => {
             if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
                 markUserInput();
             }
         };
         window.addEventListener('keydown', handleKeydown);
+
+        (async () => {
+            // Providers loaded via configStore subscription (no separate fetch needed)
+            updateProvidersFromStore();
+            await loadThreads();
+            // If URL has a thread param, switch to that thread before loading history
+            const urlThread = readThreadFromUrl();
+            if (urlThread && threads.some(t => t.id === urlThread)) {
+                try {
+                    const switched = await switchTaskThread(projectId, taskId, urlThread);
+                    updateActiveThread(switched.id);
+                } catch (e) {
+                    showToast(String(e));
+                }
+            } else if (!urlThread) {
+                // No thread param — use the last active thread (is_active flag).
+                // Only default to "Main" if no thread is marked active (first open).
+                if (!activeThreadId) {
+                    const mainThread = threads.find(t => t.name === 'Main');
+                    if (mainThread) {
+                        try {
+                            const switched = await switchTaskThread(projectId, taskId, mainThread.id);
+                            updateActiveThread(switched.id);
+                        } catch (e) {
+                            showToast(String(e));
+                        }
+                    }
+                }
+            }
+            // 1. Set up task event handler FIRST (before subscribing to task).
+            unsubTaskEvent = taskEventContext.subscribe((event) => {
+                if (event && event.task_id === taskId) {
+                    handleEvent({ type: event.type as StreamEventType, data: event.data });
+                }
+            });
+
+            // 2. Clear stale streaming state for non-running tasks.
+            // The global streamingTaskIds store may have a leftover entry from a previous
+            // visit if the user navigated away while the task was streaming.
+            if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
+                markNotStreaming();
+            }
+
+            // 3. Subscribe to this task directly (triggers buffer replay from server).
+            // Handler is already set up above, so buffer events won't be missed.
+            // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
+            const stream = getAppStreamRef();
+            if (stream) {
+                stream.subscribeTask(projectId, taskId);
+            }
+
+            // 4. Load history from DB (merges with buffer entries via ID-based dedup).
+            await loadHistory();
+
+            // 5. Allow live events — buffer replay is done, DB state is loaded.
+            suppressEvents = false;
+
+            // Override model selection with task-specific values if set
+            try {
+                const task = await (await import('$lib/api')).getTask(projectId, taskId);
+                if (task.llama_server_url) {
+                    selectedUrl = task.llama_server_url;
+                }
+                if (task.model_name) {
+                    selectedModel = task.model_name;
+                }
+                if (task.reasoning_effort) {
+                    selectedReasoningEffort = task.reasoning_effort;
+                }
+            } catch {
+                // Task may not exist yet
+            }
+            connect();
+            // Scroll to bottom after history is loaded and DOM has rendered.
+            // scroll() uses requestAnimationFrame internally so the DOM update is ready.
+            scroll();
+            // If task was started externally (e.g., from board) and is running with no
+            // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
+            // Only for in_progress — review tasks have no active executor.
+            if (taskStatus === 'in_progress') {
+                const lastEntry = entries[entries.length - 1];
+                if (lastEntry?.role === 'user') {
+                    awaitingResponse = true;
+                }
+            }
+        })();
+
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
-            unsubConfig();
+            unsubConfig?.();
             unsubViewport?.();
             window.removeEventListener('keydown', handleKeydown);
-            unsubTaskEvent();
+            unsubTaskEvent?.();
         };
     });
 
@@ -1687,7 +1704,28 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         destroyed = true;
         if (inputTimeout) clearTimeout(inputTimeout);
         unsubQueue?.();
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        // Flush pending draft save on navigation/component destroy
+        if (draftSaveTimer) {
+            clearTimeout(draftSaveTimer);
+            draftSaveTimer = null;
+        }
+        if (inputValue) {
+            setDraftText(taskId, inputValue);
+        }
     });
+
+    // Save draft on page unload (navigation, reload) as a safety net for onDestroy
+    function handleBeforeUnload() {
+        if (draftSaveTimer) {
+            clearTimeout(draftSaveTimer);
+            draftSaveTimer = null;
+        }
+        if (inputValue) {
+            setDraftText(taskId, inputValue);
+        }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     // Clear queued flags when queue changes (actions flushed)
     let unsubQueue: (() => void) | null = null;
@@ -1709,240 +1747,73 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
     <div class="sr-only" aria-live="polite" aria-atomic="true">
         {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
     </div>
-    <div class="chat-messages-wrapper">
-        {#if entries.length > 0 && showHeader}
-            <div class="chat-sticky-header" role="status" aria-live="polite">
-                <span class="chat-sticky-bubble">{stickyUserMessage}</span>
-            </div>
-        {/if}
-        <div class="chat-messages" bind:this={scrollEl} onscroll={onScroll} onwheel={markUserInput} ontouchstart={markUserInput} role="region" aria-label="Chat messages" tabindex="0">
-        {#if entries.length === 0}
-            <div class="chat-empty">
-                <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
-                </svg>
-                <p>No messages yet</p>
-                <span class="hint">Send a message to start the conversation</span>
-            </div>
-        {:else}
-            {#each entries as entry, entryIdx (entry.id)}
-                {@const meta = entryMetas[entryIdx]}
-                {#if entry.role === 'user'}
-                    {#if meta.cpThread || meta.cpState}
-                        <CheckpointDivider
-                            timestamp={entry.createdAt}
-                            threadId={entry.threadId || activeThreadId}
-                            threads={threads}
-                            activeThreadId={meta.cpThread?.id || ''}
-                            onSwitch={handleThreadSwitch}
-                            isPending={meta.cpState?.isPending || false}
-                            commitLabel={meta.cpState?.commitLabel || undefined}
-                            commitHash={meta.cpState?.commitHash || meta.cpThread?.checkpoint_commit_hash || undefined}
-                            onViewChanges={onViewChanges}
-                        />
-                    {/if}
-                {/if}
-                {#if entry.role === 'error'}
-                    <div class="error-entry">
-                        <div class="error-card">
-                            <div class="error-header">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                    <line x1="12" y1="9" x2="12" y2="13"/>
-                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                </svg>
-                                <span class="error-code">{entry.error?.code || 'error'}</span>
-                                {#if entry.error?.code === 'ws_disconnected'}
-                                    <span class="error-reconnecting"><span class="spinner"></span> Reconnecting...</span>
-                                {/if}
-                                <button class="btn-dismiss" onclick={() => handleDismissError(entry.id)} title="Dismiss error" aria-label="Dismiss error">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <line x1="18" y1="6" x2="6" y2="18"/>
-                                        <line x1="6" y1="6" x2="18" y2="18"/>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="error-message">{entry.content}</div>
-                            {#if entry.error?.code === 'ws_disconnected'}
-                                <button class="btn-retry" onclick={handleRetryConnect} title="Retry connection">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <polyline points="23 4 23 10 17 10"/>
-                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                                    </svg>
-                                    Retry now
-                                </button>
-                            {/if}
-                        </div>
-                    </div>
-                {:else if entry.role === 'compression'}
-                    <div class="compression-entry">
-                        <div class="compression-divider">
-                            <div class="divider-line"></div>
-                            <div class="divider-content">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                                </svg>
-                                <span class="compression-label">Context compressed</span>
-                            </div>
-                            <div class="divider-line"></div>
-                        </div>
-                        <div class="compression-summary">{entry.content}</div>
-                    </div>
-                {:else if entry.role === 'merge_resolution'}
-                    <div class="merge-resolution-entry">
-                        <div class="merge-resolution-card">
-                            <div class="merge-resolution-header">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <circle cx="18" cy="18" r="3"/>
-                                    <circle cx="6" cy="6" r="3"/>
-                                    <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
-                                    <line x1="6" y1="9" x2="6" y2="21"/>
-                                </svg>
-                                <span class="merge-resolution-label">Merge conflicts resolved</span>
-                            </div>
-                            <div class="merge-resolution-content">{entry.content}</div>
-                        </div>
-                    </div>
-                {:else if entry.role === 'user'}
-                    <div class="sticky-user-message" data-user-msg-first-line={entry.content.split('\n')[0]}>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => handleMsgDelete(entry)} onFork={handleMsgFork} onSend={handleMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={handleMsgNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
-                    </div>
-                {:else}
-                    <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => handleMsgDelete(entry)} onFork={handleMsgFork} onSend={handleMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => handleRegenerate(entry.id) : undefined} onNavigateTask={handleMsgNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
-                {/if}
-            {/each}
-        {/if}
-        {#if awaitingResponse && connected && isLoading}
-            <div class="awaiting-llm">
-                <span class="spinner"></span>
-                <span>{queuePosition > 0 ? `Awaiting LLM provider — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : 'Awaiting LLM provider...'}</span>
-            </div>
-        {/if}
-        </div>
-    </div>
+    <ChatEntries
+        {entries}
+        {entryMetas}
+        {lastEntryIdx}
+        {activeThreadId}
+        {threads}
+        {awaitingResponse}
+        {connected}
+        {isLoading}
+        {queuePosition}
+        {queueEstimatedWait}
+        {showHeader}
+        {stickyUserMessage}
+        {taskStatus}
+        {projectId}
+        {taskId}
+        onScroll={onScroll}
+        onWheel={markUserInput}
+        onTouchStart={markUserInput}
+        onDismissError={handleDismissError}
+        onRetryConnect={handleRetryConnect}
+        onThreadSwitch={handleThreadSwitch}
+        onMsgDelete={handleMsgDelete}
+        onMsgFork={handleMsgFork}
+        onMsgSend={handleMsgSend}
+        onRegenerate={handleRegenerate}
+        onNavigateTask={handleMsgNavigateTask}
+        {onViewChanges}
+        {scrollEl}
+        onScrollElChange={(el) => scrollEl = el}
+    />
 
 
     {#if showStartButton}
-        <div class="chat-start">
-            <div class="start-model-row">
-                {#if providers.length > 0}
-                    <ModelSelector
-                        providers={providers}
-                        currentModel={selectedModel}
-                        currentUrl={selectedUrl}
-                        currentReasoningEffort={selectedReasoningEffort}
-                        onSelect={handleModelSelect}
-                    />
-                {/if}
-                {#if !isAgentSelected()}
-                <button
-                    type="button"
-                    class="btn-plan-toggle"
-                    class:active={planMode}
-                    onclick={() => handlePlanModeToggle(!planMode)}
-                    title={planMode ? 'Plan mode: AI proposes subtasks. Click to switch to act mode.' : 'Act mode: AI makes changes directly. Click to switch to plan mode.'}
-                    aria-label="Toggle plan mode"
-                >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        {#if planMode}
-                            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        {:else}
-                            <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        {/if}
-                    </svg>
-                    <span>{planMode ? 'Plan' : 'Act'}</span>
-                </button>
-                {/if}
-            </div>
-            <button class="btn-start-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Start the AI task">
-                {#if isStarting}
-                    <span class="spinner-inline"></span> Starting...
-                {:else}
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <path d="M4 2l10 6-10 6V2z" fill="currentColor"/>
-                    </svg>
-                    Start Task
-                {/if}
-            </button>
-        </div>
+        <StartPanel
+            {providers}
+            {selectedModel}
+            {selectedUrl}
+            {selectedReasoningEffort}
+            {planMode}
+            {isStarting}
+            {disabled}
+            {isAgentSelected}
+            onModelSelect={handleModelSelect}
+            onPlanModeToggle={handlePlanModeToggle}
+            onStartTask={handleStartTask}
+        />
     {:else}
         <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
-        {#if taskStatus === 'done' && onMoveTask}
-            <div class="chat-review-bar">
-                <button class="btn-move" onclick={() => onMoveTask('review')} title="Move task to Review">
-                    → Review
-                </button>
-                <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
-                    → Backlog
-                </button>
-            </div>
-        {/if}
-        {#if taskStatus === 'review'}
-            <div class="chat-review-bar">
-                {#if onMoveTask}
-                    <div class="move-buttons">
-                        <button class="btn-move" onclick={() => onMoveTask('done')} title="Move task to Done">
-                            → Done
-                        </button>
-                        <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
-                            → Backlog
-                        </button>
-                    </div>
-                {/if}
-                {#if showResumeButton}
-                    <button class="btn-commit-done" onclick={handleStartTask} disabled={isStarting || disabled} title="Resume the task from the last user message">
-                        {#if isStarting}
-                            <span class="spinner-inline"></span> Resuming...
-                        {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
-                            Resume
-                        {/if}
-                    </button>
-                {:else}
-                    <button class="btn-commit-done" onclick={handleCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move to Done'}>
-                        {#if queueStatus === 'queued'}
-                            <span class="spinner-inline"></span> In queue...
-                        {:else if queueStatus === 'processing' || isCommitting}
-                            <span class="spinner-inline"></span> {hasChanges ? 'Committing...' : 'Moving...'}
-                        {:else}
-                            {#if hasChanges}
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                Commit and move to Done
-                            {:else}
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                Move to Done
-                            {/if}
-                        {/if}
-                    </button>
-                {/if}
-            </div>
-        {/if}
-        {#if showRestartButton}
-            <div class="chat-review-bar">
-                {#if providers.length > 0}
-                    <div class="restart-model-row">
-                        <ModelSelector
-                            providers={providers}
-                            currentModel={selectedModel}
-                            currentUrl={selectedUrl}
-                            currentReasoningEffort={selectedReasoningEffort}
-                            onSelect={handleModelSelect}
-                        />
-                    </div>
-                {/if}
-                <button class="btn-restart-task" onclick={handleStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Restart the task from the last user message">
-                    {#if isStarting}
-                        <span class="spinner-inline"></span> Restarting...
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                            <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        Restart Task
-                    {/if}
-                </button>
-            </div>
-        {/if}
+        <ReviewBar
+            {taskStatus}
+            {showResumeButton}
+            {showRestartButton}
+            {isStarting}
+            {isCommitting}
+            {disabled}
+            {hasChanges}
+            {queueStatus}
+            {providers}
+            {selectedModel}
+            {selectedUrl}
+            {selectedReasoningEffort}
+            {onMoveTask}
+            onStartTask={handleStartTask}
+            onCommitAndDone={handleCommitAndDone}
+            onModelSelect={handleModelSelect}
+        />
         {#if !showRestartButton}
         <ChatForm
             bind:this={chatFormComp}
@@ -1992,380 +1863,8 @@ import { board as boardStore, config as configStore, showToast, streamingTaskIds
         min-height: 0;
         overflow: hidden;
     }
-    .chat-messages-wrapper {
-        flex: 1;
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-    }
-    .chat-messages {
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px 12px;
-        min-height: 0;
-    }
-    .chat-sticky-header {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 5;
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        padding: 6px 12px;
-        background: var(--color-surface-1);
-        border-bottom: 1px solid var(--color-border);
-        pointer-events: none;
-    }
-    .chat-sticky-bubble {
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-        border-radius: 1.125rem;
-        padding: 6px 12px;
-        max-width: 80%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .chat-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 48px 16px;
-        color: var(--color-text-tertiary);
-        text-align: center;
-        height: 100%;
-    }
-    .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
-    .chat-empty .hint { font-size: 0.75rem; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 1.5px solid var(--color-status-yellow);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .awaiting-llm {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        font-size: 0.8125rem;
-        color: var(--color-text-tertiary);
-    }
 
-    /* Error entry styles */
-    .error-entry {
-        padding: 6px 0;
-        content-visibility: auto;
-        contain-intrinsic-size: 1px 100px;
-    }
-    .error-card {
-        background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
-        border: 1px solid color-mix(in srgb, var(--color-status-red) 30%, transparent);
-        border-left: 3px solid var(--color-status-red);
-        border-radius: var(--radius-md);
-        padding: 10px 14px;
-    }
-    .error-header {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-        color: var(--color-status-red);
-    }
-    .error-header svg { flex-shrink: 0; }
-    .btn-dismiss {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 18px;
-        height: 18px;
-        padding: 0;
-        margin-left: auto;
-        background: none;
-        border: none;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        border-radius: 4px;
-        transition: all 0.15s ease;
-    }
-    .btn-dismiss:hover {
-        background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
-        color: var(--color-status-red);
-    }
-    .error-code {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-    .error-reconnecting {
-        font-size: 0.75rem;
-        color: var(--color-status-yellow);
-        margin-left: 4px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-    }
-    .error-message {
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        line-height: 1.5;
-        white-space: pre-wrap;
-        word-break: break-word;
-    }
-    .btn-retry {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        margin-top: 8px;
-        padding: 4px 10px;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-weight: 500;
-        background: var(--color-status-red);
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-retry:hover { opacity: 0.85; }
-
-
-    .chat-start {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        padding: 16px 12px;
-        border-top: 1px solid var(--color-border);
-        flex-shrink: 0;
-    }
-    .start-model-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .btn-plan-toggle {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 3px 8px;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-        color: var(--color-text-secondary);
-        font-size: 0.75rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        flex-shrink: 0;
-    }
-    .btn-plan-toggle:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .btn-plan-toggle.active {
-        background: var(--color-accent)22;
-        border-color: var(--color-accent);
-        color: var(--color-accent);
-    }
-    .restart-model-row {
-        display: flex;
-        align-items: center;
-        margin-right: auto;
-    }
-    .btn-start-task {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 24px;
-        border-radius: var(--radius-md);
-        font-size: 0.875rem;
-        font-weight: 600;
-        background: var(--color-accent);
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-start-task:hover:not(:disabled) {
-        opacity: 0.85;
-        transform: translateY(-1px);
-    }
-    .btn-start-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .btn-restart-task {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
-        font-weight: 600;
-        background: var(--color-accent);
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-restart-task:hover:not(:disabled) {
-        opacity: 0.85;
-    }
-    .btn-restart-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .spinner-inline {
-        display: inline-block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-
-    /* Review bar — Commit and move to Done */
-    .chat-review-bar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        justify-content: flex-end;
-        padding: 8px 12px;
-        border-top: 1px solid var(--color-border);
-        background: var(--color-surface-0);
-        flex-shrink: 0;
-    }
-    .move-buttons {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-right: auto;
-    }
-    .btn-move {
-        display: inline-flex;
-        align-items: center;
-        padding: 6px 12px;
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        background: var(--color-surface-2);
-        color: var(--color-text);
-        border: 1px solid var(--color-border);
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-move:hover {
-        background: var(--color-surface-1);
-        border-color: var(--color-accent);
-    }
-    .btn-commit-done {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 7px 16px;
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
-        font-weight: 600;
-        background: var(--color-status-green);
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-commit-done:hover:not(:disabled) {
-        opacity: 0.85;
-        transform: translateY(-1px);
-    }
-    .btn-commit-done:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .compression-entry {
-        padding: 8px 0;
-        content-visibility: auto;
-        contain-intrinsic-size: 1px 100px;
-    }
-    .compression-divider {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 4px 0;
-    }
-    .compression-divider .divider-line {
-        flex: 1;
-        height: 1px;
-        background: var(--color-accent);
-        opacity: 0.7;
-    }
-    .compression-divider .divider-content {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-    .compression-label {
-        font-size: 0.75rem;
-        color: var(--color-accent);
-        opacity: 0.8;
-        white-space: nowrap;
-    }
     .chat-form-wrapper {
         flex-shrink: 0;
-    }
-    .compression-summary {
-        margin-top: 6px;
-        padding: 8px 12px;
-        background: color-mix(in srgb, var(--color-accent) 5%, transparent);
-        border-radius: var(--radius-md);
-        border-left: 3px solid var(--color-accent);
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        line-height: 1.5;
-        white-space: pre-wrap;
-    }
-    .merge-resolution-entry {
-        padding: 8px 0;
-        content-visibility: auto;
-        contain-intrinsic-size: 1px 100px;
-    }
-    .merge-resolution-card {
-        background: color-mix(in srgb, var(--color-status-green) 6%, transparent);
-        border-radius: var(--radius-md);
-        border-left: 3px solid var(--color-status-green);
-        overflow: hidden;
-    }
-    .merge-resolution-header {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 12px 4px;
-        color: var(--color-status-green);
-    }
-    .merge-resolution-label {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: var(--color-status-green);
-    }
-    .merge-resolution-content {
-        padding: 4px 12px 10px;
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        line-height: 1.5;
-        white-space: pre-wrap;
     }
 </style>

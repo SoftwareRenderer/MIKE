@@ -75,15 +75,16 @@
     }
 
     // Sort model rows: regular entries first, title generation at bottom, filter out zeroed entries
-    let sortedModels: ModelStats[] = $derived(
-        (stats?.by_model || []).filter(m => m.task_count > 0 || m.generated_tokens > 0 || m.processed_tokens > 0 || m.cache_tokens > 0)
-            .toSorted((a, b) => {
+    let sortedModels: ModelStats[] = $derived.by(() => {
+        const models = (stats as ProjectStats | null)?.by_model || [];
+        return models.filter((m: ModelStats) => m.task_count > 0 || m.generated_tokens > 0 || m.processed_tokens > 0 || m.cache_tokens > 0)
+            .toSorted((a: ModelStats, b: ModelStats) => {
                 const aTitle = a.provider_name === 'title_generation' ? 1 : 0;
                 const bTitle = b.provider_name === 'title_generation' ? 1 : 0;
                 if (aTitle !== bTitle) return aTitle - bTitle;
                 return b.generated_tokens - a.generated_tokens;
-            })
-    );
+            });
+    });
 
     async function resetModel(model: ModelStats) {
         if (!confirm(`Reset token stats for ${getTokenLabel(model)}?`)) return;

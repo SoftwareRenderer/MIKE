@@ -58,7 +58,7 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'output') term.write(msg.data);
-        if (msg.type === 'title') term.title = msg.data;
+        if (msg.type === 'title') (term as any).title = msg.data; // xterm Terminal lacks .title in types
         if (msg.type === 'status') term.write(msg.data);
         if (msg.type === 'closed' && onClosed) onClosed();
     };

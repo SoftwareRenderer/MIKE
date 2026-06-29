@@ -90,11 +90,11 @@
     let fileTooLarge = $state(false);
     let fileName = $state('');
     let editorFocused = $state(false);
+    let originalContent = $state('');
+    let showConfirm = $state(false);
 
     let hasChanges = $derived(content !== originalContent);
     let lineCount = $derived(content.split('\n').length);
-    let originalContent = $state('');
-    let showConfirm = $state(false);
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
@@ -155,17 +155,18 @@
     function openSearchPanel() {
         if (!view || !searchContainerEl) return;
         searchVisible = true;
+        const editorView = view;
         requestAnimationFrame(() => {
             if (searchContainerEl && !searchApp) {
                 searchApp = mount(CustomSearchPanel, {
                     target: searchContainerEl,
                     props: {
-                        view: view,
+                        view: editorView,
                         onClose: () => {
                             searchVisible = false;
                             unmount(searchApp);
                             searchApp = null;
-                            view?.focus();
+                            editorView?.focus();
                         },
                     },
                 });
@@ -191,7 +192,7 @@
                 openSearchPanel();
                 return true;
             },
-        },
+        } as any,
         {
             key: 'Ctrl-h',
             macKey: 'Cmd-h',
@@ -199,7 +200,7 @@
                 openSearchPanel();
                 return true;
             },
-        },
+        } as any,
     ]);
 
     function createEditor() {
@@ -223,7 +224,7 @@
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
-            highlightSelectionMatches({ style: true }),
+            highlightSelectionMatches({ style: true } as any),
             searchKeymapOverride,
             keymap.of([
                 ...closeBracketsKeymap,
@@ -352,14 +353,15 @@
     function handleJumpToLine(e: Event) {
         const line = (e as CustomEvent).detail.line;
         if (!view || line < 1) return;
-        const totalLines = view.state.doc.lines;
+        const editorView = view;
+        const totalLines = editorView.state.doc.lines;
         const lineNum = Math.min(line, totalLines);
-        const lineObj = view.state.doc.line(lineNum);
-        view.dispatch({ selection: { anchor: lineObj.from, head: lineObj.from } });
-        view.focus();
+        const lineObj = editorView.state.doc.line(lineNum);
+        editorView.dispatch({ selection: { anchor: lineObj.from, head: lineObj.from } });
+        editorView.focus();
         // Scroll into view
         requestAnimationFrame(() => {
-            const coords = view.coordsAtPos(lineObj.from);
+            const coords = editorView.coordsAtPos(lineObj.from);
             if (coords) {
                 editorEl?.querySelector('.cm-scroller')?.scrollTo({
                     top: (editorEl?.querySelector('.cm-scroller') as HTMLElement)?.scrollTop - (editorEl?.querySelector('.cm-scroller') as HTMLElement)?.clientHeight! / 3 + coords.top,
@@ -473,8 +475,8 @@
 
     <!-- Confirm close dialog -->
     {#if showConfirm}
-        <div class="confirm-overlay" onclick={() => showConfirm = false}>
-            <div class="confirm-dialog" onclick={(e) => e.stopPropagation()}>
+        <div class="confirm-overlay" role="alertdialog" aria-modal="true" tabindex="-1" onclick={() => showConfirm = false} onkeydown={(e) => { if (e.key === 'Escape') showConfirm = false; }}>
+            <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
                 <h3>Unsaved changes</h3>
                 <p id="confirm-desc">You have unsaved changes. Discard them?</p>
                 <div class="confirm-actions">
@@ -521,13 +523,6 @@
         white-space: nowrap;
         font-family: var(--font-mono);
         font-size: 0.75rem;
-    }
-
-    .editor-dirty {
-        color: var(--color-status-yellow, #f0c000);
-        display: inline-flex;
-        align-items: center;
-        line-height: 1;
     }
 
     .btn-close-file {
@@ -681,10 +676,6 @@
         z-index: 100;
         pointer-events: none;
     }
-    .search-container > * {
-        pointer-events: auto;
-    }
-
     .confirm-overlay {
         position: absolute;
         inset: 0;

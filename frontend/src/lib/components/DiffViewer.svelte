@@ -230,11 +230,11 @@
                     <span class="diff-file-path" title={entry.path}>{truncatePath(entry.path)}</span>
                     {#if isLarge}
                         <span class="diff-file-stats">
-                            <span class="diff-large-size">{formatFileSize(entry.fileSize)}</span>
+                            <span class="diff-large-size">{formatFileSize(entry.fileSize ?? 0)}</span>
                         </span>
                     {:else}
                         <span class="diff-file-stats">
-                            <span class="diff-added">+{entry.origAdded ?? ufile.added}</span>
+                            <span class="diff-added">+{entry.origAdded ?? ufile.added ?? 0}</span>
                         </span>
                     {/if}
                     <span class="diff-untracked-badge">untracked</span>
@@ -252,7 +252,7 @@
                                             <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                             <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                         </svg>
-                                        <span>Binary or large file: {formatFileSize(entry.fileSize)}</span>
+                                        <span>Binary or large file: {formatFileSize(entry.fileSize ?? 0)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -290,7 +290,7 @@
                                                 <div
                                                     class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                     role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
-                                                    tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
+                                                    tabindex={onLineClick && item.row.lineNumber != null ? 0 : -1}
                                                     onclick={() => handleRowClick(entry.path, item.row.lineNumber)}
                                                     onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
                                                     onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
@@ -336,7 +336,10 @@
                                                     {#each item.block.rows as row, ji}
                                                         <div
                                                             class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                            role={onLineClick && row.lineNumber != null ? "button" : undefined}
+                                                            tabindex={onLineClick && row.lineNumber != null ? 0 : undefined}
                                                             onclick={() => handleRowClick(entry.path, row.lineNumber)}
+                                                            onkeydown={(e) => { if (onLineClick && row.lineNumber != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(entry.path, row.lineNumber); } }}
                                                             onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i + 1 + ji } }}
                                                             onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
                                                         >
@@ -497,7 +500,10 @@
                                                     {#each item.block.rows as row, ji}
                                                         <div
                                                             class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
+                                                            role={onLineClick && row.lineNumber != null ? "button" : undefined}
+                                                            tabindex={onLineClick && row.lineNumber != null ? 0 : undefined}
                                                             onclick={() => handleRowClick(file.path, row.lineNumber)}
+                                                            onkeydown={(e) => { if (onLineClick && row.lineNumber != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(file.path, row.lineNumber); } }}
                                                             onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i + 1 + ji } }}
                                                             onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
                                                         >

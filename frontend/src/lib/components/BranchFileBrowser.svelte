@@ -50,6 +50,8 @@
     }
 
     let currentPath = $state(initialPath || projectPath);
+    // Reactive reference to projectPath for closures
+    let currentProjectPath = $derived(projectPath);
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
     let loading = $state(true);
     let error = $state('');
@@ -173,7 +175,7 @@
                     class="new-file-input"
                     placeholder="filename"
                     value={newFileName}
-                    oninput={(e) => newFileName = e.target.value}
+                    oninput={(e) => newFileName = (e.target as HTMLInputElement).value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
                     onblur={() => { showNewFile = false; newFileName = ''; }}
                     aria-label="New file name"
@@ -196,7 +198,7 @@
                 type="text"
                 class="file-browser-path-input"
                 value={currentPath}
-                oninput={(e) => { currentPath = e.target.value; onPathChange(e.target.value); }}
+                oninput={(e) => { const v = (e.target as HTMLInputElement).value; currentPath = v; onPathChange(v); }}
                 aria-label="File path"
                 onkeydown={(e) => e.key === 'Enter' && handlePathInput()}
                 onblur={handlePathInput}
@@ -210,6 +212,7 @@
                     class:dir={entry.isDir}
                     onclick={() => handleClick(entry)}
                     role="treeitem"
+                    aria-selected="false"
                     title={entry.path}
                 >
                     {#if entry.isDir}

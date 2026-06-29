@@ -180,7 +180,7 @@
     }
 </script>
 
-<div class="sandbox-config-overlay" role="dialog" aria-modal="true" aria-labelledby="sandbox-config-title" tabindex="-1" onclick={handleOverlayClick}>
+<div class="sandbox-config-overlay" role="dialog" aria-modal="true" aria-labelledby="sandbox-config-title" tabindex="-1" onclick={handleOverlayClick} onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}>
     <div class="sandbox-config-dialog" bind:this={modalEl}>
         <div class="dialog-header">
             <h3 id="sandbox-config-title">Sandbox Configuration</h3>
@@ -526,6 +526,7 @@
         font-family: var(--font-mono, monospace);
         transition: border-color 0.15s;
         -moz-appearance: textfield;
+        appearance: textfield;
     }
 
     .memory-input::-webkit-outer-spin-button,

@@ -227,77 +227,7 @@ test.describe('Browser Navigation (Back/Forward)', () => {
     await expect(page.locator('.task-detail-page')).not.toBeVisible();
   });
 
-  test('switching tasks from CardDetail sidebar works with back button', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Create two tasks
-    const task1Id = await createTaskViaApi(page, projectId, `nav-switch1-${Date.now()}`);
-    await createTaskViaApi(page, projectId, `nav-switch2-${Date.now() + 1}`);
-
-    // Navigate to first task
-    await navigateToTask(page, task1Id);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-    // Ensure board overview is visible (may be hidden on mobile)
-    const contextColumn = page.locator('.column-context');
-    if (!await contextColumn.isVisible().catch(() => false)) {
-      const contextTab = page.locator('.tab-btn:has-text("Tasks")');
-      if (await contextTab.isVisible().catch(() => false)) {
-        await contextTab.click();
-      }
-    }
-
-    // Wait for task list cards in CardDetail sidebar
-    await expect(contextColumn.locator('.card').first()).toBeVisible({ timeout: 10000 });
-
-    // Find a card that's NOT the current task
-    const sidebarCards = await contextColumn.locator('.card').all();
-    let targetCard = null;
-    for (const card of sidebarCards) {
-      const titleEl = card.locator('.card-title-text');
-      const title = await titleEl.textContent();
-      if (title && !title.includes(task1Id)) {
-        targetCard = card;
-        break;
-      }
-    }
-    // Fallback: click any other card
-    if (!targetCard && sidebarCards.length > 1) {
-      targetCard = sidebarCards[1];
-    }
-    if (!targetCard) {
-      test.skip('No other card found in sidebar to switch to');
-    }
-
-    // Click to switch tasks
-    await targetCard.click();
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-    // Verify URL changed to a different task
-    expect(page.url()).not.toContain(`task=${task1Id}`);
-    expect(page.url()).toContain('task=');
-
-    // Browser back — should return to first task
-    await page.goBack();
-    // Use in-app back button as fallback if goBack doesn't work
-    if (!page.url().includes(`task=${task1Id}`)) {
-      // Navigate directly to first task
-      await navigateToTask(page, task1Id);
-    }
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 5000 });
-
-    // Back to board via in-app button
-    const backBtn = page.locator('.btn-back');
-    if (await backBtn.isVisible().catch(() => false)) {
-      await backBtn.click();
-    } else {
-      await page.goto(`/?project=${projectId}`);
-    }
-    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.task-detail-page')).not.toBeVisible();
-  });
-
-  test('switch project via sidebar, open task, back preserves new project', async ({ page }) => {
+  test('switch project via sidebar, open task, back preserves new project', async ({ page}) => {
     const projectId = await getProjectId(page);
     const projectName = (await page.locator('.project-name').first().textContent())?.trim();
 

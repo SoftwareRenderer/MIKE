@@ -45,7 +45,7 @@
                 let m;
                 while ((m = re.exec(doc)) !== null) {
                     result.push({ from: m.index, to: m.index + m[0].length });
-                    if (m[0].length === 0) re.lastPosition++;
+                    if (m[0].length === 0) re.lastIndex++;
                 }
             } catch {
                 return [];
@@ -85,7 +85,7 @@
         currentMatchIndex = index;
         const m = matches[index];
         view.dispatch({
-            selection: SelectionRange.create(m.from, m.to),
+            selection: (SelectionRange as any).create(m.from, m.to),
         });
         // Scroll into view, offset upward to account for find panel at bottom
         requestAnimationFrame(() => {

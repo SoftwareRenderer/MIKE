@@ -1,8 +1,13 @@
 <script lang="ts">
     import type { Task, Provider } from '$lib/types';
-    import { selectedTask, showCardDetail, board as boardStore, streamingTaskIds, config as configStore, taskDiffStats as taskDiffStatsStore, showConfirm, showToast, selectedProject } from '$lib/store';
+    import { get } from 'svelte/store';
+    import { selectedTask, showCardDetail, board as boardStore, config as configStore, showConfirm, showToast, selectedProject } from '$lib/store';
+    import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
+    import CardEditPanel from './Card/CardEditPanel.svelte';
+    import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
+    import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { fade } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
@@ -48,14 +53,13 @@
     let isDoneSubtask = $derived(inline && task.parent_task_id && task.status === 'done');
 
     // Status color for subtask indicator
-    let statusColor = $derived.by(() => {
-        // Use column color for subtask left border
-        if (task.status === 'backlog') return 'var(--color-column-backlog)';
-        if (task.status === 'in_progress') return 'var(--color-column-in-progress)';
-        if (task.status === 'review') return 'var(--color-column-review)';
-        if (task.status === 'done') return 'var(--color-column-done)';
-        return 'var(--color-text-tertiary)';
-    });
+    let statusColor = $derived(
+        task.status === 'backlog' ? 'var(--color-column-backlog)' :
+        task.status === 'in_progress' ? 'var(--color-column-in-progress)' :
+        task.status === 'review' ? 'var(--color-column-review)' :
+        task.status === 'done' ? 'var(--color-column-done)' :
+        'var(--color-text-tertiary)'
+    );
 
     // Expand/collapse state (managed by Board for stability)
     let expanded = $derived(expandedTasks?.has(task.id) ?? false);
@@ -98,7 +102,8 @@
 
     function handleDragStart(e: DragEvent) {
         e.stopPropagation();
-        e.dataTransfer?.setData('text/plain', task.id);
+        if (!e.dataTransfer) return;
+        e.dataTransfer.setData('text/plain', task.id);
         e.dataTransfer.effectAllowed = 'move';
     }
 
@@ -132,7 +137,7 @@
     });
 
     let statusBadge = $derived.by(() => {
-        const streaming = $streamingTaskIds.has(task.id);
+        const streaming = get(streamingIdsContext).has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
@@ -184,7 +189,9 @@
     let targetBranch = $derived($selectedProject?.origin_branch || 'main');
     let isConfigurable = $derived(columnId === 'backlog');
 
-    // Diff stats: pushed via WebSocket from the backend
+    // Context stores (must be retrieved at top level, not inside derived/effects)
+    let streamingIdsContext = getStreamingContext();
+    let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
     let hasChanges = $derived(!!diffStats?.hash);
 
@@ -210,7 +217,7 @@
     async function selectModel(providerUrl: string, modelName: string, reasoningEffort?: string) {
         if (!projectId) return;
         try {
-            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl, reasoning_effort: reasoningEffort || null });
+            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl, reasoning_effort: reasoningEffort || undefined });
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
@@ -228,7 +235,7 @@
     async function selectAgent() {
         if (!projectId) return;
         try {
-            const updated = await updateTask(projectId, task.id, { model_name: null, llama_server_url: 'pi://agent', reasoning_effort: null });
+            const updated = await updateTask(projectId, task.id, { model_name: undefined, llama_server_url: 'pi://agent', reasoning_effort: undefined });
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
@@ -267,17 +274,19 @@
     // Adjust dropdown position after render (flip if overflowing)
     $effect(() => {
         if (!modelPickerOpen || !pickerRect || !modelBadgeRef) return;
+        const badge = modelBadgeRef as HTMLButtonElement;
+        const rect = pickerRect;
         const raf = requestAnimationFrame(() => {
             const portal = document.querySelector('.portal-card-model-picker');
             if (!portal) return;
-            const triggerTop = modelBadgeRef!.getBoundingClientRect().top;
+            const triggerTop = badge.getBoundingClientRect().top;
             const dropdownHeight = portal.getBoundingClientRect().height;
             const dropdownWidth = portal.getBoundingClientRect().width;
             const viewportHeight = window.visualViewport?.height || window.innerHeight;
             const viewportWidth = window.visualViewport?.width || window.innerWidth;
-            let top = pickerRect.top;
-            let left = pickerRect.left;
-            const spaceBelow = viewportHeight - (triggerTop + modelBadgeRef!.getBoundingClientRect().height);
+            let top = rect.top;
+            let left = rect.left;
+            const spaceBelow = viewportHeight - (triggerTop + badge.getBoundingClientRect().height);
             if (spaceBelow < dropdownHeight + 12) {
                 top = triggerTop - dropdownHeight - 6;
             }
@@ -297,13 +306,17 @@
         const sel = $selectedTask;
         if (!sel || !sel.parent_task_id) return true;
         // Walk up the ancestor chain to see if this task is an ancestor of the selected task
-        let current = sel;
-        while (current) {
-            if (current.parent_task_id === task.id) return false;
-            // Find the parent task in the board store
-            const parent = $boardStore?.tasks.find(t => t.id === current.parent_task_id);
-            current = parent || null;
+        let ancestor: Task | null = sel;
+        let found = false;
+        while (ancestor) {
+            if (ancestor.parent_task_id === task.id) {
+                found = true;
+                break;
+            }
+            const nextId: string | undefined = ancestor.parent_task_id;
+            ancestor = nextId ? ($boardStore?.tasks.find(t => t.id === nextId) ?? null) : null;
         }
+        if (found) return false;
         return true;
     });
 
@@ -400,8 +413,9 @@
 
     $effect(() => {
         if (editingTitle && titleInputRef) {
-            titleInputRef.focus();
-            titleInputRef.select();
+            const input = titleInputRef as HTMLInputElement;
+            input.focus();
+            input.select();
         }
     });
 
@@ -583,88 +597,23 @@
     style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     {#if editingTitle}
-        <div class="card-edit-panel" onclick={(e) => e.stopPropagation()}>
-            <div class="card-edit-header">
-                <span class="card-edit-title">Edit Task</span>
-                <button type="button" class="card-edit-close" onclick={(e) => { e.stopPropagation(); cancelEdit(); }} aria-label="Close">✕</button>
-            </div>
-            <div class="card-edit-body">
-                <label class="card-edit-field">
-                    <span class="card-edit-label">Title</span>
-                    <input
-                        class="card-edit-input"
-                        type="text"
-                        bind:value={titleDraft}
-                        onkeydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); e.stopPropagation(); }}
-                        oninput={(e) => e.stopPropagation()}
-                        bind:this={titleInputRef}
-                        placeholder="Task title"
-                        aria-label="Task title"
-                    />
-                </label>
-                {#if editProviders.length > 0}
-                    <div class="card-edit-model-row">
-                        <span class="card-edit-label">Model</span>
-                        <ModelSelector
-                            providers={editProviders}
-                            currentModel={editModel}
-                            currentUrl={editUrl}
-                            currentReasoningEffort={editReasoningEffort}
-                            onSelect={handleEditModelSelect}
-                        />
-                    </div>
-                {/if}
-                <div class="card-edit-options">
-                    {#if !isAgentSelected()}
-                    <div class="config-row">
-                        <div class="config-info">
-                            <span class="config-label">Plan mode</span>
-                            <span class="help-icon" title="AI decomposes work into subtasks on the board, then executes after approval">
-                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
-                        </div>
-                        <ToggleSwitch bind:checked={editPlanMode} ariaLabel="Plan mode" />
-                    </div>
-                    {/if}
-                </div>
-                <div class="card-edit-section">
-                    <div class="section-label">Repository</div>
-                    <div class="config-row">
-                        <div class="config-info">
-                            <span class="config-label">Auto-merge</span>
-                            <span class="help-icon" title={task.parent_task_id ? 'Merge changes into parent task when complete' : `Merge changes into ${targetBranch} when complete`}>
-                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
-                        </div>
-                        <ToggleSwitch bind:checked={editMergeOnCommit} ariaLabel="Auto-merge on completion" />
-                    </div>
-                    {#if !task.parent_task_id}
-                    <div class="config-row">
-                        <div class="config-info">
-                            <span class="config-label">Allow subtasks to auto-merge</span>
-                            <span class="help-icon" title="Subtasks created under this task will auto-merge into it">
-                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
-                        </div>
-                        <ToggleSwitch bind:checked={editMergeChildren} ariaLabel="Allow subtasks to auto-merge" />
-                    </div>
-                    {/if}
-                </div>
-            </div>
-            <div class="card-edit-footer">
-                <button type="button" class="card-edit-btn-cancel" onclick={(e) => { e.stopPropagation(); cancelEdit(); }}>Cancel</button>
-                <button type="button" class="card-edit-btn-save" onclick={(e) => { e.stopPropagation(); saveEdit(); }}>Save</button>
-            </div>
-        </div>
+        <CardEditPanel
+            {titleDraft}
+            {editProviders}
+            {editModel}
+            {editUrl}
+            {editReasoningEffort}
+            {editPlanMode}
+            {editMergeOnCommit}
+            {editMergeChildren}
+            {isAgentSelected}
+            taskHasParent={!!task.parent_task_id}
+            {targetBranch}
+            {titleInputRef}
+            onSave={saveEdit}
+            onCancel={cancelEdit}
+            onModelSelect={handleEditModelSelect}
+        />
     {:else}
         <div class="card-title">
             {#if task.title_generating}
@@ -826,7 +775,7 @@
         <div class="subtask-list">
             {#each children as child}
                 <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
-                    <svelte:self task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
+                    <Card task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
                 </div>
             {/each}
         </div>
@@ -835,51 +784,15 @@
 
 <!-- Model picker dropdown (portal to escape card overflow) -->
 {#if modelPickerOpen && pickerRect && providers.length > 0}
-        {@const isAgentActive = task.llama_server_url === 'pi://agent'}
-    <svelte:element this={"div"} class="portal-card-model-picker" role="listbox" aria-label="Select model" style="position:fixed;top:{pickerRect.top}px;left:{pickerRect.left}px;z-index:10000;min-width:200px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
-        <button type="button" class="picker-model-option picker-agent-option" class:active={isAgentActive} onclick={selectAgent} role="option" aria-selected={isAgentActive}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px;flex-shrink:0">
-                <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-                <circle cx="6" cy="9" r="1" fill="currentColor"/>
-                <circle cx="10" cy="9" r="1" fill="currentColor"/>
-            </svg>
-            <span class="option-name">Pi Coding Agent</span>
-            {#if isAgentActive}
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            {/if}
-        </button>
-        {#each providers as provider}
-            {#if provider.models.length > 0}
-                <div class="picker-provider-header">{provider.display_name || provider.name}</div>
-                {@const pairs = (() => {
-                    const seen = new Set<string>();
-                    const result: Array<{name: string; effort: string}> = [];
-                    for (const m of provider.models) {
-                        const name = typeof m === 'string' ? m : m.name;
-                        const effort = (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium';
-                        const key = `${name}|${effort}`;
-                        if (!seen.has(key) && name.trim()) {
-                            seen.add(key);
-                            result.push({ name, effort });
-                        }
-                    }
-                    return result;
-                })()}
-                {#each pairs as m}
-                    {@const isActive = m.name === task.model_name && m.effort === (task.reasoning_effort || 'medium')}
-                    <button type="button" class="picker-model-option" class:active={isActive} onclick={() => selectModel(provider.url, m.name, m.effort)} role="option" aria-selected={isActive}>
-                        <span class="option-name">{m.name}</span>
-                        {#if m.effort && m.effort !== 'medium'}
-                            <span class="effort-badge">{m.effort}</span>
-                        {/if}
-                        {#if isActive}
-                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        {/if}
-                    </button>
-                {/each}
-            {/if}
-        {/each}
-    </svelte:element>
+    <ModelPickerPortal
+        {providers}
+        currentUrl={task.llama_server_url}
+        currentModel={task.model_name}
+        currentEffort={task.reasoning_effort || 'medium'}
+        rect={pickerRect}
+        onSelectAgent={selectAgent}
+        onSelectModel={selectModel}
+    />
 {/if}
 
 <style>
@@ -895,6 +808,8 @@
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;
+        will-change: transform;
+        contain: layout style paint;
     }
     /* Diagonal fade overlay for tasks with queued offline actions */
     .card.queued::after {
@@ -1068,243 +983,6 @@
         padding: 0 4px;
         pointer-events: none;
     }
-    .card-edit-panel {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-    }
-    .card-edit-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .card-edit-title {
-        font-size: 0.8125rem;
-        font-weight: 600;
-        color: var(--color-text-primary);
-    }
-    .card-edit-close {
-        font-size: 1rem;
-        color: var(--color-text-secondary);
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 2px 4px;
-        line-height: 1;
-    }
-    .card-edit-close:hover {
-        color: var(--color-text-primary);
-    }
-    .card-edit-body {
-        padding: 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-    .card-edit-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .card-edit-label {
-        font-size: 0.8125rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-    }
-    .card-edit-input {
-        width: 100%;
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        padding: 6px 8px;
-        font-family: inherit;
-        outline: none;
-    }
-    .card-edit-input:focus {
-        border-color: var(--color-accent);
-    }
-    .card-edit-model-row {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-    .card-edit-options {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .card-edit-checkbox {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-    }
-    .card-edit-checkbox.disabled {
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    .card-edit-checkbox input[type="checkbox"] {
-        accent-color: var(--color-accent);
-        margin-top: 1px;
-        cursor: pointer;
-        flex-shrink: 0;
-    }
-    .card-edit-option-text {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-    }
-    .card-edit-option-title {
-        font-weight: 600;
-        font-size: 0.8125rem;
-    }
-    .card-edit-option-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        font-weight: 400;
-    }
-    .card-edit-section {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 6px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-    .section-label {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-tertiary);
-    }
-    .config-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-    }
-    .config-row-stacked {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    .config-info {
-        display: flex;
-        flex: 1;
-        min-width: 0;
-    }
-    .config-text {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-    }
-    .config-label {
-        font-size: 0.8125rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .config-info {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .help-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--color-text-tertiary);
-        cursor: help;
-        flex-shrink: 0;
-    }
-    .help-icon:hover {
-        color: var(--color-text-secondary);
-    }
-    .config-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-    }
-    .radio-group {
-        display: flex;
-        gap: 0;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        flex-shrink: 0;
-    }
-    .radio-label {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 3px 10px;
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-        user-select: none;
-        flex: 1;
-        justify-content: center;
-    }
-    .radio-label:first-child {
-        border-right: 1px solid var(--color-border);
-    }
-    .radio-label.active {
-        background: var(--color-accent);
-        color: white;
-    }
-    .radio-label:hover:not(.active) {
-        background: var(--color-surface-3);
-    }
-    .radio-label input[type="radio"] {
-        display: none;
-    }
-    .radio-text {
-        white-space: nowrap;
-    }
-    .card-edit-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        padding: 8px 10px;
-        border-top: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-    }
-    .card-edit-btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .card-edit-btn-cancel:hover {
-        background: var(--color-surface-4);
-    }
-    .card-edit-btn-save {
-        padding: 6px 16px;
-        border-radius: var(--radius-sm);
-        background: var(--color-accent);
-        color: #fff;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .card-edit-btn-save:hover {
-        background: var(--color-accent-hover);
-    }
     .badges-row {
         display: flex;
         flex-wrap: wrap;
@@ -1321,22 +999,7 @@
         font-weight: 500;
         font-family: inherit;
     }
-    button.badge {
-        border: none;
-        cursor: pointer;
-        transition: background 0.1s ease;
-    }
-    button.badge:hover {
-        background: var(--color-text-tertiary)33 !important;
-    }
-    button.badge.open {
-        background: var(--color-text-tertiary)44 !important;
-    }
-    .badge-chevron {
-        flex-shrink: 0;
-        opacity: 0.5;
-        transition: transform 0.15s ease;
-    }
+    /* badge styles removed - no longer used */
     .model-badge {
         max-width: 100%;
         overflow: hidden;
@@ -1383,69 +1046,6 @@
         opacity: 0.5;
         margin: 0 2px;
     }
-    .badge.open .badge-chevron {
-        transform: rotate(180deg);
-    }
-
-    /* Model picker dropdown styles */
-    .picker-provider-header {
-        padding: 6px 8px 2px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.4px;
-        color: var(--color-text-tertiary);
-    }
-    .picker-model-option {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        width: 100%;
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        border: none;
-        background: none;
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: inherit;
-        cursor: pointer;
-        text-align: left;
-        transition: background 0.1s ease;
-    }
-    .picker-model-option:hover {
-        background: var(--color-surface-3);
-    }
-    .picker-model-option.active {
-        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-        color: var(--color-accent);
-    }
-    .picker-agent-option {
-        color: #A371F7;
-    }
-    .picker-agent-option.active {
-        background: rgba(163, 113, 247, 0.1);
-        color: #A371F7;
-    }
-    .picker-agent-option:hover {
-        background: rgba(163, 113, 247, 0.08);
-    }
-    .option-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .effort-badge {
-        font-size: 0.65rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--color-text-tertiary);
-        background: var(--color-surface-3);
-        padding: 1px 5px;
-        border-radius: 3px;
-        flex-shrink: 0;
-    }
-
     @media (hover: none) {
         .card-actions {
             opacity: 1;

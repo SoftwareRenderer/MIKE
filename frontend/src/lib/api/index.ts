@@ -17,10 +17,10 @@ export {
     getQueueLength,
     flushQueueNow,
     __debugOfflineStatus,
-} from '../api';
+} from './queue';
 
 // -- Types --
-export type { QueuedAction } from '../api';
+export type { QueuedAction } from './queue';
 
 // -- Projects --
 export {
@@ -34,7 +34,7 @@ export {
     deleteProject,
     getBoard,
     reorderTasks,
-} from '../api';
+} from './projects';
 
 // -- Tasks --
 export {
@@ -49,7 +49,7 @@ export {
     startSubtask,
     stopTask,
     resumeTask,
-} from '../api';
+} from './tasks';
 
 // -- Messages --
 export {
@@ -61,7 +61,7 @@ export {
     regenerateTaskMessages,
     checkMessageDelete,
     updateTaskMessage,
-} from '../api';
+} from './tasks';
 
 // -- Threads --
 export {
@@ -69,7 +69,7 @@ export {
     switchTaskThread,
     forkTaskThread,
     deleteTaskThread,
-} from '../api';
+} from './threads';
 
 // -- Config --
 export {
@@ -78,7 +78,8 @@ export {
     testConnection,
     fetchModels,
     testPiConnection,
-} from '../api';
+    reloadPrompts,
+} from './config';
 
 // -- Git --
 export {
@@ -88,7 +89,7 @@ export {
     getGitLogFull,
     getGitBranches,
     checkoutBranch,
-} from '../api';
+} from './git';
 
 // -- Stream --
 export { createAppStream } from './stream';

@@ -154,17 +154,18 @@
     function openSearchPanel() {
         if (!view || !searchContainerEl) return;
         searchVisible = true;
+        const editorView = view;
         requestAnimationFrame(() => {
             if (searchContainerEl && !searchApp) {
                 searchApp = mount(CustomSearchPanel, {
                     target: searchContainerEl,
                     props: {
-                        view: view,
+                        view: editorView,
                         onClose: () => {
                             searchVisible = false;
                             unmount(searchApp);
                             searchApp = null;
-                            view?.focus();
+                            editorView?.focus();
                         },
                     },
                 });
@@ -190,7 +191,7 @@
                 openSearchPanel();
                 return true;
             },
-        },
+        } as any,
         {
             key: 'Ctrl-h',
             macKey: 'Cmd-h',
@@ -198,7 +199,7 @@
                 openSearchPanel();
                 return true;
             },
-        },
+        } as any,
     ]);
 
     function createEditor() {
@@ -223,7 +224,7 @@
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
-            highlightSelectionMatches({ style: true }),
+            highlightSelectionMatches({ style: true } as any),
             searchKeymapOverride,
             keymap.of([
                 ...closeBracketsKeymap,
@@ -422,7 +423,7 @@
     }
 </script>
 
-<div class="file-editor" tabindex="-1" onkeydown={handleKeyDown}>
+<div class="file-editor" role="application" tabindex="-1" onkeydown={handleKeyDown}>
     <!-- Header -->
     <div class="editor-header">
         <div class="header-left">
@@ -509,7 +510,7 @@
 <!-- Unsaved changes confirmation dialog -->
 {#if showConfirm}
     <div class="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
-        <div class="confirm-dialog" onclick={(e) => e.stopPropagation()}>
+        <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
             <h3 id="confirm-title">Unsaved Changes</h3>
             <p id="confirm-desc">You have unsaved changes. Discard them?</p>
             <div class="confirm-actions">
@@ -675,9 +676,7 @@
         z-index: 100;
         pointer-events: none;
     }
-    .search-container > * {
-        pointer-events: auto;
-    }
+
 
     /* CodeMirror theme overrides to match our UI */
     .editor-content :global(.cm-editor) {

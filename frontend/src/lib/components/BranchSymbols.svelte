@@ -45,6 +45,7 @@
                     class="symbol-item"
                     onclick={() => onSymbolClick(symbol.line)}
                     role="treeitem"
+                    aria-selected="false"
                     title={`Line ${symbol.line}: ${symbol.name}`}
                 >
                     <span

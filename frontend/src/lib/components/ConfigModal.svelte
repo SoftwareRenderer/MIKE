@@ -7,6 +7,7 @@
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
+    import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -61,6 +62,7 @@
         name: string;
         readonly: boolean; // true = fetched from API, not editable
         reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+        context_window?: number;
     }
 
     interface ProviderDraft {
@@ -69,6 +71,7 @@
         kind: 'llm' | 'pi';
         url: string;
         api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
+        agent_config_dir?: string;
         models: ModelEntry[];
         concurrency: number;
         default_model: string; // per-provider default model
@@ -123,7 +126,7 @@
     let encryptionEnabled = $state(false);
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
-        const oldGlobalDefault = cfg?.default_model || '';
+        const oldGlobalDefault = '';
         return (cfg?.providers || []).map(p => {
             // Detect Pi provider by kind field OR sentinel URL
             const isAgent = p.kind === 'pi' || p.url === PI_SENTINEL_URL;
@@ -495,7 +498,7 @@
                 default_merge_children: defaultMergeChildren,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
-            });
+            } as Config);
             configStore.set(cfg);
             loading = false;
             onSaved();
@@ -552,7 +555,7 @@
                     </div>
                     <!-- Agent selection dropdown -->
                     {#if agentMenuOpen && agentMenuRect}
-                        <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()}>
+                        <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') agentMenuOpen = false; }} role="menu" tabindex="-1">
                             <button type="button" class="agent-menu-item" onclick={addAgent}>
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
@@ -565,12 +568,13 @@
                     {/if}
                 </div>
                 <div class="providers-list">
-                    {#each providers as p, i}
-                        <div class="provider-card" data-index={i} bind:this={providerCards[i]} class:dragging={dragIndex === i}>
+                    {#each providers as p, i (p.name)}
+                        {@const idx = i}
+                        <div class="provider-card" data-index={idx} bind:this={providerCards[idx]} class:dragging={dragIndex === idx}>
                             <!-- Card header: always visible -->
-                            <div class="provider-card-header" onclick={() => toggleProvider(i)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleProvider(i); } }} role="button" aria-expanded={p.expanded} tabindex="0">
+                            <div class="provider-card-header" onclick={() => toggleProvider(idx)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleProvider(idx); } }} role="button" aria-expanded={p.expanded} tabindex="0">
                                 <div class="reorder-buttons">
-                                    <button type="button" class="btn-drag-handle" onpointerdown={(e) => handleDragStart(e, i)} title="Drag to reorder" aria-label="Drag to reorder provider">
+                                    <button type="button" class="btn-drag-handle" onpointerdown={(e) => handleDragStart(e, idx)} title="Drag to reorder" aria-label="Drag to reorder provider">
                                         <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
                                             <circle cx="5" cy="3" r="1.5"/>
                                             <circle cx="11" cy="3" r="1.5"/>
@@ -607,13 +611,13 @@
                                         {@const defaultModelInfo = parseDefaultModel(p.default_model)}
                                         <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}22">{defaultModelInfo.name}</span>
                                     {/if}
-                                    <button type="button" class="btn-remove-provider" onclick={(e) => { e.stopPropagation(); if (confirm('Remove this provider?')) removeProvider(i); }} title="Remove provider" aria-label="Remove provider">
+                                    <button type="button" class="btn-remove-provider" onclick={(e) => { e.stopPropagation(); if (confirm('Remove this provider?')) removeProvider(idx); }} title="Remove provider" aria-label="Remove provider">
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                                             <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(i); }} aria-expanded={p.expanded} aria-label={p.expanded ? 'Collapse provider details' : 'Expand provider details'} title={p.expanded ? 'Collapse' : 'Expand'}>
+                                    <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); toggleProvider(idx); }} aria-expanded={p.expanded} aria-label={p.expanded ? 'Collapse provider details' : 'Expand provider details'} title={p.expanded ? 'Collapse' : 'Expand'}>
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={p.expanded}>
                                             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
@@ -653,12 +657,13 @@
                                         <!-- LLM Provider Fields -->
                                         <div class="url-and-key-row">
                                             <div class="url-field">
-                                                <label class="url-label">Provider URL</label>
-                                                <input type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
+                                                <label class="url-label" for={`provider-url-${p.name}`}>Provider URL</label>
+                                                <input id={`provider-url-${p.name}`} type="text" bind:value={p.url} placeholder="http://localhost:8080/v1" oninput={() => syncProviderMeta(p)} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
                                             </div>
                                             <div class="api-key-field">
-                                                <label class="api-key-label">API key <span class="optional-text">(optional)</span></label>
+                                                <label class="api-key-label" for={`provider-key-${p.name}`}>API key <span class="optional-text">(optional)</span></label>
                                                 <input
+                                                    id={`provider-key-${p.name}`}
                                                     type="password"
                                                     bind:value={p.api_key}
                                                     placeholder="API key..."
@@ -678,7 +683,7 @@
                                     {/if}
                                     {#if p.kind !== 'pi'}
                                     <div class="details-actions">
-                                        <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(i)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
+                                        <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(idx)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}
                                                 <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -691,7 +696,7 @@
                                                 Fetch Models
                                             {/if}
                                         </button>
-                                        <button type="button" class="btn-test" onclick={() => testProviderConnection(i)} disabled={p.testingConnection || !p.url.trim()} title="Test connection to this provider">
+                                        <button type="button" class="btn-test" onclick={() => testProviderConnection(idx)} disabled={p.testingConnection || !p.url.trim()} title="Test connection to this provider">
                                             {#if p.testingConnection}
                                                 <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -750,7 +755,7 @@
                                     <div class="models-section">
                                         <div class="models-header">
                                             <span class="models-label">MODELS</span>
-                                            <button type="button" class="btn-add-model" onclick={() => addModelToProvider(i)} title="Add a model manually">
+                                            <button type="button" class="btn-add-model" onclick={() => addModelToProvider(idx)} title="Add a model manually">
                                                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                                                     <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                                 </svg>
@@ -763,7 +768,7 @@
                                                     {#if model.name}
                                                         {@const modelEffort = model.reasoning_effort || 'medium'}
                                                         {@const modelCompositeKey = modelEffort !== 'medium' ? `${model.name}|${modelEffort}` : model.name}
-                                                        <button type="button" class="btn-default" class:active={p.default_model === modelCompositeKey} onclick={() => setProviderDefaultModel(i, model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
+                                                        <button type="button" class="btn-default" class:active={p.default_model === modelCompositeKey} onclick={() => setProviderDefaultModel(idx, model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{p.default_model === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
                                                             {p.default_model === modelCompositeKey ? 'Default' : 'Set default'}
                                                         </button>
                                                     {:else}
@@ -794,7 +799,7 @@
                                                             {/each}
                                                         </optgroup>
                                                     </select>
-                                                    <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(i, mi)} aria-label={`Remove ${model.name || 'model'}`} title={`Remove ${model.name || 'model'}`}>
+                                                    <button type="button" class="btn-remove-model" onclick={() => removeModelFromProvider(idx, mi)} aria-label={`Remove ${model.name || 'model'}`} title={`Remove ${model.name || 'model'}`}>
                                                         ✕
                                                     </button>
                                                 </div>
@@ -820,28 +825,28 @@
                                                 <label for={`input-price-${i}`}>Input</label>
                                                 <div class="pricing-input-wrap">
                                                     <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`input-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.input_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.input_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                    <input id={`input-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.input_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.input_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
                                                 </div>
                                             </div>
                                             <div class="pricing-field">
                                                 <label for={`output-price-${i}`}>Output</label>
                                                 <div class="pricing-input-wrap">
                                                     <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`output-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.output_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.output_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                    <input id={`output-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.output_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.output_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
                                                 </div>
                                             </div>
                                             <div class="pricing-field">
                                                 <label for={`cache-read-price-${i}`}>Cache Read</label>
                                                 <div class="pricing-input-wrap">
                                                     <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`cache-read-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_read_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.cache_read_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                    <input id={`cache-read-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_read_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.cache_read_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
                                                 </div>
                                             </div>
                                             <div class="pricing-field">
                                                 <label for={`cache-write-price-${i}`}>Cache Write</label>
                                                 <div class="pricing-input-wrap">
                                                     <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`cache-write-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_write_price)} onfocus={(e) => { e.target.select(); }} onblur={(e) => { p.cache_write_price = parsePrice(e.target.value); }} onkeydown={(e) => { if (e.key === 'Enter') e.target.blur(); }} placeholder="0.00" class="pricing-input" />
+                                                    <input id={`cache-write-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_write_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.cache_write_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
                                                 </div>
                                             </div>
                                         </div>
@@ -892,48 +897,13 @@
             </fieldset>
 
             <!-- Task Defaults Section -->
-            <fieldset class="section">
-                <h3 class="section-label">Task Defaults</h3>
-                <p class="section-description">These settings apply to newly created tasks</p>
-
-                <div class="toggle-field">
-                    <div class="toggle-label-group">
-                        <span id="toggle-planmode-label" class="toggle-label">Plan mode</span>
-                        <span id="toggle-planmode-desc" class="toggle-desc">AI decomposes work into subtasks on the board before executing</span>
-                    </div>
-                    <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" ariaDescribedby="toggle-planmode-desc" />
-                </div>
-
-                <div class="toggle-field">
-                    <div class="toggle-label-group">
-                        <span id="toggle-mergeoncommit-label" class="toggle-label">Auto-merge</span>
-                        <span id="toggle-mergeoncommit-desc" class="toggle-desc">Merge changes into <span class="branch-badge" title={`Branch: {$selectedProject?.origin_branch || 'main'}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{$selectedProject?.origin_branch || 'main'}</span> when complete</span>
-                    </div>
-                    <ToggleSwitch bind:checked={defaultMergeOnCommit} ariaLabel="Auto-merge into main" ariaDescribedby="toggle-mergeoncommit-desc" />
-                </div>
-
-                <div class="toggle-field">
-                    <div class="toggle-label-group">
-                        <span id="toggle-mergechildren-label" class="toggle-label">Allow subtasks to auto-merge</span>
-                        <span id="toggle-mergechildren-desc" class="toggle-desc">Subtasks created under a task will auto-merge into it</span>
-                    </div>
-                    <ToggleSwitch bind:checked={defaultMergeChildren} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" />
-                </div>
-
-                <div class="field-row">
-                    <div class="option-label-group">
-                        <label class="field-label-inline" for="default-max-failed">Max failed turns</label>
-                        <button type="button" class="help-icon" aria-label="Stop task after this many consecutive LLM failures">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                            </svg>
-                        </button>
-                    </div>
-                    <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" aria-describedby="max-failed-help" />
-                    <span id="max-failed-help" class="sr-only">Stop task after this many consecutive LLM failures</span>
-                </div>
-            </fieldset>
+            <TaskDefaults
+                bind:defaultPlanMode
+                bind:defaultMergeOnCommit
+                bind:defaultMergeChildren
+                bind:defaultMaxFailedTurns
+                originBranch={$selectedProject?.origin_branch || 'main'}
+            />
 
             {#if error}
                 <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
@@ -1182,60 +1152,6 @@
         user-select: all;
     }
 
-    /* Section description */
-    .section-description {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        margin: -4px 0 4px;
-    }
-
-    /* Toggle field */
-    .toggle-field {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 0;
-    }
-    .toggle-field + .toggle-field {
-        border-top: 1px solid var(--color-border);
-    }
-    .toggle-label-group {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .toggle-label {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .toggle-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-    }
-    .branch-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        padding: 0 5px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-        font-family: var(--font-mono);
-        vertical-align: baseline;
-        line-height: 1.2;
-    }
-    /* Field row (inline label + input) */
-    .field-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 0;
-        border-top: 1px solid var(--color-border);
-        gap: 12px;
-    }
     .field-label-inline {
         font-size: 0.875rem;
         font-weight: 500;
@@ -1329,10 +1245,6 @@
     .provider-card-header:hover {
         background: var(--color-surface-3);
     }
-    .provider-card-header input {
-        cursor: text;
-    }
-
     /* Provider title section */
     .provider-title-section {
         flex: 1;
@@ -1692,6 +1604,7 @@
     }
     .option-input[type="number"] {
         -moz-appearance: textfield;
+        appearance: textfield;
     }
 
     /* Help icon tooltip */
@@ -2065,18 +1978,6 @@
         .btn-add-model {
             min-height: 44px;
         }
-        /* Exclude toggle-switch from min-height/padding — it has its own designed size */
-        button.toggle-switch {
-            min-height: 0 !important;
-            padding: 0;
-            width: 40px;
-            height: 22px;
-        }
-        /* Make the entire toggle row a proper touch target */
-        .toggle-field {
-            min-height: 44px;
-        }
-
         /* Provider card header — compact on mobile */
         .btn-drag-handle {
             display: flex;

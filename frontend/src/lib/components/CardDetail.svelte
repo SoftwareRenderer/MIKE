@@ -1,23 +1,33 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { fade } from 'svelte/transition';
     import { get } from 'svelte/store';
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore, config as configStore, selectedTask, streamingTaskIds, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, expandedTasks as expandedTasksStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, taskDiffStats } from '$lib/store';
+    import { board as boardStore, config as configStore, selectedTask, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask, clearDoneTasks } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
-import { getWorktreeDisplayPath } from '$lib/utils/path';
     import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
-    import shieldIcon from '$lib/assets/icons/shield.svg';
     import ModelSelector from './Chat/ModelSelector.svelte';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
     import DiffSelect from './DiffSelect.svelte';
-    import FileEditor from './FileEditor.svelte';
+    // Lazy-loaded on first file edit
+    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
+    let fileEditorLoading = $state(false);
+    function loadFileEditor(): void {
+        if (FileEditorComponent || fileEditorLoading) return;
+        fileEditorLoading = true;
+        import('./FileEditor.svelte').then((mod) => {
+            FileEditorComponent = mod.default;
+            fileEditorLoading = false;
+        }).catch(() => { fileEditorLoading = false; });
+    }
     import Card from './Card.svelte';
+    import MobileTabBar from './CardDetail/MobileTabBar.svelte';
+    import TaskHeader from './CardDetail/TaskHeader.svelte';
+    import BoardOverview from './CardDetail/BoardOverview.svelte';
 
     let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void } = $props();
 
@@ -75,7 +85,8 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     function handleSectionDragOver(e: DragEvent, sectionId: string) {
         e.preventDefault();
-        const taskId = e.dataTransfer?.getData('text/plain');
+        if (!e.dataTransfer) return;
+        const taskId = e.dataTransfer.getData('text/plain');
         const state = sectionDragState.get(sectionId) || { isOver: false, isRejected: false };
         if (taskId && !canDrop(taskId, sectionId)) {
             e.dataTransfer.dropEffect = 'none';
@@ -178,6 +189,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
         if (!fullPath) return;
+        loadFileEditor();
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
@@ -418,18 +430,42 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         editingReasoningEffort = reasoningEffort || '';
     }
 
+    // Context stores
+    let streamingIds = getStreamingContext();
+    let expandedTasksContext = getExpandedTasksContext();
+    let taskDiffStats = getTaskDiffStatsContext();
+
     $effect(() => {
         if (editingTaskId && editingTitleInput) {
-            editingTitleInput.focus();
-            editingTitleInput.select();
+            const input = editingTitleInput as HTMLInputElement;
+            input.focus();
+            input.select();
         }
+    });
+
+    // Reload diff when task changes (switching tasks via task view keeps CardDetail mounted)
+    let previousTaskId = $state<string | null>(null);
+    $effect(() => {
+        const taskId = task.id;
+        if (previousTaskId && taskId !== previousTaskId) {
+            // Task changed — reload diff and reset state
+            lastDiffHash = null;
+            diffFiles = [];
+            untrackedFiles = [];
+            commits = [];
+            baseCommit = null;
+            diffFrom = '';
+            diffTo = 'working';
+            loadDiff();
+        }
+        previousTaskId = taskId;
     });
 
 
 
     // Status badge
     let badge = $derived.by(() => {
-        const streaming = $streamingTaskIds.has(task.id);
+        const streaming = get(streamingIds).has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
@@ -469,7 +505,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         for (const t of allTasks) {
             if (!t.parent_task_id) continue;
             // Walk up the ancestor chain
-            let parentId = t.parent_task_id;
+            let parentId: string | undefined = t.parent_task_id;
             while (parentId) {
                 const ancestor = taskMap.get(parentId);
                 if (!ancestor) break;
@@ -477,7 +513,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
                     consolidated.add(t.id);
                     break;
                 }
-                parentId = ancestor.parent_task_id ?? null;
+                parentId = ancestor.parent_task_id ?? undefined;
             }
         }
         return consolidated;
@@ -494,12 +530,15 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             expandedInitialized = true;
             const allIds = new Set(allTasks.map(t => t.id));
             cleanupCollapsedTasks(allIds);
-            expandedTasksStore.set(initExpandedTasks(parentTaskIds));
+            expandedTasksContext.set(initExpandedTasks(parentTaskIds));
         }
     });
 
     // Track expanded tasks (shared store for Board + CardDetail sync)
-    let expandedTasks = $derived($expandedTasksStore);
+    let expandedTasks = $state<Set<string>>(new Set());
+    $effect(() => {
+        expandedTasksContext.subscribe(v => expandedTasks = v);
+    });
 
     // Auto-expand parent of currently selected task (only on task change, not on updates)
     let lastAutoExpandedParent: string | null = $state(null);
@@ -507,11 +546,11 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const parentId = task.parent_task_id;
         if (parentId && parentId !== lastAutoExpandedParent) {
             lastAutoExpandedParent = parentId;
-            const current = $expandedTasksStore;
+            const current = expandedTasks;
             if (!current.has(parentId)) {
                 const next = new Set(current);
                 next.add(parentId);
-                expandedTasksStore.set(next);
+                expandedTasksContext.set(next);
             }
         }
     });
@@ -522,11 +561,11 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         const currentParents = new Set(childrenMap.keys());
         for (const parentId of currentParents) {
             if (!lastExpandedParents.has(parentId)) {
-                const current = $expandedTasksStore;
+                const current = expandedTasks;
                 if (!current.has(parentId)) {
                     const next = new Set(current);
                     next.add(parentId);
-                    expandedTasksStore.set(next);
+                    expandedTasksContext.set(next);
                 }
                 lastExpandedParents.add(parentId);
             }
@@ -534,13 +573,13 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     });
 
     function toggleTaskExpanded(taskId: string) {
-        const next = new Set($expandedTasksStore);
+        const next = new Set(expandedTasks);
         if (next.has(taskId)) {
             next.delete(taskId);
         } else {
             next.add(taskId);
         }
-        expandedTasksStore.set(next);
+        expandedTasksContext.set(next);
         // Persist collapsed state and clean stale entries
         const allIds = new Set(allTasks.map(t => t.id));
         persistCollapsedTasks(next, parentTaskIds);
@@ -638,16 +677,18 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     // Refresh diff when switching to Changes tab on mobile (WebSocket events may have been missed)
     let prevTab = $state(activeTab);
     $effect(() => {
-        if (activeTab !== prevTab && activeTab === 'diff') {
+        const currentTab = activeTab;
+        if (currentTab !== prevTab && currentTab === 'diff') {
             loadDiff();
         }
-        prevTab = activeTab;
+        prevTab = currentTab;
     });
 
     // Load diff when task transitions out of backlog (worktree now exists)
     let prevStatus = $state(task.status);
     $effect(() => {
-        const status = $boardStore?.tasks.find(t => t.id === task.id)?.status ?? task.status;
+        const currentStatus = task.status;
+        const status = $boardStore?.tasks.find(t => t.id === task.id)?.status ?? currentStatus;
         if (prevStatus === 'backlog' && status && status !== 'backlog') {
             loadDiff();
         }
@@ -811,7 +852,7 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
     }
 
     function getStatusBadge(t: Task): { text: string; color: string } {
-        const streaming = get(streamingTaskIds).has(t.id);
+        const streaming = get(streamingIds).has(t.id);
         const state = $boardStore?.tasks.find(tt => tt.id === t.id)?.status_state ?? t.status_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
@@ -825,144 +866,48 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
 
     <div class="task-detail-page">
         <!-- Header -->
-        <div class="header">
-            <div class="header-left">
-                <button class="btn-back" onclick={onClose} aria-label="Back to board (Esc)" title="Back to board (Esc)">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-                <div class="header-main">
-                    {#if sandboxEnabled !== undefined}
-                        <span class="sandbox-badge" class:sandbox-badge-off={!sandboxEnabled} title={sandboxEnabled ? 'Sandbox enabled (gVisor)' : 'Sandbox disabled'}>
-                            <img src={sandboxEnabled ? shieldIcon : shieldOffIcon} width="14" height="14" alt="" />
-                        </span>
-                    {/if}
-                    <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', task.id)}>{getWorktreeDisplayPath(workspaceDir || '', task.id)}</span>
-                    <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
-                        {badge.text}
-                    </span>
-                </div>
-            </div>
-            <div class="header-actions">
-                <button class="icon-btn" onclick={() => showTerminal.set(true)} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                        <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" onclick={handleDelete} aria-label="Delete task" title="Delete task">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
+        <TaskHeader
+            {workspaceDir}
+            taskId={task.id}
+            {sandboxEnabled}
+            {badge}
+            {worktreeExists}
+            {onClose}
+            onOpenTerminal={() => showTerminal.set(true)}
+            onDelete={handleDelete}
+        />
 
         <!-- Mobile Tab Bar -->
         {#if isMobile}
-            <div class="mobile-tab-bar">
-                <button
-                    class="tab-btn {activeTab === 'context' ? 'active' : ''}"
-                    onclick={() => activeTab = 'context'}
-                    title="Board overview"
-                >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2"/></svg>
-                    Board
-                </button>
-                <button
-                    class="tab-btn {activeTab === 'chat' ? 'active' : ''}"
-                    onclick={() => activeTab = 'chat'}
-                    title="Agent chat"
-                >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                    Agent
-                </button>
-                <button
-                    class="tab-btn {activeTab === 'diff' ? 'active' : ''}"
-                    onclick={() => activeTab = 'diff'}
-                    title="Working changes"
-                >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Changes
-                </button>
-            </div>
+            <MobileTabBar activeTab={activeTab} onTabChange={(tab) => activeTab = tab} />
         {/if}
 
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
             <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
-                <div class="task-list">
-                    {#each overviewSections as section}
-                        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }).sort((a, b) => a.column_order - b.column_order)}
-                        {@const sectionState = sectionDragState.get(section.id) || { isOver: false, isRejected: false }}
-                        <div
-                            class="section-group"
-                            class:is-over={sectionState.isOver}
-                            class:is-drop-rejected={sectionState.isRejected}
-                            style="--col-color: {getSectionColor(section.id)}"
-                            ondragover={(e) => handleSectionDragOver(e, section.id)}
-                            ondragleave={() => handleSectionDragLeave(section.id)}
-                            ondrop={(e) => handleSectionDrop(e, section.id)}
-                        >
-                            <button class="section-header" onclick={() => toggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
-                                <span class="section-title">
-                                    {#if section.id === 'backlog'}
-                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-                                    {:else if section.id === 'in_progress'}
-                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                                    {:else if section.id === 'review'}
-                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                                    {:else if section.id === 'done'}
-                                        <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
-                                    {/if}
-                                    {section.title}
-                                </span>
-                                <div class="header-right">
-                                    <span class="section-count">{sectionTasks.length}</span>
-                                    {#if section.id === 'done' && sectionTasks.length > 0}
-                                        <button class="clear-btn" onclick={(e) => { e.stopPropagation(); handleClearDone(sectionTasks.length); }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
-                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                            </svg>
-                                        </button>
-                                    {/if}
-                                </div>
-                                <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            </button>
-                            {#if !collapsedSections.has(section.id)}
-                            <div class="section-body">
-                                {#each sectionTasks as t (t.id)}
-                                    <div class="task-wrapper" transition:fade={{ duration: 200 }}>
-                                        <Card
-                                            task={t}
-                                            columnId={section.id}
-                                            projectId={task.project_id}
-                                            childrenMap={childrenMap}
-                                            expandedTasks={expandedTasks}
-                                            onToggleExpanded={toggleTaskExpanded}
-                                            onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
-                                            columnColor={getSectionColor(section.id)}
-                                            inline={false}
-                                            showSubtaskBorder={true}
-                                            onSelect={(selected) => {
-                                                if (onSelectTask) onSelectTask(selected); else selectedTask.set(selected); activeTab = 'chat';
-                                            }}
-                                            onRefreshBoard={onRefreshBoard}
-                                        />
-                                    </div>
-                                {/each}
-                                {#if section.id === 'backlog'}
-                                    <button class="task-item-add" onclick={() => showCreateTask.set(true)} type="button" title="Create a new task">+ Create Task</button>
-                                {/if}
-                            </div>
-                            {/if}
-                        </div>
-                    {/each}
-                </div>
+                <BoardOverview
+                    sections={overviewSections}
+                    {allTasks}
+                    {consolidatedSubtaskIds}
+                    {subtaskIds}
+                    {sectionDragState}
+                    {collapsedSections}
+                    currentTask={task}
+                    {childrenMap}
+                    {expandedTasks}
+                    {onSelectTask}
+                    {onRefreshBoard}
+                    onToggleSection={toggleSection}
+                    onSectionDragOver={handleSectionDragOver}
+                    onSectionDragLeave={handleSectionDragLeave}
+                    onSectionDrop={handleSectionDrop}
+                    onClearDone={handleClearDone}
+                    onToggleExpanded={toggleTaskExpanded}
+                    onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
+                    onShowCreateTask={() => showCreateTask.set(true)}
+                    getColumnColor={getSectionColor}
+                />
             </div>
 
             <!-- Resize handle: Board ↔ Chat -->
@@ -1008,13 +953,18 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
-                        <!-- Inline file editor -->
-                        <FileEditor
-                            filePath={editingFile.path}
-                            lineNumber={editingFile.lineNumber}
-                            displayPath={editingFile.displayPath}
-                            onClose={closeFileEditor}
-                        />
+                        <!-- Inline file editor (lazy-loaded) -->
+                        {#if FileEditorComponent}
+                            {@const FileEditor = FileEditorComponent}
+                            <FileEditor
+                                filePath={editingFile.path}
+                                lineNumber={editingFile.lineNumber}
+                                displayPath={editingFile.displayPath}
+                                onClose={closeFileEditor}
+                            />
+                        {:else}
+                            <div class="file-editor-loading">Loading editor...</div>
+                        {/if}
                     {:else}
                         {#if worktreeExists || task.branch}
                             <div class="diff-header">
@@ -1066,97 +1016,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         overflow: hidden;
         height: 100%;
     }
-    .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 16px;
-        border-bottom: 1px solid var(--color-border);
-        flex-shrink: 0;
-        gap: 12px;
-        background: var(--color-surface-1);
-    }
-    .header-left {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-        flex: 1;
-    }
-    .btn-back {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        padding: 6px;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-    }
-    .btn-back:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
-    .header-main {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-        flex: 1;
-    }
-    .project-prefix {
-        font-size: 0.875rem;
-        font-weight: 400;
-        color: var(--color-text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        flex: 1 1 0;
-        min-width: 0;
-    }
-    .badge {
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        flex-shrink: 0;
-        border: 1px solid;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-    .sandbox-badge {
-        flex-shrink: 0;
-        color: var(--color-primary);
-        display: flex;
-        align-items: center;
-        height: 1em;
-    }
-    .sandbox-badge-off {
-        color: var(--color-status-red, #f85149);
-    }
-    .header-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .icon-btn {
-        padding: 6px 12px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        font-size: 0.875rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        cursor: pointer;
-        color: inherit;
-    }
-    .icon-btn:hover:not(:disabled) {
-        background: var(--color-accent);
-    }
-    .icon-btn:disabled {
-        opacity: 0.35;
-        cursor: not-allowed;
-    }
     .columns {
         display: flex;
         flex: 1;
@@ -1175,356 +1034,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         flex-shrink: 0;
         border-right: 1px solid var(--color-border);
         background: var(--color-surface-0);
-    }
-    .task-list {
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px 6px 6px 6px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .section-group {
-        background: var(--color-surface-1);
-        border-radius: var(--radius-lg);
-        border-left: 2px solid var(--col-color);
-        overflow: hidden;
-        transition: background 0.15s ease;
-    }
-    .section-group.is-over {
-        background: var(--color-surface-2);
-    }
-    .section-group.is-drop-rejected {
-        outline: 2px dashed var(--color-status-red);
-        outline-offset: -2px;
-        cursor: no-drop;
-    }
-    .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        cursor: pointer;
-        background: transparent;
-        border: none;
-        border-top: 2px solid var(--col-color);
-        width: 100%;
-        text-align: left;
-        font: inherit;
-        color: inherit;
-    }
-    .section-header:hover {
-        background: var(--color-surface-2);
-    }
-    .section-title {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.4px;
-        color: var(--color-text-secondary);
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .section-title .col-icon {
-        flex-shrink: 0;
-        color: var(--col-color);
-    }
-    .section-count {
-        background: var(--color-surface-3);
-        border-radius: 10px;
-        padding: 2px 8px;
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        flex-shrink: 0;
-        margin-left: 8px;
-    }
-    .section-chevron {
-        flex-shrink: 0;
-        margin-left: 4px;
-        color: var(--color-text-tertiary);
-        transition: transform 0.2s ease;
-    }
-    .section-header[aria-expanded="false"] .section-chevron {
-        transform: rotate(-90deg);
-    }
-    .section-body {
-        padding: 8px 6px 6px 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .task-item-add {
-        width: 100%;
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease;
-        border: none;
-        font-family: inherit;
-    }
-    .task-item-add:hover {
-        background: var(--color-accent);
-        color: #fff;
-    }
-    .header-right {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .clear-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        border: none;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease;
-        padding: 0;
-        flex-shrink: 0;
-    }
-    .clear-btn:hover {
-        background: var(--color-status-red)22;
-        color: var(--color-status-red);
-    }
-    .task-item {
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-        transition: background 0.1s ease;
-        text-align: left;
-        width: 100%;
-        font: inherit;
-        color: inherit;
-        background: var(--color-surface-2);
-        border: none;
-        box-sizing: border-box;
-    }
-    .task-item:hover { background: var(--color-surface-3); }
-    .task-item.selected {
-        background: var(--color-accent)18;
-        outline: 1px solid var(--color-accent);
-        outline-offset: 1px;
-        color: var(--color-accent);
-        font-weight: 600;
-    }
-    .task-item-title {
-        font-size: 0.75rem;
-        color: var(--color-text-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        flex: 1;
-        min-width: 0;
-    }
-    .task-item.selected .task-item-title {
-        color: var(--color-accent);
-    }
-    .task-item-edit-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-sm);
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity 0.15s ease, background 0.15s ease;
-        flex-shrink: 0;
-    }
-    .task-item:hover .task-item-edit-btn,
-    .task-item.selected .task-item-edit-btn {
-        opacity: 1;
-    }
-    .task-item-edit-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    @media (hover: none) {
-        .task-item-edit-btn {
-            opacity: 1;
-            transition: background 0.15s ease;
-        }
-    }
-    .task-item-editing {
-        padding: 4px 6px;
-    }
-    .task-item-title-input {
-        width: 100%;
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-accent);
-        border-radius: var(--radius-sm);
-        padding: 3px 6px;
-        font-family: inherit;
-        outline: none;
-    }
-    .task-item-editing-panel {
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-    }
-    .task-item-editing-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .task-item-editing-title {
-        font-size: 0.8125rem;
-        font-weight: 600;
-        color: var(--color-text-primary);
-    }
-    .task-item-editing-close {
-        font-size: 1rem;
-        color: var(--color-text-secondary);
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 2px 4px;
-        line-height: 1;
-    }
-    .task-item-editing-close:hover {
-        color: var(--color-text-primary);
-    }
-    .task-item-editing-body {
-        padding: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-    .task-item-editing-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .task-item-editing-label {
-        font-size: 0.8125rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-    }
-    .task-item-editing-input {
-        width: 100%;
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: var(--color-surface-3);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        padding: 6px 8px;
-        font-family: inherit;
-        outline: none;
-    }
-    .task-item-editing-input:focus {
-        border-color: var(--color-accent);
-    }
-    .task-item-editing-model-row {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-    .task-item-editing-options {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .task-item-editing-checkbox {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-    }
-    .task-item-editing-checkbox.disabled {
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    .task-item-editing-checkbox input[type="checkbox"] {
-        accent-color: var(--color-accent);
-        margin-top: 1px;
-        cursor: pointer;
-        flex-shrink: 0;
-    }
-    .task-item-editing-option-text {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-    }
-    .task-item-editing-option-title {
-        font-weight: 600;
-        font-size: 0.8125rem;
-    }
-    .task-item-editing-option-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        font-weight: 400;
-    }
-    .task-item-editing-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        padding: 10px 12px;
-        border-top: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-    }
-    .task-item-editing-btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .task-item-editing-btn-cancel:hover {
-        background: var(--color-surface-4);
-    }
-    .task-item-editing-btn-save {
-        padding: 6px 16px;
-        border-radius: var(--radius-sm);
-        background: var(--color-accent);
-        color: #fff;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .task-item-editing-btn-save:hover {
-        background: var(--color-accent-hover);
-    }
-    .task-item-badge {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        flex-shrink: 0;
     }
     .column-chat {
         min-width: 0;
@@ -1557,43 +1066,11 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
         user-select: none;
         flex-shrink: 0;
     }
-    .mobile-tab-bar {
-        display: none;
-    }
     .column.hidden {
         display: none;
     }
 
     @media (max-width: 768px) {
-        .mobile-tab-bar {
-            display: flex;
-            border-bottom: 1px solid var(--color-border);
-            background: var(--color-surface-1);
-            flex-shrink: 0;
-        }
-        .tab-btn {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            padding: 10px 8px;
-            border: none;
-            background: none;
-            color: var(--color-text-tertiary);
-            font-size: 0.75rem;
-            font-weight: 500;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            transition: all 0.15s ease;
-        }
-        .tab-btn.active {
-            color: var(--color-accent);
-            border-bottom-color: var(--color-accent);
-        }
-        .tab-btn:hover:not(.active) {
-            color: var(--color-text-primary);
-        }
         .column-context {
             border-right: none;
         }
@@ -1604,23 +1081,6 @@ import { getWorktreeDisplayPath } from '$lib/utils/path';
             flex: 0 0 100% !important;
             min-width: 100% !important;
             width: 100% !important;
-        }
-        .task-list {
-            padding: 0 8px 8px 8px;
-        }
-        .section-header {
-            padding: 12px 10px;
-        }
-        .section-body {
-            padding: 6px 8px 8px 8px;
-        }
-        .task-item {
-            padding: 10px 12px;
-            min-height: 44px;
-            align-items: center;
-        }
-        .task-item-title {
-            font-size: 0.875rem;
         }
     }
 

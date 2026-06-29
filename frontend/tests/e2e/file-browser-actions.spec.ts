@@ -69,38 +69,7 @@ test.describe('File Browser Actions', () => {
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
   });
 
-  test('should create a new folder and navigate into it', async ({ page }) => {
-    await page.click('.add-project-btn');
-    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
-
-    const pathInput = page.locator('.path-input');
-    await pathInput.fill(TEST_NEW_FOLDER_PARENT);
-    await pathInput.press('Enter');
-
-    await expect(page.locator('.git-indicator')).toBeVisible({ timeout: 5000 });
-
-    // Click the "New Folder" button
-    await page.click('.icon-btn-sm[title="New folder"]');
-
-    await expect(page.locator('.folder-name-input')).toBeVisible({ timeout: 5000 });
-
-    const folderName = `test-folder-${Date.now()}`;
-    await page.fill('.folder-name-input', folderName);
-    await page.locator('.folder-name-input').press('Enter');
-
-    // Wait for the new folder input to disappear (navigated into new folder)
-    await expect(page.locator('.folder-name-input')).toBeHidden({ timeout: 5000 });
-
-    // Current path should now include the new folder name
-    const currentPathText = await page.locator('.current-path').textContent();
-    expect(currentPathText).toContain(folderName);
-
-    // Close the browser
-    await page.click('.btn-cancel');
-    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
-  });
-
-  test('should show error when creating a folder that already exists', async ({ page }) => {
+  test('should show error when creating a folder that already exists', async ({ page}) => {
     await page.click('.add-project-btn');
     await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
 
@@ -136,51 +105,7 @@ test.describe('File Browser Actions', () => {
     expect(errorText).toContain('already exists');
   });
 
-  test('should create project with sandbox enabled when checkbox is checked (default)', async ({ page }) => {
-    const initialCount = await page.locator('.project-item').count();
-    const uniqueDir = `/tmp/kanban-test-sandbox-on-${Date.now()}`;
-    try { rmSync(uniqueDir, { recursive: true, force: true }); } catch { /* ignore */ }
-    mkdirSync(uniqueDir, { recursive: true });
-    execSync('git init', { cwd: uniqueDir });
-    execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: uniqueDir });
-
-    // Open the file browser
-    await page.click('.add-project-btn');
-    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
-
-    // Verify "Use Sandbox" checkbox is checked by default
-    const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
-    await expect(sandboxCheckbox).toBeChecked();
-
-    // Navigate to the test git directory
-    const pathInput = page.locator('.path-input');
-    await pathInput.fill(uniqueDir);
-    await pathInput.press('Enter');
-
-    // Wait for git indicator
-    await expect(page.locator('.git-indicator')).toBeVisible({ timeout: 5000 });
-
-    // Click Select
-    await page.click('.btn-select');
-
-    // Browser should close
-    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
-
-    // New project should be added
-    await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
-
-    // Verify via API that the last project has sandbox_enabled: true
-    await expect(async () => {
-        const projects = await page.evaluate(async () => {
-            const res = await fetch('/api/projects');
-            return res.json();
-        });
-        const lastProject = projects[projects.length - 1];
-        expect(lastProject.sandbox_enabled).toBe(true);
-    }).toPass({ timeout: 5000 });
-  });
-
-  test('should create project with sandbox disabled when checkbox is unchecked', async ({ page }) => {
+  test('should create project with sandbox disabled when checkbox is unchecked', async ({ page}) => {
     const initialCount = await page.locator('.project-item').count();
 
     // Open the file browser

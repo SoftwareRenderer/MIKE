@@ -1,13 +1,18 @@
 
 <script lang="ts">
-    let { type, collapsible = false, summary = '', tokenCount = 0 }: { 
+    import type { Snippet } from 'svelte';
+    let { type, collapsible = false, summary = '', tokenCount = 0, children }: { 
         type: string; 
         collapsible?: boolean;
         summary?: string;
         tokenCount?: number;
+        children?: Snippet;
     } = $props();
 
     let collapsed = $state(collapsible && !!summary);
+    // Reactive references for prop values used in closures
+    let collapsibleRef = $derived(collapsible);
+    let summaryRef = $derived(summary);
 
     function iconForType(t: string): string {
         switch (t) {
@@ -54,10 +59,10 @@
         {#if collapsed}
             <div class="collapsed-summary">{summary || 'Thinking...'}</div>
         {:else}
-            <slot></slot>
+            {@render children?.()}
         {/if}
     {:else}
-        <slot></slot>
+        {@render children?.()}
     {/if}
 </div>
 

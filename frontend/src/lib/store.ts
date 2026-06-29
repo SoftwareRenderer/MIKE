@@ -10,8 +10,6 @@ export const selectedTask = writable<Task | null>(null);
 export const config = writable<Config | null>(null);
 export const showCreateTask = writable(false);
 
-/** Task event from the app stream, dispatched to TaskStream via this store. */
-export const taskEvent = writable<{ task_id: string; type: string; data: any } | null>(null);
 export const creatingChildOf = writable<string | null>(null);
 export const showConfig = writable(false);
 export const showTerminal = writable(false);
@@ -19,35 +17,11 @@ export const showStats = writable(false);
 export const showCardDetail = writable(false);
 export const showSandboxConfig = writable(false);
 
-/** Tracks commit queue status per project: projectID → { taskID, status } */
-export const commitQueueStatus = writable<Record<string, { taskID: string; status: 'queued' | 'processing' }>>({});
-
 /**
  * expandedTasks store — tracks which task cards are expanded in the board view.
  * Subtasks are expanded by default. Collapsed state is persisted in localStorage.
  * Use `toggleExpandedTask(id, allTaskIds)` to toggle and auto-clean stale entries.
  */
-export const expandedTasks = writable<Set<string>>(new Set());
-
-/**
- * Toggle a task's expanded state. Cleans up stale entries from localStorage.
- * @param taskId  The task ID to toggle.
- * @param allTaskIds  Set of all currently existing task IDs (for cleanup).
- */
-export function toggleExpandedTask(taskId: string, allTaskIds?: Set<string>) {
-    expandedTasks.update(expanded => {
-        const next = new Set(expanded);
-        if (next.has(taskId)) {
-            next.delete(taskId);
-        } else {
-            next.add(taskId);
-        }
-        // Note: we store collapsed tasks in localStorage, but the hold expanded in memory.
-        // The collapsed set = all parent tasks that are NOT in the expanded set.
-        // We persist the collapsed set derived from the expanded set.
-        return next;
-    });
-}
 
 /**
  * Save the current collapsed state to localStorage.
@@ -103,13 +77,6 @@ export function initExpandedTasks(parentTaskIds: Set<string>): Set<string> {
     }
     return expanded;
 }
-
-// Task IDs that are actively streaming tokens (frontend-only, real-time)
-export const streamingTaskIds = writable<Set<string>>(new Set());
-
-// Diff stats per task ID (pushed via WebSocket)
-export const taskDiffStats = writable<Record<string, { hash: string; files: number; additions: number; deletions: number }>>({});
-export const taskDiff = writable<Record<string, { diff: string; untracked: Array<{ path: string; diff: string; file_size?: number }> }>>({});
 
 // Toast notification — empty string means no toast visible
 export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);

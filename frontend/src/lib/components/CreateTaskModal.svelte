@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import type { Provider, Task } from '$lib/types';
+    import type { Config, Provider, Task } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
     import { config as configStore, showCreateTask, board as boardStore, selectedProject } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -156,7 +156,7 @@
 
     // Subscribe to config store to pick up providers (may load after modal opens)
     // $configStore syntax auto-subscribes to store changes
-    let cfg = $state(null);
+    let cfg: Config | null = $state(null);
     const unsubConfig = configStore.subscribe(val => { cfg = val; });
     let targetBranch = $derived($selectedProject?.origin_branch || 'main');
     let configLoaded = $state(false);
@@ -245,7 +245,7 @@
         const id = generateId();
         // Include optimistic ID in taskData so getQueuedTaskIds() can find it
         const taskDataWithId = { ...taskData, id };
-        const optimisticTask: Task = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true as any, actionId: '' } as Task;
+        const optimisticTask = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true } as any;
         if (isOfflineNow) {
             const queued = enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
             (optimisticTask as any).actionId = queued.id;
@@ -572,11 +572,6 @@
         flex-direction: column;
         gap: 2px;
     }
-    .config-label-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
     .config-label {
         font-size: 0.8125rem;
         font-weight: 500;
@@ -600,43 +595,6 @@
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
-    .radio-group {
-        display: flex;
-        gap: 0;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        flex-shrink: 0;
-    }
-    .radio-label {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 3px 10px;
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-        user-select: none;
-        flex: 1;
-        justify-content: center;
-    }
-    .radio-label:first-child {
-        border-right: 1px solid var(--color-border);
-    }
-    .radio-label.active {
-        background: var(--color-accent);
-        color: white;
-    }
-    .radio-label:hover:not(.active) {
-        background: var(--color-surface-3);
-    }
-    .radio-label input[type="radio"] {
-        display: none;
-    }
-    .radio-text {
-        white-space: nowrap;
-    }
     .model-select-row {
         display: flex;
         align-items: center;
@@ -645,31 +603,6 @@
         font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-secondary);
-    }
-    .checkbox-label {
-        flex-direction: row !important;
-        align-items: center;
-        gap: 8px !important;
-        cursor: pointer;
-    }
-    .checkbox-label.disabled {
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    .option-text {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-    }
-    .option-title {
-        font-weight: 600;
-        font-size: 0.875rem;
-    }
-    .option-desc {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        font-weight: 400;
     }
     .error {
         color: var(--color-status-red);

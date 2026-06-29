@@ -207,6 +207,7 @@ export type StreamEventType =
     | 'reasoning_end'
     | 'tool_call'
     | 'tool_result'
+    | 'tool_progress'
     | 'status'
     | 'queue'
     | 'complete'
@@ -216,7 +217,10 @@ export type StreamEventType =
     | 'thread_switch'
     | 'compression'
     | 'git_checkpoint_pending'
-    | 'git_checkpoint_complete';
+    | 'git_checkpoint_complete'
+    | 'merge_resolution'
+    | 'diff_changed'
+    | 'build_progress';
 
 export interface StreamEvent {
     type: StreamEventType;
