@@ -674,7 +674,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         onToggleSidebar={toggleSidebar}
         onShowStats={() => { showStats.set(true); if (isMobile) mobileMenuOpen = false; }}
         onShowConfig={() => { showConfig.set(true); if (isMobile) mobileMenuOpen = false; }}
-        onAddProject={openAddProject}
+        onAddProject={() => { openAddProject(); if (isMobile) mobileMenuOpen = false; }}
     />
 
     <!-- Main Content -->
