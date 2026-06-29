@@ -558,3 +558,33 @@ func TestShouldIgnorePath_NestedPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestComputeUntrackedHash_ContentChange(t *testing.T) {
+	// Verify that ComputeUntrackedHash produces different hashes when
+	// file content changes but line count stays the same.
+	// This is critical for delta detection: if the hash doesn't change,
+	// the frontend will skip refetching the file and show stale content.
+	u1 := UntrackedFile{Path: "test.txt", Lines: []string{"todo"}}
+	u2 := UntrackedFile{Path: "test.txt", Lines: []string{"todo app"}}
+
+	hash1 := ComputeUntrackedHash(u1)
+	hash2 := ComputeUntrackedHash(u2)
+
+	if hash1 == hash2 {
+		t.Errorf("ComputeUntrackedHash produced same hash for different content (same line count): %s", hash1)
+	}
+
+	// Also verify same content produces same hash (deterministic)
+	u3 := UntrackedFile{Path: "test.txt", Lines: []string{"todo"}}
+	hash3 := ComputeUntrackedHash(u3)
+	if hash1 != hash3 {
+		t.Errorf("ComputeUntrackedHash non-deterministic: %s != %s", hash1, hash3)
+	}
+
+	// Verify different line count also produces different hash
+	u4 := UntrackedFile{Path: "test.txt", Lines: []string{"todo", "more"}}
+	hash4 := ComputeUntrackedHash(u4)
+	if hash1 == hash4 {
+		t.Errorf("ComputeUntrackedHash produced same hash for different line count: %s", hash1)
+	}
+}

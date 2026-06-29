@@ -746,11 +746,15 @@
     });
 
     // Real-time diff update: re-fetch when the diff hash changes.
-    // Skip HTTP fetch if WebSocket already pushed matching diff data.
-    // Plain object (not $state) to avoid re-triggering $effect on writes
+    // Two phases: initial load (full manifest + all files), then delta updates (WS-pushed).
+    // Delta events are only processed after the initial load completes to prevent
+    // stale fetchChangedFiles responses from overwriting fresh delta data.
+    // Plain object (not $state) to avoid re-triggering $effect on writes.
     let diffTracker = { hash: null as string | null };
     // Per-file hash tracker for incremental updates
     let diffFileHashes = $state<Record<string, string>>({});
+    // Gate: delta processing only starts after the initial load is fully done.
+    let diffInitialLoaded = $state(false);
     $effect(() => {
         const stat = diffStatsMap[task.id];
         const currentHash = stat?.hash || null;
@@ -758,8 +762,25 @@
             diffTracker.hash = currentHash;
             const fileHashes = stat?.file_hashes;
             const removedFiles = stat?.removed_files || [];
+
+            // No diff data (e.g., after commit-and-done) — clear cache
+            if (!currentHash) {
+                diffFileCache = {};
+                untrackedCache = {};
+                diffFileHashes = {};
+                diffInitialLoaded = false;
+                return;
+            }
+
+            if (!diffInitialLoaded || Object.keys(diffFileCache).length === 0) {
+                // Phase 1: initial load — fetch full manifest + all files
+                // Also re-load if cache was cleared (e.g., error recovery)
+                loadDiff();
+                return;
+            }
+
+            // Phase 2: delta updates — WS tells us which files changed
             if (fileHashes) {
-                // Delta update: file_hashes only contains changed/new files
                 // Remove deleted files from cache
                 if (removedFiles.length > 0) {
                     const newDiff = { ...diffFileCache };
@@ -774,26 +795,18 @@
                     untrackedCache = newUntracked;
                     diffFileHashes = newHashes;
                 }
-                // Initial load: fetch full manifest + files
-                if (Object.keys(diffFileCache).length === 0) {
-                    diffFileHashes = { ...diffFileHashes, ...fileHashes };
-                    loadDiff();
-                    return;
-                }
-                // Delta: fetch only changed files directly (skip manifest)
+                // Fetch only changed files directly (skip manifest)
                 if (Object.keys(fileHashes).length > 0) {
-                    const prevHashes = { ...diffFileHashes };
                     diffFileHashes = { ...diffFileHashes, ...fileHashes };
-                    fetchDeltaFiles(fileHashes, prevHashes);
+                    fetchDeltaFiles(fileHashes);
                 }
                 return;
             }
-            // Check if WebSocket already pushed this diff
+
+            // Fallback: no file_hashes — check WS fast-path or full reload
             const wsDiff = wsDiffMap[task.id];
             if (wsDiff && wsDiff.hash === currentHash) {
-                // WebSocket data is fresh — apply it directly, skip HTTP
                 updateDiff({ diff: wsDiff.diff, untracked: wsDiff.untracked, files: wsDiff.files }, 'websocket');
-                // Fetch changed files if manifest format
                 if (wsDiff.files) {
                     fetchChangedFiles(wsDiff.files);
                 }
@@ -924,6 +937,8 @@
             await Promise.all([loadCommits(), loadDiffForMode()]);
         } finally {
             diffLoading = false;
+            // Mark initial load complete — delta processing can now start.
+            diffInitialLoaded = true;
             // Sync tracker with current store value so a pending WebSocket
             // diffStats event doesn't trigger a redundant re-fetch.
             const stat = diffStatsMap[task.id];
@@ -962,20 +977,16 @@
         }
     }
 
-    /** Fetch individual files whose hash changed (or are new). */
+    /** Fetch individual files from the manifest. Trusts the server — no client-side hash comparison. */
     async function fetchChangedFiles(manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number }>) {
         if (!task) return;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, boolean> = {};
         const fetches: Promise<void>[] = [];
         for (const [path, entry] of Object.entries(manifest)) {
-            const localHash = diffFileHashes[path];
-            const remoteHash = entry.hash;
-            // Skip if hash matches (file unchanged) and we already have content
-            if (localHash === remoteHash && diffFileCache[path]?.rows.length) continue;
             // Skip blank untracked files (no content to fetch)
             if (entry.type === 'untracked' && (entry.line_count ?? 0) === 0) continue;
-            // Fetch this file
+            // Fetch this file — server says it exists, render it
             fetches.push((async () => {
                 try {
                     const data = await getDiffFile(task.project_id, task.id, path);
@@ -991,9 +1002,7 @@
             })());
         }
         await Promise.all(fetches);
-        if (Object.keys(updatedDiff).length > 0) {
-            diffFileCache = { ...diffFileCache, ...updatedDiff };
-        }
+        diffFileCache = { ...diffFileCache, ...updatedDiff };
         if (Object.keys(updatedUntracked).length > 0) {
             const newUntracked = { ...untrackedCache };
             for (const path of Object.keys(updatedUntracked)) {
@@ -1003,18 +1012,28 @@
         }
     }
 
-    /** Fetch only changed files directly (no manifest fetch). Used for delta updates. */
-    async function fetchDeltaFiles(changedHashes: Record<string, string>, prevHashes: Record<string, string>) {
+    /** Per-file AbortControllers to cancel stale in-flight fetches. */
+    let diffAbortControllers: Record<string, AbortController> = {};
+
+    /** Fetch changed files directly (no manifest fetch). Used for delta updates.
+     * The backend already filters changedHashes to only files that actually changed,
+     * so we always fetch and update for every path provided.
+     * Uses per-file AbortControllers to cancel stale fetches when newer deltas arrive. */
+    async function fetchDeltaFiles(changedHashes: Record<string, string>) {
         if (!task) return;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
         const fetches: Promise<void>[] = [];
         for (const path of Object.keys(changedHashes)) {
-            // Skip only if hash unchanged from previous (no actual change)
-            if (diffFileCache[path]?.rows.length && prevHashes[path] === changedHashes[path]) continue;
+            // Cancel any previous in-flight fetch for this file
+            if (diffAbortControllers[path]) {
+                diffAbortControllers[path].abort();
+            }
+            const controller = new AbortController();
+            diffAbortControllers[path] = controller;
             fetches.push((async () => {
                 try {
-                    const data = await getDiffFile(task.project_id, task.id, path);
+                    const data = await getDiffFile(task.project_id, task.id, path, { signal: controller.signal });
                     if (data.rows) {
                         const added = data.rows.filter((r: any) => r.variant === 'added').length;
                         const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
@@ -1024,15 +1043,17 @@
                         updatedUntracked[path] = { loading: false };
                     }
                 } catch (e) {
-                    // Silently fail for individual file fetches
+                    if (e instanceof DOMException && e.name === 'AbortError') return;
+                    console.error(`[diff] Failed to fetch file ${path}:`, e);
                 }
             })());
         }
         await Promise.all(fetches);
-        // Reassign for Svelte 5 reactivity (new keys on $state records need reassignment)
-        if (Object.keys(updatedDiff).length > 0) {
-            diffFileCache = { ...diffFileCache, ...updatedDiff };
+        // Clean up controllers for fetched files
+        for (const path of Object.keys(changedHashes)) {
+            delete diffAbortControllers[path];
         }
+        diffFileCache = { ...diffFileCache, ...updatedDiff };
         if (Object.keys(updatedUntracked).length > 0) {
             untrackedCache = { ...untrackedCache, ...updatedUntracked };
         }
