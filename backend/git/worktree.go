@@ -1,6 +1,7 @@
 package git
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
@@ -532,24 +533,81 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 type UntrackedFile struct {
 	Path      string   `json:"path"`
 	Lines     []string `json:"lines,omitempty"`      // file content lines (set for text files)
+	LineCount int      `json:"line_count,omitempty"` // total line count (set when Lines is omitted)
 	FileSize  int64    `json:"file_size,omitempty"`  // set when file is binary or >1MB (lines omitted)
 	Truncated bool     `json:"truncated,omitempty"`  // true when lines were truncated to maxChangeLines
 	OrigAdded int      `json:"orig_added,omitempty"` // original line count before truncation
 }
 
+// DiffRow represents a single line in a parsed diff.
+type DiffRow struct {
+	LineNumber *int                `json:"lineNumber"` // null for non-code rows
+	Variant    string              `json:"variant"`    // "context", "added", "removed"
+	Text       string              `json:"text,omitempty"` // omitted when segments present
+	Segments   []InlineDiffSegment `json:"segments,omitempty"`
+}
+
+// InlineDiffSegment represents a word-level diff segment within a line.
+type InlineDiffSegment struct {
+	Key  string `json:"key"`
+	Text string `json:"text"`
+	Tone string `json:"tone"` // "added", "removed", "context"
+}
+
+// TrackedDiffFile holds the parsed diff for a single tracked file.
+type TrackedDiffFile struct {
+	Path      string    `json:"path"`
+	Rows      []DiffRow `json:"rows"`
+	Added     int       `json:"added"`
+	Removed   int       `json:"removed"`
+	FileSize  *int64    `json:"fileSize,omitempty"`  // set for binary/large files
+	Truncated bool      `json:"truncated,omitempty"`
+	OrigAdded int       `json:"origAdded,omitempty"`
+	OrigRemoved int     `json:"origRemoved,omitempty"`
+}
+
 // TaskDiff holds the diff output and list of untracked files for a task.
+// Tracked is a per-file map for incremental updates. Diff is the legacy
+// monolithic unified diff string (kept for backward compatibility).
 type TaskDiff struct {
-	Diff              string                     `json:"diff"`
-	Untracked         []UntrackedFile            `json:"untracked"`
-	ShortStat         string                     `json:"short_stat"`
-	TruncatedFiles    []string                   `json:"truncated_files,omitempty"`
-	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
+	Diff              string                      `json:"diff"`
+	Tracked           map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
+	Untracked         []UntrackedFile             `json:"untracked"`
+	ShortStat         string                      `json:"short_stat"`
+	TruncatedFiles    []string                    `json:"truncated_files,omitempty"`
+	OriginalFileStats map[string]FileChangeStats  `json:"original_file_stats,omitempty"`
 }
 
 // FileChangeStats holds the original added/removed line counts for a file.
 type FileChangeStats struct {
 	Added   int `json:"added"`
 	Removed int `json:"removed"`
+}
+
+// ComputeFileHash computes a SHA-256 hash for a tracked diff file based on its rows.
+func ComputeFileHash(f *TrackedDiffFile) string {
+	var sb strings.Builder
+	for _, row := range f.Rows {
+		fmt.Fprintf(&sb, "%s:%s\n", row.Variant, row.Text)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(sb.String())))
+}
+
+// ComputeUntrackedHash computes a SHA-256 hash for an untracked file based on its lines.
+func ComputeUntrackedHash(u UntrackedFile) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(u.Path+strings.Join(u.Lines, "\n"))))
+}
+
+// GetPerFileHashes returns a map of file path → hash for all tracked and untracked files.
+func (d *TaskDiff) GetPerFileHashes() map[string]string {
+	hashes := make(map[string]string)
+	for path, f := range d.Tracked {
+		hashes[path] = ComputeFileHash(f)
+	}
+	for _, u := range d.Untracked {
+		hashes[u.Path] = ComputeUntrackedHash(u)
+	}
+	return hashes
 }
 
 // Default maximum number of change lines per file before truncation.
@@ -718,6 +776,107 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 		}
 	}
 	return stats
+}
+
+// parseUnifiedDiffToFiles parses a unified diff into per-file TrackedDiffFile entries.
+// This mirrors the frontend parseUnifiedDiff but runs on the backend for caching.
+func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map[string]FileChangeStats) map[string]*TrackedDiffFile {
+	if diff == "" || !strings.Contains(diff, "\n") {
+		return nil
+	}
+
+	truncatedSet := make(map[string]bool, len(truncatedFiles))
+	for _, f := range truncatedFiles {
+		truncatedSet[f] = true
+	}
+
+	files := make(map[string]*TrackedDiffFile)
+	var current *TrackedDiffFile
+	var newLine int
+	var inHunk bool
+	var rowIdx int
+
+	lines := strings.Split(diff, "\n")
+	// Remove trailing empty line
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			match := fileRe.FindStringSubmatch(line)
+			path := "unknown"
+			if match != nil {
+				path = match[1]
+			}
+			current = &TrackedDiffFile{Path: path, Rows: nil}
+			files[path] = current
+			inHunk = false
+			newLine = 0
+			rowIdx = 0
+			continue
+		}
+		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			inHunk = true
+			if m := hunkRe.FindStringSubmatch(line); m != nil {
+				newLine, _ = strconv.Atoi(m[3])
+			}
+			continue
+		}
+		if !inHunk || current == nil {
+			continue
+		}
+
+		if line == "\\ No newline at end of file" {
+			continue
+		}
+
+		var variant string
+		if len(line) > 0 && line[0] == '+' {
+			variant = "added"
+			current.Added++
+		} else if len(line) > 0 && line[0] == '-' {
+			variant = "removed"
+			current.Removed++
+		} else if len(line) > 0 && line[0] == ' ' {
+			variant = "context"
+		} else {
+			continue
+		}
+
+		ln := newLine
+		row := DiffRow{
+			LineNumber: &ln,
+			Variant:    variant,
+			Text:       line[1:],
+		}
+		current.Rows = append(current.Rows, row)
+		rowIdx++
+
+		if variant == "added" || variant == "context" {
+			newLine++
+		}
+	}
+
+	// Enrich with truncation metadata
+	for path, f := range files {
+		if len(f.Rows) == 0 {
+			delete(files, path)
+			continue
+		}
+		if truncatedSet[path] {
+			f.Truncated = true
+			if s, ok := origStats[path]; ok {
+				f.OrigAdded = s.Added
+				f.OrigRemoved = s.Removed
+			}
+		}
+	}
+
+	return files
 }
 
 // hunkRe parses a unified diff hunk header.
@@ -958,7 +1117,14 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		}
 	}
 
-	return &TaskDiff{Diff: diffOut, Untracked: untracked, ShortStat: shortStat, TruncatedFiles: truncatedFiles, OriginalFileStats: originalStats}, nil
+	return &TaskDiff{
+		Diff:              diffOut,
+		Tracked:           parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats),
+		Untracked:         untracked,
+		ShortStat:         shortStat,
+		TruncatedFiles:    truncatedFiles,
+		OriginalFileStats: originalStats,
+	}, nil
 }
 
 // GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.

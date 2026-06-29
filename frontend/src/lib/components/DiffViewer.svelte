@@ -5,7 +5,7 @@
     import { highlightLines } from '$lib/highlighter';
 
 
-    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
+    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -99,7 +99,7 @@
 
         for (const file of _files) {
             if (file.rows.length === 0 || file.fileSize) continue;
-            const texts = file.rows.map(r => r.text);
+            const texts = file.rows.map(r => r.text ?? '');
             const fileResult: Record<string, string> = {};
             const htmls = highlightLines(texts, file.path);
             let hasAnyHighlight = false;
@@ -115,7 +115,7 @@
         for (const entry of _untracked) {
             const ufile = entry.file;
             if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
-            const texts = ufile.rows.map(r => r.text);
+            const texts = ufile.rows.map(r => r.text ?? '');
             const fileResult: Record<string, string> = {};
             const htmls = highlightLines(texts, entry.path);
             let hasAnyHighlight = false;
@@ -232,7 +232,7 @@
                         <span class="diff-file-stats">
                             <span class="diff-large-size">{formatFileSize(entry.fileSize ?? 0)}</span>
                         </span>
-                    {:else}
+                    {:else if (entry.origAdded ?? ufile.added ?? 0) > 0}
                         <span class="diff-file-stats">
                             <span class="diff-added">+{entry.origAdded ?? ufile.added ?? 0}</span>
                         </span>
@@ -303,7 +303,13 @@
                                                         {:else}
                                                             <span class="diff-prefix"> </span>
                                                         {/if}
-                                                        {#if getHighlight(entry.path, item.row.lineNumber)}
+                                                        {#if item.row.segments}
+                                                            <span class="diff-text">
+                                                                {#each item.row.segments as seg}
+                                                                    <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
+                                                                {/each}
+                                                            </span>
+                                                        {:else if getHighlight(entry.path, item.row.lineNumber)}
                                                             <span class="diff-text">{@html getHighlight(entry.path, item.row.lineNumber)!}</span>
                                                         {:else}
                                                             <span class="diff-text">{item.row.text || ' '}</span>
@@ -345,7 +351,13 @@
                                                         >
                                                             <span class="diff-line-content">
                                                                 <span class="diff-prefix"> </span>
-                                                                {#if getHighlight(entry.path, row.lineNumber)}
+                                                                {#if row.segments}
+                                                                    <span class="diff-text">
+                                                                        {#each row.segments as seg}
+                                                                            <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
+                                                                        {/each}
+                                                                    </span>
+                                                                {:else if getHighlight(entry.path, row.lineNumber)}
                                                                     <span class="diff-text">{@html getHighlight(entry.path, row.lineNumber)!}</span>
                                                                 {:else}
                                                                     <span class="diff-text">{row.text || ' '}</span>
@@ -372,6 +384,41 @@
                                     Show full diff
                                 </button>
                             {/if}
+                        </div>
+                    {:else if ufile.added > 0 && !entry.loading}
+                        <div class="diff-file-content">
+                            <div class="diff-line-scroll">
+                                <div class="diff-line-content-wrapper">
+                                    <button type="button" class="diff-expand-btn diff-expand-center" onclick={() => onExpandUntracked(entry.path)}>
+                                        Load {ufile.added} line{ufile.added !== 1 ? 's' : ''}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    {:else if entry.loading}
+                        <div class="diff-file-content">
+                            <div class="diff-line-scroll">
+                                <div class="diff-line-content-wrapper">
+                                    <div class="diff-loading">
+                                        <div class="diff-loading-spinner"></div>
+                                        <span>Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {:else if ufile.added === 0 && ufile.rows.length === 0}
+                        <div class="diff-file-content">
+                            <div class="diff-line-scroll">
+                                <div class="diff-line-content-wrapper">
+                                    <div class="diff-empty-file-notice">
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                            <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                        </svg>
+                                        <span>Empty file</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     {/if}
                 {/if}
@@ -467,7 +514,13 @@
                                                         {:else}
                                                             <span class="diff-prefix"> </span>
                                                         {/if}
-                                                        {#if getHighlight(file.path, item.row.lineNumber)}
+                                                        {#if item.row.segments}
+                                                            <span class="diff-text">
+                                                                {#each item.row.segments as seg}
+                                                                    <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
+                                                                {/each}
+                                                            </span>
+                                                        {:else if getHighlight(file.path, item.row.lineNumber)}
                                                             <span class="diff-text">{@html getHighlight(file.path, item.row.lineNumber)!}</span>
                                                         {:else}
                                                             <span class="diff-text">{item.row.text || ' '}</span>
@@ -509,7 +562,13 @@
                                                         >
                                                             <span class="diff-line-content">
                                                                 <span class="diff-prefix"> </span>
-                                                                {#if getHighlight(file.path, row.lineNumber)}
+                                                                {#if row.segments}
+                                                                    <span class="diff-text">
+                                                                        {#each row.segments as seg}
+                                                                            <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
+                                                                        {/each}
+                                                                    </span>
+                                                                {:else if getHighlight(file.path, row.lineNumber)}
                                                                     <span class="diff-text">{@html getHighlight(file.path, row.lineNumber)!}</span>
                                                                 {:else}
                                                                     <span class="diff-text">{row.text || ' '}</span>
@@ -749,6 +808,20 @@
         white-space: inherit;
     }
 
+    /* Inline word-level diff segments */
+    .diff-segment {
+        font-family: inherit;
+        font-size: inherit;
+        white-space: inherit;
+    }
+    .diff-segment-added {
+        background: rgba(63,185,80,0.4);
+    }
+    .diff-segment-removed {
+        background: rgba(248,81,73,0.4);
+        text-decoration: line-through;
+    }
+
     /* Lezer token highlighting — GitHub Dark palette (matches FileEditor) */
     :global(.diff-text .hl-keyword) {
         color: #F97583;
@@ -868,6 +941,21 @@
         flex-shrink: 0;
         opacity: 0.5;
     }
+
+    /* Empty file notice */
+    .diff-empty-file-notice {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+    }
+    .diff-empty-file-notice svg {
+        flex-shrink: 0;
+        opacity: 0.5;
+    }
     .diff-large-size {
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
@@ -914,6 +1002,33 @@
     .diff-expand-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-accent-hover);
+    }
+    .diff-expand-center {
+        justify-content: center;
+        padding: 24px 12px;
+        border-top: none;
+    }
+
+    /* Loading indicator */
+    .diff-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 24px 12px;
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+    }
+    .diff-loading-spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--color-border);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: diff-spin 0.6s linear infinite;
+    }
+    @keyframes diff-spin {
+        to { transform: rotate(360deg); }
     }
 
     /* Tree grouping */

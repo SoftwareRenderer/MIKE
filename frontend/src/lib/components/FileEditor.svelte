@@ -103,7 +103,7 @@
         },
     });
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string } = $props();
 
     let content = $state('');
     let originalContent = $state('');
@@ -342,7 +342,10 @@
         displayPath = displayPathProp || filePath.split('/').pop() || filePath;
 
         try {
-            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`);
+            const params = new URLSearchParams({ path: filePath });
+            if (projectId) params.set('project', projectId);
+            if (taskId) params.set('task', taskId);
+            const res = await fetch(`/api/fs/read?${params}`);
             if (!res.ok) {
                 if (res.status === 413) {
                     fileTooLarge = true;
@@ -366,7 +369,10 @@
         saving = true;
         try {
             const csrfToken = await ensureCsrfToken();
-            const res = await fetch('/api/fs/write', {
+            const params = new URLSearchParams();
+            if (projectId) params.set('project', projectId);
+            if (taskId) params.set('task', taskId);
+            const res = await fetch(`/api/fs/write?${params}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

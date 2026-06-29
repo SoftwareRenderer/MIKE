@@ -186,7 +186,12 @@
     let lastQueueLen = $state(0);
     $effect(() => {
         const len = fsEventQueue.length;
-        if (len > lastQueueLen && len > 0) {
+        // Reset when queue is cleared (project switch)
+        if (len === 0) {
+            lastQueueLen = 0;
+            return;
+        }
+        if (len > lastQueueLen) {
             // Use the latest event (most relevant)
             pendingFsEvent = fsEventQueue[len - 1];
             lastQueueLen = len;

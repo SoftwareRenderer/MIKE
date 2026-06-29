@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"kanban/backend/git"
 	"kanban/backend/httputil"
@@ -18,6 +19,7 @@ import (
 type GitHandler struct {
 	store       *store.Store
 	worktreeMgr *git.WorktreeManager
+	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
 }
 
 // NewGitHandler creates a new GitHandler.
@@ -404,7 +406,128 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	if taskDiff.Untracked == nil {
 		taskDiff.Untracked = []git.UntrackedFile{}
 	}
+	// Cache the full result (including untracked file content) for on-demand access
+	h.diffCache.Store(taskID, taskDiff)
+
+	// For default working tree diff, return a manifest (per-file metadata only).
+	// Custom ref comparisons (checkpoints, commit-to-commit) return full content.
+	if headRef == "" && customBase == "" {
+		manifest := buildDiffManifest(taskDiff)
+		httputil.JSONResponse(w, http.StatusOK, manifest)
+		return
+	}
+
+	// Strip Lines from untracked files for the response
+	taskDiff = stripUntrackedLines(taskDiff)
 	httputil.JSONResponse(w, http.StatusOK, taskDiff)
+}
+
+// stripUntrackedLines creates a copy of TaskDiff with Lines removed from untracked entries.
+// Sets LineCount so the frontend knows the file size without fetching content.
+func stripUntrackedLines(d *git.TaskDiff) *git.TaskDiff {
+	copy := *d
+	copy.Untracked = make([]git.UntrackedFile, len(d.Untracked))
+	for i, u := range d.Untracked {
+		entry := u
+		if len(u.Lines) > 0 {
+			entry.LineCount = len(u.Lines)
+			entry.Lines = nil
+		}
+		copy.Untracked[i] = entry
+	}
+	return &copy
+}
+
+// diffManifestFile is a single file entry in the diff manifest.
+type diffManifestFile struct {
+	Hash      string `json:"hash"`
+	Type      string `json:"type"` // "tracked" or "untracked"
+	Added     int    `json:"added,omitempty"`
+	Removed   int    `json:"removed,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	OrigAdded int    `json:"origAdded,omitempty"`
+	OrigRemoved int  `json:"origRemoved,omitempty"`
+	LineCount int    `json:"line_count,omitempty"` // for untracked files
+	FileSize  int64  `json:"file_size,omitempty"`  // for untracked files
+}
+
+// diffManifest is the lightweight manifest returned by GET /diff.
+// Contains per-file metadata (hashes, stats) without the actual diff content.
+type diffManifest struct {
+	Files     map[string]diffManifestFile `json:"files"`
+	ShortStat string                      `json:"short_stat"`
+}
+
+// buildDiffManifest creates a manifest from a TaskDiff with per-file hashes.
+func buildDiffManifest(d *git.TaskDiff) diffManifest {
+	manifest := diffManifest{
+		Files:     make(map[string]diffManifestFile),
+		ShortStat: d.ShortStat,
+	}
+	for path, f := range d.Tracked {
+		manifest.Files[path] = diffManifestFile{
+			Hash:        git.ComputeFileHash(f),
+			Type:        "tracked",
+			Added:       f.Added,
+			Removed:     f.Removed,
+			Truncated:   f.Truncated,
+			OrigAdded:   f.OrigAdded,
+			OrigRemoved: f.OrigRemoved,
+		}
+	}
+	for _, u := range d.Untracked {
+		manifest.Files[u.Path] = diffManifestFile{
+			Hash:      git.ComputeUntrackedHash(u),
+			Type:      "untracked",
+			LineCount: len(u.Lines),
+			FileSize:  u.FileSize,
+			Added:     len(u.Lines),
+		}
+	}
+	return manifest
+}
+
+// HandleTaskDiffFile returns the content of a single untracked file from the cached diff.
+// Query params: path (file path relative to worktree).
+// Returns 404 if the task's diff is not cached or the file is not found.
+func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	taskID := r.PathValue("taskID")
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	cached, ok := h.diffCache.Load(taskID)
+	if !ok {
+		httputil.JSONError(w, http.StatusNotFound, "diff not available (open the Changes panel first)")
+		return
+	}
+	taskDiff := cached.(*git.TaskDiff)
+	// Check tracked files first
+	if f, ok := taskDiff.Tracked[filePath]; ok {
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{
+			"rows":        f.Rows,
+			"truncated":   f.Truncated,
+			"origAdded":   f.OrigAdded,
+			"origRemoved": f.OrigRemoved,
+		})
+		return
+	}
+	// Then check untracked files
+	for _, u := range taskDiff.Untracked {
+		if u.Path == filePath {
+			httputil.JSONResponse(w, http.StatusOK, map[string]any{
+				"lines":      u.Lines,
+				"line_count": len(u.Lines),
+			})
+			return
+		}
+	}
+	httputil.JSONError(w, http.StatusNotFound, "file not found in diff")
 }
 
 // getTaskDiffFromProject runs git diff from the project repo using the task's branch.

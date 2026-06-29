@@ -67,6 +67,8 @@ export {
 export {
     getTaskDiff,
     getTaskCommits,
+    getDiffFile,
+    getUntrackedFileContent,
     resetWorktree,
 } from './api/git';
 

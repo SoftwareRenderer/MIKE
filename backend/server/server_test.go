@@ -443,12 +443,12 @@ func TestHandleFSPathValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("allows access without project param", func(t *testing.T) {
+	t.Run("requires project param", func(t *testing.T) {
 		req := testRequest(http.MethodGet, "/api/fs/read?path="+filepath.Join(tmpDir, "allowed.txt"), nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 		}
 	})
 }

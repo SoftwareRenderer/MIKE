@@ -4,8 +4,8 @@
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, config as configStore, selectedTask, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
-    import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, updateTask, clearDoneTasks } from '$lib/api';
+    import { getStreamingContext, getTaskDiffStatsContext, getTaskDiffContext, getExpandedTasksContext } from '$lib/context';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -157,9 +157,16 @@
         return colors[id] || 'var(--color-border)';
     }
 
-    // Diff state
-    let diffFiles: DiffFile[] = $state([]);
-    let untrackedFiles: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[] = $state([]);
+    // Diff state — per-file cache for incremental updates
+    let diffFileCache = $state<Record<string, DiffFile>>({});       // tracked files: path → DiffFile
+    let untrackedCache = $state<Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }>>({}); // untracked: path → metadata
+    // Derived arrays for DiffViewer (sorted)
+    let diffFiles = $derived(Object.values(diffFileCache).filter(f => !untrackedCache[f.path]));
+    let untrackedFiles = $derived(Object.entries(untrackedCache).map(([path, meta]) => ({
+        path,
+        ...meta,
+        file: diffFileCache[path] || { path, rows: [], added: 0, removed: 0 },
+    })));
     // Terminal - worktree exists when task has a branch (set on start, cleared on delete)
     let worktreeExists = $derived(!!task.branch);
 
@@ -183,6 +190,9 @@
 
     function resolveFilePath(relativePath: string): string | null {
         if (!workspaceDir || !task.id) return null;
+        if (sandboxEnabled) {
+            return `/sandbox/${task.id}/${relativePath}`;
+        }
         return `${workspaceDir.replace(/\/+$/, '')}/${task.id}/${relativePath}`;
     }
 
@@ -197,13 +207,14 @@
         editingFile = null;
     }
 
-    /** Build a DiffFile from raw file lines (untracked/new files, all additions). */
-    function buildUntrackedDiffFile(path: string, lines?: string[]): DiffFile {
+    /** Build a DiffFile from raw file lines (untracked/new files, all additions).
+     * When lines is null, uses lineCount to show a placeholder (content loaded on-demand). */
+    function buildUntrackedDiffFile(path: string, lines: string[] | null | undefined, lineCount?: number): DiffFile {
         if (!lines || lines.length === 0) {
-            return { path, added: 0, removed: 0, rows: [] };
+            const count = lineCount || 0;
+            return { path, added: count, removed: 0, rows: [] };
         }
         const rows = lines.map((text, i) => ({
-            key: `n-${i + 1}-${i}`,
             lineNumber: i + 1,
             variant: 'added' as const,
             text,
@@ -330,7 +341,7 @@
                 fileSize: u.file_size,
                 truncated: u.truncated,
                 origAdded: u.orig_added,
-                file: buildUntrackedDiffFile(u.path, u.lines),
+                file: buildUntrackedDiffFile(u.path, u.lines, u.line_count),
             }));
         } catch (e) {
             checkpointDiffFiles = [];
@@ -434,6 +445,8 @@
     let streamingIds = getStreamingContext();
     let expandedTasksContext = getExpandedTasksContext();
     let taskDiffStats = getTaskDiffStatsContext();
+    // Sync store to reactive state for $effect tracking
+    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number }>>({});
 
     $effect(() => {
         if (editingTaskId && editingTitleInput) {
@@ -449,9 +462,10 @@
         const taskId = task.id;
         if (previousTaskId && taskId !== previousTaskId) {
             // Task changed — reload diff and reset state
-            lastDiffHash = null;
-            diffFiles = [];
-            untrackedFiles = [];
+            diffTracker.hash = null;
+            diffFileCache = {};
+            untrackedCache = {};
+            diffFileHashes = {};
             commits = [];
             baseCommit = null;
             diffFrom = '';
@@ -695,8 +709,10 @@
         prevStatus = status || '';
     });
 
-    // Real-time diff update: re-fetch when the diff hash changes or is cleared
-    let lastDiffHash = $state<string | null>(null);
+
+
+    // WebSocket diff data (pushed via task_diff events)
+    let wsDiffMap = $state<Record<string, { hash: string; diff?: string; untracked?: any[]; files?: Record<string, { hash: string; type: string }>; updated_at: number }>>({});
 
     onMount(() => {
         const unsubBoard = boardStore.subscribe(b => {
@@ -706,17 +722,10 @@
                 allTasks = [];
             }
         });
+        const unsubDiff = taskDiffStats.subscribe(v => { diffStatsMap = v; });
+        const unsubWsDiff = getTaskDiffContext().subscribe(v => { wsDiffMap = v; });
 
         loadDiff();
-
-        const unsubDiff = taskDiffStats.subscribe(stats => {
-            const stat = stats[task.id];
-            const currentHash = stat?.hash || null;
-            if (currentHash !== lastDiffHash) {
-                lastDiffHash = currentHash;
-                loadDiff();
-            }
-        });
 
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
@@ -731,8 +740,67 @@
         return () => {
             unsubBoard();
             unsubDiff();
+            unsubWsDiff();
             window.removeEventListener('keydown', handleKey);
         };
+    });
+
+    // Real-time diff update: re-fetch when the diff hash changes.
+    // Skip HTTP fetch if WebSocket already pushed matching diff data.
+    // Plain object (not $state) to avoid re-triggering $effect on writes
+    let diffTracker = { hash: null as string | null };
+    // Per-file hash tracker for incremental updates
+    let diffFileHashes = {} as Record<string, string>;
+    $effect(() => {
+        const stat = diffStatsMap[task.id];
+        const currentHash = stat?.hash || null;
+        if (currentHash !== diffTracker.hash) {
+            diffTracker.hash = currentHash;
+            // Per-file incremental update: compare file_hashes with local cache
+            const fileHashes = stat?.file_hashes;
+            if (fileHashes) {
+                // Determine which files changed
+                const changedFiles: string[] = [];
+                const removedFiles: string[] = [];
+                const allPaths = new Set([...Object.keys(fileHashes), ...Object.keys(diffFileHashes)]);
+                for (const path of allPaths) {
+                    const remoteHash = fileHashes[path];
+                    const localHash = diffFileHashes[path];
+                    // File removed from remote
+                    if (!remoteHash) {
+                        if (localHash) removedFiles.push(path);
+                        continue;
+                    }
+                    // File is new or hash changed
+                    if (!localHash || localHash !== remoteHash) {
+                        changedFiles.push(path);
+                    }
+                }
+                // Remove deleted files from cache
+                for (const path of removedFiles) {
+                    delete diffFileCache[path];
+                    delete untrackedCache[path];
+                    delete diffFileHashes[path];
+                }
+                // Fetch manifest for metadata + fetch only changed files
+                if (changedFiles.length > 0 || Object.keys(diffFileCache).length === 0) {
+                    loadDiff();
+                }
+                return;
+            }
+            // Check if WebSocket already pushed this diff
+            const wsDiff = wsDiffMap[task.id];
+            if (wsDiff && wsDiff.hash === currentHash) {
+                // WebSocket data is fresh — apply it directly, skip HTTP
+                updateDiff({ diff: wsDiff.diff, untracked: wsDiff.untracked, files: wsDiff.files }, 'websocket');
+                // Fetch changed files if manifest format
+                if (wsDiff.files) {
+                    fetchChangedFiles(wsDiff.files);
+                }
+                return;
+            }
+            loadDiff();
+        }
     });
 
     async function handleMove(status: string) {
@@ -772,29 +840,79 @@
         }
     }
 
-    type DiffData = { diff: string; untracked: Array<{ path: string; lines?: string[]; file_size?: number; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
+    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }> };
 
-    function updateDiff(data: DiffData) {
+    function updateDiff(data: DiffData, source: 'http' | 'http-force' | 'websocket' = 'http') {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
+
+        // New manifest format: per-file entries
+        if (data.files && Object.keys(data.files).length > 0) {
+            const newCache: Record<string, DiffFile> = {};
+            const newUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
+            for (const [path, entry] of Object.entries(data.files)) {
+                if (!ignoreSwp(path) && entry.type === 'untracked') continue;
+                if (entry.type === 'tracked') {
+                    // Keep existing rows if cached (hash unchanged), update metadata
+                    const existing = diffFileCache[path];
+                    newCache[path] = {
+                        path,
+                        rows: existing?.rows || [],
+                        added: entry.added ?? 0,
+                        removed: entry.removed ?? 0,
+                        truncated: !!entry.truncated,
+                        origAdded: entry.origAdded,
+                        origRemoved: entry.origRemoved,
+                    };
+                } else if (entry.type === 'untracked') {
+                    const existing = diffFileCache[path];
+                    newUntracked[path] = { fileSize: entry.file_size, truncated: false, origAdded: entry.line_count, loading: false };
+                    newCache[path] = {
+                        path,
+                        rows: existing?.rows || [],
+                        added: entry.line_count ?? 0,
+                        removed: 0,
+                    };
+                }
+            }
+            diffFileCache = newCache;
+            untrackedCache = newUntracked;
+            // Store per-file hashes for incremental comparison
+            const newHashes: Record<string, string> = {};
+            for (const [path, entry] of Object.entries(data.files!)) {
+                newHashes[path] = entry.hash;
+            }
+            diffFileHashes = newHashes;
+            return;
+        }
+
+        // Legacy format: monolithic diff string + untracked array
+        // If cache already has data (from manifest), skip empty legacy updates
+        if (!data.diff && !data.untracked && (Object.keys(diffFileCache).length > 0 || Object.keys(untrackedCache).length > 0)) {
+            return; // keep existing manifest data
+        }
         const truncatedSet = new Set(data.truncated_files || []);
         const origStats = data.original_file_stats || {};
-        diffFiles = parseUnifiedDiff(data.diff).filter(f => ignoreSwp(f.path)).map(f => {
+        const newCache: Record<string, DiffFile> = {};
+        const newUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
+
+        parseUnifiedDiff(data.diff || '').filter(f => ignoreSwp(f.path)).forEach(f => {
             const isTruncated = truncatedSet.has(f.path);
             const stat = origStats[f.path];
-            return {
+            newCache[f.path] = {
                 ...f,
                 truncated: isTruncated,
                 origAdded: stat?.added,
                 origRemoved: stat?.removed,
             };
         });
-        untrackedFiles = (data.untracked || []).filter(u => ignoreSwp(u.path)).map(u => ({
-            path: u.path,
-            fileSize: u.file_size,
-            truncated: u.truncated,
-            origAdded: u.orig_added,
-            file: buildUntrackedDiffFile(u.path, u.lines),
-        }));
+
+        (data.untracked || []).filter(u => ignoreSwp(u.path)).forEach(u => {
+            newUntracked[u.path] = { fileSize: u.file_size, truncated: u.truncated, origAdded: u.orig_added, loading: false };
+            newCache[u.path] = buildUntrackedDiffFile(u.path, u.lines, u.line_count);
+        });
+
+        diffFileCache = newCache;
+        untrackedCache = newUntracked;
     }
 
     let diffLoading = $state(false);
@@ -806,11 +924,10 @@
             await Promise.all([loadCommits(), loadDiffForMode()]);
         } finally {
             diffLoading = false;
-            // Sync lastDiffHash with current store value so a pending WebSocket
+            // Sync tracker with current store value so a pending WebSocket
             // diffStats event doesn't trigger a redundant re-fetch.
-            const stats = get(taskDiffStats);
-            const stat = stats[task.id];
-            lastDiffHash = stat?.hash || null;
+            const stat = diffStatsMap[task.id];
+            diffTracker.hash = stat?.hash || null;
         }
     }
 
@@ -832,11 +949,48 @@
             const headRef = diffTo === 'working' ? undefined : diffTo;
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef });
-            updateDiff(result);
+            const isDefaultMode = !headRef && !baseRef;
+            updateDiff(result, isDefaultMode ? 'http' : 'http-force');
+            // For manifest format, fetch individual files
+            if (result.files && isDefaultMode) {
+                await fetchChangedFiles(result.files);
+            }
         } catch (e) {
-            diffFiles = [];
-            untrackedFiles = [];
+            diffFileCache = {};
+            untrackedCache = {};
+            diffFileHashes = {};
         }
+    }
+
+    /** Fetch individual files whose hash changed (or are new). */
+    async function fetchChangedFiles(manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number }>) {
+        if (!task) return;
+        const fetches: Promise<void>[] = [];
+        for (const [path, entry] of Object.entries(manifest)) {
+            const localHash = diffFileHashes[path];
+            const remoteHash = entry.hash;
+            // Skip if hash matches (file unchanged) and we already have content
+            if (localHash === remoteHash && diffFileCache[path]?.rows.length) continue;
+            // Skip blank untracked files (no content to fetch)
+            if (entry.type === 'untracked' && (entry.line_count ?? 0) === 0) continue;
+            // Fetch this file
+            fetches.push((async () => {
+                try {
+                    const data = await getDiffFile(task.project_id, task.id, path);
+                    if (data.rows) {
+                        diffFileCache[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
+                    } else if (data.lines) {
+                        diffFileCache[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
+                        if (untrackedCache[path]) {
+                            untrackedCache[path] = { ...untrackedCache[path], loading: false };
+                        }
+                    }
+                } catch (e) {
+                    // Silently fail for individual file fetches
+                }
+            })());
+        }
+        await Promise.all(fetches);
     }
 
     async function handleExpandDiff() {
@@ -845,9 +999,39 @@
             const headRef = diffTo === 'working' ? undefined : diffTo;
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef, full: true });
-            updateDiff(result);
+            const isDefaultMode = !headRef && !baseRef;
+            updateDiff(result, isDefaultMode ? 'http' : 'http-force');
         } catch (e) {
             // Silently fail
+        }
+    }
+
+    /** Load content for a single untracked file on-demand. */
+    async function loadUntrackedFile(path: string) {
+        if (!task) return;
+        // Already loaded
+        if (diffFileCache[path]?.rows.length) return;
+        // Mark as loading
+        if (untrackedCache[path]) {
+            untrackedCache[path] = { ...untrackedCache[path], loading: true };
+        }
+        try {
+            const data = await getDiffFile(task.project_id, task.id, path);
+            if (data.lines) {
+                diffFileCache[path] = {
+                    path,
+                    rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
+                    added: data.lines.length,
+                    removed: 0,
+                };
+            }
+            if (untrackedCache[path]) {
+                untrackedCache[path] = { ...untrackedCache[path], loading: false };
+            }
+        } catch (e) {
+            if (untrackedCache[path]) {
+                untrackedCache[path] = { ...untrackedCache[path], loading: false };
+            }
         }
     }
 
@@ -930,7 +1114,7 @@
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
                             taskTitle={task.title}
-                            onRefreshDiff={updateDiff}
+                            onRefreshDiff={(data: DiffData) => updateDiff(data, 'websocket')}
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
                             onViewChanges={handleViewChanges}
@@ -960,6 +1144,8 @@
                                 filePath={editingFile.path}
                                 lineNumber={editingFile.lineNumber}
                                 displayPath={editingFile.displayPath}
+                                projectId={task.project_id}
+                                taskId={task.id}
                                 onClose={closeFileEditor}
                             />
                         {:else}
@@ -973,7 +1159,7 @@
                                 <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
                             </div>
                         {/if}
-                        <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} onLineClick={handleDiffLineClick} />
+                        <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} />
 
                         <!-- Checkpoint diff overlay -->
                         {#if checkpointDiffOpen}

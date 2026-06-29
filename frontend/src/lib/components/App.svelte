@@ -304,7 +304,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         projectCounts = counts;
                     },
                     onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines) => {
+                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines, file_hashes) => {
                         const stat = short_stat || '';
                         const fileMatch = stat.match(/(\d+) file\w* changed/);
                         const insMatch = stat.match(/(\d+) insertion\w*/);
@@ -316,24 +316,27 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
                         if (hash) {
                             taskDiffStatsContext.update(map => {
-                                map[task_id] = { hash, files: totalFiles, additions, deletions };
-                                return map;
+                                map[task_id] = { hash, files: totalFiles, additions, deletions, file_hashes };
+                                return { ...map }; // new ref for Svelte 5 $state reactivity
                             });
                         } else {
                             taskDiffStatsContext.update(map => {
                                 delete map[task_id];
-                                return map;
+                                return { ...map };
                             });
                         }
                     },
-                    onDiff: (task_id, diff, untracked) => {
+                    onDiff: (task_id, hash, diff, untracked, files) => {
                         taskDiffContext.update(map => {
-                            if (diff || untracked.length > 0) {
-                                map[task_id] = { diff, untracked };
+                            // Manifest format (files map) or legacy format (diff string + untracked array)
+                            const hasManifest = files && Object.keys(files).length > 0;
+                            const hasLegacy = diff || (untracked?.length ?? 0) > 0;
+                            if (hasManifest || hasLegacy) {
+                                map[task_id] = { hash, diff, untracked, files, updated_at: Date.now() };
                             } else {
                                 delete map[task_id];
                             }
-                            return map;
+                            return { ...map };
                         });
                     },
                     onBranch: (branch) => {

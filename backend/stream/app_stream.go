@@ -467,7 +467,8 @@ func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 // Used by the card UI to show file counts and the commit button.
 // The hash lets the frontend detect content changes without receiving the full diff.
-func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int) {
+// fileHashes is a per-file hash map for incremental updates.
+func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, fileHashes map[string]string) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":            "task_diff_stats",
 		"task_id":         taskID,
@@ -475,14 +476,27 @@ func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, sho
 		"short_stat":      shortStat,
 		"untracked_n":     untrackedN,
 		"untracked_lines": untrackedLines,
+		"file_hashes":     fileHashes,
 	})
 }
 
+// ComputeDiffHash computes a SHA-256 hash of the tracked diff + untracked file contents.
+// Matches the algorithm used by the worktree watcher for consistent change detection.
+func ComputeDiffHash(diff string, untracked []git.UntrackedFile) string {
+	var hashInput strings.Builder
+	hashInput.WriteString(diff)
+	for _, u := range untracked {
+		hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
+}
+
 // BroadcastDiff sends the full diff to all clients of a project.
-func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diff string, shortStat string, untrackedN int, untracked []map[string]any) {
+func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diffHash, diff string, shortStat string, untrackedN int, untracked []map[string]any) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":       "task_diff",
 		"task_id":    taskID,
+		"hash":       diffHash,
 		"diff":       diff,
 		"short_stat": shortStat,
 		"untracked":  untracked,
@@ -844,12 +858,12 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
 			// Send compact stats for card UI
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {
 				untrackedLines += len(u.Lines)
 			}
-			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(diffResult.Diff)))
 			statsMsg, _ := json.Marshal(map[string]any{
 				"type":            "task_diff_stats",
 				"task_id":         task.ID,
@@ -857,26 +871,44 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 				"short_stat":      diffResult.ShortStat,
 				"untracked_n":     len(diffResult.Untracked),
 				"untracked_lines": untrackedLines,
+				"file_hashes":     diffResult.GetPerFileHashes(),
 			})
 			asm.writeMu.Lock()
 			conn.Write(context.Background(), websocket.MessageText, statsMsg)
 			asm.writeMu.Unlock()
 
-			// Send full diff for detail view
-			untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
-			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+		// Send manifest for detail view (per-file metadata, no diff content)
+		files := make(map[string]map[string]any)
+		for path, f := range diffResult.Tracked {
+			files[path] = map[string]any{
+				"hash":        git.ComputeFileHash(f),
+				"type":        "tracked",
+				"added":       f.Added,
+				"removed":     f.Removed,
+				"truncated":   f.Truncated,
+				"origAdded":   f.OrigAdded,
+				"origRemoved": f.OrigRemoved,
 			}
-			msg, _ := json.Marshal(map[string]any{
-				"type":       "task_diff",
-				"task_id":    task.ID,
-				"diff":       diffResult.Diff,
-				"short_stat": diffResult.ShortStat,
-				"untracked":  untrackedMaps,
-			})
-			asm.writeMu.Lock()
-			conn.Write(context.Background(), websocket.MessageText, msg)
-			asm.writeMu.Unlock()
+		}
+		for _, u := range diffResult.Untracked {
+			files[u.Path] = map[string]any{
+				"hash":       git.ComputeUntrackedHash(u),
+				"type":       "untracked",
+				"line_count": len(u.Lines),
+				"file_size":  u.FileSize,
+				"added":      len(u.Lines),
+			}
+		}
+		msg, _ := json.Marshal(map[string]any{
+			"type":       "task_diff",
+			"task_id":    task.ID,
+			"hash":       hash,
+			"files":      files,
+			"short_stat": diffResult.ShortStat,
+		})
+		asm.writeMu.Lock()
+		conn.Write(context.Background(), websocket.MessageText, msg)
+		asm.writeMu.Unlock()
 		}
 	}
 

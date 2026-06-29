@@ -264,34 +264,53 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
+	project, err := s.optionalProject(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if project == nil {
+		JSONError(w, http.StatusBadRequest, "project parameter is required")
+		return
+	}
+	taskID := r.URL.Query().Get("task")
+
+	// Determine worktree path (host filesystem)
+	var worktreePath string
+	if taskID != "" {
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, "task worktree not found")
+			return
+		}
+		worktreePath = wtPath
+	} else {
+		worktreePath = project.Path
+	}
+	// Sandbox availability check (required but don't exec inside sandbox)
+	if project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
+		}
+		// Translate sandbox path to host path
+		mountPath := "/sandbox/" + filepath.Base(worktreePath)
+		cleanPath := filepath.Clean(path)
+		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
+			rel := cleanPath[len(mountPath):]
+			if rel == "" {
+				path = worktreePath
+			} else {
+				path = filepath.Join(worktreePath, rel)
+			}
+		}
+	}
 	// Validate path is within allowed project root
 	if err := s.validateFSPath(path, r); err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	project, _ := s.optionalProject(r)
-	// Enforce sandbox if enabled — no fallback to host
-	if project != nil && project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
-		mountPath := "/sandbox/" + filepath.Base(project.Path)
-		relPath, _ := filepath.Rel(project.Path, path)
-		sandboxPath := filepath.Join(mountPath, relPath)
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, "cat "+sandboxPath)
-		if err != nil {
-			JSONError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if len(output) > 1_000_000 {
-			JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
-			return
-		}
-		JSONResponse(w, http.StatusOK, map[string]string{"content": output})
-		return
-	}
-	// Host filesystem (no project or sandbox disabled)
+	// Host filesystem (worktree is bind-mounted into sandbox)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		JSONError(w, http.StatusNotFound, err.Error())
@@ -318,40 +337,58 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	// Validate path is within allowed project root
-	if err := s.validateFSPath(req.Path, r); err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	// Limit file size to 1MB
 	if len(req.Content) > 1_000_000 {
 		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
 		return
 	}
-	project, _ := s.optionalProject(r)
-	// Enforce sandbox if enabled — no fallback to host
-	if project != nil && project.SandboxEnabled {
+	project, err := s.optionalProject(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if project == nil {
+		JSONError(w, http.StatusBadRequest, "project parameter is required")
+		return
+	}
+	taskID := r.URL.Query().Get("task")
+
+	// Determine worktree path (host filesystem)
+	var worktreePath string
+	if taskID != "" {
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, "task worktree not found")
+			return
+		}
+		worktreePath = wtPath
+	} else {
+		worktreePath = project.Path
+	}
+	// Sandbox availability check (required but don't exec inside sandbox)
+	if project.SandboxEnabled {
 		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
-		mountPath := "/sandbox/" + filepath.Base(project.Path)
-		relPath, _ := filepath.Rel(project.Path, req.Path)
-		sandboxPath := filepath.Join(mountPath, relPath)
-		sandboxDir := filepath.Dir(sandboxPath)
-		// Write content using base64, creating parent dir in single command
-		encoded := base64.StdEncoding.EncodeToString([]byte(req.Content))
-		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path,
-			"mkdir -p "+sandboxDir+" && base64 -d > "+sandboxPath,
-			[]byte(encoded+"\n"))
-		if err != nil {
-			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("write file: %v", err))
-			return
+		// Translate sandbox path to host path
+		mountPath := "/sandbox/" + filepath.Base(worktreePath)
+		cleanPath := filepath.Clean(req.Path)
+		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
+			rel := cleanPath[len(mountPath):]
+			if rel == "" {
+				req.Path = worktreePath
+			} else {
+				req.Path = filepath.Join(worktreePath, rel)
+			}
 		}
-		JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": req.Path})
+	}
+	// Validate path is within allowed project root
+	if err := s.validateFSPath(req.Path, r); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Host filesystem (no project or sandbox disabled)
+	// Host filesystem (worktree is bind-mounted into sandbox)
 	dir := filepath.Dir(req.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
@@ -512,8 +549,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	// Resolve search root from project or task worktree
 	var searchRoot string
 	var project *types.Project
-	var sandboxPath string
-	var useSandbox bool
 	var err error
 
 	if taskID != "" {
@@ -550,15 +585,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		// Task sandbox
-		if project.SandboxEnabled {
-			if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-				JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-				return
-			}
-			useSandbox = true
-			sandboxPath = "/sandbox/" + filepath.Base(searchRoot)
-		}
 	} else {
 		// Search within project root
 		project, err = s.store.GetProject(projectID)
@@ -572,14 +598,12 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		// Project sandbox
-		if project.SandboxEnabled {
-			if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-				JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-				return
-			}
-			useSandbox = true
-			sandboxPath = "/sandbox/" + filepath.Base(project.Path)
+	}
+	// Sandbox availability check (required but don't exec inside sandbox)
+	if project != nil && project.SandboxEnabled {
+		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+			return
 		}
 	}
 
@@ -588,83 +612,54 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []searchResult
 
-	if useSandbox {
-		// Search inside the sandbox using find command
-		execID := projectID
-		execPath := searchRoot
-		if taskID != "" {
-			execID = taskID
-		}
-		cmd := "find " + sandboxPath + " -type f -not -path '*/.*'"
-		if q != "" {
-			cmd += " | grep -i '" + q + "'"
-		}
-		cmd += " | head -10"
-		output, err := s.sandboxMgr.ExecProject(execID, execPath, cmd)
+	// Check that the search root exists
+	if _, statErr := os.Stat(searchRoot); statErr != nil {
+		JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
+		return
+	}
+
+	// Recursively walk and collect matching files (worktree is bind-mounted into sandbox)
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			JSONError(w, http.StatusInternalServerError, "search failed: "+err.Error())
-			return
+			return nil // skip unreadable entries
 		}
-		for _, line := range strings.FieldsFunc(output, func(r rune) bool { return r == '\n' }) {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			rel, _ := filepath.Rel(sandboxPath, line)
-			if rel != "" && rel != "." {
-				results = append(results, searchResult{Path: rel})
-			}
-		}
-	} else {
-		// Check that the search root exists
-		if _, statErr := os.Stat(searchRoot); statErr != nil {
-			JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
-			return
+		rel, _ := filepath.Rel(searchRoot, path)
+		if rel == "." {
+			return nil
 		}
 
-		// Recursively walk and collect matching files
-		err := filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil // skip unreadable entries
-			}
-			rel, _ := filepath.Rel(searchRoot, path)
-			if rel == "." {
-				return nil
-			}
-
-			// Skip hidden files/dirs (starting with .)
-			if strings.HasPrefix(d.Name(), ".") {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			// Skip ignored directories
-			if git.ShouldIgnorePath(rel) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
+		// Skip hidden files/dirs (starting with .)
+		if strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
-				return nil
-			}
-
-			// Match: filename or relative path contains query (case-insensitive)
-			if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
-				return nil
-			}
-
-			results = append(results, searchResult{Path: rel})
-			if len(results) >= 10 {
-				return errStopWalk
+				return filepath.SkipDir
 			}
 			return nil
-		})
-		_ = err // ignore errStopWalk
-	}
+		}
+
+		// Skip ignored directories
+		if git.ShouldIgnorePath(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Match: filename or relative path contains query (case-insensitive)
+		if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
+			return nil
+		}
+
+		results = append(results, searchResult{Path: rel})
+		if len(results) >= 10 {
+			return errStopWalk
+		}
+		return nil
+	})
+	_ = err // ignore errStopWalk
 
 	// Sort results for deterministic output
 	sort.SliceStable(results, func(i, j int) bool {

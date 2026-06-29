@@ -706,11 +706,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					// Broadcast diff so the frontend updates the diff panel
 					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-						untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
-						for i, u := range diffResult.Untracked {
-							untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+						hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+						fileHashes := diffResult.GetPerFileHashes()
+						untrackedLines := 0
+						for _, u := range diffResult.Untracked {
+							untrackedLines += len(u.Lines)
 						}
-						te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+						te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
 					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
@@ -796,11 +798,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-				untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
-				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+				fileHashes := diffResult.GetPerFileHashes()
+				untrackedLines := 0
+				for _, u := range diffResult.Untracked {
+					untrackedLines += len(u.Lines)
 				}
-				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
 			}
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
@@ -880,11 +884,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Broadcast diff so the frontend updates the diff panel
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-				untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
-				for i, u := range diffResult.Untracked {
-					untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+				fileHashes := diffResult.GetPerFileHashes()
+				untrackedLines := 0
+				for _, u := range diffResult.Untracked {
+					untrackedLines += len(u.Lines)
 				}
-				te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
 			}
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
@@ -1451,11 +1457,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		// Broadcast diff
 		baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
 		if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-			untrackedMaps := make([]map[string]any, len(diffResult.Untracked))
-			for i, u := range diffResult.Untracked {
-				untrackedMaps[i] = map[string]any{"path": u.Path, "lines": u.Lines, "file_size": u.FileSize, "truncated": u.Truncated, "orig_added": u.OrigAdded}
+			hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+			fileHashes := diffResult.GetPerFileHashes()
+			untrackedLines := 0
+			for _, u := range diffResult.Untracked {
+				untrackedLines += len(u.Lines)
 			}
-			te.appStreamMgr.BroadcastDiff(projectID, task.ID, diffResult.Diff, diffResult.ShortStat, len(diffResult.Untracked), untrackedMaps)
+			te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes)
 		}
 
 		// Auto-start next sibling if subtask

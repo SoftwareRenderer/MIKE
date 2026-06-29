@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
@@ -16,7 +15,7 @@ import (
 )
 
 // diffBroadcastFn is a callback to broadcast diff stats to clients.
-type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int)
+type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, fileHashes map[string]string)
 
 // worktreeInfo tracks the state of a watched worktree.
 type worktreeInfo struct {
@@ -236,18 +235,13 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	untrackedN := len(diffResult.Untracked)
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
-		// Compute hash from tracked diff + untracked file contents
-		var hashInput strings.Builder
-		hashInput.WriteString(diffResult.Diff)
-		for _, u := range diffResult.Untracked {
-			hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
-		}
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
-		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines)
+		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+		fileHashes := diffResult.GetPerFileHashes()
+		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, fileHashes)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else {
 		// No changes — broadcast empty hash to clear
-		ww.broadcast(projectID, taskID, "", "", 0, 0)
+		ww.broadcast(projectID, taskID, "", "", 0, 0, nil)
 	}
 }
 

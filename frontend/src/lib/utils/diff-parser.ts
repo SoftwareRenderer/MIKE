@@ -1,4 +1,5 @@
-import type { DiffFile, DiffRow } from '$lib/types/diff';
+import { diffWordsWithSpace } from 'diff';
+import type { DiffFile, DiffRow, InlineDiffSegment } from '$lib/types/diff';
 
 /**
  * Parse a raw unified diff (git diff output) into structured DiffFile[] data.
@@ -68,7 +69,6 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
         if (line.startsWith('Binary files ') || line.includes('Binary file')) {
             if (currentFile) {
                 currentFile.rows.push({
-                    key: `binary-${currentFile.path}`,
                     lineNumber: null,
                     variant: 'context',
                     text: line,
@@ -104,7 +104,6 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
         // Parse diff content lines
         if (line.startsWith('+')) {
             currentFile.rows.push({
-                key: `n-${newLine}-${i}`,
                 lineNumber: newLine,
                 variant: 'added',
                 text: line.slice(1),
@@ -113,7 +112,6 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
             newLine++;
         } else if (line.startsWith('-')) {
             currentFile.rows.push({
-                key: `o-${oldLine}-${i}`,
                 lineNumber: oldLine,
                 variant: 'removed',
                 text: line.slice(1),
@@ -122,7 +120,6 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
             oldLine++;
         } else if (line.startsWith(' ')) {
             currentFile.rows.push({
-                key: `c-${newLine}-${i}`,
                 lineNumber: newLine,
                 variant: 'context',
                 text: line.slice(1),
@@ -136,7 +133,92 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
     }
 
     // Filter out files with no actual changes
-    return files.filter(f => f.rows.length > 0);
+    // Enrich rows with inline word-level diff segments
+    return files.filter(f => f.rows.length > 0).map(f => ({
+        ...f,
+        rows: enrichRowsWithInlineSegments(f.rows),
+    }));
+}
+
+/**
+ * Build inline word-level diff segments for a pair of removed/added lines.
+ * Uses diffWordsWithSpace to find the exact changed portions within the line.
+ */
+function buildModifiedSegments(oldText: string, newText: string): {
+    oldSegments: InlineDiffSegment[];
+    newSegments: InlineDiffSegment[];
+} {
+    const oldSegments: InlineDiffSegment[] = [];
+    const newSegments: InlineDiffSegment[] = [];
+    const parts = diffWordsWithSpace(oldText, newText);
+
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+        if (part.removed) {
+            oldSegments.push({ key: `o-${i}`, text: part.value, tone: 'removed' });
+        } else if (part.added) {
+            newSegments.push({ key: `n-${i}`, text: part.value, tone: 'added' });
+        } else {
+            oldSegments.push({ key: `oc-${i}`, text: part.value, tone: 'context' });
+            newSegments.push({ key: `nc-${i}`, text: part.value, tone: 'context' });
+        }
+    }
+    return { oldSegments, newSegments };
+}
+
+/**
+ * Post-process rows to add word-level inline diff segments for adjacent
+ * removed/added blocks (e.g. rows parsed from a git patch which lack them).
+ */
+function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
+    const result: DiffRow[] = [];
+    let index = 0;
+
+    while (index < rows.length) {
+        const row = rows[index];
+        if (!row || row.variant !== 'removed') {
+            result.push(row);
+            index++;
+            continue;
+        }
+
+        // Collect contiguous removed rows
+        const removedStart = index;
+        while (index < rows.length && rows[index]?.variant === 'removed') {
+            index++;
+        }
+        const removedBlock = rows.slice(removedStart, index);
+
+        // Collect contiguous added rows immediately following
+        const addedStart = index;
+        while (index < rows.length && rows[index]?.variant === 'added') {
+            index++;
+        }
+        const addedBlock = rows.slice(addedStart, index);
+
+        if (addedBlock.length === 0) {
+            // Pure deletion — no pairing possible
+            result.push(...removedBlock);
+            continue;
+        }
+
+        // Pair positionally and compute inline segments
+        const pairCount = Math.min(removedBlock.length, addedBlock.length);
+        for (let pi = 0; pi < pairCount; pi++) {
+            const removedRow = removedBlock[pi];
+            const addedRow = addedBlock[pi];
+            if (removedRow && addedRow && !removedRow.segments && !addedRow.segments) {
+                const { oldSegments, newSegments } = buildModifiedSegments(removedRow.text, addedRow.text);
+                removedBlock[pi] = { ...removedRow, segments: oldSegments };
+                addedBlock[pi] = { ...addedRow, segments: newSegments };
+            }
+        }
+
+        result.push(...removedBlock, ...addedBlock);
+    }
+
+    return result;
 }
 
 /**

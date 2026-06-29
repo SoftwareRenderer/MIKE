@@ -1,13 +1,22 @@
+/** Inline word-level diff segment for highlighting changes within a line. */
+export interface InlineDiffSegment {
+    key: string;
+    text: string;
+    tone: 'added' | 'removed' | 'context';
+}
+
 /** A single line in a parsed diff. */
 export interface DiffRow {
-    /** Unique key for rendering. */
-    key: string;
+    /** Unique key for rendering (optional, index-based fallback). */
+    key?: string;
     /** Line number in the new file (or old file for removed lines), or null for headers. */
     lineNumber: number | null;
     /** Type of this line. */
     variant: 'context' | 'added' | 'removed';
-    /** The text content (without the +/-/ prefix). */
-    text: string;
+    /** The text content (without the +/-/ prefix). Omitted when segments present. */
+    text?: string;
+    /** Word-level inline diff segments (set for paired removed/added rows). */
+    segments?: InlineDiffSegment[];
 }
 
 /** A parsed file group from a unified diff. */

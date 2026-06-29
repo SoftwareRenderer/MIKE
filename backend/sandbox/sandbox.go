@@ -330,6 +330,35 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, command s
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }
 
+// ExecTask runs a command inside a task's sandbox container,
+// creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
+// This is for task-level filesystem operations (read, write, etc.) in the diff view editor.
+func (sm *SandboxManager) ExecTask(taskID, worktreePath, command string) (string, error) {
+	sm.mu.Lock()
+	_, exists := sm.active[taskID]
+	sm.mu.Unlock()
+	if !exists {
+		if err := sm.Create(taskID, worktreePath, BaseImage, false, 0, ""); err != nil {
+			return "", fmt.Errorf("create sandbox container: %w", err)
+		}
+	}
+	return sm.Exec(taskID, command, nil)
+}
+
+// ExecTaskWithInput runs a command inside a task's sandbox container
+// with stdin input, creating the container on demand if needed.
+func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, command string, stdin []byte) (string, error) {
+	sm.mu.Lock()
+	_, exists := sm.active[taskID]
+	sm.mu.Unlock()
+	if !exists {
+		if err := sm.Create(taskID, worktreePath, BaseImage, false, 0, ""); err != nil {
+			return "", fmt.Errorf("create sandbox container: %w", err)
+		}
+	}
+	return sm.ExecWithInput(taskID, command, stdin, nil)
+}
+
 func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]

@@ -85,6 +85,8 @@ export {
 export {
     getTaskDiff,
     getTaskCommits,
+    getDiffFile,
+    getUntrackedFileContent,
     resetWorktree,
     getGitLogFull,
     getGitBranches,

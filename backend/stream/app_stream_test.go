@@ -108,6 +108,7 @@ func TestDiffWireFormat(t *testing.T) {
 	frame, err := json.Marshal(map[string]any{
 		"type":       "task_diff",
 		"task_id":    "test-task",
+		"hash":       "abc123",
 		"diff":       "diff content",
 		"short_stat": "1 file changed",
 		"untracked":  []any{},
@@ -119,6 +120,9 @@ func TestDiffWireFormat(t *testing.T) {
 	msg := assertFlatJSON(t, frame, "type", "", "task_diff")
 	if msg["task_id"] != "test-task" {
 		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
+	}
+	if msg["hash"] != "abc123" {
+		t.Fatalf("expected hash=abc123, got %v", msg["hash"])
 	}
 	if msg["diff"] != "diff content" {
 		t.Fatalf("expected diff='diff content', got %v", msg["diff"])

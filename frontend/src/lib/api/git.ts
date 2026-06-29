@@ -39,7 +39,7 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
 // -- Task Git endpoints --
 
 /** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content. */
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[] }>; short_stat: string; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> }> {
+export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>; short_stat: string; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }> }> {
     const params = new URLSearchParams();
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
@@ -55,6 +55,19 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch commits');
     return res.json();
+}
+
+/** Fetch the content of a single file (tracked or untracked) from the cached diff. */
+export async function getDiffFile(projectId: string, taskId: string, path: string): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch file content');
+    return res.json();
+}
+
+/** Fetch the content of a single untracked file from the cached diff. (legacy) */
+export async function getUntrackedFileContent(projectId: string, taskId: string, path: string): Promise<string[]> {
+    const data = await getDiffFile(projectId, taskId, path);
+    return data.lines || [];
 }
 
 /** Reset a task's worktree to a specific commit. Queued when offline. */
