@@ -1,4 +1,4 @@
-import { API_BASE, apiFetch, apiError, generateId, registerSetOffline } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage } from '../storage';
 import type { Config, Project, ReorderRequest, Task, TaskMessage, Thread } from '../types';
 
@@ -360,6 +360,59 @@ async function buildSandboxImageRaw(id: string): Promise<{ status: string; image
     });
     if (!res.ok) throw await apiError(res, 'Failed to build sandbox image');
     return res.json();
+}
+
+/** Stream build progress via SSE. onLine is called for each progress line. */
+export async function buildSandboxImageStream(id: string, onLine: (line: string) => void): Promise<{ status: string; image: string; project: string }> {
+    const token = await ensureCsrfToken();
+    const headers = new Headers();
+    if (token) headers.set('X-CSRF-Token', token);
+
+    const res = await fetch(`${API_BASE}/projects/${id}/sandbox/build`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to build sandbox image');
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming not supported');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: { status: string; image: string; project: string } | null = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                // Only parse JSON objects (final result), treat everything else as text
+                if (data.startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed && typeof parsed === 'object' && 'status' in parsed) {
+                            result = parsed;
+                            continue;
+                        }
+                    } catch {}
+                }
+                onLine(data);
+            }
+        }
+    }
+
+    if (!result) throw new Error('Build completed without result');
+    return result;
 }
 
 async function deleteProjectRaw(id: string): Promise<void> {

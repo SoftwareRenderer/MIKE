@@ -2,6 +2,7 @@ package managers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -204,6 +205,7 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 }
 
 // HandleSandboxBuild builds a container image from the project's Dockerfile.
+// Streams build progress as SSE and returns final JSON result.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	if r.Method != http.MethodPost {
@@ -226,21 +228,45 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.sandboxMgr.BuildImage(project.Name, project.SandboxDockerfilePath); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sendLine := func(line string) {
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
+		flusher.Flush()
+	}
+
+	sendLine("Building sandbox image from Dockerfile...")
+
+	err = h.sandboxMgr.BuildImageWithProgress(project.Name, project.SandboxDockerfilePath, func(line string) {
+		sendLine(line)
+	})
 
 	// Remove terminal sessions so they pick up the new image
 	if h.terminalMgr != nil {
 		h.terminalMgr.RemoveProjectSessions(id)
 	}
 
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{
+	if err != nil {
+		sendLine("error: " + err.Error())
+		return
+	}
+
+	// Final result as JSON
+	result, _ := json.Marshal(map[string]string{
 		"status":  "built",
 		"image":   sandbox.ProjectImageName(project.Name),
 		"project": id,
 	})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", result)
+	flusher.Flush()
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.

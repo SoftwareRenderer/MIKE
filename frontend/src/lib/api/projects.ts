@@ -70,6 +70,9 @@ export async function buildSandboxImage(id: string): Promise<{ status: string; i
     return buildSandboxImageRaw(id);
 }
 
+/** Trigger a sandbox image build with live progress streaming. */
+export { buildSandboxImageStream } from './queue';
+
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {
     if (getOfflineStatus()) {

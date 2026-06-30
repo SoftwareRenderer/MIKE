@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Project } from '$lib/types';
-    import { updateProject, buildSandboxImage } from '$lib/api';
+    import { updateProject, buildSandboxImageStream } from '$lib/api';
     import { showConfirm } from '$lib/store';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -27,9 +27,29 @@
     let saving = $state(false);
     let building = $state(false);
     let buildError = $state('');
+    let buildLog = $state<string[]>([]);
+    let buildLogEl: HTMLDivElement | null = null;
+    let buildLogAtBottom = $state(true);
     let error = $state('');
     let isLocked = $derived(inProgressCount > 0);
     let modalEl: HTMLDivElement | null = null;
+
+    function scrollBuildLog() {
+        if (!buildLogEl || !buildLogAtBottom) return;
+        requestAnimationFrame(() => {
+            if (!buildLogEl) return;
+            buildLogEl.scrollTop = buildLogEl.scrollHeight;
+            requestAnimationFrame(() => {
+                if (buildLogEl) buildLogEl.scrollTop = buildLogEl.scrollHeight;
+            });
+        });
+    }
+
+    function onBuildLogScroll() {
+        if (!buildLogEl) return;
+        const gap = buildLogEl.scrollHeight - buildLogEl.scrollTop - buildLogEl.clientHeight;
+        buildLogAtBottom = gap < 50;
+    }
 
     // Auto-enable network isolation when sandbox is toggled on
     let prevSandboxEnabled = $state(project.sandbox_enabled ?? false);
@@ -76,8 +96,6 @@
     function handleDockerfileSelected(path: string) {
         sandboxDockerfilePath = path;
         showDockerfilePicker = false;
-        // Auto-build when a new Dockerfile is selected
-        handleRebuild();
     }
 
     function handleDockerfilePickerClose() {
@@ -92,10 +110,17 @@
         if (!sandboxDockerfilePath || building) return;
         building = true;
         buildError = '';
+        buildLog = [];
 
         try {
-            const result = await buildSandboxImage(project.id);
-            // Show success via the image tag display
+            await buildSandboxImageStream(project.id, (line: string) => {
+                if (line.startsWith('error: ')) {
+                    buildError = line.slice(7);
+                } else {
+                    buildLog.push(line);
+                    scrollBuildLog();
+                }
+            });
         } catch (e) {
             buildError = String(e);
         } finally {
@@ -151,9 +176,17 @@
             }
         }
 
+        // Validate: dockerfile mode requires a path
+        if (imageSource === 'dockerfile' && !sandboxDockerfilePath) {
+            error = 'Please select a Dockerfile before saving.';
+            saving = false;
+            return;
+        }
+
         // No changes made
         if (Object.keys(changes).length === 0) {
             saving = false;
+            onClose();
             return;
         }
 
@@ -179,6 +212,11 @@
             error = String(e);
         } finally {
             saving = false;
+        }
+
+        // Rebuild image in background if dockerfile mode and path changed
+        if (imageSource === 'dockerfile' && sandboxDockerfilePath && dockerfileChanged) {
+            handleRebuild();
         }
     }
 </script>
@@ -351,6 +389,21 @@
                         Browse
                     </button>
                 </div>
+
+                {#if building}
+                <div class="build-notice">Build running in background — you can close this dialog.</div>
+                {/if}
+
+                {#if building || buildLog.length > 0}
+                <div class="build-log" bind:this={buildLogEl} role="log" aria-label="Build output" onscroll={onBuildLogScroll}>
+                    {#each buildLog as line}
+                        <div class="build-log-line">{line}</div>
+                    {/each}
+                    {#if buildLog.length === 0}
+                        <div class="build-log-line build-log-pending">Building...</div>
+                    {/if}
+                </div>
+                {/if}
 
                 {#if buildError}
                 <div class="build-error">{buildError}</div>
@@ -769,6 +822,40 @@
         border: 1px solid rgba(248, 81, 73, 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
+        font-size: 0.75rem;
+    }
+
+    .build-log {
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px 10px;
+        background: var(--color-bg-elevated);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        line-height: 1.5;
+        color: var(--color-text-secondary);
+        margin-bottom: 8px;
+    }
+
+    .build-log-line {
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .build-log-pending {
+        color: var(--color-text-tertiary);
+        font-style: italic;
+    }
+
+    .build-notice {
+        padding: 6px 10px;
+        margin-bottom: 6px;
+        background: rgba(80, 140, 255, 0.08);
+        border: 1px solid rgba(80, 140, 255, 0.2);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-secondary);
         font-size: 0.75rem;
     }
 

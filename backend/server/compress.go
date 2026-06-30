@@ -61,6 +61,7 @@ func CompressMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+
 		encoding := selectEncoding(r.Header.Get("Accept-Encoding"))
 		if encoding == "" {
 			w.Header().Set("Vary", "Accept-Encoding")
@@ -131,6 +132,12 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		return c.ResponseWriter.Write(p)
 	}
 
+	// Skip compression for streaming content types (SSE) — they need real-time flushes.
+	if c.headers.Get("Content-Type") == "text/event-stream" {
+		c.commitNoCompress()
+		return c.ResponseWriter.Write(p)
+	}
+
 	// Buffer data until we can decide.
 	n, err := c.body.Write(p)
 	if err != nil {
@@ -146,6 +153,23 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		c.commit()
 	}
 	return n, err
+}
+
+func (c *compressWriter) commitNoCompress() {
+	c.committed = true
+	c.headers.Del("Content-Length")
+
+	for k, vv := range c.headers {
+		for _, v := range vv {
+			c.ResponseWriter.Header().Add(k, v)
+		}
+	}
+	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
+	c.ResponseWriter.WriteHeader(c.code)
+	// Write any buffered data uncompressed
+	if c.body.Len() > 0 {
+		c.ResponseWriter.Write(c.body.Bytes())
+	}
 }
 
 func (c *compressWriter) commit() {
