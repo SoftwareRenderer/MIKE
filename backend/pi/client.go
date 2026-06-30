@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"kanban/backend/llama"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
@@ -514,6 +515,27 @@ func (c *Client) readEvents() {
 	}
 }
 
+// MapPiToolName maps Pi's tool names to Kanban's tool names.
+// Pi uses Anthropic-style names (read, write, edit) while Kanban uses read_file, write_file, edit_file.
+func MapPiToolName(piToolName string) string {
+	switch piToolName {
+	case "read":
+		return "read_file"
+	case "write":
+		return "write_file"
+	case "edit":
+		return "edit_file"
+	case "bash":
+		return "bash"
+	case "task_complete":
+		return "task_complete"
+	case "final_answer":
+		return "task_complete"
+	default:
+		return piToolName
+	}
+}
+
 // ToStreamEvent converts a PiEvent to a Kanban StreamEvent for WebSocket broadcasting.
 // The sandbox parameter indicates whether Pi is running inside a container.
 func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
@@ -533,23 +555,31 @@ func ToStreamEvent(event PiEvent, sandbox bool) types.StreamEvent {
 		}
 
 	case "tool_execution_start":
+		kanbanName := MapPiToolName(event.ToolName)
+		rawArgs, _ := json.Marshal(event.ToolArgs)
 		return types.StreamEvent{
 			Type: types.WSTypeToolCall,
 			Data: map[string]any{
-				"tool_id":   event.ToolCallID,
-				"tool_name": event.ToolName,
-				"args":      event.ToolArgs,
-				"sandbox":   sandbox,
+				"tool_id":           event.ToolCallID,
+				"tool_name":         kanbanName,
+				"tool_display_name": llama.GetToolDisplayName(kanbanName),
+				"args":              event.ToolArgs,
+				"raw_args":          string(rawArgs),
+				"sandbox":           sandbox,
 			},
 		}
 
 	case "tool_execution_end":
+		rawArgs, _ := json.Marshal(event.ToolArgs)
 		return types.StreamEvent{
 			Type: types.WSTypeToolResult,
 			Data: map[string]any{
-				"tool_id": event.ToolCallID,
-				"success": !event.ToolIsError,
-				"output":  event.ToolResult,
+				"tool_id":  event.ToolCallID,
+				"success":  !event.ToolIsError,
+				"output":   event.ToolResult,
+				"args":     event.ToolArgs,
+				"raw_args": string(rawArgs),
+				"sandbox":  sandbox,
 			},
 		}
 

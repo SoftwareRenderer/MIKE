@@ -1339,7 +1339,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							}
 
 							// Map Pi tool names to Kanban tool names
-							kanbanToolName := mapPiToolName(toolName)
+							kanbanToolName := pi.MapPiToolName(toolName)
 
 							// Build raw_args for display
 							rawArgs, _ := json.Marshal(toolArgs)
@@ -1378,7 +1378,20 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								CreatedAt:  time.Now().UTC(),
 							})
 
-							// Send tool_result WS event to finalize pending tool calls on the frontend.
+							// Send tool_call WS event so the frontend creates the tool call entry.
+							// Pi may not send streaming tool_execution_start events, so the frontend
+							// might not have a pending entry to update. The frontend's dedup logic
+							// (by tool_id) will skip duplicates if streaming already created it.
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{
+								"tool_id":           toolCallID,
+								"tool_name":         kanbanToolName,
+								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
+								"args":              toolArgs,
+								"raw_args":          string(rawArgs),
+								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
+							}})
+
+							// Send tool_result WS event to finalize the tool call on the frontend.
 							// If the streaming tool_execution_end was missing/late the frontend
 							// would otherwise leave isPending=true forever (stuck spinner).
 							resultOutput := ""

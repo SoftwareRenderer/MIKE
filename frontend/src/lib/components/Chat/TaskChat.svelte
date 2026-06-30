@@ -392,8 +392,24 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 if (!data.tool_id || data.tool_id === '') {
                     break;
                 }
-                // Attach tool call to the current assistant entry
-                const entry = ensureAssistantEntry();
+                // Attach tool call to the current assistant entry, or fall back to
+                // the last existing assistant entry (e.g., agent_end sends tool_call
+                // events after the streaming assistant was already closed).
+                let entry = currentAssistantId
+                    ? entries.find(e => e.id === currentAssistantId) || null
+                    : null;
+                if (!entry) {
+                    // Find last assistant entry to merge tool calls into
+                    for (let i = entries.length - 1; i >= 0; i--) {
+                        if (entries[i].role === 'assistant') {
+                            entry = entries[i];
+                            break;
+                        }
+                    }
+                }
+                if (!entry) {
+                    entry = ensureAssistantEntry();
+                }
                 // If the LLM sent the tool name as text content before the tool call,
                 // clear it in-place to avoid a blank bubble
                 if (entry.content.trim() === data.tool_name && !entry.reasoningContent) {

@@ -5,7 +5,7 @@
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
-    import CardEditPanel from './Card/CardEditPanel.svelte';
+    import EditTaskModal from './Card/EditTaskModal.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
@@ -327,61 +327,45 @@
         return unsub;
     });
 
-    // Inline editing
+    // Edit task modal
     let editingTitle = $state(false);
-    let titleDraft = $state('');
-    let titleInputRef: HTMLInputElement | null = $state(null);
-    let editPlanMode = $state(false);
-    let editAutoCommit = $state(false);
-    let editMergeOnCommit = $state(true);
-    let editMergeChildren = $state(true);
-    let editModel = $state('');
-    let editUrl = $state('');
-    let editReasoningEffort = $state('');
     let editProviders: Provider[] = $state([]);
     let isAgentSelected = $derived(() => {
-        if (!editUrl) return false;
-        const p = editProviders.find(p => p.url === editUrl);
+        const url = task.llama_server_url;
+        if (!url) return false;
+        const p = editProviders.find(p => p.url === url);
         return p ? p.kind !== 'llm' : false;
     });
 
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
         editingTitle = true;
-        titleDraft = task.title;
-        editPlanMode = task.plan_mode ?? false;
-        editAutoCommit = task.auto_commit ?? false;
-        editMergeOnCommit = task.merge_on_commit ?? true;
-        editMergeChildren = task.merge_children ?? true;
-        editModel = task.model_name ?? '';
-        editUrl = task.llama_server_url ?? '';
-        editReasoningEffort = task.reasoning_effort ?? '';
         const cfg = $configStore;
         editProviders = cfg?.providers || [];
     }
 
-    function saveEdit() {
-        const trimmed = titleDraft.trim();
+    function saveEdit(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, mergeOnCommit: boolean, mergeChildren: boolean) {
+        const trimmed = title.trim();
         if (!trimmed || !projectId) {
             cancelEdit();
             return;
         }
         const updates: Record<string, unknown> = { title: trimmed };
-        updates.plan_mode = editPlanMode;
-        updates.auto_commit = editMergeOnCommit; // auto-commit is prerequisite for auto-merge
-        updates.merge_on_commit = editMergeOnCommit;
-        updates.merge_children = editMergeChildren;
-        if (editModel) updates.model_name = editModel;
-        if (editUrl) updates.llama_server_url = editUrl;
-        if (editReasoningEffort) updates.reasoning_effort = editReasoningEffort;
+        updates.plan_mode = planMode;
+        updates.auto_commit = mergeOnCommit; // auto-commit is prerequisite for auto-merge
+        updates.merge_on_commit = mergeOnCommit;
+        updates.merge_children = mergeChildren;
+        if (model) updates.model_name = model;
+        if (url) updates.llama_server_url = url;
+        if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
         task.title = trimmed;
-        task.plan_mode = editPlanMode;
-        task.auto_commit = editAutoCommit;
-        task.merge_on_commit = editMergeOnCommit;
-        task.merge_children = editMergeChildren;
-        if (editModel) task.model_name = editModel;
-        if (editUrl) task.llama_server_url = editUrl;
-        if (editReasoningEffort) task.reasoning_effort = editReasoningEffort;
+        task.plan_mode = planMode;
+        task.auto_commit = mergeOnCommit;
+        task.merge_on_commit = mergeOnCommit;
+        task.merge_children = mergeChildren;
+        if (model) task.model_name = model;
+        if (url) task.llama_server_url = url;
+        if (reasoningEffort) task.reasoning_effort = reasoningEffort;
         boardStore.update(b => {
             if (!b) return b;
             return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
@@ -394,30 +378,8 @@
 
     function cancelEdit() {
         editingTitle = false;
-        titleDraft = '';
-        editPlanMode = false;
-        editAutoCommit = false;
-        editMergeOnCommit = true;
-        editMergeChildren = true;
-        editModel = '';
-        editUrl = '';
-        editReasoningEffort = '';
         editProviders = [];
     }
-
-    function handleEditModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
-        editModel = modelName;
-        editUrl = providerUrl;
-        editReasoningEffort = reasoningEffort || '';
-    }
-
-    $effect(() => {
-        if (editingTitle && titleInputRef) {
-            const input = titleInputRef as HTMLInputElement;
-            input.focus();
-            input.select();
-        }
-    });
 
     function truncate(s: string, max: number): string {
         if (!s) return '';
@@ -598,26 +560,7 @@
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
-    {#if editingTitle}
-        <CardEditPanel
-            {titleDraft}
-            {editProviders}
-            {editModel}
-            {editUrl}
-            {editReasoningEffort}
-            {editPlanMode}
-            {editMergeOnCommit}
-            {editMergeChildren}
-            {isAgentSelected}
-            taskHasParent={!!task.parent_task_id}
-            {targetBranch}
-            {titleInputRef}
-            onSave={saveEdit}
-            onCancel={cancelEdit}
-            onModelSelect={handleEditModelSelect}
-        />
-    {:else}
-        <div class="card-title">
+    <div class="card-title">
             {#if task.title_generating}
                 <span class="title-spinner" aria-label="Generating title">
                     <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
@@ -723,7 +666,6 @@
                 {/if}
             </div>
         </div>
-    {/if}
     {#if statusBadge || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
@@ -794,6 +736,26 @@
         rect={pickerRect}
         onSelectAgent={selectAgent}
         onSelectModel={selectModel}
+    />
+{/if}
+
+<!-- Edit task modal -->
+{#if editingTitle}
+    <EditTaskModal
+        taskTitle={task.title}
+        taskPrompt={task.prompt}
+        {editProviders}
+        editModel={task.model_name || ''}
+        editUrl={task.llama_server_url || ''}
+        editReasoningEffort={task.reasoning_effort || ''}
+        editPlanMode={task.plan_mode ?? false}
+        editMergeOnCommit={task.merge_on_commit ?? true}
+        editMergeChildren={task.merge_children ?? true}
+        taskHasParent={!!task.parent_task_id}
+        {targetBranch}
+        {isAgentSelected}
+        onSave={saveEdit}
+        onCancel={cancelEdit}
     />
 {/if}
 

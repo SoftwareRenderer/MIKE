@@ -149,27 +149,6 @@ func (d *loopDetector) phraseDetected() bool {
 	return d.phraseFired
 }
 
-// mapPiToolName maps Pi's tool names to Kanban's tool names.
-// Pi uses Anthropic-style names (read, write, edit) while Kanban uses read_file, write_file, edit_file.
-func mapPiToolName(piToolName string) string {
-	switch piToolName {
-	case "read":
-		return "read_file"
-	case "write":
-		return "write_file"
-	case "edit":
-		return "edit_file"
-	case "bash":
-		return "bash"
-	case "task_complete":
-		return "task_complete"
-	case "final_answer":
-		return "task_complete"
-	default:
-		return piToolName
-	}
-}
-
 // extractTarget extracts the primary file/target from a tool call.
 func extractTarget(toolName, rawArgs string) string {
 	switch toolName {
