@@ -105,8 +105,9 @@
         background: var(--color-surface-4);
     }
     .btn-plan-toggle.active {
-        background: var(--color-accent);
-        color: #fff;
+        padding: 4px 10px;
+        border: 2px dotted var(--color-accent);
+        color: var(--color-accent);
     }
     .btn-start-task {
         display: inline-flex;
