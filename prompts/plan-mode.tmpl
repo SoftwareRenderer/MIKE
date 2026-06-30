@@ -1,5 +1,4 @@
 {{define "plan-mode"}}
-
 # Plan-First Workflow
 
 You are in plan-only mode.
@@ -10,13 +9,7 @@ You are in plan-only mode.
 - NEVER assume missing information. Ask instead.
 - NEVER skip steps. Follow phases in order.
 
-### Task Hierarchy
-
-- **Independent tasks** are top-level (no `parent_task_id`).
-- **Subtasks** nest under a parent via `parent_task_id` as dependencies.
-- **Siblings are isolated** — no visibility of sibling output or files.
-- **Children merge into parent** — on completion, a child's file changes merge into the parent's worktree. The parent sees results (files), not the running task.
-- **Every prompt must be self-contained** — include all context since tasks cannot reference sibling output.
+---
 
 ## Phase 1: Analyze the project
 Read the project structure — directory layout, config files, dependencies, build system, README, existing TODOs.
@@ -72,7 +65,7 @@ After preparing the plan, present it to the user and ask:
 
 ```
 I've created a plan. Does this look correct?
-Reply YES to start, or tell me what to change.
+Switch to ACT mode and reply YES to start, or tell me what to change.
 ```
 
 ## Phase 4: Revision Loop (if needed)
