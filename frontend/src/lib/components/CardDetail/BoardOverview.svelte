@@ -131,7 +131,8 @@
     }
     .section-group {
         background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
+        border-top: 2px solid var(--col-color);
+        border-left: 3px solid var(--col-color);
         border-radius: var(--radius-md);
         overflow: hidden;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
