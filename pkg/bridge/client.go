@@ -87,24 +87,6 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	return c
 }
 
-// Dial connects to the agent at the given TCP address (host:port).
-func Dial(addr string) (*Client, error) {
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
-	}
-
-	c := &Client{
-		conn:     conn,
-		pending:  make(map[uint32]*pendingReq),
-		sessions: make(map[uint32]*shellSessionState),
-		readDone: make(chan struct{}),
-	}
-	c.nextID.Store(1)
-	go c.readLoop()
-	return c, nil
-}
-
 // nextMsgID returns the next unique message ID.
 func (c *Client) nextMsgID() uint32 {
 	return c.nextID.Add(1) - 1
@@ -214,36 +196,60 @@ func (c *Client) waitFor(frame *protocol.Frame, timeout time.Duration) (*protoco
 	}
 
 	var chunks []*protocol.Frame
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+
+	// timeout == 0 means block indefinitely (no timer)
+	hasTimeout := timeout > 0
+	var timer *time.Timer
+	if hasTimeout {
+		timer = time.NewTimer(timeout)
+		defer timer.Stop()
+	}
 
 	// Phase 1: collect chunks
 	for {
-		select {
-		case chunk, ok := <-p.chunkCh:
-			if !ok {
-				goto waitDone
+		if hasTimeout {
+			select {
+			case chunk, ok := <-p.chunkCh:
+				if !ok {
+					goto waitDone
+				}
+				chunks = append(chunks, chunk)
+			case final := <-p.done:
+				c.cleanup(msgID)
+				return final, chunks, nil
+			case <-timer.C:
+				c.cleanup(msgID)
+				return nil, chunks, fmt.Errorf("timeout waiting for result")
 			}
-			chunks = append(chunks, chunk)
+		} else {
+			select {
+			case chunk, ok := <-p.chunkCh:
+				if !ok {
+					goto waitDone
+				}
+				chunks = append(chunks, chunk)
+			case final := <-p.done:
+				c.cleanup(msgID)
+				return final, chunks, nil
+			}
+		}
+	}
+
+waitDone:
+	// Phase 2: wait for final result/error
+	if hasTimeout {
+		select {
 		case final := <-p.done:
-			// Result arrived before chunk channel closed
 			c.cleanup(msgID)
 			return final, chunks, nil
 		case <-timer.C:
 			c.cleanup(msgID)
 			return nil, chunks, fmt.Errorf("timeout waiting for result")
 		}
-	}
-
-waitDone:
-	// Phase 2: wait for final result/error
-	select {
-	case final := <-p.done:
+	} else {
+		final := <-p.done
 		c.cleanup(msgID)
 		return final, chunks, nil
-	case <-timer.C:
-		c.cleanup(msgID)
-		return nil, chunks, fmt.Errorf("timeout waiting for result")
 	}
 }
 
@@ -263,7 +269,7 @@ func (c *Client) ReadFile(path string) (string, int64, error) {
 	params, _ := json.Marshal(protocol.ReadParams{Path: path})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodRead, params)
 
-	final, chunks, err := c.waitFor(frame, 60*time.Second)
+	final, chunks, err := c.waitFor(frame, 0)
 	if err != nil {
 		return "", 0, err
 	}
@@ -292,7 +298,7 @@ func (c *Client) WriteFile(path, content string) (int64, error) {
 	params, _ := json.Marshal(protocol.WriteParams{Path: path, Content: content})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodWrite, params)
 
-	final, _, err := c.waitFor(frame, 120*time.Second)
+	final, _, err := c.waitFor(frame, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -313,7 +319,7 @@ func (c *Client) EditFile(path string, edits []protocol.Edit) (int64, error) {
 	params, _ := json.Marshal(protocol.EditParams{Path: path, Edits: edits})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodEdit, params)
 
-	final, _, err := c.waitFor(frame, 120*time.Second)
+	final, _, err := c.waitFor(frame, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -448,7 +454,7 @@ func (c *Client) ShellOpen(shell string, rows, cols uint16) (uint32, error) {
 	params, _ := json.Marshal(protocol.ShellOpenParams{Shell: shell, Rows: rows, Cols: cols})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodShellOpen, params)
 
-	final, _, err := c.waitFor(frame, 30*time.Second)
+	final, _, err := c.waitFor(frame, 0)
 	if err != nil {
 		return 0, err
 	}

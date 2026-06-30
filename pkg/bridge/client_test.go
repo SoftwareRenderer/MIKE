@@ -35,10 +35,3 @@ func TestBashResultHolderCompiles(t *testing.T) {
 
 
 
-// TestDialNonExistent verifies that Dial fails for a non-existent TCP address.
-func TestDialNonExistent(t *testing.T) {
-	_, err := Dial("127.0.0.1:59999")
-	if err == nil {
-		t.Fatal("expected error for non-existent address")
-	}
-}
