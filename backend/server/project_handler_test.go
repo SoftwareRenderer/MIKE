@@ -242,6 +242,58 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 	}
 }
 
+func TestProjectToggleSandboxWithTasks(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Create tasks (backlog, not running)
+	createTestTask(t, s, projID, "Task 1")
+	createTestTask(t, s, projID, "Task 2")
+
+	// Enable sandbox
+	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": true,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatal("expected sandbox_enabled to be true")
+	}
+
+	// Disable sandbox (should succeed — no tasks running)
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_enabled": false,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]any](t, rr.Body)
+	if result["sandbox_enabled"] != false {
+		t.Fatal("expected sandbox_enabled to be false")
+	}
+
+	// Re-enable sandbox (toggle back)
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": true,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("re-enable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]any](t, rr.Body)
+	if result["sandbox_enabled"] != true {
+		t.Fatal("expected sandbox_enabled to be true after re-enable")
+	}
+}
+
+
+
 func TestProjectDelete(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)

@@ -129,7 +129,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		state.sandboxExec, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
 	} else {
-		// Non-sandbox: use os.Root for folder isolation
+		// Non-sandbox: use os.Root only for write isolation.
+		// Read uses plain os.ReadFile (no isolation).
 		root, err := os.OpenRoot(worktreePath)
 		if err != nil {
 			task.StatusState = "failed"
@@ -140,7 +141,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Root creation failed: %v", err), "root_create_failed")
 			return
 		}
-		state.sandboxRead, state.sandboxWrite = makeRootCallbacks(root, worktreePath)
+		_, state.sandboxWrite = makeRootCallbacks(root, worktreePath)
 	}
 
 	// Check if this task uses Pi agent

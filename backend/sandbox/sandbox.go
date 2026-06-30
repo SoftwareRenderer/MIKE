@@ -834,6 +834,19 @@ func (sm *SandboxManager) containerExists(name string) (bool, error) {
 	return true, nil
 }
 
+// StopProjectContainers stops all sandbox containers associated with a project.
+// This includes task-level containers (identified by taskIDs) and the project-level
+// container (identified by "proj:" + projectID). Used when sandbox settings change
+// so containers are recreated with the new settings on next use.
+func (sm *SandboxManager) StopProjectContainers(projectID string, taskIDs []string) {
+	// Stop task-level containers
+	for _, taskID := range taskIDs {
+		_ = sm.Stop(taskID)
+	}
+	// Stop project-level container
+	_ = sm.Stop("proj:"+projectID)
+}
+
 // Cleanup removes all active sandbox containers.
 func (sm *SandboxManager) Cleanup() {
 	sm.mu.Lock()

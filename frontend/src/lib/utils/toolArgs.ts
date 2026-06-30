@@ -3,8 +3,10 @@
 export function formatToolArgs(toolName: string, args: Record<string, unknown> | null): string {
     if (!args) return '';
     switch (toolName) {
-        case 'bash':
-            return `$ ${args.command as string}`;
+        case 'bash': {
+            const cmd = args.command as string;
+            return cmd ? `$ ${cmd}` : '$ (building command...)';
+        }
         case 'read_file': {
             const p = args.path as string;
             if (!p) return '';

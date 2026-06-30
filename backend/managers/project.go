@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/sandbox"
@@ -24,11 +25,12 @@ type ProjectHandler struct {
 	worktreeMgr *git.WorktreeManager
 	terminalMgr *term.TerminalManager
 	sandboxMgr  *sandbox.SandboxManager
+	executor    *exec.TaskExecutor
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor}
 }
 
 // HandleList returns all projects.
@@ -267,6 +269,10 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.SandboxEnabled != nil {
+			// Stop any actively running executors so they don't hold stale sandbox connections
+			if h.executor != nil {
+				h.executor.StopProjectTasks(id)
+			}
 			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return

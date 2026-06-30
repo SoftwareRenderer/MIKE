@@ -35,6 +35,7 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 		store:        s,
 		appStreamMgr: appStreamMgr,
 		configStore:  &config.ConfigStore{},
+		tasks:        make(map[string]*executionState),
 	}
 }
 

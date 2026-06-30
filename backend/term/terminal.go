@@ -197,12 +197,13 @@ func (tm *TerminalManager) RemoveProjectSessions(projectID string) {
 		tm.RemoveSession(task.ID)
 	}
 	tm.RemoveSession("proj:" + projectID)
-	// Stop sandbox containers so they'll be recreated with the new image
+	// Stop sandbox containers so they'll be recreated with the new settings
 	if tm.sandboxMgr != nil {
+		taskIDs := make([]string, 0, len(tasks))
 		for _, task := range tasks {
-			_ = tm.sandboxMgr.Stop(task.ID)
+			taskIDs = append(taskIDs, task.ID)
 		}
-		_ = tm.sandboxMgr.Stop("proj:" + projectID)
+		tm.sandboxMgr.StopProjectContainers(projectID, taskIDs)
 	}
 }
 

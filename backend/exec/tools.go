@@ -104,25 +104,17 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
 	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
-	// In production, loop.go always provides sandboxRead/sandboxWrite via os.Root.
+	// In production, loop.go always provides sandboxWrite via os.Root.
+	// Read uses plain os.ReadFile (no isolation) when sandbox is disabled.
 	var root *os.Root
 	var rootErr error
 	makeRead := func() readFunc {
-		if root == nil {
-			var err error
-			root, err = os.OpenRoot(worktreePath)
-			rootErr = err
-		}
 		return func(p string) ([]byte, error) {
-			if rootErr != nil {
-				return nil, rootErr
+			norm := normalizePath(worktreePath, p)
+			if !filepath.IsAbs(norm) {
+				norm = filepath.Join(worktreePath, norm)
 			}
-			f, err := root.Open(normalizePath(worktreePath, p))
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-			return io.ReadAll(f)
+			return os.ReadFile(norm)
 		}
 	}
 	makeWrite := func() writeFunc {

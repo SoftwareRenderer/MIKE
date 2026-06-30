@@ -59,7 +59,7 @@
     let resolvedResult = $state<string | undefined>();
 
     /** Effective result: resolved (fetched) value, or the prop value. */
-    let effectiveResult = $derived(resolvedResult ?? tc.result);
+    let effectiveResult = $derived(resolvedResult ?? tc.result ?? '');
 
     function getTruncatedResult(text: string): string {
         if (!text) return '';

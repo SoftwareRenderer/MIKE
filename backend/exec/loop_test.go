@@ -1,11 +1,15 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -813,4 +817,166 @@ func TestNormalizePhrase_WordWithTrailingPunctuation(t *testing.T) {
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
 	}
+}
+
+// --- StopProjectTasks Tests ---
+
+func TestStopProjectTasks(t *testing.T) {
+	te := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	// Create project with unique path
+	proj := &types.Project{ID: "proj-test", Name: "Test Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create tasks in the project
+	task1 := createTaskInProject(t, te.store, proj.ID, "task-1")
+	task2 := createTaskInProject(t, te.store, proj.ID, "task-2")
+	// Task in a different project
+	otherProj := &types.Project{ID: "proj-other", Name: "Other Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(otherProj); err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	_ = createTaskInProject(t, te.store, otherProj.ID, "task-other")
+
+	// Simulate running executors for task1 and task2
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	te.taskMu.Lock()
+	te.tasks[task1.ID] = &executionState{ctx: ctx1, cancel: cancel1, userMsgChan: make(chan stream.UserMessage, 16)}
+	te.tasks[task2.ID] = &executionState{ctx: ctx2, cancel: cancel2, userMsgChan: make(chan stream.UserMessage, 16)}
+	// Also add a non-project task (orphan)
+	te.tasks["orphan-task"] = &executionState{
+		ctx:       context.Background(),
+		cancel:    func() {},
+		userMsgChan: make(chan stream.UserMessage, 16),
+	}
+	te.taskMu.Unlock()
+
+	// Call StopProjectTasks
+	stopped := te.StopProjectTasks(proj.ID)
+	if stopped != 2 {
+		t.Fatalf("expected 2 tasks stopped, got %d", stopped)
+	}
+
+	// Verify task1 and task2 executors were removed
+	te.taskMu.Lock()
+	_, hasTask1 := te.tasks[task1.ID]
+	_, hasTask2 := te.tasks[task2.ID]
+	_, hasOrphan := te.tasks["orphan-task"]
+	te.taskMu.Unlock()
+	if hasTask1 {
+		t.Error("expected task1 executor to be stopped")
+	}
+	if hasTask2 {
+		t.Error("expected task2 executor to be stopped")
+	}
+	if !hasOrphan {
+		t.Error("expected orphan task executor to still exist (different project)")
+	}
+
+	// Verify task statuses were reset to idle
+	t1, _ := te.store.GetTaskByTaskID(task1.ID)
+	if t1.StatusState != "idle" {
+		t.Errorf("expected task1 status_state='idle', got %q", t1.StatusState)
+	}
+	t2, _ := te.store.GetTaskByTaskID(task2.ID)
+	if t2.StatusState != "idle" {
+		t.Errorf("expected task2 status_state='idle', got %q", t2.StatusState)
+	}
+}
+
+func TestStopProjectTasks_NoRunningTasks(t *testing.T) {
+	te := newTestExecutor(t)
+	now := time.Now().UTC()
+	proj := &types.Project{ID: "proj-empty", Name: "Empty Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	createTaskInProject(t, te.store, proj.ID, "idle-task")
+
+	// No running executors
+	stopped := te.StopProjectTasks(proj.ID)
+	if stopped != 0 {
+		t.Fatalf("expected 0 tasks stopped, got %d", stopped)
+	}
+}
+
+func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
+	te := newTestExecutor(t)
+	now := time.Now().UTC()
+	proj := &types.Project{ID: "proj-mixed", Name: "Mixed Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create a running task and a review task
+	runningTask := createTaskInProject(t, te.store, proj.ID, "running-task")
+	reviewTask := createTaskInProject(t, te.store, proj.ID, "review-task")
+	// Move review task to review status
+	reviewTask.Status = "review"
+	reviewTask.StatusState = "awaiting_review"
+	_ = te.store.UpdateTask(reviewTask)
+
+	// Only runningTask has an active executor
+	ctx, cancel := context.WithCancel(context.Background())
+	te.taskMu.Lock()
+	te.tasks[runningTask.ID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: make(chan stream.UserMessage, 16)}
+	te.taskMu.Unlock()
+
+	// Call StopProjectTasks
+	stopped := te.StopProjectTasks(proj.ID)
+	if stopped != 1 {
+		t.Fatalf("expected 1 task stopped, got %d", stopped)
+	}
+
+	// Verify running task was stopped and reset to idle
+	runningTaskAfter, _ := te.store.GetTaskByTaskID(runningTask.ID)
+	if runningTaskAfter.StatusState != "idle" {
+		t.Errorf("expected running task status_state='idle', got %q", runningTaskAfter.StatusState)
+	}
+
+	// Verify review task was NOT modified
+	reviewTaskAfter, _ := te.store.GetTaskByTaskID(reviewTask.ID)
+	if reviewTaskAfter.Status != "review" {
+		t.Errorf("expected review task status='review', got %q", reviewTaskAfter.Status)
+	}
+	if reviewTaskAfter.StatusState != "awaiting_review" {
+		t.Errorf("expected review task status_state='awaiting_review', got %q", reviewTaskAfter.StatusState)
+	}
+}
+
+// createTaskInProject creates a task directly in the store for testing.
+func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string) *types.Task {
+	t.Helper()
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Test Task",
+		Prompt:      "Test prompt",
+		Status:      "backlog",
+		StatusState: "idle",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// Create default thread
+	threadID := types.GenerateThreadID()
+	if err := s.CreateThread(&types.TaskThread{
+		ID:        threadID,
+		TaskID:    taskID,
+		Name:      "Main",
+		IsActive:  true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	task.CurrentThreadID = threadID
+	_ = s.UpdateTask(task)
+	return task
 }

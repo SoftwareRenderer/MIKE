@@ -712,6 +712,34 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	return nil
 }
 
+// StopProjectTasks stops all actively running executors for tasks in a project.
+// Used when project-level settings (e.g., sandbox) change while tasks are running.
+// Returns the count of tasks that were stopped.
+func (te *TaskExecutor) StopProjectTasks(projectID string) int {
+	tasks, err := te.store.GetTasksByProject(projectID)
+	if err != nil {
+		return 0
+	}
+	stopped := 0
+	for _, task := range tasks {
+		te.taskMu.Lock()
+		if _, ok := te.tasks[task.ID]; ok {
+			state := te.tasks[task.ID]
+			state.cancel()
+			delete(te.tasks, task.ID)
+			stopped++
+			log.Printf("[stop-project-tasks] task=%s project=%s stopped (settings change)", task.ID, projectID)
+			// Reset only the running task to idle; preserve its column (status)
+			task.StatusState = "idle"
+			te.taskMu.Unlock()
+			_ = te.store.UpdateTask(&task)
+		} else {
+			te.taskMu.Unlock()
+		}
+	}
+	return stopped
+}
+
 // forwardUserMessage forwards a user message to the running executor or lazy-starts one.
 func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.UserMessage) {
 	te.taskMu.Lock()

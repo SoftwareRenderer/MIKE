@@ -232,8 +232,10 @@ func TestCreateWithoutGVisor(t *testing.T) {
 
 func TestContainerRunning(t *testing.T) {
 	sm := &SandboxManager{
-		active:    make(map[string]string),
-		available: true,
+		active:     make(map[string]string),
+		mountPaths: make(map[string]string),
+		agents:     make(map[string]*agentConn),
+		available:  true,
 	}
 
 	// Empty map — no containers running
@@ -251,6 +253,53 @@ func TestContainerRunning(t *testing.T) {
 	if sm.ContainerRunning("task-3") {
 		t.Error("expected ContainerRunning to return false for non-active task")
 	}
+}
+
+func TestStopProjectContainers(t *testing.T) {
+	sm := &SandboxManager{
+		active:     make(map[string]string),
+		mountPaths: make(map[string]string),
+		agents:     make(map[string]*agentConn),
+		available:  true,
+	}
+
+	// Simulate containers for project "proj-A": two tasks + project-level
+	sm.active["task-a1"] = "kanban-sandbox-task-a1"
+	sm.active["task-a2"] = "kanban-sandbox-task-a2"
+	sm.active["proj:proj-A"] = "kanban-sandbox-proj-proj-A"
+	// Container for a different project
+	sm.active["task-b1"] = "kanban-sandbox-task-b1"
+
+	// Stop containers for project A
+	sm.StopProjectContainers("proj-A", []string{"task-a1", "task-a2"})
+
+	// Project A containers should be stopped (removed from active map)
+	if sm.ContainerRunning("task-a1") {
+		t.Error("expected task-a1 container to be stopped")
+	}
+	if sm.ContainerRunning("task-a2") {
+		t.Error("expected task-a2 container to be stopped")
+	}
+	if sm.ContainerRunning("proj:proj-A") {
+		t.Error("expected project-level container to be stopped")
+	}
+
+	// Project B container should still be running
+	if !sm.ContainerRunning("task-b1") {
+		t.Error("expected task-b1 container to still be running (different project)")
+	}
+}
+
+func TestStopProjectContainers_NoContainers(t *testing.T) {
+	sm := &SandboxManager{
+		active:     make(map[string]string),
+		mountPaths: make(map[string]string),
+		agents:     make(map[string]*agentConn),
+		available:  true,
+	}
+
+	// Should not panic when there are no containers
+	sm.StopProjectContainers("proj-empty", []string{"nonexistent-task"})
 }
 
 func TestImageReady(t *testing.T) {
