@@ -259,8 +259,8 @@ func (c *Client) cleanup(msgID uint32) {
 
 // ReadFile reads a file from the sandbox.
 // Returns the content as a string and the total size.
-func (c *Client) ReadFile(path string, offset, limit int64) (string, int64, error) {
-	params, _ := json.Marshal(protocol.ReadParams{Path: path, Offset: offset, Limit: limit})
+func (c *Client) ReadFile(path string) (string, int64, error) {
+	params, _ := json.Marshal(protocol.ReadParams{Path: path})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodRead, params)
 
 	final, chunks, err := c.waitFor(frame, 60*time.Second)

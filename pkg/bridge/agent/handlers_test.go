@@ -114,7 +114,7 @@ func TestEditApply(t *testing.T) {
 
 func TestRequestParsing(t *testing.T) {
 	// Test that request frames are built and parsed correctly
-	params, _ := json.Marshal(protocol.ReadParams{Path: "test.txt", Offset: 10, Limit: 50})
+	params, _ := json.Marshal(protocol.ReadParams{Path: "test.txt"})
 	frame := protocol.NewRequest(42, protocol.MethodRead, params)
 
 	if frame.MsgID != 42 {

@@ -143,7 +143,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		// Build sandbox read/write functions
 		readFn = func(path string) ([]byte, error) {
-			content, _, err := agentClient.ReadFile(path, 0, 0)
+			content, _, err := agentClient.ReadFile(path)
 			if err != nil {
 				return nil, fmt.Errorf("read: %w", err)
 			}

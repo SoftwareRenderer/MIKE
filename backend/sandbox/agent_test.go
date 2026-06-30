@@ -40,7 +40,7 @@ func TestAgentClient(t *testing.T) {
 	}
 
 	// Read it back
-	content, size, err := client.ReadFile("hello.txt", 0, 0)
+	content, size, err := client.ReadFile("hello.txt")
 	if err != nil {
 		t.Fatalf("read file: %v", err)
 	}

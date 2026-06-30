@@ -67,9 +67,7 @@ func TestFrameTruncatedPayload(t *testing.T) {
 
 func TestRequestRoundTrip(t *testing.T) {
 	params, _ := json.Marshal(map[string]any{
-		"path":    "src/main.go",
-		"offset":  float64(10),
-		"limit":   float64(50),
+		"path": "src/main.go",
 	})
 
 	frame := NewRequest(123, MethodRead, params)
@@ -93,9 +91,6 @@ func TestRequestRoundTrip(t *testing.T) {
 	}
 	if p.Path != "src/main.go" {
 		t.Errorf("Path = %q, want %q", p.Path, "src/main.go")
-	}
-	if p.Offset != 10 {
-		t.Errorf("Offset = %d, want 10", p.Offset)
 	}
 }
 

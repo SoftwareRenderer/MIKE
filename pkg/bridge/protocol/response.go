@@ -180,11 +180,9 @@ type EditParams struct {
 	Edits []Edit `json:"edits"`
 }
 
-// ReadParams is a type alias for read request params.
+// ReadParams holds the parsed parameters for a read request.
 type ReadParams struct {
-	Path   string `json:"path"`
-	Offset int64  `json:"offset"`
-	Limit  int64  `json:"limit"`
+	Path string `json:"path"`
 }
 
 // WriteParams holds the parsed parameters for a write request.

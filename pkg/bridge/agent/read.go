@@ -40,25 +40,6 @@ func handleRead(h *handler, conn net.Conn, req *protocol.Request) error {
 
 	totalSize := stat.Size()
 
-	// Apply offset
-	if p.Offset > 0 {
-		if _, err := f.Seek(p.Offset, 0); err != nil {
-			return fmt.Errorf("seek offset %d: %w", p.Offset, err)
-		}
-		// Recalculate remaining size after offset
-		pos, _ := f.Seek(0, 2) // seek to end
-		_, _ = f.Seek(p.Offset, 0) // seek back
-		totalSize = pos - p.Offset
-		if totalSize < 0 {
-			totalSize = 0
-		}
-	}
-
-	// Apply limit
-	if p.Limit > 0 && totalSize > p.Limit {
-		totalSize = p.Limit
-	}
-
 	// Read and send in chunks
 	buf := make([]byte, readChunkSize)
 	remaining := totalSize
