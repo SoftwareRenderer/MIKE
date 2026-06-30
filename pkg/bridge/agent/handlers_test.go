@@ -9,35 +9,6 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-func TestValidatePath_Allowed(t *testing.T) {
-	cases := []string{
-		"file.txt",
-		"src/main.go",
-		"deep/nested/path/file.txt",
-		"./file.txt",
-	}
-	for _, path := range cases {
-		if err := validatePath(path); err != nil {
-			t.Errorf("validatePath(%q) = %v, want nil", path, err)
-		}
-	}
-}
-
-func TestValidatePath_Rejected(t *testing.T) {
-	cases := []string{
-		"../escape.txt",
-		"..",
-		"src/../../escape.txt",
-		"/absolute/path",
-		"file/../../../etc/passwd",
-	}
-	for _, path := range cases {
-		if err := validatePath(path); err == nil {
-			t.Errorf("validatePath(%q) = nil, want error", path)
-		}
-	}
-}
-
 // --- Direct handler logic tests (no network simulation) ---
 
 func TestWriteFileAtomic(t *testing.T) {

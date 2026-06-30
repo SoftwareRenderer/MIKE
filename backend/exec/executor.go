@@ -40,6 +40,10 @@ type executionState struct {
 	cancel      context.CancelFunc
 	userMsgChan chan stream.UserMessage
 	createdIDs  []string // task IDs created by create_task during this execution
+	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
+	sandboxExec  execFunc
+	sandboxRead  readFunc
+	sandboxWrite writeFunc
 }
 
 // modelConfig holds mutable model/provider settings for an executor.

@@ -22,11 +22,6 @@ func handleRead(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("path is required")
 	}
 
-	// Validate path stays within CWD
-	if err := validatePath(p.Path); err != nil {
-		return err
-	}
-
 	f, err := os.Open(p.Path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", p.Path, err)

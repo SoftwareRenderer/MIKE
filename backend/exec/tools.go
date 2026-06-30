@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -13,35 +15,157 @@ import (
 	"time"
 
 	"kanban/backend/types"
+	sandbox "kanban/pkg/bridge"
 
 	"github.com/google/uuid"
 )
 
-// execFunc is a function that executes a command, either in a sandbox or directly.
-// timeout is in seconds (already validated 1–300).
+// execFunc runs a shell command. Provided by the sandbox in container mode.
 type execFunc func(command string, timeout int64) (string, error)
 
-// readFunc reads a file's contents. When sandboxed, runs via container exec.
+// readFunc reads a file. Provided by the sandbox in container mode.
 type readFunc func(path string) ([]byte, error)
 
-// writeFunc writes content to a file. When sandboxed, runs via container exec with stdin.
+// writeFunc writes a file. Provided by the sandbox in container mode.
 type writeFunc func(path, content string) error
 
-func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, execFn execFunc, readFn readFunc, writeFn writeFunc) (string, bool) {
+// makeSandboxCallbacks creates exec/read/write callbacks that route through
+// the sandbox agent client inside a container.
+func makeSandboxCallbacks(client *sandbox.Client) (execFunc, readFunc, writeFunc) {
+	execCb := func(command string, timeout int64) (string, error) {
+		holder, err := client.Bash(command, timeout)
+		if err != nil {
+			return "", fmt.Errorf("bash: %w", err)
+		}
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(holder.Output())
+		exitCode := <-holder.ExitCode()
+		if exitCode != 0 {
+			return buf.String(), fmt.Errorf("exit code %d", exitCode)
+		}
+		return buf.String(), nil
+	}
+	readCb := func(path string) ([]byte, error) {
+		content, _, err := client.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read: %w", err)
+		}
+		return []byte(content), nil
+	}
+	writeCb := func(path, content string) error {
+		_, err := client.WriteFile(path, content)
+		if err != nil {
+			return fmt.Errorf("write: %w", err)
+		}
+		return nil
+	}
+	return execCb, readCb, writeCb
+}
+
+// makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
+func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc) {
+	readCb := func(path string) ([]byte, error) {
+		f, err := root.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return io.ReadAll(f)
+	}
+	writeCb := func(path, content string) error {
+		dir := filepath.Dir(filepath.Join(worktreePath, path))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		f, err := root.Create(path)
+		if err != nil {
+			return err
+		}
+		_, writeErr := f.WriteString(content)
+		closeErr := f.Close()
+		if writeErr != nil {
+			_ = root.Remove(path)
+			return writeErr
+		}
+		if closeErr != nil {
+			_ = root.Remove(path)
+			return closeErr
+		}
+		return os.Chmod(filepath.Join(worktreePath, path), 0o644)
+	}
+	return readCb, writeCb
+}
+
+// executeTool dispatches a tool call to the appropriate handler.
+// Sandbox callbacks are read from state.
+// When nil, os.Root provides folder isolation on the host.
+func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePath string, task *types.Task, state *executionState) (string, bool) {
+	sandboxExec := state.sandboxExec
+	sandboxRead := state.sandboxRead
+	sandboxWrite := state.sandboxWrite
+	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
+	// In production, loop.go always provides sandboxRead/sandboxWrite via os.Root.
+	var root *os.Root
+	var rootErr error
+	makeRead := func() readFunc {
+		if root == nil {
+			var err error
+			root, err = os.OpenRoot(worktreePath)
+			rootErr = err
+		}
+		return func(p string) ([]byte, error) {
+			if rootErr != nil {
+				return nil, rootErr
+			}
+			f, err := root.Open(normalizePath(worktreePath, p))
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+			return io.ReadAll(f)
+		}
+	}
+	makeWrite := func() writeFunc {
+		if root == nil {
+			var err error
+			root, err = os.OpenRoot(worktreePath)
+			rootErr = err
+		}
+		return func(p, c string) error {
+			if rootErr != nil {
+				return rootErr
+			}
+			norm := normalizePath(worktreePath, p)
+			dir := filepath.Dir(filepath.Join(worktreePath, norm))
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			f, err := root.Create(norm)
+			if err != nil {
+				return err
+			}
+			_, writeErr := f.WriteString(c)
+			closeErr := f.Close()
+			if writeErr != nil {
+				_ = root.Remove(norm)
+				return writeErr
+			}
+			if closeErr != nil {
+				_ = root.Remove(norm)
+				return closeErr
+			}
+			return os.Chmod(filepath.Join(worktreePath, norm), 0o644)
+		}
+	}
+
 	switch name {
 	case "read_file":
 		path, _ := args["path"].(string)
-		fullPath := validateWorktreePath(worktreePath, path)
-		if fullPath == "" {
-			return "Error: path escape", false
+		read := sandboxRead
+		if read == nil {
+			read = makeRead()
 		}
-		var data []byte
-		var err error
-		if readFn != nil {
-			data, err = readFn(path)
-		} else {
-			data, err = os.ReadFile(fullPath)
-		}
+		data, err := read(path)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -82,26 +206,24 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 	case "write_file":
 		path, _ := args["path"].(string)
 		content, _ := args["content"].(string)
-		fullPath := validateWorktreePath(worktreePath, path)
-		if fullPath == "" {
-			return "Error: path escape", false
+		write := sandboxWrite
+		if write == nil {
+			write = makeWrite()
 		}
-		var err error
-		if writeFn != nil {
-			err = writeFn(path, content)
-		} else {
-			os.MkdirAll(filepath.Dir(fullPath), 0o755)
-			err = os.WriteFile(fullPath, []byte(content), 0o644)
-		}
+		err := write(path, content)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return fmt.Sprintf("Wrote %d bytes", len(content)), true
 	case "edit_file":
 		path, _ := args["path"].(string)
-		fullPath := validateWorktreePath(worktreePath, path)
-		if fullPath == "" {
-			return "Error: path escape", false
+		read := sandboxRead
+		write := sandboxWrite
+		if read == nil {
+			read = makeRead()
+		}
+		if write == nil {
+			write = makeWrite()
 		}
 		editsRaw, ok := args["edits"].(json.RawMessage)
 		if !ok {
@@ -120,20 +242,11 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 		}
 
 		// Read current file content
-		var fileContent string
-		if readFn != nil {
-			data, err := readFn(path)
-			if err != nil {
-				return fmt.Sprintf("Error: %v", err), false
-			}
-			fileContent = string(data)
-		} else {
-			data, err := os.ReadFile(fullPath)
-			if err != nil {
-				return fmt.Sprintf("Error: %v", err), false
-			}
-			fileContent = string(data)
+		data, err := read(path)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
 		}
+		fileContent := string(data)
 
 		// Find all oldText positions in the original content
 		type editPos struct {
@@ -180,17 +293,8 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 		}
 
 		// Write the result
-		if writeFn != nil {
-			err := writeFn(path, result)
-			if err != nil {
-				return fmt.Sprintf("Error: %v", err), false
-			}
-		} else {
-			os.MkdirAll(filepath.Dir(fullPath), 0o755)
-			err := os.WriteFile(fullPath, []byte(result), 0o644)
-			if err != nil {
-				return fmt.Sprintf("Error: %v", err), false
-			}
+		if err := write(path, result); err != nil {
+			return fmt.Sprintf("Error: %v", err), false
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
 	case "bash":
@@ -205,9 +309,9 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 
 		var out string
 		var err error
-		if execFn != nil {
+		if sandboxExec != nil {
 			// Use sandbox execution — pass the LLM's timeout
-			out, err = execFn(cmd, timeout)
+			out, err = sandboxExec(cmd, timeout)
 		} else {
 			// Direct execution (no sandbox)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
@@ -304,63 +408,28 @@ func parseToolArgs(s string) map[string]any {
 	return result
 }
 
-// validateWorktreePath resolves a relative path against the worktree root
-// and returns the absolute path, or empty string if it escapes the worktree.
-// Handles: .. traversal, absolute paths, and symlink-style escapes.
-func validateWorktreePath(worktreePath, path string) string {
-	// Ensure worktree path is absolute and has trailing separator for prefix check
-	wt := worktreePath
-	if !filepath.IsAbs(wt) {
-		return ""
-	}
-	if !strings.HasSuffix(wt, string(filepath.Separator)) {
-		wt = wt + string(filepath.Separator)
-	}
-
-	// Clean the input path
+// normalizePath strips the sandbox mount prefix from absolute paths.
+// Relative paths are returned as-is (os.Root handles traversal prevention).
+func normalizePath(worktreePath, path string) string {
 	cleaned := filepath.Clean(path)
-
-	// Handle absolute paths
-	if filepath.IsAbs(cleaned) {
-		// In sandbox mode, the LLM sees /sandbox/<basename> as the worktree root.
-		// Strip that prefix so the relative path can be validated normally.
-		mountPath := "/sandbox/" + filepath.Base(worktreePath)
-		mountPrefix := mountPath + "/"
-		if cleaned == mountPath || strings.HasPrefix(cleaned, mountPrefix) {
-			cleaned = cleaned[len(mountPath):]
-			if cleaned == "" {
-				return worktreePath
-			}
-			if cleaned[0] == os.PathSeparator {
-				cleaned = cleaned[1:]
-			}
-		} else if strings.HasPrefix(cleaned, wt) || cleaned == worktreePath {
-			// Path matches the actual worktree (non-sandbox absolute path)
-			cleaned = cleaned[len(worktreePath):]
-			if cleaned == "" {
-				return worktreePath
-			}
-			if cleaned[0] == os.PathSeparator {
-				cleaned = cleaned[1:]
-			}
-		} else {
-			// Absolute path outside worktree
-			return ""
+	if !filepath.IsAbs(cleaned) {
+		return cleaned
+	}
+	// Strip sandbox mount prefix: /sandbox/<basename>/...
+	mountPath := "/sandbox/" + filepath.Base(worktreePath)
+	mountPrefix := mountPath + "/"
+	if cleaned == mountPath {
+		return "."
+	}
+	if strings.HasPrefix(cleaned, mountPrefix) {
+		rel := cleaned[len(mountPath):]
+		if len(rel) > 0 && rel[0] == os.PathSeparator {
+			rel = rel[1:]
 		}
+		return rel
 	}
-
-	// Reject paths that escape with ..
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return ""
-	}
-
-	fullPath := filepath.Join(worktreePath, cleaned)
-	// Final safety check: resolved path must be within worktree
-	// (exact match or starts with worktree + separator)
-	if fullPath != worktreePath && !strings.HasPrefix(fullPath, wt) {
-		return ""
-	}
-	return fullPath
+	// Other absolute paths — os.Root treats them as relative to root
+	return cleaned
 }
 
 // handleCreateTask creates a new task on the board, used by the LLM in plan mode

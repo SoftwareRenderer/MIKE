@@ -91,12 +91,12 @@ func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
 	te := &TaskExecutor{}
 
 	// Simulate sandbox read callback
-	readFn := func(path string) ([]byte, error) {
+	sandboxRead := func(path string) ([]byte, error) {
 		// In real sandbox, path is relative to worktree
 		return os.ReadFile(filepath.Join(dir, path))
 	}
 
-	result, ok := te.executeTool("read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, &executionState{sandboxRead: sandboxRead})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -115,8 +115,8 @@ func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
 
 	te := &TaskExecutor{}
 
-	// No readFn — should fall back to host
-	result, ok := te.executeTool("read_file", map[string]any{"path": "host.txt"}, dir, &types.Task{}, nil, nil, nil, nil)
+	// No sandboxRead — should fall back to host
+	result, ok := te.executeTool("read_file", map[string]any{"path": "host.txt"}, dir, &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -126,19 +126,15 @@ func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_PathEscape(t *testing.T) {
+	// Non-sandbox: os.Root blocks path escapes at the OS level
 	te := &TaskExecutor{}
 
-	// Path escape should be rejected even with sandbox callback
-	readFn := func(path string) ([]byte, error) {
-		return []byte("should not reach here"), nil
-	}
-
-	result, ok := te.executeTool("read_file", map[string]any{"path": "../etc/passwd"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "../etc/passwd"}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for path escape, got success: %s", result)
 	}
-	if result != "Error: path escape" {
-		t.Errorf("expected 'Error: path escape', got %q", result)
+	if !strings.Contains(result, "Error:") {
+		t.Errorf("expected error, got %q", result)
 	}
 }
 
@@ -148,7 +144,7 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 	var writtenPath, writtenContent string
 
 	// Simulate sandbox write callback
-	writeFn := func(path, content string) error {
+	sandboxWrite := func(path, content string) error {
 		writtenPath = path
 		writtenContent = content
 		fullPath := filepath.Join(dir, path)
@@ -159,7 +155,7 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "test.txt",
 		"content": "hello sandbox",
-	}, dir, &types.Task{}, nil, nil, nil, writeFn)
+	}, dir, &types.Task{}, &executionState{sandboxWrite: sandboxWrite})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -187,11 +183,11 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 	dir := t.TempDir()
 	te := &TaskExecutor{}
 
-	// No writeFn — should fall back to host
+	// No sandboxWrite — should fall back to host
 	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "host.txt",
 		"content": "hello host",
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -210,21 +206,18 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_PathEscape(t *testing.T) {
+	// Non-sandbox: os.Root blocks path escapes at the OS level
 	te := &TaskExecutor{}
-
-	writeFn := func(path, content string) error {
-		return nil // should not reach here
-	}
 
 	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "../etc/evil",
 		"content": "malicious",
-	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, writeFn)
+	}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for path escape, got success: %s", result)
 	}
-	if result != "Error: path escape" {
-		t.Errorf("expected 'Error: path escape', got %q", result)
+	if !strings.Contains(result, "Error:") {
+		t.Errorf("expected error, got %q", result)
 	}
 }
 
@@ -232,7 +225,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 	dir := t.TempDir()
 	te := &TaskExecutor{}
 
-	writeFn := func(path, content string) error {
+	sandboxWrite := func(path, content string) error {
 		fullPath := filepath.Join(dir, path)
 		os.MkdirAll(filepath.Dir(fullPath), 0755)
 		return os.WriteFile(fullPath, []byte(content), 0644)
@@ -241,7 +234,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "deep/nested/dir/file.txt",
 		"content": "nested content",
-	}, dir, &types.Task{}, nil, nil, nil, writeFn)
+	}, dir, &types.Task{}, &executionState{sandboxWrite: sandboxWrite})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -257,7 +250,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 
 func TestExecuteTool_TaskComplete(t *testing.T) {
 	te := &TaskExecutor{}
-	result, ok := te.executeTool("task_complete", map[string]any{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	result, ok := te.executeTool("task_complete", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -268,7 +261,7 @@ func TestExecuteTool_TaskComplete(t *testing.T) {
 
 func TestExecuteTool_UnknownTool(t *testing.T) {
 	te := &TaskExecutor{}
-	result, ok := te.executeTool("unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	result, ok := te.executeTool("unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for unknown tool, got success: %s", result)
 	}
@@ -280,11 +273,11 @@ func TestExecuteTool_UnknownTool(t *testing.T) {
 func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
 	te := &TaskExecutor{}
 
-	readFn := func(path string) ([]byte, error) {
+	sandboxRead := func(path string) ([]byte, error) {
 		return nil, fmt.Errorf("file not found in sandbox")
 	}
 
-	result, ok := te.executeTool("read_file", map[string]any{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, nil, nil, readFn, nil)
+	result, ok := te.executeTool("read_file", map[string]any{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, &executionState{sandboxRead: sandboxRead})
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
 	}
@@ -357,7 +350,7 @@ func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, ok := te.executeTool("read_file", tt.args, dir, &types.Task{}, nil, nil, nil, nil)
+			result, ok := te.executeTool("read_file", tt.args, dir, &types.Task{}, &executionState{})
 			if tt.wantErr {
 				if ok {
 					t.Fatalf("expected failure, got success: %s", result)
@@ -392,7 +385,7 @@ func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -424,7 +417,7 @@ func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -455,7 +448,7 @@ func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
 	}
@@ -480,7 +473,7 @@ func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for duplicate oldText, got success: %s", result)
 	}
@@ -506,7 +499,7 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for overlapping edits, got success: %s", result)
 	}
@@ -516,6 +509,7 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
+	// Non-sandbox: os.Root blocks path escapes at the OS level
 	te := &TaskExecutor{}
 	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "x", "newText": "y"},
@@ -524,12 +518,12 @@ func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "../etc/passwd",
 		"edits": json.RawMessage(editsJSON),
-	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for path escape, got success: %s", result)
 	}
-	if result != "Error: path escape" {
-		t.Errorf("expected 'Error: path escape', got %q", result)
+	if !strings.Contains(result, "Error:") {
+		t.Errorf("expected error, got %q", result)
 	}
 }
 
@@ -548,7 +542,7 @@ func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for empty oldText, got success: %s", result)
 	}
@@ -570,7 +564,7 @@ func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for empty edits, got success: %s", result)
 	}
@@ -590,10 +584,10 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 	te := &TaskExecutor{}
 	var writtenPath, writtenContent string
 
-	readFn := func(path string) ([]byte, error) {
+	sandboxRead := func(path string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(dir, path))
 	}
-	writeFn := func(path, c string) error {
+	sandboxWrite := func(path, c string) error {
 		writtenPath = path
 		writtenContent = c
 		fullPath := filepath.Join(dir, path)
@@ -608,7 +602,7 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "test.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, dir, &types.Task{}, nil, nil, readFn, writeFn)
+	}, dir, &types.Task{}, &executionState{sandboxRead: sandboxRead, sandboxWrite: sandboxWrite})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -638,7 +632,7 @@ func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
 	result, ok := te.executeTool("edit_file", map[string]any{
 		"path":  "nonexistent.txt",
 		"edits": json.RawMessage(editsJSON),
-	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
+	}, "/tmp/worktree", &types.Task{}, &executionState{})
 	if ok {
 		t.Fatalf("expected failure for missing file, got success: %s", result)
 	}
@@ -656,7 +650,7 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 	result, ok := te.executeTool("bash", map[string]any{
 		"command": "echo hello",
 		"timeout": float64(5),
-	}, dir, &types.Task{}, nil, nil, nil, nil)
+	}, dir, &types.Task{}, &executionState{})
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -665,55 +659,17 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 	}
 }
 
-// --- validateWorktreePath Tests ---
-
-func TestValidateWorktreePath_Valid(t *testing.T) {
-	tests := []struct {
-		worktree string
-		path     string
-		want     string
-	}{
-		{"/tmp/worktree", "src/main.go", "/tmp/worktree/src/main.go"},
-		{"/tmp/worktree", "file.txt", "/tmp/worktree/file.txt"},
-		{"/tmp/worktree", "deep/nested/file.go", "/tmp/worktree/deep/nested/file.go"},
-		{"/tmp/worktree", ".", "/tmp/worktree"},
-	}
-	for _, tt := range tests {
-		got := validateWorktreePath(tt.worktree, tt.path)
-		if got != tt.want {
-			t.Errorf("validateWorktreePath(%q, %q) = %q, want %q", tt.worktree, tt.path, got, tt.want)
-		}
-	}
-}
-
-func TestValidateWorktreePath_Escapes(t *testing.T) {
-	escapes := []string{
-		"../etc/passwd",
-		"../../etc/passwd",
-		"foo/../../etc/passwd",
-		"..",
-		"/etc/passwd",        // absolute path
-		"/tmp/other/file.go", // absolute path outside worktree
-	}
-	for _, path := range escapes {
-		got := validateWorktreePath("/tmp/worktree", path)
-		if got != "" {
-			t.Errorf("validateWorktreePath(%q, %q) = %q, want empty (escape)", "/tmp/worktree", path, got)
-		}
-	}
-}
-
 func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 	te := &TaskExecutor{}
 
-	writeFn := func(path, content string) error {
+	sandboxWrite := func(path, content string) error {
 		return fmt.Errorf("permission denied")
 	}
 
 	result, ok := te.executeTool("write_file", map[string]any{
 		"path":    "readonly.txt",
 		"content": "data",
-	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, writeFn)
+	}, "/tmp/worktree", &types.Task{}, &executionState{sandboxWrite: sandboxWrite})
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
 	}
@@ -722,29 +678,3 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 	}
 }
 
-func TestValidateWorktreePath_SandboxMountPath(t *testing.T) {
-	// Sandbox mode: LLM uses /sandbox/<basename>/... paths
-	tests := []struct {
-		name   string
-		path   string
-		wantOK bool
-	}{
-		{"sandbox valid", "/sandbox/worktree/hello.c", true},
-		{"sandbox nested", "/sandbox/worktree/src/main.go", true},
-		{"sandbox root", "/sandbox/worktree", true},
-		{"sandbox escape", "/sandbox/worktree/../etc/passwd", false},
-		{"sandbox absolute escape", "/etc/passwd", false},
-		{"sandbox sibling", "/sandbox-other/file.txt", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := validateWorktreePath("/tmp/worktree", tt.path)
-			if tt.wantOK && result == "" {
-				t.Errorf("expected ok for %q, got rejection", tt.path)
-			}
-			if !tt.wantOK && result != "" {
-				t.Errorf("expected rejection for %q, got %q", tt.path, result)
-			}
-		})
-	}
-}

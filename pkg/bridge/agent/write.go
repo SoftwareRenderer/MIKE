@@ -20,11 +20,6 @@ func handleWrite(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("path is required")
 	}
 
-	// Validate path stays within CWD
-	if err := validatePath(p.Path); err != nil {
-		return err
-	}
-
 	// Create parent directories
 	dir := filepath.Dir(p.Path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

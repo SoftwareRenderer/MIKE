@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,19 +39,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}()
 
 	// Create sandbox if enabled
-	var execFn execFunc
-	var readFn readFunc
-	var writeFn writeFunc
+	// Get state reference to store sandbox callbacks
+	te.taskMu.Lock()
+	state := te.tasks[task.ID]
+	te.taskMu.Unlock()
+
 	if sandboxEnabled {
-		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-			task.StatusState = "failed"
-			task.Status = "review"
-			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "gVisor not available", "sandbox_unavailable")
-			return
-		}
+			if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
+				task.StatusState = "failed"
+				task.Status = "review"
+				task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
+				te.store.UpdateTask(task)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, "gVisor not available", "sandbox_unavailable")
+				return
+			}
 		// Determine image to use: Dockerfile build takes precedence over pre-built image
 		imageToUse := ""
 		if sandboxDockerfilePath != "" {
@@ -126,36 +127,20 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Agent connection failed: %v", err), "agent_connection_failed")
 			return
 		}
-
-		// Build sandbox exec function
-		execFn = func(command string, timeout int64) (string, error) {
-			holder, err := agentClient.Bash(command, timeout)
-			if err != nil {
-				return "", fmt.Errorf("bash: %w", err)
-			}
-			var buf bytes.Buffer
-			_, _ = buf.ReadFrom(holder.Output())
-			exitCode := <-holder.ExitCode()
-			if exitCode != 0 {
-				return buf.String(), fmt.Errorf("exit code %d", exitCode)
-			}
-			return buf.String(), nil
+		state.sandboxExec, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
+	} else {
+		// Non-sandbox: use os.Root for folder isolation
+		root, err := os.OpenRoot(worktreePath)
+		if err != nil {
+			task.StatusState = "failed"
+			task.Status = "review"
+			task.Output = fmt.Sprintf("Failed to create worktree root: %v", err)
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Root creation failed: %v", err), "root_create_failed")
+			return
 		}
-		// Build sandbox read/write functions
-		readFn = func(path string) ([]byte, error) {
-			content, _, err := agentClient.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("read: %w", err)
-			}
-			return []byte(content), nil
-		}
-		writeFn = func(path, content string) error {
-			_, err := agentClient.WriteFile(path, content)
-			if err != nil {
-				return fmt.Errorf("write: %w", err)
-			}
-			return nil
-		}
+		state.sandboxRead, state.sandboxWrite = makeRootCallbacks(root, worktreePath)
 	}
 
 	// Check if this task uses Pi agent
@@ -644,7 +629,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.taskMu.Lock()
 				state := te.tasks[task.ID]
 				te.taskMu.Unlock()
-				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state, execFn, readFn, writeFn)
+				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})

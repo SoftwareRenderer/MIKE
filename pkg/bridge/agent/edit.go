@@ -25,11 +25,6 @@ func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("no edits provided")
 	}
 
-	// Validate path stays within CWD
-	if err := validatePath(p.Path); err != nil {
-		return err
-	}
-
 	// Read current file content
 	data, err := os.ReadFile(p.Path)
 	if err != nil {
