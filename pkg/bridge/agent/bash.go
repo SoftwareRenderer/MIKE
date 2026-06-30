@@ -37,7 +37,12 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 		timeout = maxBashTimeout * time.Second
 	}
 
-	cmd := exec.Command("bash", "-c", p.Command)
+	// Prefer bash for compatibility, fall back to sh (e.g. Alpine containers)
+	shellCmd := "/bin/sh"
+	if _, err := exec.LookPath("bash"); err == nil {
+		shellCmd = "bash"
+	}
+	cmd := exec.Command(shellCmd, "-c", p.Command)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
