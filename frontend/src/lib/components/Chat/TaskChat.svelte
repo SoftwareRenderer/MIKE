@@ -31,6 +31,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             sandbox?: boolean;
             path?: string;
             result?: string;
+            resultTruncated?: boolean; // true if backend truncated the result
+            originalLines?: number; // original line count before truncation
+            originalBytes?: number; // original byte count before truncation
+            messageId?: string; // tool_call message ID for fetching full result
             success?: boolean;
             duration?: number;
             isPending?: boolean;
@@ -843,6 +847,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                             raw_args: tc.raw_args,
                             sandbox: tc.sandbox,
                             result: result?.output,
+                            resultTruncated: m.result_truncated,
+                            originalLines: result?.original_lines,
+                            originalBytes: result?.original_bytes,
+                            messageId: m.id, // tool_call message ID for fetching full result
                             success: result?.success ?? true,
                             duration: result?.duration,
                             isPending,

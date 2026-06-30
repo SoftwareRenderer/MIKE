@@ -7,6 +7,7 @@
     import editIcon from '$lib/assets/icons/edit.svg';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
     import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
+    import { getTaskMessageFull } from '$lib/api';
 
     interface Props {
         toolCall: {
@@ -21,13 +22,19 @@
             sandbox?: boolean;
             duration?: number;
             bytesWritten?: number;
+            resultTruncated?: boolean; // true if backend truncated the result
+            originalLines?: number; // original line count before truncation
+            originalBytes?: number; // original byte count before truncation
+            messageId?: string; // tool_call message ID for fetching full result
         };
         expandedArgs: Set<string>;
+        projectId?: string;
+        taskId?: string;
         onToggleArgs: (toolId: string) => void;
         onNavigateTask?: (taskId: string) => void;
     }
 
-    let { toolCall: tc, expandedArgs, onToggleArgs, onNavigateTask }: Props = $props();
+    let { toolCall: tc, expandedArgs, onToggleArgs, onNavigateTask, projectId, taskId }: Props = $props();
 
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
@@ -43,6 +50,74 @@
     let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));
     let argsDisplay = $derived(formatToolArgs(tc.toolName, tc.args));
     let truncated = $derived(truncateArgs(argsDisplay));
+
+    // Bash result truncation: max 10 lines AND max 1KB (whichever is smaller)
+    const RESULT_MAX_LINES = 10;
+    const RESULT_MAX_BYTES = 1024;
+    let resultExpanded = $state(false);
+    let resultLoading = $state(false);
+    let resolvedResult = $state<string | undefined>();
+
+    /** Effective result: resolved (fetched) value, or the prop value. */
+    let effectiveResult = $derived(resolvedResult ?? tc.result);
+
+    function getTruncatedResult(text: string): string {
+        if (!text) return '';
+        const lines = text.split('\n');
+        // Find how many lines fit within 1KB
+        let bytesAt1KB = 0;
+        let byteTotal = 0;
+        for (let i = 0; i < lines.length; i++) {
+            byteTotal += lines[i].length + (i > 0 ? 1 : 0);
+            if (byteTotal > RESULT_MAX_BYTES) {
+                bytesAt1KB = i;
+                break;
+            }
+            bytesAt1KB = i + 1;
+        }
+        const maxLines = Math.min(RESULT_MAX_LINES, bytesAt1KB);
+        if (maxLines >= lines.length && text.length <= RESULT_MAX_BYTES) return text + '…';
+        if (maxLines > 1) {
+            return lines.slice(0, maxLines - 1).join('\n') + '\n…';
+        }
+        return text.slice(0, RESULT_MAX_BYTES) + '…';
+    }
+
+    let bashResultNeedsTruncation = $derived(
+        tc.toolName === 'bash' && effectiveResult && (
+            tc.resultTruncated || effectiveResult.split('\n').length > RESULT_MAX_LINES || effectiveResult.length > RESULT_MAX_BYTES
+        )
+    );
+    // Use original stats from backend when available, otherwise compute from current result
+    let bashResultStats = $derived({
+        fullLength: tc.originalBytes ?? (effectiveResult ? effectiveResult.length : 0),
+        lineCount: tc.originalLines ?? (effectiveResult ? effectiveResult.split('\n').length : 0),
+    });
+
+    async function handleResultToggle() {
+        if (resultExpanded) {
+            resultExpanded = false;
+            return;
+        }
+        // If result was truncated by backend, fetch full message
+        if (tc.resultTruncated && tc.messageId && projectId && taskId && !resolvedResult) {
+            resultLoading = true;
+            try {
+                const fullMsg = await getTaskMessageFull(projectId, taskId, tc.messageId);
+                if (fullMsg.tool_result) {
+                    const resultData = JSON.parse(fullMsg.tool_result);
+                    if (resultData.output) {
+                        resolvedResult = resultData.output;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch full tool result:', e);
+            } finally {
+                resultLoading = false;
+            }
+        }
+        resultExpanded = true;
+    }
 
     // Icon selection
     let iconSrc = $derived(
@@ -153,7 +228,16 @@
         {:else if tc.toolName === 'task_complete' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
         {:else if tc.result && tc.result.trim()}
-            <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+            {#if bashResultNeedsTruncation}
+                <div class="tool-result-wrapper">
+                    <pre class="tool-result" class:tool-result-error={!tc.success} class:tool-result-expanded={resultExpanded}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
+                    <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>
+                        {resultLoading ? 'Loading...' : (resultExpanded ? 'Collapse' : `Show all (${bashResultStats.lineCount} lines, ${bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B'})`)}
+                    </button>
+                </div>
+            {:else}
+                <pre class="tool-result" class:tool-result-error={!tc.success}>{effectiveResult}</pre>
+            {/if}
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'task_complete'}
             <span class="tool-duration">{tc.duration}ms</span>
@@ -237,7 +321,32 @@
         white-space: pre-wrap;
         word-break: break-word;
     }
+    .tool-result-expanded {
+        max-height: none;
+        overflow-y: visible;
+    }
     .tool-result-error { color: var(--color-status-red); }
+    .tool-result-wrapper { position: relative; }
+    .tool-result-expand {
+        display: inline-flex;
+        align-items: center;
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        font-size: 0.6875rem;
+        cursor: pointer;
+        padding: 2px 4px;
+        margin: 0 0 4px;
+        font-family: var(--font-mono);
+        transition: color 0.15s ease;
+    }
+    .tool-result-expand:hover {
+        color: var(--color-text-primary);
+    }
+    .tool-result-expand:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
     .tool-result-summary {
         font-family: inherit;
         font-size: 1rem;

@@ -204,6 +204,7 @@ type TaskMessage struct {
 	HasReasoning     bool      `json:"has_reasoning,omitempty"` // true if message has reasoning (even if suppressed)
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
+	ResultTruncated  bool      `json:"result_truncated,omitempty"` // true if tool_result output was truncated
 	Attachments      string    `json:"attachments,omitempty"` // JSON array of {mimeType, data} for images
 	ModelName        string    `json:"model_name,omitempty"`
 	ProviderName     string    `json:"provider_name,omitempty"`

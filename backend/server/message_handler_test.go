@@ -602,3 +602,201 @@ func TestMessageGetByIDFull(t *testing.T) {
 		t.Fatalf("expected content, got %v", result["content"])
 	}
 }
+
+func TestMessageListBashResultTruncated(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	// Create a bash tool_call message with long output (>10 lines)
+	longOutput := strings.Repeat("line of output text\n", 20)
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_bash",
+		"tool_name": "bash",
+		"args":      map[string]any{"command": "cat large_file.txt"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   longOutput,
+		"success":  true,
+		"duration": 50,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-bash-long",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "executed",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	// GET without full=1 — output should be truncated
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var bashMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			bashMsg = m
+			break
+		}
+	}
+	if bashMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	// result_truncated should be true
+	if bashMsg["result_truncated"] != true {
+		t.Fatalf("expected result_truncated=true, got %v", bashMsg["result_truncated"])
+	}
+
+	// Parse tool_result and check output is truncated
+	var result map[string]any
+	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if !strings.Contains(output, "truncated") {
+		t.Fatalf("expected truncated output, got: %s", output)
+	}
+	// Should have fewer lines than original
+	outputLines := strings.Count(output, "\n")
+	if outputLines >= 20 {
+		t.Fatalf("expected fewer than 20 lines, got %d", outputLines)
+	}
+	// original_lines and original_bytes should be set
+	// strings.Split on "line\n" * 20 produces 21 elements (trailing empty)
+	originalLines := len(strings.Split(longOutput, "\n"))
+	if result["original_lines"] != float64(originalLines) {
+		t.Fatalf("expected original_lines=%d, got %v", originalLines, result["original_lines"])
+	}
+	if result["original_bytes"] != float64(len(longOutput)) {
+		t.Fatalf("expected original_bytes=%d, got %v", len(longOutput), result["original_bytes"])
+	}
+}
+
+func TestMessageListBashResultFull(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	longOutput := strings.Repeat("line of output text\n", 20)
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_bash",
+		"tool_name": "bash",
+		"args":      map[string]any{"command": "cat large_file.txt"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   longOutput,
+		"success":  true,
+		"duration": 50,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-bash-full",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "executed",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	// GET with full=1 — output should be preserved
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var bashMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			bashMsg = m
+			break
+		}
+	}
+	if bashMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	// result_truncated should NOT be set
+	if bashMsg["result_truncated"] == true {
+		t.Fatalf("expected result_truncated=false, got true")
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if output != longOutput {
+		t.Fatalf("expected full output, got length %d", len(output))
+	}
+}
+
+func TestMessageListShortBashResultNotTruncated(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	// Short output — should NOT be truncated
+	shortOutput := "total 100\ndrwxr-xr-x  5 user user  4096 Jan 1 .\n"
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_bash",
+		"tool_name": "bash",
+		"args":      map[string]any{"command": "ls -la"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   shortOutput,
+		"success":  true,
+		"duration": 5,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-bash-short",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "executed",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var bashMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			bashMsg = m
+			break
+		}
+	}
+	if bashMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	if bashMsg["result_truncated"] == true {
+		t.Fatalf("expected result_truncated=false for short output, got true")
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if output != shortOutput {
+		t.Fatalf("expected unchanged short output, got: %s", output)
+	}
+}

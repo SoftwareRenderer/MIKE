@@ -14,6 +14,10 @@
         sandbox?: boolean;
         path?: string;
         result?: string;
+        resultTruncated?: boolean; // true if backend truncated the result
+        originalLines?: number; // original line count before truncation
+        originalBytes?: number; // original byte count before truncation
+        messageId?: string; // tool_call message ID for fetching full result
         success?: boolean;
         duration?: number;
         isPending?: boolean;
@@ -510,7 +514,7 @@
             {/if}
             {#if toolCalls && toolCalls.length > 0}
                 {#each toolCalls as tc (tc.toolId)}
-                    <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} />
+                    <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} projectId={projectId} taskId={msgTaskId} />
                 {/each}
             {/if}
             {#if stats && stats.predicted_tokens > 0}

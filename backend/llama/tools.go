@@ -91,11 +91,11 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "task_complete",
 				DisplayName: "Done",
-				Description: "Signal that the planning is complete. Call this after all subtasks have been created.",
+				Description: "Signal that the task is complete.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"summary": map[string]any{"type": "string", "description": "Brief summary of the plan (subtasks created, key decisions)"},
+						"summary": map[string]any{"type": "string", "description": "Optional: Concise summary of accomplishments, any issues encountered"},
 					},
 					"required": []string{"summary"},
 				},

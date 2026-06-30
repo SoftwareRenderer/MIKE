@@ -107,7 +107,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Suppress write_file content args and reasoning_content unless full=1 is requested
+	// Suppress write_file content args, reasoning_content, and bash tool results unless full=1
 	if r.URL.Query().Get("full") != "1" {
 		for i := range messages {
 			if messages[i].ToolCalls != "" {
@@ -122,6 +122,12 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 				if suppressed {
 					messages[i].ReasoningContent = "[HIDDEN]"
 					messages[i].HasReasoning = true
+				}
+			}
+			if messages[i].Role == "tool_call" && messages[i].ToolResult != "" {
+				truncated := truncateBashResult(&messages[i])
+				if truncated {
+					messages[i].ResultTruncated = true
 				}
 			}
 		}
@@ -1495,5 +1501,69 @@ func shouldSuppressReasoning(reasoningContent, content, toolCalls string) bool {
 		return false
 	}
 	// Otherwise, suppress
+	return true
+}
+
+// truncateBashResult truncates the output field in tool_result for bash tool calls.
+// Limit: max 10 lines AND max 1KB (whichever is smaller).
+// Returns true if the output was truncated.
+func truncateBashResult(msg *types.TaskMessage) bool {
+	// Check if this is a bash tool call
+	var tc map[string]any
+	if err := json.Unmarshal([]byte(msg.ToolCalls), &tc); err != nil {
+		return false
+	}
+	if tc["tool_name"] != "bash" {
+		return false
+	}
+	// Parse tool_result
+	var result map[string]any
+	if err := json.Unmarshal([]byte(msg.ToolResult), &result); err != nil {
+		return false
+	}
+	output, ok := result["output"].(string)
+	if !ok {
+		return false
+	}
+	// Check if truncation is needed
+	lines := strings.Split(output, "\n")
+	if len(lines) <= 10 && len(output) <= 1024 {
+		return false
+	}
+	// Find how many lines fit within 1KB
+	var bytesAt1KB int
+	byteTotal := 0
+	for i, line := range lines {
+		sep := 0
+		if i > 0 {
+			sep = 1
+		}
+		byteTotal += len(line) + sep
+		if byteTotal > 1024 {
+			bytesAt1KB = i
+			break
+		}
+		bytesAt1KB = i + 1
+	}
+	maxLines := 10
+	if bytesAt1KB < maxLines {
+		maxLines = bytesAt1KB
+	}
+	// Truncate
+	var truncated string
+	if maxLines > 1 {
+		truncated = strings.Join(lines[:maxLines-1], "\n") + "\n... (truncated)"
+	} else {
+		truncated = output[:1024] + "... (truncated)"
+	}
+	result["output"] = truncated
+	// Store original stats for the frontend "Show all" button
+	result["original_lines"] = len(lines)
+	result["original_bytes"] = len(output)
+	data, err := json.Marshal(result)
+	if err != nil {
+		return false
+	}
+	msg.ToolResult = string(data)
 	return true
 }
