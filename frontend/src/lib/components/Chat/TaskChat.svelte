@@ -1365,7 +1365,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
-    let hasChanges = $derived(!!diffStats?.hash);
+    let hasChanges = $derived(!!diffStats?.hash && (diffStats.files || 0) > 0);
 
     async function handleCommitAndDone() {
         if (isCommitting || disabled) return;
@@ -1374,6 +1374,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             let updated;
             if (hasChanges) {
                 updated = await commitAndDone(projectId, taskId);
+                // Clear stale diff stats immediately so the button updates right away
+                taskDiffStatsStore.update(map => { delete map[taskId]; return { ...map }; });
             } else {
                 updated = await moveTask(projectId, taskId, 'done');
             }

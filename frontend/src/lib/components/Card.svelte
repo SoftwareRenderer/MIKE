@@ -193,7 +193,7 @@
     let streamingIdsContext = getStreamingContext();
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
-    let hasChanges = $derived(!!diffStats?.hash);
+    let hasChanges = $derived(!!diffStats?.hash && (diffStats.files || 0) > 0);
 
     function togglePicker(e: MouseEvent) {
         e.stopPropagation(); // Prevent card from opening when clicking the model badge
@@ -495,6 +495,8 @@
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
                 updated = await commitAndDone(projectId, task.id);
+                // Clear stale diff stats immediately so the button updates right away
+                taskDiffStatsStore.update(map => { delete map[task.id]; return { ...map }; });
             } else {
                 updated = await moveTask(projectId, task.id, nextStatus);
             }
