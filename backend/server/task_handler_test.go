@@ -555,6 +555,87 @@ func TestTaskDeleteCascadesToSubtasks(t *testing.T) {
 	}
 }
 
+// Test: deleting a parent with subtasks in different states cascades to all of them
+func TestTaskDeleteCascadesToSubtasksInDifferentStates(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "parent-multi-state")
+
+	// Create 3 subtasks and move them to different columns
+	subBacklog := createTestSubtask(t, s, projID, parentID, "sub-backlog")
+	subReview := createTestSubtask(t, s, projID, parentID, "sub-review")
+	subDone := createTestSubtask(t, s, projID, parentID, "sub-done")
+
+	// Move subtasks to different states
+	moveTask(t, s, projID, subReview, "review")
+	moveTask(t, s, projID, subDone, "done")
+
+	// Verify states
+	if getTaskStatus(t, s, projID, subBacklog) != "backlog" {
+		t.Fatal("subBacklog should be backlog")
+	}
+	if getTaskStatus(t, s, projID, subReview) != "review" {
+		t.Fatal("subReview should be review")
+	}
+	if getTaskStatus(t, s, projID, subDone) != "done" {
+		t.Fatal("subDone should be done")
+	}
+
+	// Delete the parent
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+parentID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete parent: expected 204, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify ALL tasks are gone (parent + all subtasks regardless of state)
+	for _, id := range []string{parentID, subBacklog, subReview, subDone} {
+		req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+id, nil)
+		rr = testResponseAuth(t, s, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 for %s, got %d", id, rr.Code)
+		}
+	}
+}
+
+// Test: clear done cascades to subtasks of done tasks
+func TestClearDoneCascadesToSubtasks(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "parent-clear-done")
+	subID := createTestSubtask(t, s, projID, parentID, "sub-clear-done")
+
+	// Move subtask to review (different state from parent)
+	moveTask(t, s, projID, subID, "review")
+
+	// Move parent to done
+	moveTask(t, s, projID, parentID, "done")
+
+	// Verify states
+	if getTaskStatus(t, s, projID, parentID) != "done" {
+		t.Fatal("parent should be done")
+	}
+	if getTaskStatus(t, s, projID, subID) != "review" {
+		t.Fatal("subtask should be review")
+	}
+
+	// Clear done tasks
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/done", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear done: expected 200, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify both parent and subtask are gone
+	for _, id := range []string{parentID, subID} {
+		req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+id, nil)
+		rr = testResponseAuth(t, s, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 for %s after clear done, got %d", id, rr.Code)
+		}
+	}
+}
+
 // Test: subtask consolidation — move subtask to same column as parent
 func TestSubtaskConsolidation(t *testing.T) {
 	s := testServer(t)

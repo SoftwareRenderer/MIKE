@@ -260,8 +260,8 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		h.cleanupTask(taskID)
 		h.broadcastTaskDeleted(projectID, taskID)
+		h.cleanupTask(taskID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -288,8 +288,8 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		taskID := task.ID
-		h.cleanupTask(taskID)
 		h.broadcastTaskDeleted(projectID, taskID)
+		h.cleanupTask(taskID)
 		deleted++
 	}
 
