@@ -14,13 +14,14 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
+
 // shellSession manages a single interactive shell process with PTY.
 type shellSession struct {
-	mu   sync.Mutex
-	cmd  *exec.Cmd
-	ptmx *os.File
-	conn net.Conn // agent's connection to host (for sending chunks)
-	done chan struct{}
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	ptmx    *os.File
+	handler *handler // for synchronized writes to the client connection
+	done    chan struct{}
 }
 
 // handleShellOpen starts a new shell session with a PTY.
@@ -66,52 +67,53 @@ func (h *handler) handleShellOpen(conn net.Conn, req *protocol.Request) error {
 	sessionID := h.nextSession
 	h.nextSession++
 	sess := &shellSession{
-		cmd:  cmd,
-		ptmx: ptmx,
-		conn: conn,
-		done: make(chan struct{}),
+		cmd:     cmd,
+		ptmx:    ptmx,
+		handler: h,
+		done:    make(chan struct{}),
 	}
 	h.sessions[sessionID] = sess
 	h.mu.Unlock()
 
 	// Start read goroutine to stream PTY output to host
-	go sess.readLoop(sessionID)
+	go sess.readLoop(sessionID, conn)
 
 	log.Printf("agent: shell session %d started (%s)", sessionID, shell)
 
 	// Send result with session ID
 	result := protocol.NewResult(req.MsgID, protocol.NewShellOpenResult(sessionID))
-	return protocol.WriteFrame(conn, result)
+	return h.writeFrame(conn, result)
 }
 
 // readLoop reads from the PTY and sends output as ShellChunk frames to the host.
-func (s *shellSession) readLoop(sessionID uint32) {
+func (s *shellSession) readLoop(sessionID uint32, conn net.Conn) {
+	h := s.handler
+	// Capture ptmx under lock to avoid data race with close()
+	s.mu.Lock()
+	ptmx := s.ptmx
+	s.mu.Unlock()
 	buf := make([]byte, 32*1024) // 32KB
 	for {
-		n, err := s.ptmx.Read(buf)
+		n, err := ptmx.Read(buf)
 		if n > 0 {
 			chunk := protocol.NewChunk(sessionID, protocol.NewShellChunk(sessionID, buf[:n]))
-			s.mu.Lock()
-			conn := s.conn
-			s.mu.Unlock()
-			if conn != nil {
-				_ = protocol.WriteFrame(conn, chunk)
-			}
+			_ = h.writeFrame(conn, chunk)
 		}
 		if err != nil {
 			// PTY closed — shell exited
-			s.mu.Lock()
-			if s.conn != nil {
-				// Send empty chunk as exit signal
-				_ = protocol.WriteFrame(s.conn, protocol.NewChunk(sessionID, protocol.NewShellChunk(sessionID, nil)))
-			}
-			s.mu.Unlock()
+			// Send empty chunk as exit signal (best-effort, connection may be closed)
+			_ = h.writeFrame(conn, protocol.NewChunk(sessionID, protocol.NewShellChunk(sessionID, nil)))
 			log.Printf("agent: shell session %d exited", sessionID)
 
-			// Clean up from handler
+			// Reap the process if close() hasn't already cleaned it up.
 			// The handler will remove the session when shell_close is received,
 			// but if it wasn't received, we need to clean up here.
-			_ = s.cmd.Wait() // reap
+			s.mu.Lock()
+			cmd := s.cmd
+			s.mu.Unlock()
+			if cmd != nil {
+				_ = cmd.Wait()
+			}
 			close(s.done)
 			return
 		}
@@ -140,10 +142,6 @@ func (s *shellSession) resize(rows, cols uint16) {
 func (s *shellSession) close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if s.conn != nil {
-		s.conn = nil // prevent further writes
-	}
 
 	if s.ptmx != nil {
 		s.ptmx.Close()

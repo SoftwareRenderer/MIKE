@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,13 +33,20 @@ const (
 	KeepAliveTimeout = 30 * time.Second
 )
 
+// agentConn holds the pipes to a running agent process.
+type agentConn struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+}
+
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
 	mu         sync.Mutex
-	active     map[string]string // taskID -> containerName
-	mountPaths map[string]string // taskID -> mount path inside container
-	clients    map[string]*sandbox.Client // taskID -> agent client
-	agentPorts map[string]int // taskID -> host port for agent TCP
+	active     map[string]string    // taskID -> containerName
+	mountPaths map[string]string    // taskID -> mount path inside container
+	agents     map[string]*agentConn // taskID -> agent pipes + process
+	clients    map[string]*sandbox.Client // taskID -> agent client (cached)
 	available  bool
 }
 
@@ -49,8 +55,8 @@ func NewSandboxManager() *SandboxManager {
 	sm := &SandboxManager{
 		active:     make(map[string]string),
 		mountPaths: make(map[string]string),
+		agents:     make(map[string]*agentConn),
 		clients:    make(map[string]*sandbox.Client),
-		agentPorts: make(map[string]int),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -97,17 +103,6 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 	return out, err
 }
 
-// pickAgentPort finds a free TCP port on localhost for the agent.
-func (sm *SandboxManager) pickAgentPort() (int, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, fmt.Errorf("pick agent port: %w", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	return port, nil
-}
-
 // agentBinaryPath resolves the path to the sandbox-bridge binary.
 // Checks KANBAN_AGENT_PATH env var first, then looks next to the executable.
 func agentBinaryPath() (string, error) {
@@ -137,41 +132,24 @@ func agentBinaryPath() (string, error) {
 	return "", fmt.Errorf("sandbox-bridge binary not found (checked KANBAN_AGENT_PATH, next to executable, ./, sandbox/)")
 }
 
-// waitForAgent waits for the agent's TCP port to be reachable.
-// The agent is started as part of the container entrypoint.
-func (sm *SandboxManager) waitForAgent(taskID string, hostPort int) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", hostPort)
-	for i := 0; i < 50; i++ {
-		conn, err := net.Dial("tcp", addr)
-		if err == nil {
-			conn.Close()
-			log.Printf("[sandbox] task=%s agent ready on %s", taskID, addr)
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("agent port %d not reachable within 5s", hostPort)
-}
 
-// GetClient returns the agent client for a task, dialing the TCP port if needed.
+
+// GetClient returns the agent client for a task.
+// The client communicates directly with the container agent via podman exec pipes.
 func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 	sm.mu.Lock()
 	if c, ok := sm.clients[taskID]; ok {
 		sm.mu.Unlock()
 		return c, nil
 	}
-	hostPort, ok := sm.agentPorts[taskID]
+	ac, ok := sm.agents[taskID]
 	sm.mu.Unlock()
 
 	if !ok {
-		return nil, fmt.Errorf("no agent port for task %s", taskID)
+		return nil, fmt.Errorf("no agent process for task %s", taskID)
 	}
 
-	addr := fmt.Sprintf("127.0.0.1:%d", hostPort)
-	client, err := sandbox.Dial(addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial agent: %w", err)
-	}
+	client := sandbox.NewClient(ac.stdin, ac.stdout)
 
 	sm.mu.Lock()
 	sm.clients[taskID] = client
@@ -229,12 +207,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName st
 		return fmt.Errorf("sandbox-bridge binary not found: %w", err)
 	}
 
-	// Pick a free host port for agent TCP connection
-	hostPort, err := sm.pickAgentPort()
-	if err != nil {
-		return fmt.Errorf("pick agent port: %w", err)
-	}
-
 	// Create container with gVisor runtime
 	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
 	// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
@@ -267,10 +239,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName st
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
-	// Map agent TCP port (container :9999 → host :hostPort)
-	createArgs = append(createArgs,
-		"-p", fmt.Sprintf("127.0.0.1:%d:9999", hostPort),
-	)
 	if networkIsolation {
 		createArgs = append(createArgs, "--network", "none")
 	}
@@ -290,10 +258,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName st
 		)
 		log.Printf("[sandbox] task=%s mounting pi agent dir %s at %s", taskID, absPiDir, PiConfigMount)
 	}
-	// Container entrypoint: start agent in background, then sleep
+	// Container entrypoint: just sleep (agent is started via podman exec)
 	createArgs = append(createArgs, image,
 		"/bin/sh", "-c",
-		"chmod +x /sandbox-bridge && nohup /sandbox-bridge > /sandbox-bridge.log 2>&1 & sleep infinity",
+		"chmod +x /sandbox-bridge && sleep infinity",
 	)
 
 	out, err := sm.podmanExec(createArgs...)
@@ -317,15 +285,40 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName st
 		return fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
 
-	// Wait for agent TCP port to be reachable
-	if err := sm.waitForAgent(taskID, hostPort); err != nil {
+	// Start agent in container via podman exec (stdin/stdout protocol)
+	// --runtime-flag ignore-cgroups=true is required for rootless gVisor
+	agentCmd := exec.Command(
+		"podman", "--runtime-flag", "ignore-cgroups=true",
+		"exec", "-i", "-w", mountPath, containerName,
+		"/sandbox-bridge",
+	)
+
+	// Create pipes for communication with the agent
+	stdin, err := agentCmd.StdinPipe()
+	if err != nil {
+		_, _ = sm.podmanExec("rm", "-f", containerName)
+		return fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdout, err := agentCmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		_, _ = sm.podmanExec("rm", "-f", containerName)
+		return fmt.Errorf("create stdout pipe: %w", err)
+	}
+	agentCmd.Stderr = nil // agent logs go to container stderr
+
+	if err := agentCmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
 		_, _ = sm.podmanExec("rm", "-f", containerName)
 		return fmt.Errorf("start agent: %w", err)
 	}
 
 	sm.active[taskID] = containerName
 	sm.mountPaths[taskID] = mountPath
-	sm.agentPorts[taskID] = hostPort
+	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
+
+	log.Printf("[sandbox] task=%s agent ready", taskID)
 	return nil
 }
 
@@ -643,14 +636,22 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	if client != nil {
 		delete(sm.clients, taskID)
 	}
-	if _, ok := sm.agentPorts[taskID]; ok {
-		delete(sm.agentPorts, taskID)
+	ac := sm.agents[taskID]
+	if ac != nil {
+		delete(sm.agents, taskID)
 	}
 	sm.mu.Unlock()
 
 	// Close agent client
 	if client != nil {
 		_ = client.Close()
+	}
+	// Kill agent process (podman exec session)
+	if ac != nil && ac.cmd.Process != nil {
+		_ = ac.stdin.Close()
+		_ = ac.stdout.Close()
+		_ = ac.cmd.Process.Kill()
+		_ = ac.cmd.Wait()
 	}
 
 	if !ok {

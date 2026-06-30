@@ -13,7 +13,7 @@ import (
 const readChunkSize = 64 * 1024 // 64KB
 
 // handleRead reads a file and sends content as Chunk frames + Result(size).
-func handleRead(conn net.Conn, req *protocol.Request) error {
+func handleRead(h *handler, conn net.Conn, req *protocol.Request) error {
 	var p protocol.ReadParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fmt.Errorf("parse read params: %w", err)
@@ -76,7 +76,7 @@ func handleRead(conn net.Conn, req *protocol.Request) error {
 		}
 
 		chunk := protocol.NewChunk(req.MsgID, buf[:n])
-		if err := protocol.WriteFrame(conn, chunk); err != nil {
+		if err := h.writeFrame(conn, chunk); err != nil {
 			return fmt.Errorf("send chunk: %w", err)
 		}
 		remaining -= int64(n)
@@ -84,5 +84,5 @@ func handleRead(conn net.Conn, req *protocol.Request) error {
 
 	// Send result with total size
 	result := protocol.NewResult(req.MsgID, protocol.NewUint64Result(uint64(totalSize)))
-	return protocol.WriteFrame(conn, result)
+	return h.writeFrame(conn, result)
 }

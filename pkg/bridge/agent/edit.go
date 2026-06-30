@@ -13,7 +13,7 @@ import (
 )
 
 // handleEdit reads a file, applies text replacements, and writes atomically.
-func handleEdit(conn net.Conn, req *protocol.Request) error {
+func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 	var p protocol.EditParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fmt.Errorf("parse edit params: %w", err)
@@ -111,5 +111,5 @@ func handleEdit(conn net.Conn, req *protocol.Request) error {
 	}
 
 	resultFrame := protocol.NewResult(req.MsgID, protocol.NewUint64Result(uint64(n)))
-	return protocol.WriteFrame(conn, resultFrame)
+	return h.writeFrame(conn, resultFrame)
 }

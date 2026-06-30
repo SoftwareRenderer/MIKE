@@ -18,7 +18,8 @@ import (
 )
 
 // execFunc is a function that executes a command, either in a sandbox or directly.
-type execFunc func(command string) (string, error)
+// timeout is in seconds (already validated 1–300).
+type execFunc func(command string, timeout int64) (string, error)
 
 // readFunc reads a file's contents. When sandboxed, runs via container exec.
 type readFunc func(path string) ([]byte, error)
@@ -205,8 +206,8 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 		var out string
 		var err error
 		if execFn != nil {
-			// Use sandbox execution
-			out, err = execFn(cmd)
+			// Use sandbox execution — pass the LLM's timeout
+			out, err = execFn(cmd, timeout)
 		} else {
 			// Direct execution (no sandbox)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)

@@ -128,8 +128,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 
 		// Build sandbox exec function
-		execFn = func(command string) (string, error) {
-			holder, err := agentClient.Bash(command, 300)
+		execFn = func(command string, timeout int64) (string, error) {
+			holder, err := agentClient.Bash(command, timeout)
 			if err != nil {
 				return "", fmt.Errorf("bash: %w", err)
 			}

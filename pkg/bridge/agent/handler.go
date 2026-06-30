@@ -6,25 +6,44 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"kanban/pkg/bridge/protocol"
 )
 
-// handler manages request dispatch and shell sessions.
+// handler manages request dispatch and shell sessions for a single client connection.
 type handler struct {
 	mu          sync.Mutex
 	sessions    map[uint32]*shellSession
 	nextSession uint32
+	writeMu     sync.Mutex        // serializes all writes to conn (shell readLoop + dispatch + read loop)
+	closed      atomic.Bool       // set true when connection is torn down (atomic: accessed from readLoop + close)
 }
 
 func newHandler() *handler {
-	return &handler{
+	h := &handler{
 		sessions:    make(map[uint32]*shellSession),
 		nextSession: 1,
 	}
+	h.closed.Store(true) // set to false by caller when connection is ready
+	return h
+}
+
+// writeFrame sends a frame to conn under the write lock.
+// Returns ErrClosed if the handler has been closed.
+var errHandlerClosed = fmt.Errorf("handler closed")
+
+func (h *handler) writeFrame(conn net.Conn, frame *protocol.Frame) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	if h.closed.Load() {
+		return errHandlerClosed
+	}
+	return protocol.WriteFrame(conn, frame)
 }
 
 func (h *handler) close() {
+	h.closed.Store(true) // prevent readLoop from writing to closed connection
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for id, s := range h.sessions {
@@ -74,7 +93,7 @@ func (h *handler) handleConn(conn net.Conn) error {
 		req, err := protocol.ParseRequest(frame)
 		if err != nil {
 			log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
-			protocol.WriteFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
+			_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
 			continue
 		}
 
@@ -87,23 +106,23 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 	var err error
 	switch req.Method {
 	case protocol.MethodRead:
-		err = handleRead(conn, req)
+		err = handleRead(h, conn, req)
 	case protocol.MethodWrite:
-		err = handleWrite(conn, req)
+		err = handleWrite(h, conn, req)
 	case protocol.MethodEdit:
-		err = handleEdit(conn, req)
+		err = handleEdit(h, conn, req)
 	case protocol.MethodBash:
-		err = handleBash(conn, req)
+		err = handleBash(h, conn, req)
 	case protocol.MethodShellOpen:
 		err = h.handleShellOpen(conn, req)
 	default:
-		protocol.WriteFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("unknown method: %s", req.MethodString())))
+		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("unknown method: %s", req.MethodString())))
 		return
 	}
 
 	if err != nil {
 		log.Printf("agent: MsgID %d method %s error: %v", req.MsgID, req.MethodString(), err)
-		protocol.WriteFrame(conn, protocol.NewError(req.MsgID, err.Error()))
+		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 	}
 }
 

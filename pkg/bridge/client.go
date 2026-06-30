@@ -14,8 +14,24 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-// Client connects to a sandbox bridge over TCP.
-// It handles request/response correlation, chunk streaming, and reconnection.
+// pipeConn wraps separate read/write pipes as a net.Conn.
+// Used when the Client connects to the agent via podman exec stdin/stdout.
+type pipeConn struct {
+	reader io.ReadCloser
+	writer io.WriteCloser
+}
+
+func (c *pipeConn) Read(b []byte) (int, error)       { return c.reader.Read(b) }
+func (c *pipeConn) Write(b []byte) (int, error)      { return c.writer.Write(b) }
+func (c *pipeConn) Close() error                     { return c.reader.Close() }
+func (c *pipeConn) LocalAddr() net.Addr              { return &net.UnixAddr{Net: "pipe", Name: "stdin"} }
+func (c *pipeConn) RemoteAddr() net.Addr             { return &net.UnixAddr{Net: "pipe", Name: "stdout"} }
+func (c *pipeConn) SetDeadline(t time.Time) error    { return nil }
+func (c *pipeConn) SetReadDeadline(t time.Time) error { return nil }
+func (c *pipeConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// Client connects to a sandbox bridge.
+// It handles request/response correlation and chunk streaming.
 type Client struct {
 	mu       sync.Mutex
 	conn     net.Conn
@@ -24,7 +40,6 @@ type Client struct {
 	sessions map[uint32]*shellSessionState // sessionID → shell state
 	readDone chan struct{}
 	closed   bool
-	addr     string // TCP address for reconnection
 }
 
 // shellSessionState tracks a persistent shell session.
@@ -35,10 +50,10 @@ type shellSessionState struct {
 
 // pendingReq tracks an in-flight request.
 type pendingReq struct {
-	chunkCh  chan *protocol.Frame // chunk frames arrive here
-	done     chan *protocol.Frame // result/error frame arrives here
-	chunkOnce sync.Once           // prevent double-close
-	doneOnce  sync.Once           // prevent double-close
+	chunkCh   chan *protocol.Frame // chunk frames arrive here
+	done      chan *protocol.Frame // result/error frame arrives here
+	chunkOnce sync.Once            // prevent double-close
+	doneOnce  sync.Once            // prevent double-close
 }
 
 // closeChunk closes the chunk channel safely (idempotent).
@@ -51,10 +66,25 @@ func (p *pendingReq) closeDone() {
 	p.doneOnce.Do(func() { close(p.done) })
 }
 
-// BashResult holds the result of a bash command execution.
-type BashResult struct {
-	Output   io.Reader // streaming output (stdout+stderr interleaved)
-	ExitCode chan int32 // closed with exit code when command completes
+// BashResultHolder wraps the bash result for streaming.
+type BashResultHolder struct {
+	outputCh chan []byte
+	exitCode chan int32
+}
+
+// NewClient creates a Client from stdin/stdout pipes (e.g., from podman exec).
+// The stdin pipe is used for writing requests, stdout for reading responses.
+func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
+	conn := &pipeConn{reader: stdout, writer: stdin}
+	c := &Client{
+		conn:     conn,
+		pending:  make(map[uint32]*pendingReq),
+		sessions: make(map[uint32]*shellSessionState),
+		readDone: make(chan struct{}),
+	}
+	c.nextID.Store(1)
+	go c.readLoop()
+	return c
 }
 
 // Dial connects to the agent at the given TCP address (host:port).
@@ -69,13 +99,9 @@ func Dial(addr string) (*Client, error) {
 		pending:  make(map[uint32]*pendingReq),
 		sessions: make(map[uint32]*shellSessionState),
 		readDone: make(chan struct{}),
-		addr:     addr,
 	}
 	c.nextID.Store(1)
-
-	// Start background read loop
 	go c.readLoop()
-
 	return c, nil
 }
 
@@ -84,7 +110,7 @@ func (c *Client) nextMsgID() uint32 {
 	return c.nextID.Add(1) - 1
 }
 
-// readLoop reads frames from the socket and dispatches them to pending requests
+// readLoop reads frames from the connection and dispatches them to pending requests
 // and shell sessions.
 func (c *Client) readLoop() {
 	defer func() {
@@ -302,12 +328,6 @@ func (c *Client) EditFile(path string, edits []protocol.Edit) (int64, error) {
 	return int64(size), nil
 }
 
-// BashResultHolder wraps the bash result for streaming.
-type BashResultHolder struct {
-	outputCh chan []byte
-	exitCode chan int32
-}
-
 // Output returns an io.Reader that yields bash output as it arrives.
 func (b *BashResultHolder) Output() io.Reader {
 	pr, pw := io.Pipe()
@@ -424,7 +444,6 @@ func (c *Client) Bash(command string, timeout int64) (*BashResultHolder, error) 
 
 // ShellOpen starts a new shell session in the sandbox.
 // Returns a session ID for subsequent ShellIO/ShellResize/ShellClose calls.
-// The session is registered with the client for chunk routing.
 func (c *Client) ShellOpen(shell string, rows, cols uint16) (uint32, error) {
 	params, _ := json.Marshal(protocol.ShellOpenParams{Shell: shell, Rows: rows, Cols: cols})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodShellOpen, params)
@@ -454,22 +473,18 @@ func (c *Client) ShellOpen(shell string, rows, cols uint16) (uint32, error) {
 }
 
 // ShellIO sends input to a shell session.
-// The session must have been opened via ShellOpen.
-// Output is available via ShellOutput(sessionID).
 func (c *Client) ShellIO(sessionID uint32, input []byte) error {
 	frame := protocol.NewShellIORequest(c.nextMsgID(), sessionID, input)
 	return protocol.WriteFrame(c.conn, frame)
 }
 
 // ShellOutput returns an io.Reader that yields shell output for a session.
-// The reader blocks until output arrives or the session is closed.
 func (c *Client) ShellOutput(sessionID uint32) io.Reader {
 	c.mu.Lock()
 	s := c.sessions[sessionID]
 	c.mu.Unlock()
 
 	if s == nil {
-		// Return a reader that immediately closes
 		pr, pw := io.Pipe()
 		_ = pw.Close()
 		return pr
@@ -496,7 +511,6 @@ func (c *Client) ShellResize(sessionID uint32, rows, cols uint16) error {
 
 // ShellClose terminates a shell session.
 func (c *Client) ShellClose(sessionID uint32) error {
-	// Clean up session state
 	c.mu.Lock()
 	if s, ok := c.sessions[sessionID]; ok {
 		close(s.outputCh)

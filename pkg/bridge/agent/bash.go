@@ -20,7 +20,7 @@ const (
 
 // handleBash runs a shell command and streams output as Chunk frames.
 // Sends a Result frame with exit code when the command completes.
-func handleBash(conn net.Conn, req *protocol.Request) error {
+func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 	var p protocol.BashParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fmt.Errorf("parse bash params: %w", err)
@@ -59,7 +59,7 @@ func handleBash(conn net.Conn, req *protocol.Request) error {
 			n, readErr := reader.Read(buf)
 			if n > 0 {
 				chunk := protocol.NewChunk(req.MsgID, protocol.NewBashChunk(stream, buf[:n]))
-				_ = protocol.WriteFrame(conn, chunk)
+				_ = h.writeFrame(conn, chunk)
 			}
 			if readErr != nil {
 				return
@@ -103,5 +103,5 @@ func handleBash(conn net.Conn, req *protocol.Request) error {
 	})
 	payload := protocol.NewBashResult(exitCode, meta)
 	result := protocol.NewResult(req.MsgID, payload)
-	return protocol.WriteFrame(conn, result)
+	return h.writeFrame(conn, result)
 }

@@ -11,7 +11,7 @@ import (
 )
 
 // handleWrite writes content to a file atomically (temp file + rename).
-func handleWrite(conn net.Conn, req *protocol.Request) error {
+func handleWrite(h *handler, conn net.Conn, req *protocol.Request) error {
 	var p protocol.WriteParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fmt.Errorf("parse write params: %w", err)
@@ -64,5 +64,5 @@ func handleWrite(conn net.Conn, req *protocol.Request) error {
 
 	// Send result with bytes written
 	result := protocol.NewResult(req.MsgID, protocol.NewUint64Result(uint64(n)))
-	return protocol.WriteFrame(conn, result)
+	return h.writeFrame(conn, result)
 }
