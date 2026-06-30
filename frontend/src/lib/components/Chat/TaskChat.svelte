@@ -18,6 +18,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         role: string;
         content: string;
         reasoningContent?: string;
+        hasReasoning?: boolean; // true if message has reasoning (even if content is suppressed)
         isStreaming?: boolean;
         threadId?: string;
         attachments?: Array<{ mimeType: string; data: string }>;
@@ -857,7 +858,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     } catch { /* ignore parse errors */ }
                 }
                 return {
-                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
+                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
                     stats: m.model_name ? {
                         model_name: m.model_name,
                         prompt_tokens: m.prompt_tokens ?? 0,

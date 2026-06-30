@@ -103,6 +103,48 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	return messages, rows.Err()
 }
 
+// GetTaskMessageByID retrieves a single message by its ID.
+func (s *Store) GetTaskMessageByID(messageID string) (*types.TaskMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var m types.TaskMessage
+	var createdAt string
+	var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments sql.NullString
+	err := s.db.QueryRow(
+		`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE id = ?`,
+		messageID,
+	).Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	if threadID.Valid {
+		m.ThreadID = threadID.String
+	}
+	if reasoningContent.Valid {
+		m.ReasoningContent = reasoningContent.String
+	}
+	if modelName.Valid {
+		m.ModelName = modelName.String
+	}
+	if providerName.Valid {
+		m.ProviderName = providerName.String
+	}
+	if toolCalls.Valid {
+		m.ToolCalls = toolCalls.String
+	}
+	if toolResult.Valid {
+		m.ToolResult = toolResult.String
+	}
+	if gitCommitHash.Valid {
+		m.GitCommitHash = gitCommitHash.String
+	}
+	if attachments.Valid {
+		m.Attachments = attachments.String
+	}
+	m.CreatedAt = scanTime(createdAt)
+	return &m, nil
+}
+
 // DeleteTaskMessageByID deletes a single message by its ID.
 func (s *Store) DeleteTaskMessageByID(messageID string) error {
 	s.mu.Lock()

@@ -107,12 +107,41 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Suppress write_file content args and reasoning_content unless full=1 is requested
+	if r.URL.Query().Get("full") != "1" {
+		for i := range messages {
+			if messages[i].ToolCalls != "" {
+				messages[i].ToolCalls = redactWriteFileContent(messages[i].ToolCalls)
+			}
+			if messages[i].ReasoningContent != "" {
+				suppressed := shouldSuppressReasoning(
+					messages[i].ReasoningContent,
+					messages[i].Content,
+					messages[i].ToolCalls,
+				)
+				if suppressed {
+					messages[i].ReasoningContent = "[HIDDEN]"
+					messages[i].HasReasoning = true
+				}
+			}
+		}
+	}
 	JSONResponse(w, http.StatusOK, messages)
 }
 
 func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 	if r.Method == http.MethodGet {
+		// Return full message (with unsuppressed reasoning_content and tool_calls) when full=1
+		if r.URL.Query().Get("full") == "1" {
+			msg, err := s.store.GetTaskMessageByID(messageID)
+			if err != nil {
+				JSONError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			JSONResponse(w, http.StatusOK, msg)
+			return
+		}
 		// Check if deleting this message would delete a fork branch.
 		// Used by the frontend to show a warning in the delete dialog.
 		checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(messageID)
@@ -1423,4 +1452,48 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 		s.resetWorktreeToCommit(taskID, lastCommit)
 		s.broadcastTaskDiff(taskID)
 	}
+}
+
+// redactWriteFileContent removes the "content" field from write_file tool call args
+// and redacts raw_args, to save bandwidth and avoid sending file contents to clients.
+func redactWriteFileContent(toolCallsJSON string) string {
+	var tc map[string]any
+	if err := json.Unmarshal([]byte(toolCallsJSON), &tc); err != nil {
+		return toolCallsJSON
+	}
+	if tc["tool_name"] != "write_file" {
+		return toolCallsJSON
+	}
+	if args, ok := tc["args"].(map[string]any); ok {
+		if _, hasContent := args["content"]; hasContent {
+			args["content"] = "[REDACTED]"
+		}
+	}
+	if _, hasRawArgs := tc["raw_args"]; hasRawArgs {
+		tc["raw_args"] = "[REDACTED]"
+	}
+	redacted, err := json.Marshal(tc)
+	if err != nil {
+		return toolCallsJSON
+	}
+	return string(redacted)
+}
+
+// shouldSuppressReasoning returns true when reasoning_content should be hidden
+// to save bandwidth. Mirrors the frontend logic in ChatMessage.svelte:
+//   - Auto-expand if: short reasoning (<=200) with no content,
+//     tool calls with no content, or streaming with no tool calls.
+//   - Otherwise: collapse (suppress).
+func shouldSuppressReasoning(reasoningContent, content, toolCalls string) bool {
+	// Auto-expand conditions (keep reasoning visible):
+	// 1. Short reasoning (<=200 chars) with no regular content
+	if len(reasoningContent) <= 200 && content == "" {
+		return false
+	}
+	// 2. Has tool calls and no regular content
+	if toolCalls != "" && content == "" {
+		return false
+	}
+	// Otherwise, suppress
+	return true
 }

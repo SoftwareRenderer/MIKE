@@ -201,6 +201,7 @@ type TaskMessage struct {
 	Role             string    `json:"role"`
 	Content          string    `json:"content"`
 	ReasoningContent string    `json:"reasoning_content,omitempty"`
+	HasReasoning     bool      `json:"has_reasoning,omitempty"` // true if message has reasoning (even if suppressed)
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
 	Attachments      string    `json:"attachments,omitempty"` // JSON array of {mimeType, data} for images

@@ -3,6 +3,7 @@
     import ToolCall from './ToolCall.svelte';
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+    import { getTaskMessageFull } from '$lib/api';
 
     interface ToolCallInfo {
         toolId: string;
@@ -23,6 +24,7 @@
         role: string;
         content: string;
         reasoningContent?: string;
+        hasReasoning?: boolean; // true if message has reasoning (even if content is suppressed)
         isStreaming?: boolean;
         timestamp?: string;
         messageId?: string;
@@ -44,14 +46,24 @@
         taskId?: string;
     }
 
-    let { role, content, reasoningContent, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+
+    // Resolved reasoning content — fetched on-demand when backend suppresses it
+    let resolvedReasoningContent = $state<string | undefined>();
+    let reasoningLoading = $state(false);
+
+    /** Effective reasoning content: resolved (fetched) value, or the prop value. */
+    let effectiveReasoning = $derived(resolvedReasoningContent ?? reasoningContent);
+
+    /** Whether to show the reasoning toggle (has reasoning that isn't yet resolved). */
+    let showReasoningToggle = $derived(hasReasoning || !!reasoningContent);
 
     let reasoningUserToggled = $state(false);
     let reasoningUserValue = $state(false);
     let reasoningExpanded = $derived(
         reasoningUserToggled
             ? reasoningUserValue
-            : (!reasoningContent || (reasoningContent.length <= 200 && !content) || (toolCalls && toolCalls.length > 0 && !content) || (isStreaming && !(toolCalls && toolCalls.length > 0)))
+            : (effectiveReasoning === '[HIDDEN]' ? false : !effectiveReasoning || (effectiveReasoning.length <= 200 && !content) || (toolCalls && toolCalls.length > 0 && !content) || (isStreaming && !(toolCalls && toolCalls.length > 0)))
     );
 
     let expandedArgs = $state<Set<string>>(new Set());
@@ -64,6 +76,29 @@
             next.add(toolId);
         }
         expandedArgs = next;
+    }
+
+    async function handleReasoningToggle() {
+        // If hiding, just toggle
+        if (reasoningExpanded) {
+            reasoningUserToggled = true;
+            reasoningUserValue = false;
+            return;
+        }
+        // If showing and content is [HIDDEN], fetch full message first
+        if (effectiveReasoning === '[HIDDEN]' && messageId && projectId && msgTaskId && !resolvedReasoningContent) {
+            reasoningLoading = true;
+            try {
+                const fullMsg = await getTaskMessageFull(projectId, msgTaskId, messageId);
+                resolvedReasoningContent = fullMsg.reasoning_content;
+            } catch (e) {
+                console.error('Failed to fetch full reasoning:', e);
+            } finally {
+                reasoningLoading = false;
+            }
+        }
+        reasoningUserToggled = true;
+        reasoningUserValue = true;
     }
 
     function formatTimestamp(isoStr: string): { display: string; tooltip: string } {
@@ -446,16 +481,20 @@
         </div>
     {:else if role === 'assistant'}
         <div class="message-wrapper assistant-wrapper">
-            {#if reasoningContent}
+            {#if showReasoningToggle}
                 <div class="reasoning-block" class:expanded={reasoningExpanded}>
-                    <button class="reasoning-toggle" onclick={() => { reasoningUserToggled = true; reasoningUserValue = !reasoningExpanded; }} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'}>
+                    <button class="reasoning-toggle" onclick={() => handleReasoningToggle()} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
                         </svg>
                         {reasoningExpanded ? 'Hide' : 'Show'} reasoning
                     </button>
                     {#if reasoningExpanded}
-                        <div class="reasoning-content">{reasoningContent}</div>
+                        {#if reasoningLoading}
+                            <div class="reasoning-content reasoning-loading">Loading reasoning...</div>
+                        {:else if effectiveReasoning && effectiveReasoning !== '[HIDDEN]'}
+                            <div class="reasoning-content">{effectiveReasoning}</div>
+                        {/if}
                     {/if}
                 </div>
             {/if}
@@ -481,7 +520,7 @@
                     <span class="stat-item">{genTokens} tokens</span>
                 </div>
             {/if}
-            {#if content || reasoningContent}
+            {#if content || showReasoningToggle}
                 <div class="message-actions assistant-actions">
                     {#if timestampInfo.display}
                         <span class="message-timestamp" title={timestampInfo.tooltip || undefined}>{timestampInfo.display}</span>
@@ -623,6 +662,10 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
+    .reasoning-toggle:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
     .reasoning-content {
         margin-top: 4px;
         padding: 8px 12px;
@@ -633,6 +676,9 @@
         color: var(--color-text-secondary);
         white-space: pre-wrap;
         font-style: italic;
+    }
+    .reasoning-loading {
+        color: var(--color-text-tertiary);
     }
     .assistant .message-text :global(pre) {
         background: var(--color-surface-0);

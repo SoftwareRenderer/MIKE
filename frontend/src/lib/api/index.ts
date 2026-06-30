@@ -55,6 +55,7 @@ export {
 export {
     sendTaskMessage,
     getTaskMessages,
+    getTaskMessageFull,
     createTaskMessage,
     deleteTaskMessagesAfter,
     deleteTaskMessage,

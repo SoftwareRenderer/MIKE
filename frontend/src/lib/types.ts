@@ -130,6 +130,7 @@ export interface TaskMessage {
     role: string;
     content: string;
     reasoning_content?: string;
+    has_reasoning?: boolean; // true if message has reasoning (even if content is suppressed)
     tool_calls?: string;
     tool_result?: string;
     attachments?: string | Array<{ mimeType: string; data: string }>;

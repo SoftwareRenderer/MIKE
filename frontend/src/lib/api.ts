@@ -56,6 +56,7 @@ export {
     resumeTask,
     sendTaskMessage,
     getTaskMessages,
+    getTaskMessageFull,
     createTaskMessage,
     deleteTaskMessagesAfter,
     deleteTaskMessage,

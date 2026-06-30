@@ -151,6 +151,13 @@ export async function getTaskMessages(projectId: string, taskId: string): Promis
     return res.json();
 }
 
+/** Fetch a single message with full content (uncompressed reasoning_content, tool_calls). */
+export async function getTaskMessageFull(projectId: string, taskId: string, messageId: string): Promise<TaskMessage> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}?full=1`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch message');
+    return res.json();
+}
+
 /** Create a message directly (e.g., for system messages). Queued when offline. */
 export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
     if (getOfflineStatus()) {
