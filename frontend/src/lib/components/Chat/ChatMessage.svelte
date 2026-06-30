@@ -635,6 +635,10 @@
     .assistant .message-text {
         color: var(--color-text-primary);
         white-space: normal;
+        /* Ensure text respects bubble width on mobile — inline elements (a, code, strong)
+         * inside flex children don't shrink by default, so content can overflow the bubble. */
+        min-width: 0;
+        overflow: hidden;
     }
     .assistant .message-text.streaming {
         border-left: 2px solid var(--color-accent);
