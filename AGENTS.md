@@ -17,7 +17,7 @@ The sandbox bridge (`sandbox-bridge`) is a lightweight binary that runs inside e
 
 **Build:**
 ```bash
-# Build for Linux (cross-compile on macOS)
+# Build for Linux (CGO_ENABLED=0 for static build)
 CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
 ```
 
