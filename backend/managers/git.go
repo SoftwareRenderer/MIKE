@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -483,11 +485,13 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 	}
 	for _, u := range d.Untracked {
 		manifest.Files[u.Path] = diffManifestFile{
-			Hash:      git.ComputeUntrackedHash(u),
-			Type:      "untracked",
-			LineCount: len(u.Lines),
-			FileSize:  u.FileSize,
-			Added:     len(u.Lines),
+			Hash:        git.ComputeUntrackedHash(u),
+			Type:        "untracked",
+			LineCount:   len(u.Lines),
+			FileSize:    u.FileSize,
+			Added:       len(u.Lines),
+			Truncated:   u.Truncated,
+			OrigAdded:   u.OrigAdded,
 		}
 	}
 	return manifest
@@ -539,9 +543,23 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	// Then check untracked files
 	for _, u := range taskDiff.Untracked {
 		if u.Path == filePath {
+			lines := u.Lines
+			// If full=1 and file was truncated, re-read from disk
+			if fullFile && u.Truncated && h.worktreeMgr != nil {
+				worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+				if err == nil {
+					fullPath := filepath.Join(worktreePath, filePath)
+					data, err := os.ReadFile(fullPath)
+					if err == nil {
+						lines = git.SplitLines(string(data))
+					}
+				}
+			}
 			httputil.JSONResponse(w, http.StatusOK, map[string]any{
-				"lines":      u.Lines,
-				"line_count": len(u.Lines),
+				"lines":      lines,
+				"line_count": len(lines),
+				"truncated":  false,
+				"origAdded":  len(lines),
 			})
 			return
 		}

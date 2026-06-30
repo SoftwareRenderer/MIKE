@@ -945,9 +945,9 @@ func pluralS(n int) string {
 	return "s"
 }
 
-// splitLines splits file content into lines, dropping a trailing empty entry
+// SplitLines splits file content into lines, dropping a trailing empty entry
 // caused by a final newline (matching how files are conventionally stored).
-func splitLines(content string) []string {
+func SplitLines(content string) []string {
 	lines := strings.Split(content, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
@@ -1123,7 +1123,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 					if err != nil {
 						continue
 					}
-					fileLines := splitLines(string(data))
+					fileLines := SplitLines(string(data))
 					untracked = append(untracked, UntrackedFile{Path: filePath, Lines: fileLines})
 				}
 			}

@@ -878,7 +878,7 @@
                     };
                 } else if (entry.type === 'untracked') {
                     const existing = diffFileCache[path];
-                    newUntracked[path] = { fileSize: entry.file_size, truncated: false, origAdded: entry.line_count, loading: false };
+                    newUntracked[path] = { fileSize: entry.file_size, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
                     newCache[path] = {
                         path,
                         rows: existing?.rows || [],
@@ -993,7 +993,7 @@
                     if (data.rows) {
                         updatedDiff[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
+                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
                         updatedUntracked[path] = true;
                     }
                 } catch (e) {
@@ -1035,12 +1035,11 @@
                 try {
                     const data = await getDiffFile(task.project_id, task.id, path, { signal: controller.signal });
                     if (data.rows) {
-                        const added = data.rows.filter((r: any) => r.variant === 'added').length;
-                        const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
-                        updatedDiff[path] = { path, rows: data.rows, added, removed, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
+                        const existing = diffFileCache[path];
+                        updatedDiff[path] = { path, rows: data.rows, added: existing?.added ?? data.rows.filter((r: any) => r.variant === 'added').length, removed: existing?.removed ?? data.rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: existing?.origAdded ?? data.origAdded, origRemoved: existing?.origRemoved ?? data.origRemoved };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0 };
-                        updatedUntracked[path] = { loading: false };
+                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
+                        updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false };
                     }
                 } catch (e) {
                     if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -1096,21 +1095,25 @@
     /** Load content for a single untracked file on-demand. */
     async function loadUntrackedFile(path: string) {
         if (!task) return;
-        // Already loaded
-        if (diffFileCache[path]?.rows.length) return;
+        const meta = untrackedCache[path];
+        const isTruncated = meta?.truncated && diffFileCache[path]?.rows.length;
+        // Already loaded and not truncated
+        if (diffFileCache[path]?.rows.length && !isTruncated) return;
         // Mark as loading
         untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: true } };
         try {
-            const data = await getDiffFile(task.project_id, task.id, path);
+            const data = await getDiffFile(task.project_id, task.id, path, { full: isTruncated });
             if (data.lines) {
                 diffFileCache = { ...diffFileCache, [path]: {
                     path,
                     rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
                     added: data.lines.length,
                     removed: 0,
+                    truncated: !!data.truncated,
+                    origAdded: data.origAdded,
                 }};
             }
-            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false } };
+            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false, truncated: !!data?.truncated } };
         } catch (e) {
             untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false } };
         }
