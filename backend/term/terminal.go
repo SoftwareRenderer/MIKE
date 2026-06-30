@@ -126,7 +126,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

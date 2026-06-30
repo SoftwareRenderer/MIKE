@@ -194,9 +194,6 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
 	case "bash":
 		cmd, _ := args["command"].(string)
-		if isDangerousCommand(cmd) {
-			return "Error: command blocked", false
-		}
 		timeout := int64(5)
 		if t, ok := args["timeout"].(float64); ok {
 			timeout = int64(t)
@@ -304,17 +301,6 @@ func parseToolArgs(s string) map[string]any {
 		return map[string]any{"raw": s}
 	}
 	return result
-}
-
-func isDangerousCommand(cmd string) bool {
-	dangerous := []string{"sudo", "mkfs", "dd if=/dev/", ":(){ :|: };:", "chmod -R 777 /"}
-	cmd = strings.TrimSpace(cmd)
-	for _, d := range dangerous {
-		if strings.Contains(cmd, d) {
-			return true
-		}
-	}
-	return strings.HasPrefix(cmd, "rm -rf /") || strings.HasPrefix(cmd, "rm -rf /*")
 }
 
 // validateWorktreePath resolves a relative path against the worktree root

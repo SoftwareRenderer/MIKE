@@ -665,53 +665,6 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_Bash_Dangerous(t *testing.T) {
-	te := &TaskExecutor{}
-
-	result, ok := te.executeTool("bash", map[string]any{
-		"command": "sudo rm -rf /",
-		"timeout": float64(5),
-	}, "/tmp/worktree", &types.Task{}, nil, nil, nil, nil)
-	if ok {
-		t.Fatalf("expected failure for dangerous command, got success: %s", result)
-	}
-	if result != "Error: command blocked" {
-		t.Errorf("expected 'Error: command blocked', got %q", result)
-	}
-}
-
-// --- isDangerousCommand Tests ---
-
-func TestIsDangerousCommand(t *testing.T) {
-	dangerous := []string{
-		"sudo rm -rf /",
-		"mkfs.ext4 /dev/sda",
-		"dd if=/dev/zero of=/dev/sda",
-		":(){ :|: };:",
-		"chmod -R 777 /",
-		"rm -rf /",
-		"rm -rf /*",
-	}
-	for _, cmd := range dangerous {
-		if !isDangerousCommand(cmd) {
-			t.Errorf("expected %q to be dangerous", cmd)
-		}
-	}
-
-	safe := []string{
-		"ls -la",
-		"cat file.txt",
-		"git status",
-		"echo hello",
-		"rm -rf ./mydir",
-	}
-	for _, cmd := range safe {
-		if isDangerousCommand(cmd) {
-			t.Errorf("expected %q to be safe", cmd)
-		}
-	}
-}
-
 // --- validateWorktreePath Tests ---
 
 func TestValidateWorktreePath_Valid(t *testing.T) {

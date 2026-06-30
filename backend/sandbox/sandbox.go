@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	sandbox "kanban/pkg/bridge"
 )
 
 const (
@@ -36,6 +39,8 @@ type SandboxManager struct {
 	mu         sync.Mutex
 	active     map[string]string // taskID -> containerName
 	mountPaths map[string]string // taskID -> mount path inside container
+	clients    map[string]*sandbox.Client // taskID -> agent client
+	agentPorts map[string]int // taskID -> host port for agent TCP
 	available  bool
 }
 
@@ -44,6 +49,8 @@ func NewSandboxManager() *SandboxManager {
 	sm := &SandboxManager{
 		active:     make(map[string]string),
 		mountPaths: make(map[string]string),
+		clients:    make(map[string]*sandbox.Client),
+		agentPorts: make(map[string]int),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -90,14 +97,96 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 	return out, err
 }
 
+// pickAgentPort finds a free TCP port on localhost for the agent.
+func (sm *SandboxManager) pickAgentPort() (int, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("pick agent port: %w", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port, nil
+}
+
+// agentBinaryPath resolves the path to the sandbox-bridge binary.
+// Checks KANBAN_AGENT_PATH env var first, then looks next to the executable.
+func agentBinaryPath() (string, error) {
+	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	// Look next to the running executable
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
+	}
+	// Check next to executable, then in sandbox/ subdirectory
+	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
+		candidate := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	// Look in current directory
+	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
+		if _, err := os.Stat(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("sandbox-bridge binary not found (checked KANBAN_AGENT_PATH, next to executable, ./, sandbox/)")
+}
+
+// waitForAgent waits for the agent's TCP port to be reachable.
+// The agent is started as part of the container entrypoint.
+func (sm *SandboxManager) waitForAgent(taskID string, hostPort int) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", hostPort)
+	for i := 0; i < 50; i++ {
+		conn, err := net.Dial("tcp", addr)
+		if err == nil {
+			conn.Close()
+			log.Printf("[sandbox] task=%s agent ready on %s", taskID, addr)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("agent port %d not reachable within 5s", hostPort)
+}
+
+// GetClient returns the agent client for a task, dialing the TCP port if needed.
+func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
+	sm.mu.Lock()
+	if c, ok := sm.clients[taskID]; ok {
+		sm.mu.Unlock()
+		return c, nil
+	}
+	hostPort, ok := sm.agentPorts[taskID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("no agent port for task %s", taskID)
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", hostPort)
+	client, err := sandbox.Dial(addr)
+	if err != nil {
+		return nil, fmt.Errorf("dial agent: %w", err)
+	}
+
+	sm.mu.Lock()
+	sm.clients[taskID] = client
+	sm.mu.Unlock()
+	return client, nil
+}
+
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted read-write at /sandbox/<basename> inside the container.
+// The worktree is bind-mounted read-write at /sandbox/<projectName> inside the container.
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
 // (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -131,8 +220,20 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err)
 	}
-	// Compute mount path: /sandbox/<basename-of-worktree>
-	mountPath := "/sandbox/" + filepath.Base(absWorktree)
+	// Compute mount path: /sandbox/<project-name>
+	mountPath := "/sandbox/" + projectName
+
+	// Resolve agent binary path (required)
+	agentPath, err := agentBinaryPath()
+	if err != nil {
+		return fmt.Errorf("sandbox-bridge binary not found: %w", err)
+	}
+
+	// Pick a free host port for agent TCP connection
+	hostPort, err := sm.pickAgentPort()
+	if err != nil {
+		return fmt.Errorf("pick agent port: %w", err)
+	}
 
 	// Create container with gVisor runtime
 	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
@@ -166,6 +267,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
+	// Map agent TCP port (container :9999 → host :hostPort)
+	createArgs = append(createArgs,
+		"-p", fmt.Sprintf("127.0.0.1:%d:9999", hostPort),
+	)
 	if networkIsolation {
 		createArgs = append(createArgs, "--network", "none")
 	}
@@ -185,11 +290,22 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		)
 		log.Printf("[sandbox] task=%s mounting pi agent dir %s at %s", taskID, absPiDir, PiConfigMount)
 	}
-	createArgs = append(createArgs, image, "sleep", "infinity")
+	// Container entrypoint: start agent in background, then sleep
+	createArgs = append(createArgs, image,
+		"/bin/sh", "-c",
+		"chmod +x /sandbox-bridge && nohup /sandbox-bridge > /sandbox-bridge.log 2>&1 & sleep infinity",
+	)
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
 		return fmt.Errorf("create container: %w (%s)", err, out)
+	}
+
+	// Copy agent binary into container (before start)
+	cpOut, cpErr := sm.podmanExec("cp", agentPath, containerName+":"+"/sandbox-bridge")
+	if cpErr != nil {
+		_, _ = sm.podmanExec("rm", "-f", containerName)
+		return fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut)
 	}
 
 	// Start the container (needed for exec sessions)
@@ -201,8 +317,15 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage string, network
 		return fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
 
+	// Wait for agent TCP port to be reachable
+	if err := sm.waitForAgent(taskID, hostPort); err != nil {
+		_, _ = sm.podmanExec("rm", "-f", containerName)
+		return fmt.Errorf("start agent: %w", err)
+	}
+
 	sm.active[taskID] = containerName
 	sm.mountPaths[taskID] = mountPath
+	sm.agentPorts[taskID] = hostPort
 	return nil
 }
 
@@ -282,7 +405,7 @@ type ShellProcess struct {
 // with the PTY master file descriptor for I/O relay.
 // The caller is responsible for calling Close() when done.
 func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
-	return sm.startShell(taskID, false, "", "", false, 0, "")
+	return sm.startShell(taskID, false, "", "", "", false, 0, "")
 }
 
 // StartShellWithCreate starts an interactive shell, creating the sandbox container
@@ -293,21 +416,21 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If piAgentDir is non-empty, the Pi config directory is bind-mounted.
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
-	return sm.startShell(taskID, true, worktreePath, baseImage, networkIsolation, memoryLimit, piAgentDir)
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
+	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, networkIsolation, memoryLimit, piAgentDir)
 }
 
 // ExecProject runs a command inside the project's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for project-level filesystem operations (read, write, search, etc.).
-func (sm *SandboxManager) ExecProject(projectID, projectPath, command string) (string, error) {
+func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, command string) (string, error) {
 	taskID := "proj:" + projectID
 	// Check if container already exists
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, projectPath, BaseImage, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, projectPath, BaseImage, projectName, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -316,14 +439,14 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, command string) (s
 
 // ExecProjectWithInput runs a command inside the project's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, command string, stdin []byte) (string, error) {
+func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectName, command string, stdin []byte) (string, error) {
 	taskID := "proj:" + projectID
 	// Check if container already exists
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, projectPath, BaseImage, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, projectPath, BaseImage, projectName, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -333,12 +456,12 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, command s
 // ExecTask runs a command inside a task's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for task-level filesystem operations (read, write, etc.) in the diff view editor.
-func (sm *SandboxManager) ExecTask(taskID, worktreePath, command string) (string, error) {
+func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, command string) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, worktreePath, BaseImage, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -347,19 +470,19 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, command string) (string
 
 // ExecTaskWithInput runs a command inside a task's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, command string, stdin []byte) (string, error) {
+func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, command string, stdin []byte) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, worktreePath, BaseImage, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -370,7 +493,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 			return nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err := sm.Create(taskID, worktreePath, baseImage, networkIsolation, memoryLimit, piAgentDir); err != nil {
+		if err := sm.Create(taskID, worktreePath, baseImage, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			return nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()
@@ -516,7 +639,19 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	if ok {
 		delete(sm.active, taskID)
 	}
+	client := sm.clients[taskID]
+	if client != nil {
+		delete(sm.clients, taskID)
+	}
+	if _, ok := sm.agentPorts[taskID]; ok {
+		delete(sm.agentPorts, taskID)
+	}
 	sm.mu.Unlock()
+
+	// Close agent client
+	if client != nil {
+		_ = client.Close()
+	}
 
 	if !ok {
 		return nil // already stopped

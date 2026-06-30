@@ -11,6 +11,36 @@ gVisor (`runsc`) is required for project sandboxing. When a project has sandboxi
 - Podman sandbox commands run via `podman --runtime runsc`
 - Without gVisor, projects with sandboxing enabled will refuse to start tasks (hard error, no fallback)
 
+### Sandbox Bridge
+
+The sandbox bridge (`sandbox-bridge`) is a lightweight binary that runs inside each sandbox container and handles tool calls (read, write, edit, bash, shell) over TCP. This eliminates the overhead of spawning `podman exec` per tool call.
+
+**Build:**
+```bash
+# Build for Linux (cross-compile on macOS)
+CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
+```
+
+**Runtime discovery:** The server finds `sandbox-bridge` via:
+1. `KANBAN_AGENT_PATH` environment variable
+2. Next to the `kanban` binary (`<kanban-dir>/sandbox/sandbox-bridge`)
+3. Current directory (`./sandbox/sandbox-bridge`)
+
+**Required:** The sandbox-bridge binary is required for sandbox mode. Container creation fails if the binary is not found.
+
+**Architecture:**
+```
+Host (kanban server)                    Container (sandbox)
+─────────────────                       ─────────────────
+                                        ┌──────────────┐
+SandboxManager ──TCP──► 127.0.0.1:PORT ─► sandbox-bridge  │
+                     (mapped via          (listens on    │
+                      podman -p)          0.0.0.0:9999)  │
+                                        └──────────────┘
+```
+
+**Protocol:** Custom binary framing — 9-byte header (MsgID + Type + Length) + typed payload. Supports streaming via Chunk frames before a final Result/Error frame.
+
 ## Server Management
 
 The agent is responsible for starting/stopping the server.

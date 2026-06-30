@@ -485,7 +485,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			sandboxPath = filepath.Join(mountPath, relPath)
 		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, "ls -pA "+sandboxPath)
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
@@ -797,7 +797,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		sandboxPath := filepath.Join(mountPath, relPath)
 
 		// Check if already a git repo
-		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null")
+		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null")
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
@@ -808,7 +808,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
 
 		// git init + create README + add + commit in single command
-		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path,
+		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
 			"git -C "+sandboxPath+" init && " +
 			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
 			"git -C "+sandboxPath+" add README.md && " +
@@ -900,7 +900,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path,
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name,
 			"if [ ! -d "+sandboxParent+" ]; then echo 'PARENT_MISSING'; " +
 			"elif [ -e "+sandboxPath+" ]; then echo 'ALREADY_EXISTS'; " +
 			"else mkdir "+sandboxPath+" && echo 'OK'; fi")

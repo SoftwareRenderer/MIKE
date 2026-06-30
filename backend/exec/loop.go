@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -99,7 +100,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Reuse existing container if it's already running from a previous executor (lazy-start).
 		// Only create a new container and send status if one doesn't exist.
 		if !te.sandboxMgr.ContainerRunning(task.ID) {
-			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, networkIsolation, memoryLimit, piAgentDir); err != nil {
+			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
 				task.StatusState = "failed"
 				task.Status = "review"
 				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
@@ -114,22 +115,44 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
 		}
 
+		// Get agent client for tool calls (required — sandbox creation ensures agent is running)
+		agentClient, err := te.sandboxMgr.GetClient(task.ID)
+		if err != nil {
+			task.StatusState = "failed"
+			task.Status = "review"
+			task.Output = fmt.Sprintf("Failed to connect to sandbox bridge: %v", err)
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Agent connection failed: %v", err), "agent_connection_failed")
+			return
+		}
+
 		// Build sandbox exec function
 		execFn = func(command string) (string, error) {
-			return te.sandboxMgr.Exec(task.ID, command, nil)
+			holder, err := agentClient.Bash(command, 300)
+			if err != nil {
+				return "", fmt.Errorf("bash: %w", err)
+			}
+			var buf bytes.Buffer
+			_, _ = buf.ReadFrom(holder.Output())
+			exitCode := <-holder.ExitCode()
+			if exitCode != 0 {
+				return buf.String(), fmt.Errorf("exit code %d", exitCode)
+			}
+			return buf.String(), nil
 		}
 		// Build sandbox read/write functions
 		readFn = func(path string) ([]byte, error) {
-			out, err := te.sandboxMgr.Exec(task.ID, "cat "+shellQuote(path), nil)
+			content, _, err := agentClient.ReadFile(path, 0, 0)
 			if err != nil {
-				return nil, fmt.Errorf("%v: %s", err, out)
+				return nil, fmt.Errorf("read: %w", err)
 			}
-			return []byte(out), nil
+			return []byte(content), nil
 		}
 		writeFn = func(path, content string) error {
-			_, err := te.sandboxMgr.ExecWithInput(task.ID, "mkdir -p "+shellQuote(filepath.Dir(path))+" && cat > "+shellQuote(path), []byte(content), nil)
+			_, err := agentClient.WriteFile(path, content)
 			if err != nil {
-				return fmt.Errorf("write failed: %w", err)
+				return fmt.Errorf("write: %w", err)
 			}
 			return nil
 		}

@@ -8,6 +8,32 @@ import (
 	"testing"
 )
 
+// findAgentBinary locates the sandbox-bridge binary for tests.
+// Checks KANBAN_AGENT_PATH env var, then project root, then build directory.
+func findAgentBinary(t *testing.T) string {
+	t.Helper()
+	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Check project root (go test runs from package dir)
+	candidates := []string{
+		"../../sandbox/sandbox-bridge",
+		"../../sandbox-bridge",
+		"./sandbox-bridge",
+	}
+	for _, c := range candidates {
+		if abs, err := filepath.Abs(c); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				return abs
+			}
+		}
+	}
+	t.Skip("sandbox-bridge binary not found (run: CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge ./pkg/sandbox/agent)")
+	return ""
+}
+
 func TestIsAvailable(t *testing.T) {
 	sm := NewSandboxManager()
 
@@ -21,6 +47,10 @@ func TestIsAvailable(t *testing.T) {
 }
 
 func TestCreateAndStop(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -30,7 +60,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -49,6 +79,10 @@ func TestCreateAndStop(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -57,7 +91,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -98,6 +132,10 @@ func TestExec(t *testing.T) {
 }
 
 func TestExecNotAllowed(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -106,7 +144,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -126,6 +164,10 @@ func TestExecNotAllowed(t *testing.T) {
 }
 
 func TestExecWithInput(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -134,7 +176,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -182,7 +224,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	err := sm.Create("task-1", "/tmp/test", "", false, 0, "")
+	err := sm.Create("task-1", "/tmp/test", "", "test-proj", false, 0, "")
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -332,6 +374,10 @@ func TestProjectImageName(t *testing.T) {
 }
 
 func TestPiAvailable(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -340,7 +386,7 @@ func TestPiAvailable(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-pi-available-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -360,6 +406,10 @@ func TestPiAvailable(t *testing.T) {
 }
 
 func TestStartProcess(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -368,7 +418,7 @@ func TestStartProcess(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-startprocess-task"
 
-	err := sm.Create(taskID, dir, "", false, 0, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 0, "")
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -426,6 +476,10 @@ func TestStartProcess_NonexistentTask(t *testing.T) {
 }
 
 func TestCreateWithMemoryLimit(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
@@ -435,7 +489,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
-	err := sm.Create(taskID, dir, "", false, 512, "")
+	err := sm.Create(taskID, dir, "", "test-proj", false, 512, "")
 	if err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
