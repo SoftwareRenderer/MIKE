@@ -3,6 +3,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { parseUnifiedDiff, buildSideBySideRows } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
+    import { highlightLines } from '$lib/highlighter';
 
     interface Props {
         commit: GitCommit;
@@ -21,6 +22,40 @@
     // Parse the unified diff into structured files
     let diffFiles = $derived<DiffFile[]>(parseUnifiedDiff(diff));
     let hasContent = $derived(diffFiles.length > 0);
+
+    // Syntax highlight cache: path -> Map<lineText, highlightedHtml>
+    let highlightMap = $derived<Record<string, Map<string, string>>>(
+        (() => {
+            const result: Record<string, Map<string, string>> = {};
+            for (const file of diffFiles) {
+                const cleanPath = formatPath(file.path);
+                // Collect old lines (removed + context in order)
+                const oldLines: string[] = [];
+                const newLines: string[] = [];
+                for (const row of file.rows) {
+                    if (row.variant === 'removed') oldLines.push(row.text);
+                    else if (row.variant === 'context') { oldLines.push(row.text); newLines.push(row.text); }
+                    else if (row.variant === 'added') newLines.push(row.text);
+                }
+                const oldHtmls = oldLines.length ? highlightLines(oldLines, cleanPath) : [];
+                const newHtmls = newLines.length ? highlightLines(newLines, cleanPath) : [];
+                const map = new Map<string, string>();
+                for (let i = 0; i < oldLines.length; i++) {
+                    if (oldHtmls[i]) map.set(oldLines[i], oldHtmls[i]);
+                }
+                for (let i = 0; i < newLines.length; i++) {
+                    if (newHtmls[i]) map.set(newLines[i], newHtmls[i]);
+                }
+                result[cleanPath] = map;
+            }
+            return result;
+        })()
+    );
+
+    function getHighlighted(path: string, text: string): string {
+        if (!text) return '';
+        return highlightMap[formatPath(path)]?.get(text) || '';
+    }
 
     // Collapsed file state — track which files are collapsed
     let collapsedFiles = $state<Set<string>>(new Set());
@@ -153,7 +188,7 @@
                     {@const collapsed = isFileCollapsed(file.path)}
                     {@const cleanPath = formatPath(file.path)}
                     <section class="diff-file-section">
-                        <!-- File header (collapsible) -->
+                        <!-- File header (collapsible, sticky) -->
                         <button
                             type="button"
                             class="diff-file-header"
@@ -185,38 +220,45 @@
                             {#if file.rows.length === 0}
                                 <div class="diff-binary-notice">Binary file</div>
                             {:else}
-                                <div class="diff-sbs-wrapper" onclick={() => handleFileClick(file.path)}>
-                                    <div class="diff-sbs-grid">
-                                        <!-- Column headers -->
-                                        <div class="diff-sbs-header-row">
-                                            <div class="diff-sbs-col-header">
-                                                <span class="diff-sbs-label">Old</span>
-                                            </div>
-                                            <div class="diff-sbs-col-header">
-                                                <span class="diff-sbs-label">New</span>
-                                            </div>
+                                <div class="diff-sbs-body">
+                                    <!-- Column headers -->
+                                    <div class="diff-sbs-header-row">
+                                        <div class="diff-sbs-col-header">
+                                            <span class="diff-sbs-label">Old</span>
                                         </div>
-
-                                        <!-- Side-by-side rows -->
-                                        {#each getSideBySideRows(file.rows) as row}
-                                            <div class="diff-sbs-row">
-                                                <!-- Left column (old) -->
-                                                <div class="diff-sbs-cell diff-sbs-left">
+                                        <div class="diff-sbs-col-header">
+                                            <span class="diff-sbs-label">New</span>
+                                        </div>
+                                    </div>
+                                    <!-- Scrollable columns -->
+                                    <div class="diff-sbs-columns" onclick={() => handleFileClick(file.path)}>
+                                    <!-- Left column (old) -->
+                                    <div class="diff-sbs-column diff-sbs-left">
+                                        <div class="diff-sbs-scroll">
+                                            {#each getSideBySideRows(file.rows) as row}
+                                                <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:removed={row.leftVariant === 'removed'} class:context={row.leftVariant === 'context'}>
-                                                        {row.leftText}
+                                                        {@html getHighlighted(file.path, row.leftText) || row.leftText}
                                                     </span>
                                                 </div>
-                                                <!-- Right column (new) -->
-                                                <div class="diff-sbs-cell diff-sbs-right">
+                                            {/each}
+                                        </div>
+                                    </div>
+                                    <!-- Right column (new) -->
+                                    <div class="diff-sbs-column diff-sbs-right">
+                                        <div class="diff-sbs-scroll">
+                                            {#each getSideBySideRows(file.rows) as row}
+                                                <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:added={row.rightVariant === 'added'} class:context={row.rightVariant === 'context'}>
-                                                        {row.rightText}
+                                                        {@html getHighlighted(file.path, row.rightText) || row.rightText}
                                                     </span>
                                                 </div>
-                                            </div>
-                                        {/each}
+                                            {/each}
+                                        </div>
                                     </div>
+                                </div>
                                 </div>
                             {/if}
                         {/if}
@@ -375,15 +417,19 @@
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
-        padding: 12px 16px 24px 16px;
+        padding: 0 16px 24px 16px;
     }
 
     /* File section — card-like */
     .diff-file-section {
         margin-bottom: 16px;
+        margin-top: 12px;
+    }
+    .diff-file-section:last-child {
+        margin-bottom: 0;
     }
 
-    /* File header — card header with rounded top */
+    /* File header — card header with rounded top, sticky */
     .diff-file-header {
         display: flex;
         align-items: center;
@@ -399,8 +445,16 @@
         text-align: left;
         position: sticky;
         top: 0;
-        z-index: 10;
+        z-index: 5;
         opacity: 1;
+    }
+
+    /* Diff body: column headers + columns, shares border with file header */
+    .diff-sbs-body {
+        border: 1px solid var(--color-border);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        overflow: hidden;
     }
     .diff-file-header:hover {
         background: var(--color-surface-3);
@@ -449,59 +503,53 @@
         font-style: italic;
     }
 
-    /* Side-by-side wrapper — card body with rounded bottom */
-    .diff-sbs-wrapper {
-        margin-top: 2px;
-        border: 1px solid var(--color-border);
-        border-top: none;
-        border-radius: 0 0 6px 6px;
-        overflow-x: auto;
-        overflow-y: hidden;
-        cursor: pointer;
-    }
-    .diff-sbs-wrapper:hover .diff-line-content {
-        opacity: 0.85;
-    }
-
-    /* Single grid for header + rows — columns stay aligned */
-    .diff-sbs-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        min-inline-size: max-content;
-    }
-
     /* Column headers row */
     .diff-sbs-header-row {
-        display: contents;
+        display: flex;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-0);
     }
     .diff-sbs-col-header {
+        flex: 1;
         padding: 5px 12px;
         font-size: 0.75rem;
         font-weight: 600;
         color: var(--color-text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        border-right: 1px solid var(--color-border);
-        border-bottom: 1px solid var(--color-border);
         background: var(--color-surface-0);
     }
-    .diff-sbs-col-header:last-child {
+
+    /* Two columns side by side */
+    .diff-sbs-columns {
+        display: flex;
+        overflow: hidden;
+        cursor: pointer;
+    }
+    .diff-sbs-columns:hover .diff-line-content {
+        opacity: 0.85;
+    }
+    .diff-sbs-column {
+        flex: 1;
+        min-width: 0;
+        border-right: 1px solid var(--color-border);
+        overflow: hidden;
+    }
+    .diff-sbs-column:last-child {
         border-right: none;
     }
 
-    /* Side-by-side rows */
-    .diff-sbs-row {
-        display: contents;
+    /* Scrollable content area per column */
+    .diff-sbs-scroll {
+        overflow-x: auto;
     }
-    .diff-sbs-cell {
+
+    /* Individual line within a column */
+    .diff-sbs-line {
         display: flex;
         font-size: 0.8125rem;
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
-        border-right: 1px solid var(--color-border);
-    }
-    .diff-sbs-cell:last-child {
-        border-right: none;
     }
     .diff-line-num {
         width: 3.5rem;
@@ -543,4 +591,25 @@
             display: none;
         }
     }
+
+    /* Syntax highlighting — GitHub Dark palette (matches DiffViewer) */
+    :global(.diff-line-content .hl-keyword) { color: #ff7b72; }
+    :global(.diff-line-content .hl-constantkeyword) { color: #79c0ff; }
+    :global(.diff-line-content .hl-definitionvariable,
+        .diff-line-content .hl-variable,
+        .diff-line-content .hl-classname,
+        .diff-line-content .hl-typename) { color: #ffa657; }
+    :global(.diff-line-content .hl-function) { color: #d2a8ff; }
+    :global(.diff-line-content .hl-property,
+        .diff-line-content .hl-attribute) { color: #79c0ff; }
+    :global(.diff-line-content .hl-string,
+        .diff-line-content .hl-attributevalue,
+        .diff-line-content .hl-regexp) { color: #a5d6ff; }
+    :global(.diff-line-content .hl-number) { color: #79c0ff; }
+    :global(.diff-line-content .hl-comment) { color: #8b949e; font-style: italic; }
+    :global(.diff-line-content .hl-operator) { color: #c9d1d9; }
+    :global(.diff-line-content .hl-punctuation) { color: #c9d1d9; }
+    :global(.diff-line-content .hl-tagname) { color: #7ee787; }
+    :global(.diff-line-content .hl-meta) { color: #c9d1d9; }
+    :global(.diff-line-content .hl-invalid) { color: #f85149; }
 </style>

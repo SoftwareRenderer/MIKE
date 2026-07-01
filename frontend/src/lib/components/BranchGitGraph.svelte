@@ -53,9 +53,6 @@
                     <!-- Timeline line -->
                     <div class="git-timeline">
                         <div class="git-dot" title={commit.short}></div>
-                        {#if i < commits.length - 1}
-                            <div class="git-line"></div>
-                        {/if}
                     </div>
 
                     <!-- Commit info -->
@@ -151,13 +148,23 @@
     }
 
     .git-timeline {
+        align-self: stretch;
         display: flex;
-        flex-direction: column;
         align-items: center;
-        padding-top: 3px;
+        justify-content: center;
         position: relative;
         flex-shrink: 0;
         width: 12px;
+    }
+    .git-timeline::before {
+        content: '';
+        position: absolute;
+        top: -3px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 1.5px;
+        height: calc(100% + 6px);
+        background: rgba(163, 113, 247, 0.3);
     }
 
     .git-dot {
@@ -167,13 +174,16 @@
         background: var(--color-status-purple);
         flex-shrink: 0;
         z-index: 1;
+        transition: all 0.15s ease;
     }
-
-    .git-line {
-        width: 1.5px;
-        flex: 1;
-        min-height: 12px;
-        background: rgba(163, 113, 247, 0.3);
+    .git-commit-row.selected .git-dot {
+        width: 0;
+        height: 0;
+        border-radius: 0;
+        background: transparent;
+        border-left: 8px solid var(--color-accent);
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
     }
 
     .git-commit-info {
