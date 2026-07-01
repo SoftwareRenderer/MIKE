@@ -103,7 +103,9 @@ const HIGHLIGHT_CACHE_MAX = 50;
 function contentHash(lines: string[]): string {
     let hash = 0;
     for (const line of lines) {
-        hash = ((hash << 5) - hash + line.charCodeAt(0)) | 0;
+        for (let i = 0; i < line.length; i++) {
+            hash = ((hash << 5) - hash + line.charCodeAt(i)) | 0;
+        }
     }
     return hash.toString(36);
 }
