@@ -15,9 +15,12 @@
         onFileSelected: (path: string) => void;
         hasPrev: boolean;
         hasNext: boolean;
+        onToggleFullscreen?: () => void;
+        mobileFullscreen?: boolean;
+        isMobile?: boolean;
     }
 
-    let { commit, diff, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext }: Props = $props();
+    let { commit, diff, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, onToggleFullscreen, mobileFullscreen, isMobile }: Props = $props();
 
     // Parse the unified diff into structured files
     let diffFiles = $derived<DiffFile[]>(parseUnifiedDiff(diff));
@@ -192,28 +195,15 @@
             {/if}
         </div>
         <div class="diff-header-right">
-            <button
-                class="nav-btn"
-                class:disabled={!hasPrev}
-                onclick={() => hasPrev && onNavigate('prev')}
-                title="Previous commit"
-                disabled={!hasPrev}
-            >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M7 2L3 6l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
-            <button
-                class="nav-btn"
-                class:disabled={!hasNext}
-                onclick={() => hasNext && onNavigate('next')}
-                title="Next commit"
-                disabled={!hasNext}
-            >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M5 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
+            {#if onToggleFullscreen}
+                <button type="button" class="nav-btn diff-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
+                    {#if mobileFullscreen}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {/if}
+                </button>
+            {/if}
         </div>
     </div>
 
@@ -418,6 +408,16 @@
         opacity: 0.3;
         cursor: default;
     }
+    /* Fullscreen toggle: visible only on tablets (768–1024px) */
+    .diff-fullscreen-toggle {
+        display: none;
+    }
+    @media (min-width: 768px) and (max-width: 1024px) {
+        .diff-fullscreen-toggle {
+            display: flex;
+        }
+    }
+
     .close-btn {
         width: 24px;
         height: 24px;

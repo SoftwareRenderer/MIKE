@@ -106,11 +106,28 @@
     // Mobile layout
     let isMobile = $state(false);
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
+    let editorFullscreen = $state(false);
+    let diffFullscreen = $state(false);
+
+    function toggleEditorFullscreen() {
+        editorFullscreen = !editorFullscreen;
+    }
+
+    function toggleDiffFullscreen() {
+        diffFullscreen = !diffFullscreen;
+    }
     let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath));
     let projectPathRef = $derived(projectPath);
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
+
+    // Clear symbols when no file is selected
+    $effect(() => {
+        if (!selectedFilePath) {
+            symbols = [];
+        }
+    });
 
     // Column widths (resizable) — loaded from localStorage with defaults
     const savedLayout = loadExplorerLayout();
@@ -208,6 +225,7 @@
         diffCommit = null;
         diffCommitIndex = -1;
         diffUnified = '';
+        diffFullscreen = false;
     }
 
     function handleDiffNavigate(direction: 'prev' | 'next') {
@@ -260,33 +278,41 @@
     }
 
     // Resize handlers
-    function handleResizeStart(type: 'left' | 'right' | 'split', e: MouseEvent) {
+    function handleResizeStart(type: 'left' | 'right' | 'split', e: MouseEvent | TouchEvent) {
         activeResize = type;
         e.preventDefault();
     }
 
-    function handleMouseMove(e: MouseEvent) {
+    function getPointerPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
+        if ('touches' in e) {
+            return { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY };
+        }
+        return { x: e.clientX, y: e.clientY };
+    }
+
+    function handlePointerMove(e: MouseEvent | TouchEvent) {
         if (!activeResize) return;
+        const { x, y } = getPointerPos(e);
         const body = document.querySelector('.branch-body');
         if (!body) return;
         const rect = body.getBoundingClientRect();
 
         if (activeResize === 'left') {
-            const x = e.clientX - rect.left;
-            leftWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, x));
+            const posX = x - rect.left;
+            leftWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, posX));
         } else if (activeResize === 'right') {
-            const x = rect.right - e.clientX;
-            rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, x));
+            const posX = rect.right - x;
+            rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, posX));
         } else if (activeResize === 'split') {
             const splitContainer = document.querySelector('.branch-split-container');
             if (!splitContainer) return;
             const splitRect = splitContainer.getBoundingClientRect();
-            const y = e.clientY - splitRect.top;
-            splitRatio = Math.max(0.2, Math.min(0.8, y / splitRect.height));
+            const posY = y - splitRect.top;
+            splitRatio = Math.max(0.2, Math.min(0.8, posY / splitRect.height));
         }
     }
 
-    function handleMouseUp() {
+    function handlePointerUp() {
         activeResize = null;
         persistExplorerLayout();
     }
@@ -320,24 +346,28 @@
         }
         window.addEventListener('resize', checkMobile);
         window.addEventListener('keydown', handleKeydown);
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('mousemove', handlePointerMove);
+        document.addEventListener('mouseup', handlePointerUp);
+        document.addEventListener('touchmove', handlePointerMove, { passive: false });
+        document.addEventListener('touchend', handlePointerUp);
         document.addEventListener('selectstart', handleSelectStart);
     });
 
     onDestroy(() => {
         window.removeEventListener('resize', checkMobile);
         window.removeEventListener('keydown', handleKeydown);
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('mousemove', handlePointerMove);
+        document.removeEventListener('mouseup', handlePointerUp);
+        document.removeEventListener('touchmove', handlePointerMove);
+        document.removeEventListener('touchend', handlePointerUp);
         document.removeEventListener('selectstart', handleSelectStart);
     });
 </script>
 
-<div class="branch-view" role="dialog" aria-label="Branch view">
+<div class="branch-view" class:fullscreen={(editorFullscreen && selectedFilePath) || (diffFullscreen && diffCommit)} role="dialog" aria-label="Branch view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="branch-header">
-        <button class="close-btn" onclick={onClose} aria-label="Close branch view" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { editorFullscreen = false; diffFullscreen = false; onClose(); }} aria-label="Close branch view" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -406,7 +436,7 @@
     </div>
 
     <!-- Mobile Tab Bar -->
-    {#if isMobile && !diffCommit}
+    {#if isMobile && !diffCommit && !editorFullscreen && !diffFullscreen}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -460,6 +490,7 @@
                     class="branch-split-handle"
                     class:dragging={activeResize === 'split'}
                     onmousedown={(e) => handleResizeStart('split', e)}
+                    ontouchstart={(e) => handleResizeStart('split', e)}
                     role="separator"
                     aria-label="Resize panels"
                     aria-orientation="horizontal"
@@ -486,6 +517,7 @@
             class="branch-resize-handle"
             class:active={activeResize === 'left'}
             onmousedown={(e) => handleResizeStart('left', e)}
+            ontouchstart={(e) => handleResizeStart('left', e)}
             role="separator"
             aria-label="Resize left panel"
             aria-orientation="vertical"
@@ -505,6 +537,9 @@
                     onFileSelected={handleFileSelected}
                     hasPrev={diffCommitIndex < commits.length - 1}
                     hasNext={diffCommitIndex > 0}
+                    onToggleFullscreen={toggleDiffFullscreen}
+                    mobileFullscreen={diffFullscreen}
+                    isMobile={isMobile}
                 />
             </div>
         {:else}
@@ -516,7 +551,10 @@
                     onFocused={handleEditorFocused}
                     onSymbolsUpdate={handleSymbolsUpdate}
                     onHasChanges={handleHasChanges}
-                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; }}
+                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                    onToggleFullscreen={toggleEditorFullscreen}
+                    mobileFullscreen={editorFullscreen}
+                    isMobile={isMobile}
                 />
             </div>
 
@@ -525,6 +563,7 @@
                 class="branch-resize-handle"
                 class:active={activeResize === 'right'}
                 onmousedown={(e) => handleResizeStart('right', e)}
+                ontouchstart={(e) => handleResizeStart('right', e)}
                 role="separator"
                 aria-label="Resize right panel"
                 aria-orientation="vertical"
@@ -561,6 +600,30 @@
         border-bottom: 1px solid var(--color-border);
         background: var(--color-surface-1);
         flex-shrink: 0;
+    }
+
+    /* Fullscreen mode: hide header and tab bar, expand to cover sidebar */
+    .branch-view.fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        margin: 0;
+        border-radius: 0;
+    }
+    .branch-view.fullscreen .branch-header {
+        display: none;
+    }
+    .branch-view.fullscreen .mobile-tab-bar {
+        display: none !important;
+    }
+    .branch-view.fullscreen .branch-left-column {
+        display: none !important;
+    }
+    .branch-view.fullscreen .branch-body {
+        height: 100%;
     }
 
     .branch-view-title {

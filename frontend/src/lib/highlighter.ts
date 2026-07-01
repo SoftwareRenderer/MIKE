@@ -258,46 +258,61 @@ export function getLanguageTreeFromView(view: any): Array<{ name: string; kind: 
             'VariableDefinition': 'variable',
             'PropertyDefinition': 'property',
             'PropertyName': 'property',
+            // Go
+            'FunctionDecl': 'function',
+            'MethodDecl': 'function',
+            'VarDecl': 'variable',
+            'ImportSpec': 'variable',
+            'TypeDecl': 'class',
+            'InterfaceType': 'class',
+            'StructType': 'class',
         };
 
-        // Track parent stack as we iterate
+        // Track parent stack during iteration
         const parentStack: string[] = [];
+        const rootNodes = new Set(['SourceFile', 'Script', 'Program', 'Document', 'CompilationUnit', 'TranslationUnit']);
 
         tree.iterate({
             enter(node) {
                 const name = node.type.name;
 
-                // Check if this is an identifier with a symbol-kind parent
-                if (name === 'Identifier' || name === 'TypeIdentifier' || name === 'FieldIdentifier' || name === 'VariableName' || name === 'PropertyName' || name === 'VariableDefinition' || name === 'PropertyDefinition') {
+                // Check if this is an identifier name node
+                const isIdent = name === 'Identifier' || name === 'TypeIdentifier' || name === 'FieldIdentifier' || name === 'VariableName' || name === 'PropertyName' || name === 'VariableDefinition' || name === 'PropertyDefinition' || name === 'DefName' || name === 'FieldName' || name === 'TypeName';
+
+                // Only capture top-level (global) identifiers.
+                // Uses parent stack length to distinguish global from local scope:
+                // - stackLen 1: only functions/methods (Go: [FunctionDecl], [MethodDecl])
+                //   local short-var declarations also have stackLen=1 [VarDecl], excluded by kind check
+                // - stackLen 2: root+declaration (JS/C: [Script, FunctionDeclaration]),
+                //   or declaration+child for non-functions (Go global: [VarDecl, VarSpec])
+                // This rejects stacks like [Block, VarDecl] or [FunctionDecl, VarDecl] (local/nested)
+                let topDeclKind: string | null = null;
+                if (parentStack.length === 1) {
+                    // Only accept functions and classes at stackLen 1
+                    const k = kindMap[parentStack[0]];
+                    if (k === 'function' || k === 'class') topDeclKind = k;
+                } else if (parentStack.length === 2) {
+                    // JS/C: root wrapper at index 0, declaration at index 1
+                    if (rootNodes.has(parentStack[0])) {
+                        topDeclKind = kindMap[parentStack[1]] ?? null;
+                    }
+                    // Go global: declaration at index 0 (e.g., [VarDecl, VarSpec])
+                    // But NOT if index 0 is a function/method (those contain local vars)
+                    else if (kindMap[parentStack[0]] && kindMap[parentStack[0]] !== 'function') {
+                        topDeclKind = kindMap[parentStack[0]];
+                    }
+                }
+                if (isIdent && parentStack.length <= 2 && topDeclKind) {
                     const text = doc.sliceString(node.from, node.to).trim();
                     if (!text || text.length > 60) return;
                     // Skip keywords
-                    if (/^(if|for|while|return|static|const|struct|typedef|sizeof|void|int|char|bool|true|false|else|break|continue|case|default|switch|do|goto|enum|union|volatile|register|extern|auto|signed|unsigned|short|long|double|float|include|define|ifdef|ifndef|endif|undef|let|var|class|function|new|this|super|import|export|from|extends|implements|interface|type|async|await|yield|try|catch|finally|throw|delete|typeof|instanceof|in|of|with|debugger|null|undefined|constructor|get|set|then|catch|finally|finally|console|log|error|warn|info)$/.test(text)) return;
+                    if (/^(if|for|while|return|static|const|struct|typedef|sizeof|void|int|char|bool|true|false|else|break|continue|case|default|switch|do|goto|enum|union|volatile|register|extern|auto|signed|unsigned|short|long|double|float|include|define|ifdef|ifndef|endif|undef|let|var|class|function|new|this|super|import|export|from|extends|implements|interface|type|async|await|yield|try|catch|finally|throw|delete|typeof|instanceof|in|of|with|debugger|null|undefined|constructor|get|set|then|catch|finally|finally|console|log|error|warn|info|func|package|chan|map|range|defer|fallthrough|iota|nil|string|rune|byte)$/.test(text)) return;
 
-                    // Find the nearest declaration parent
-                    // Only keep functions and variables
-                    let kind: string | null = null;
-                    const priority: Record<string, number> = { 'function': 5, 'variable': 2 };
-                    let bestPriority = 0;
-                    for (let i = parentStack.length - 1; i >= 0; i--) {
-                        const pKind = kindMap[parentStack[i]];
-                        if (pKind && priority[pKind] && priority[pKind] > bestPriority) {
-                            kind = pKind;
-                            bestPriority = priority[pKind];
-                        }
-                    }
-                    if (!kind) return;
-
-                    // Only keep top-level (global) symbols
-                    // The declaration must be at index 1 (direct child of Program/Script)
-                    // and the identifier must be within 3 levels of it
-                    if (!kindMap[parentStack[1]]) return;
-                    const identDepth = parentStack.length;
-                    if ((identDepth - 1) > 3) return;
+                    const declKind = topDeclKind;
 
                     const line = doc.lineAt(node.from).number;
                     if (!symbols.some(s => s.name === text && s.line === line)) {
-                        symbols.push({ name: text, kind, line, indent: 0 });
+                        symbols.push({ name: text, kind: declKind, line, indent: 0 });
                     }
                 }
 
@@ -308,11 +323,12 @@ export function getLanguageTreeFromView(view: any): Array<{ name: string; kind: 
             },
         });
 
-        // Sort: variables first, then functions, each group alphabetically
+        // Sort: functions first, then classes, each group alphabetically
         symbols.sort((a, b) => {
-            const kindOrder = a.kind === 'variable' ? 0 : 1;
-            const bKindOrder = b.kind === 'variable' ? 0 : 1;
-            if (kindOrder !== bKindOrder) return kindOrder - bKindOrder;
+            const kindOrder = { function: 0, class: 1, constant: 2, variable: 3 };
+            const aOrder = kindOrder[a.kind] ?? 9;
+            const bOrder = kindOrder[b.kind] ?? 9;
+            if (aOrder !== bOrder) return aOrder - bOrder;
             return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
         });
 

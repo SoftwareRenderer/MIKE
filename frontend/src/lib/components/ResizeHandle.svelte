@@ -6,21 +6,22 @@
         onDragEnd,
     }: {
         ariaLabel?: string;
-        /** Called on mousedown with the event and startX position */
-        onDragStart: (event: MouseEvent, startX: number) => void;
+        /** Called on mousedown/touchstart with the event and startX position */
+        onDragStart: (event: MouseEvent | TouchEvent, startX: number) => void;
         /** Called during drag with the current pointer X position */
         onDragMove: (pointerX: number) => void;
-        /** Called on mouseup with the final pointer X position */
+        /** Called on mouseup/touchend with the final pointer X position */
         onDragEnd?: (pointerX: number) => void;
     } = $props();
 
     import { startDrag } from '$lib/utils/use-resize-drag';
 
-    function handleMouseDown(event: MouseEvent) {
+    function handlePointerDown(event: MouseEvent | TouchEvent) {
         const container = (event.currentTarget as HTMLElement).closest('.columns');
         if (!container) return;
         const containerWidth = (container as HTMLElement).offsetWidth;
-        const startX = event.clientX;
+        const pos = 'touches' in event ? event.touches[0] : event as MouseEvent;
+        const startX = pos.clientX;
 
         startDrag(event, {
             axis: 'x',
@@ -43,7 +44,8 @@
     aria-orientation="vertical"
     aria-label={ariaLabel}
     class="resize-handle"
-    onmousedown={handleMouseDown}
+    onmousedown={handlePointerDown}
+    ontouchstart={handlePointerDown}
 >
     <div class="resize-handle-line"></div>
 </div>

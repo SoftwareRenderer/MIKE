@@ -4,7 +4,20 @@ import { loadCollapsedTasks, saveCollapsedTasks } from './storage';
 
 export const projects = writable<Project[]>([]);
 export const selectedProject = writable<Project | null>(null);
-export const sidebarCollapsed = writable(false);
+export const sidebarCollapsed = writable(false, () => {
+    // Initialize from localStorage
+    const stored = localStorage.getItem('kanban-sidebar-collapsed');
+    if (stored === 'true') {
+        sidebarCollapsed.set(true);
+    }
+    // Subscribe to save on change
+    return () => {};
+});
+
+// Persist sidebar collapsed state whenever it changes
+sidebarCollapsed.subscribe(v => {
+    localStorage.setItem('kanban-sidebar-collapsed', String(v));
+});
 export const board = writable<Board | null>(null);
 export const selectedTask = writable<Task | null>(null);
 export const config = writable<Config | null>(null);

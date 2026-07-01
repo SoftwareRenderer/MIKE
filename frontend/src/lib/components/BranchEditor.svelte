@@ -74,13 +74,16 @@
         '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     });
 
-    let { projectId, filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+    let { projectId, filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
         projectId: string;
         filePath: string;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
         onHasChanges: (hasChanges: boolean) => void;
         onClose: () => void;
+        onToggleFullscreen?: () => void;
+        mobileFullscreen?: boolean;
+        isMobile?: boolean;
     } = $props();
 
     let content = $state('');
@@ -429,6 +432,15 @@
                 <span class="editor-filename" title={filePath}>{fileName}</span>
             </div>
             <div class="editor-actions">
+                {#if onToggleFullscreen}
+                    <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
+                        {#if mobileFullscreen}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        {:else}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        {/if}
+                    </button>
+                {/if}
                 <button
                     class="editor-save-btn"
                     class:saving={saving}
@@ -578,6 +590,33 @@
     .editor-actions {
         display: flex;
         gap: 4px;
+    }
+
+    .editor-icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+    }
+    .editor-icon-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    /* Fullscreen toggle: visible only on tablets (768–1024px) */
+    .editor-fullscreen-toggle {
+        display: none;
+    }
+    @media (min-width: 768px) and (max-width: 1024px) {
+        .editor-fullscreen-toggle {
+            display: flex;
+        }
     }
 
     .editor-save-btn {
