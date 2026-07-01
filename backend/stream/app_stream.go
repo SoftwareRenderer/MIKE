@@ -42,14 +42,15 @@ const (
 
 // UserMessage carries a user message with optional model override.
 type UserMessage struct {
-	Content     string
-	ModelName   string
-	ServerURL   string
-	Attachments string // JSON array of {mimeType, data} for images
+	Content         string
+	ModelName       string
+	ServerURL       string
+	ReasoningEffort string
+	Attachments     string // JSON array of {mimeType, data} for images
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
-type LazyStartHandler func(projectID, taskID, content, modelName, serverURL string)
+type LazyStartHandler func(projectID, taskID, content, modelName, serverURL, reasoningEffort string)
 
 // clientState holds the subscription state for a single WebSocket connection.
 type clientState struct {

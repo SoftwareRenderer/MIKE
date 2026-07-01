@@ -133,6 +133,9 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let planMode = $state(false);
+    // Tracks when handleModelSelect's updateTask is in-flight, so the board store
+    // $effect doesn't overwrite the user's selection with stale DB values.
+    let modelUpdatePending = $state(false);
     let isAgentSelected = $derived(() => {
         if (!selectedUrl) return false;
         const p = providers.find(p => p.url === selectedUrl);
@@ -281,13 +284,15 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     }
 
     // Watch for task config changes from the board store (e.g., inline edit)
-    // Updates model selection when the task's model/provider is changed externally
+    // Updates model selection when the task's model/provider is changed externally.
+    // Skips model fields when a local updateTask is in-flight to avoid overwriting
+    // the user's selection with stale DB values.
     $effect(() => {
         const boardTask = $boardStore?.tasks.find(t => t.id === taskId);
         if (boardTask) {
-            if (boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
-            if (boardTask.model_name) selectedModel = boardTask.model_name;
-            if (boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
+            if (!modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
+            if (!modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
+            if (!modelUpdatePending && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
             planMode = boardTask.plan_mode ?? false;
         }
     });
@@ -1232,7 +1237,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         // Send with model info for lazy-start
         awaitingResponse = true;
         try {
-            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments);
+            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
         } catch (e) {
             // Send failed — show error, remove optimistic message
             const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
@@ -1250,7 +1255,15 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
         updateContextLimit();
+        // Recalculate context usage from conversation history when switching providers.
+        // This ensures the context bar reflects the correct usage for the new provider.
+        const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
+        if (lastAssistant?.stats) {
+            lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
+            contextState.used = lastPromptTokens;
+        }
         // Update task with new model/provider
+        modelUpdatePending = true;
         try {
             await updateTask(projectId, taskId, {
                 model_name: modelName,
@@ -1259,6 +1272,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             });
         } catch (e) {
             console.error('Failed to update task model:', e);
+        } finally {
+            modelUpdatePending = false;
         }
     }
 
@@ -1295,7 +1310,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         isRegenerating = true;
         awaitingResponse = true;
         try {
-            await sendTaskMessage(projectId, taskId, lastUser.content, selectedModel, selectedUrl);
+            await sendTaskMessage(projectId, taskId, lastUser.content, selectedModel, selectedUrl, undefined, selectedReasoningEffort || undefined);
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : 'Failed to regenerate';
             showToast(errorMsg);
@@ -1505,7 +1520,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             onThreadSwitch?.();
             lastSentMessage = newContent;
             awaitingResponse = true;
-            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments);
+            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
         } catch (e) {
             showToast(String(e));
         }
@@ -1542,7 +1557,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         lastSentMessage = newContent;
         awaitingResponse = true;
-        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments);
+        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
         scroll();
     }
 

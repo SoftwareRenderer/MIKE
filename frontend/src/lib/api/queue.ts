@@ -525,11 +525,13 @@ async function sendTaskMessageRaw(
     content: string,
     modelName?: string,
     serverUrl?: string,
-    attachments?: Array<{ mimeType: string; data: string }>
+    attachments?: Array<{ mimeType: string; data: string }>,
+    reasoningEffort?: string
 ): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
     const body: Record<string, any> = { content };
     if (modelName) body.model_name = modelName;
     if (serverUrl) body.llama_server_url = serverUrl;
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     if (attachments && attachments.length > 0) {
         body.attachments = JSON.stringify(attachments);
     }

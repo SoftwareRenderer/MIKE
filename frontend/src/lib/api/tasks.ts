@@ -135,13 +135,14 @@ export async function sendTaskMessage(
     content: string,
     modelName?: string,
     serverUrl?: string,
-    attachments?: Array<{ mimeType: string; data: string }>
+    attachments?: Array<{ mimeType: string; data: string }>,
+    reasoningEffort?: string
 ): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments }, { id, role: 'user', content });
+        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort }, { id, role: 'user', content });
     }
-    return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments);
+    return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort);
 }
 
 /** Fetch all messages for a task. */

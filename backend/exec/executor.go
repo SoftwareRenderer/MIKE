@@ -36,11 +36,12 @@ type TaskExecutor struct {
 }
 
 type executionState struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	userMsgChan chan stream.UserMessage
-	projectName string
-	createdIDs  []string // task IDs created by create_task during this execution
+	ctx          context.Context
+	cancel       context.CancelFunc
+	userMsgChan  chan stream.UserMessage
+	projectName  string
+	createdIDs   []string // task IDs created by create_task during this execution
+	executorType string   // "llm" or "pi" — tracks which executor type is active
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
 	sandboxExec  execFunc
 	sandboxRead  readFunc
@@ -159,10 +160,11 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Content        string `json:"content"`
-		ModelName      string `json:"model_name"`
-		LlamaServerURL string `json:"llama_server_url"`
-		Attachments    string `json:"attachments"`
+		Content         string `json:"content"`
+		ModelName       string `json:"model_name"`
+		LlamaServerURL  string `json:"llama_server_url"`
+		ReasoningEffort string `json:"reasoning_effort"`
+		Attachments     string `json:"attachments"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "content is required")
@@ -233,10 +235,11 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	// Forward to executor or lazy-start
 	te.forwardUserMessage(projectID, taskID, stream.UserMessage{
-		Content:     req.Content,
-		ModelName:   req.ModelName,
-		ServerURL:   req.LlamaServerURL,
-		Attachments: req.Attachments,
+		Content:         req.Content,
+		ModelName:       req.ModelName,
+		ServerURL:       req.LlamaServerURL,
+		ReasoningEffort: req.ReasoningEffort,
+		Attachments:     req.Attachments,
 	})
 
 	// Return the message
@@ -543,19 +546,20 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 
 // taskExecSetup holds the shared state prepared for task execution.
 type taskExecSetup struct {
-	task               *types.Task
-	project            *types.Project
-	worktreePath       string
-	serverURL          string
-	modelName          string
-	ctx                context.Context
-	cancel             context.CancelFunc
-	userMsgChan        chan stream.UserMessage
-	sandboxEnabled     bool
-	networkIsolation   bool
-	baseImage          string
-	sandboxDockerfilePath string
-	memoryLimit        int
+	task                    *types.Task
+	project                 *types.Project
+	worktreePath            string
+	serverURL               string
+	modelName               string
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	userMsgChan             chan stream.UserMessage
+	initialContent          string   // user message content for lazy-start (empty for normal start)
+	sandboxEnabled          bool
+	networkIsolation        bool
+	baseImage               string
+	sandboxDockerfilePath   string
+	memoryLimit             int
 }
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
@@ -633,6 +637,15 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		}
 	}
 
+	// Apply model/provider overrides to the task before persisting.
+	// This ensures the DB has the correct URL/model even if the frontend's
+	// updateTask call hasn't arrived yet (race condition during executor switch).
+	if serverURL != "" {
+		task.LlamaServerURL = serverURL
+	}
+	if modelName != "" {
+		task.ModelName = modelName
+	}
 	task.StatusState = "running"
 	task.Status = "in_progress"
 	if err := te.store.UpdateTask(task); err != nil {
@@ -668,7 +681,11 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	te.taskMu.Lock()
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, projectName: project.Name}
+	execType := "llm"
+	if te.configStore.IsAgentProvider(serverURL) {
+		execType = "pi"
+	}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, projectName: project.Name, executorType: execType}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -720,7 +737,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "")
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -764,10 +781,28 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 }
 
 // forwardUserMessage forwards a user message to the running executor or lazy-starts one.
+// If the requested executor type (llm vs pi) differs from the currently running executor,
+// it stops the old executor and lazy-starts a new one with the correct type.
 func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.UserMessage) {
+	requestedType := "llm"
+	if te.configStore.IsAgentProvider(um.ServerURL) {
+		requestedType = "pi"
+	}
+
 	te.taskMu.Lock()
 	state, exists := te.tasks[taskID]
 	if exists {
+		if state.executorType != requestedType {
+			// Executor type switch: stop old executor, start new one
+			log.Printf("[executor-switch] task=%s switching from %s to %s", taskID, state.executorType, requestedType)
+			state.cancel()
+			delete(te.tasks, taskID)
+			te.taskMu.Unlock()
+			// Brief drain to let old executor finish its select loop
+			time.Sleep(100 * time.Millisecond)
+			go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort)
+			return
+		}
 		select {
 		case state.userMsgChan <- um:
 		default:
@@ -777,7 +812,7 @@ func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.U
 		return
 	}
 	te.taskMu.Unlock()
-	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL)
+	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort)
 }
 
 // StopSandbox removes the sandbox container for a task (called on task deletion).
@@ -801,8 +836,8 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 }
 
 // handleLazyStart is called when a user message arrives for a task with no active executor.
-func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL string) {
-	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s)", taskID, projectID, modelName, serverURL)
+func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL, reasoningEffort string) {
+	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s, effort=%s)", taskID, projectID, modelName, serverURL, reasoningEffort)
 
 	te.taskMu.Lock()
 	if _, exists := te.tasks[taskID]; exists {
@@ -815,6 +850,11 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	if err != nil {
 		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
 		return
+	}
+	// Apply model override from the user message (may arrive before updateTask completes)
+	if reasoningEffort != "" {
+		task.ReasoningEffort = reasoningEffort
+		te.store.UpdateTask(task)
 	}
 
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName)
@@ -829,6 +869,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	task = execSetup.task
+	execSetup.initialContent = content // pass user message to executor
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
@@ -836,7 +877,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content)
 }
 
 // mergeBranch merges the task's branch into the target branch.

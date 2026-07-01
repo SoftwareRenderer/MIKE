@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -980,4 +981,100 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 	task.CurrentThreadID = threadID
 	_ = s.UpdateTask(task)
 	return task
+}
+
+// --- Reasoning Effort Tests ---
+
+func TestUserMessage_ReasoningEffortField(t *testing.T) {
+	// Verify the UserMessage struct carries ReasoningEffort
+	um := stream.UserMessage{
+		Content:         "test message",
+		ModelName:       "test-model",
+		ServerURL:       "http://localhost:8080/v1",
+		ReasoningEffort: "high",
+		Attachments:     "",
+	}
+
+	if um.ReasoningEffort != "high" {
+		t.Errorf("expected ReasoningEffort='high', got %q", um.ReasoningEffort)
+	}
+	if um.ModelName != "test-model" {
+		t.Errorf("expected ModelName='test-model', got %q", um.ModelName)
+	}
+	if um.ServerURL != "http://localhost:8080/v1" {
+		t.Errorf("expected ServerURL='http://localhost:8080/v1', got %q", um.ServerURL)
+	}
+}
+
+func TestUserMessage_ReasoningEffortEmpty(t *testing.T) {
+	// Verify empty ReasoningEffort is handled (falls back to config default)
+	um := stream.UserMessage{
+		Content:         "test message",
+		ModelName:       "test-model",
+		ServerURL:       "http://localhost:8080/v1",
+		ReasoningEffort: "", // empty — should use config default
+	}
+
+	if um.ReasoningEffort != "" {
+		t.Errorf("expected empty ReasoningEffort, got %q", um.ReasoningEffort)
+	}
+}
+
+func TestModelConfig_SetAndGet(t *testing.T) {
+	mc := &modelConfig{
+		serverURL: "http://old-server/v1",
+		modelName: "old-model",
+	}
+
+	// Verify initial values
+	url, model := mc.get()
+	if url != "http://old-server/v1" {
+		t.Errorf("expected initial URL 'http://old-server/v1', got %q", url)
+	}
+	if model != "old-model" {
+		t.Errorf("expected initial model 'old-model', got %q", model)
+	}
+
+	// Update model config
+	mc.set("http://new-server/v1", "new-model")
+
+	url, model = mc.get()
+	if url != "http://new-server/v1" {
+		t.Errorf("expected URL 'http://new-server/v1', got %q", url)
+	}
+	if model != "new-model" {
+		t.Errorf("expected model 'new-model', got %q", model)
+	}
+}
+
+func TestModelConfig_ConcurrentAccess(t *testing.T) {
+	mc := &modelConfig{
+		serverURL: "http://initial/v1",
+		modelName: "initial-model",
+	}
+
+	done := make(chan bool, 2)
+
+	// Writer goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			mc.set("http://server/v1", fmt.Sprintf("model-%d", i))
+		}
+		done <- true
+	}()
+
+	// Reader goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			_, _ = mc.get()
+		}
+		done <- true
+	}()
+
+	// Wait for both goroutines
+	<-done
+	<-done
+
+	// If we got here without data race, the test passes
+	_, _ = mc.get()
 }

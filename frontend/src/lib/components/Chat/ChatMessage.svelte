@@ -517,11 +517,17 @@
                     <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} projectId={projectId} taskId={msgTaskId} />
                 {/each}
             {/if}
-            {#if stats && stats.predicted_tokens > 0}
+            {#if stats}
                 <div class="message-stats">
                     <span class="stats-model-name">{stats.model_name || 'model'}</span>
-                    <span class="stat-separator" aria-hidden="true">·</span>
-                    <span class="stat-item">{genTokens} tokens</span>
+                    {#if genTokens > 0}
+                        <span class="stat-separator" aria-hidden="true">·</span>
+                        <span class="stat-item">{genTokens} tokens</span>
+                    {/if}
+                    {#if stats.duration > 0}
+                        <span class="stat-separator" aria-hidden="true">·</span>
+                        <span class="stat-item">{(stats.duration / 1000).toFixed(1)}s</span>
+                    {/if}
                 </div>
             {/if}
             {#if content || showReasoningToggle}

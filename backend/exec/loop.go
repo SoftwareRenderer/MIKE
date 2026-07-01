@@ -25,14 +25,18 @@ import (
 const PiSentinelURL = "pi://agent"
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
+		// Only remove from tasks map if we're still the active executor
+		// (prevents old executor from deleting a replacement during type switch)
 		te.taskMu.Lock()
-		delete(te.tasks, task.ID)
+		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
+			delete(te.tasks, task.ID)
+		}
 		te.taskMu.Unlock()
 		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
 		// It's removed only when the task is deleted (via RemoveStream in cleanupTask).
@@ -101,7 +105,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		// Reuse existing container if it's already running from a previous executor (lazy-start).
 		// Only create a new container and send status if one doesn't exist.
-		if !te.sandboxMgr.ContainerRunning(task.ID) {
+		// Exception: if Pi config is needed but the existing container was created without it
+		// (e.g., executor switched from LLM to Pi), recreate the container with the mount.
+		needPiConfig := piAgentDir != ""
+		hasExistingContainer := te.sandboxMgr.ContainerRunning(task.ID)
+		if !hasExistingContainer || needPiConfig {
+			if needPiConfig && hasExistingContainer {
+				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
+			}
 			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
 				task.StatusState = "failed"
 				task.Status = "review"
@@ -148,7 +159,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	// Check if this task uses Pi agent
 	if serverURL == PiSentinelURL {
 		log.Printf("[exec] task=%s detected Pi agent (url=%s), calling executeTaskWithPi", task.ID, serverURL)
-		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, userMsgChan, sandboxEnabled)
+		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, userMsgChan, sandboxEnabled, initialContent)
 		log.Printf("[exec] task=%s executeTaskWithPi returned", task.ID)
 		return
 	}
@@ -291,28 +302,33 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			newModel := updatedTask.ModelName
 			curURL, curModel := mc.get()
 			if newURL != "" && newURL != curURL || newModel != "" && newModel != curModel {
-				if newURL == "" {
-					newURL = curURL
-				}
-				if newModel == "" {
-					newModel = curModel
-				}
-				mc.set(newURL, newModel)
-				newReasoningEffort := updatedTask.ReasoningEffort
-				if newReasoningEffort == "" {
-					newReasoningEffort = te.configStore.GetModelReasoningEffort(newModel)
-				}
-				newAPIKey := te.configStore.GetProviderAPIKey(newURL)
-				client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort, newAPIKey)
-				providerName = te.configStore.GetProviderNameByURL(newURL)
-				contextWindow = te.configStore.GetModelContextWindow(newModel, newURL)
-				if contextWindow == nil {
-					if discovered := te.configStore.DiscoverContextWindow(newModel, newURL); discovered != nil {
-						contextWindow = discovered
-						te.configStore.SaveModelContextWindow(newModel, newURL, *discovered)
+				// Skip model switch if target is Pi agent — requires different executor
+				if newURL == PiSentinelURL {
+					log.Printf("[model-switch] task=%s skipping switch to Pi agent (requires executor restart)", task.ID)
+				} else {
+					if newURL == "" {
+						newURL = curURL
 					}
+					if newModel == "" {
+						newModel = curModel
+					}
+						mc.set(newURL, newModel)
+					newReasoningEffort := updatedTask.ReasoningEffort
+					if newReasoningEffort == "" {
+						newReasoningEffort = te.configStore.GetModelReasoningEffort(newModel)
+					}
+					newAPIKey := te.configStore.GetProviderAPIKey(newURL)
+					client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort, newAPIKey)
+					providerName = te.configStore.GetProviderNameByURL(newURL)
+					contextWindow = te.configStore.GetModelContextWindow(newModel, newURL)
+					if contextWindow == nil {
+						if discovered := te.configStore.DiscoverContextWindow(newModel, newURL); discovered != nil {
+							contextWindow = discovered
+							te.configStore.SaveModelContextWindow(newModel, newURL, *discovered)
+						}
+					}
+					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, contextWindow)
 				}
-				log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, contextWindow)
 			}
 		}
 
@@ -322,12 +338,20 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[user-msg] task=%s received message before LLM call", task.ID)
 			detector.reset() // user input breaks any loop pattern
 			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
-			if um.ModelName != "" {
+			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 				mc.set(um.ServerURL, um.ModelName)
-				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+				newReasoningEffort := um.ReasoningEffort
+				if newReasoningEffort == "" {
+					newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
+				}
 				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
 				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+				// Persist model override to DB so the DB sync check doesn't revert it
+				task.LlamaServerURL = um.ServerURL
+				task.ModelName = um.ModelName
+				task.ReasoningEffort = newReasoningEffort
+				_ = te.store.UpdateTask(task)
 			}
 		default:
 		}
@@ -559,10 +583,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				messages = append(messages, types.ChatMessage{Role: "user", Content: qm.Content})
 				if qm.ModelName != "" {
 					mc.set(qm.ServerURL, qm.ModelName)
-					newReasoningEffort := te.configStore.GetModelReasoningEffort(qm.ModelName)
+					newReasoningEffort := qm.ReasoningEffort
+					if newReasoningEffort == "" {
+						newReasoningEffort = te.configStore.GetModelReasoningEffort(qm.ModelName)
+					}
 					newAPIKey := te.configStore.GetProviderAPIKey(qm.ServerURL)
 					client = llama.NewLlamaClient(qm.ServerURL, qm.ModelName, newReasoningEffort, newAPIKey)
 					providerName = te.configStore.GetProviderNameByURL(qm.ServerURL)
+					// Persist model override to DB so the DB sync check doesn't revert it
+					task.LlamaServerURL = qm.ServerURL
+					task.ModelName = qm.ModelName
+					task.ReasoningEffort = newReasoningEffort
+					_ = te.store.UpdateTask(task)
 				}
 			}
 
@@ -876,10 +908,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
 				if um.ModelName != "" {
 					mc.set(um.ServerURL, um.ModelName)
-					newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+					newReasoningEffort := um.ReasoningEffort
+					if newReasoningEffort == "" {
+						newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
+					}
 					newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
 					client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 					providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+					// Persist model override to DB so the DB sync check doesn't revert it
+					task.LlamaServerURL = um.ServerURL
+					task.ModelName = um.ModelName
+					task.ReasoningEffort = newReasoningEffort
 				}
 				task.StatusState = "running"
 				te.store.UpdateTask(task)
@@ -956,12 +995,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
 			detector.reset()
 			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
-			if um.ModelName != "" {
+			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 				mc.set(um.ServerURL, um.ModelName)
-				newReasoningEffort := te.configStore.GetModelReasoningEffort(um.ModelName)
+				newReasoningEffort := um.ReasoningEffort
+				if newReasoningEffort == "" {
+					newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
+				}
 				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
 				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
 				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
+				// Persist model override to DB so the DB sync check doesn't revert it
+				task.LlamaServerURL = um.ServerURL
+				task.ModelName = um.ModelName
+				task.ReasoningEffort = newReasoningEffort
 			}
 			task.StatusState = "running"
 			te.store.UpdateTask(task)
@@ -1011,14 +1057,18 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 // executeTaskWithPi runs the task using Pi agent via RPC mode.
 // Pi handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, sandboxEnabled bool) {
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
+		// Only remove from tasks map if we're still the active executor
+		// (prevents old executor from deleting a replacement during type switch)
 		te.taskMu.Lock()
-		delete(te.tasks, task.ID)
+		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
+			delete(te.tasks, task.ID)
+		}
 		te.taskMu.Unlock()
 	}()
 
@@ -1094,8 +1144,14 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
 
-	// Send initial prompt to Pi
-	err = client.Prompt(ctx, task.Prompt)
+	// Send initial prompt to Pi.
+	// For lazy-start (executor switch), use the user's message. For normal start, use task prompt.
+	initialPrompt := task.Prompt
+	if initialContent != "" {
+		initialPrompt = initialContent
+		log.Printf("[pi] task=%s lazy-start: sending user message as initial prompt", task.ID)
+	}
+	err = client.Prompt(ctx, initialPrompt)
 	if err != nil {
 		task.StatusState = "failed"
 		task.Status = "review"
@@ -1195,6 +1251,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	startTime := time.Now()
 	agentEnded := false
 	var stopReason string
+	var totalPromptTokens, totalPredictedTokens int // accumulated across all assistant messages
 
 	for !agentEnded {
 		select {
@@ -1312,6 +1369,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								predictedTokens = int(output)
 							}
 						}
+						totalPromptTokens += promptTokens
+						totalPredictedTokens += predictedTokens
 
 						// Persist assistant message first (even if empty — acts as anchor for tool call merge)
 						te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1469,10 +1528,15 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 		// Broadcast complete event
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-			"state":      task.StatusState,
-			"summary":    "Pi Coding Agent finished",
-			"model_name": client.ModelName(),
-			"duration":   duration.Milliseconds(),
+			"state":            task.StatusState,
+			"summary":          "Pi Coding Agent finished",
+			"model_name":       client.ModelName(),
+			"prompt_tokens":    totalPromptTokens,
+			"predicted_tokens": totalPredictedTokens,
+			"cache_tokens":     0,
+			"prompt_ms":        0,
+			"predicted_ms":     0,
+			"duration":         duration.Milliseconds(),
 		}})
 
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
