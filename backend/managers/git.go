@@ -166,7 +166,14 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	var c *exec.Cmd
 	if base != "" && head != "" {
 		// Commit-to-commit comparison
-		c = exec.Command("git", "-C", project.Path, "diff", base+".."+head)
+		// Special case: empty tree hash is a virtual constant, not a real git object.
+		// git diff EMPTY_TREE..HEAD fails with "Invalid revision range".
+		// Use git diff-tree --root instead to show the root commit's changes.
+		if base == git.EmptyTreeHash {
+			c = exec.Command("git", "-C", project.Path, "diff-tree", "--root", "--format=", "-p", head)
+		} else {
+			c = exec.Command("git", "-C", project.Path, "diff", base+".."+head)
+		}
 	} else {
 		// Legacy: working tree vs ref
 		ref := r.URL.Query().Get("ref")

@@ -17,6 +17,10 @@ import (
 	"kanban/backend/store"
 )
 
+// EmptyTreeHash is the SHA-1 of an empty git tree object.
+// It's a git internal constant (SHA-1 of "tree 0\0").
+const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
+
 // Git author identity, configurable via environment variables.
 var (
 	GitAuthorName = envDefault("KANBAN_GIT_AUTHOR_NAME", "Kanban")
