@@ -85,6 +85,7 @@ export {
 
 export {
     getGitLogFull,
+    getCommitDiff,
     getGitBranches,
     checkoutBranch,
 } from './api/git';

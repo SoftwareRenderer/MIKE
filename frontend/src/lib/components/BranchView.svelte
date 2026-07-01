@@ -1,12 +1,13 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getGitLogFull, getGitBranches, checkoutBranch } from '$lib/api';
+    import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiff } from '$lib/api';
     import { toHomeRelative } from '$lib/utils/path';
     import type { GitCommit } from '$lib/types';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
+    import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
@@ -28,6 +29,13 @@
     let loadingCommits = $state(true);
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
+
+    // Commit diff overlay state
+    let diffCommit = $state<GitCommit | null>(null);
+    let diffCommitIndex = $state(-1);
+    let diffUnified = $state('');
+    let diffLoading = $state(false);
+    const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
     // Sync selectedBranch when parent updates currentBranch via WebSocket
     $effect(() => {
@@ -78,8 +86,15 @@
     // Selected file state
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
-    let initialFileRef = $derived(initialFile);
     let unsavedFiles = $state<string[]>(loadUnsavedFiles(projectId));
+
+    // Sync selected file from URL on mount and when initialFile updates
+    $effect(() => {
+        const file = initialFile;
+        if (file && isPathSafe(file) && !selectedFilePath) {
+            selectedFilePath = file;
+        }
+    });
     let editorFocused = $state(false);
 
     // Persist unsaved files to localStorage
@@ -158,9 +173,48 @@
 
     function handleFileSelected(path: string) {
         if (!isPathSafe(path)) return;
+        closeCommitDiff();
         selectedFilePath = path;
         onUpdateFile(path);
         if (isMobile) activeTab = 'editor';
+    }
+
+    // Commit diff overlay handlers
+    async function handleCommitSelected(commit: GitCommit, index: number) {
+        diffCommit = commit;
+        diffCommitIndex = index;
+        diffLoading = true;
+        diffUnified = '';
+        try {
+            // Base: previous commit in log, or the commit's first parent, or empty tree
+            let baseHash: string;
+            if (index > 0) {
+                baseHash = commits[index - 1].hash;
+            } else if (commit.parents && commit.parents.length > 0) {
+                baseHash = commit.parents[0];
+            } else {
+                baseHash = EMPTY_TREE;
+            }
+            diffUnified = await getCommitDiff(projectId, baseHash, commit.hash);
+        } catch (e) {
+            console.error('Failed to fetch commit diff:', e);
+            diffUnified = '';
+        } finally {
+            diffLoading = false;
+        }
+    }
+
+    function closeCommitDiff() {
+        diffCommit = null;
+        diffCommitIndex = -1;
+        diffUnified = '';
+    }
+
+    function handleDiffNavigate(direction: 'prev' | 'next') {
+        const newIndex = diffCommitIndex + (direction === 'next' ? -1 : 1);
+        if (newIndex >= 0 && newIndex < commits.length) {
+            handleCommitSelected(commits[newIndex], newIndex);
+        }
     }
 
     function handleSymbolsUpdate(newSymbols: Array<{ name: string; kind: string; line: number; indent: number }>) {
@@ -420,6 +474,8 @@
                         currentBranch={selectedBranch}
                         commits={commits}
                         loading={loadingCommits}
+                        onCommitSelected={handleCommitSelected}
+                        selectedCommitHash={diffCommit?.hash}
                     />
                 </div>
             </div>
@@ -436,38 +492,55 @@
             tabindex="-1"
         ></div>
 
-        <!-- Center column: File editor -->
-        <div class="branch-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
-            <BranchEditor
-                projectId={projectId}
-                filePath={selectedFilePath}
-                onFocused={handleEditorFocused}
-                onSymbolsUpdate={handleSymbolsUpdate}
-                onHasChanges={handleHasChanges}
-                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; }}
-            />
-        </div>
+        {#if diffCommit}
+            <!-- Commit diff overlay (replaces editor + symbols columns) -->
+            <div class="branch-diff-overlay">
+                <CommitDiffOverlay
+                    commit={diffCommit}
+                    diff={diffUnified}
+                    loading={diffLoading}
+                    projectPath={projectPath}
+                    onClose={closeCommitDiff}
+                    onNavigate={handleDiffNavigate}
+                    onFileSelected={handleFileSelected}
+                    hasPrev={diffCommitIndex < commits.length - 1}
+                    hasNext={diffCommitIndex > 0}
+                />
+            </div>
+        {:else}
+            <!-- Center column: File editor -->
+            <div class="branch-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
+                <BranchEditor
+                    projectId={projectId}
+                    filePath={selectedFilePath}
+                    onFocused={handleEditorFocused}
+                    onSymbolsUpdate={handleSymbolsUpdate}
+                    onHasChanges={handleHasChanges}
+                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; }}
+                />
+            </div>
 
-        <!-- Resize handle: right column -->
-        <div
-            class="branch-resize-handle"
-            class:active={activeResize === 'right'}
-            onmousedown={(e) => handleResizeStart('right', e)}
-            role="separator"
-            aria-label="Resize right panel"
-            aria-orientation="vertical"
-            tabindex="-1"
-        ></div>
+            <!-- Resize handle: right column -->
+            <div
+                class="branch-resize-handle"
+                class:active={activeResize === 'right'}
+                onmousedown={(e) => handleResizeStart('right', e)}
+                role="separator"
+                aria-label="Resize right panel"
+                aria-orientation="vertical"
+                tabindex="-1"
+            ></div>
 
-        <!-- Right column: Symbol outline -->
-        <div class="branch-right-column" class:hidden={isMobile && activeTab !== 'symbols'} style="width: {rightWidth}px">
-            <BranchSymbols
-                symbols={symbols}
-                onSymbolClick={(line: number) => {
-                    window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
-                }}
-            />
-        </div>
+            <!-- Right column: Symbol outline -->
+            <div class="branch-right-column" class:hidden={isMobile && activeTab !== 'symbols'} style="width: {rightWidth}px">
+                <BranchSymbols
+                    symbols={symbols}
+                    onSymbolClick={(line: number) => {
+                        window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
+                    }}
+                />
+            </div>
+        {/if}
     </div>
 </div>
 
@@ -726,6 +799,14 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+    }
+
+    .branch-diff-overlay {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+        border-left: 1px solid var(--color-border);
+        background: var(--color-surface-1);
     }
 
     .mobile-tab-bar {

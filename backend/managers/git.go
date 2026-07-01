@@ -52,7 +52,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	full := r.URL.Query().Get("full") == "1"
 
 	if full {
-		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI|%P", branch)
+		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aN|%aI|%P", branch)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
@@ -64,19 +64,19 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 			if line == "" {
 				continue
 			}
-			parts := strings.SplitN(line, "|", 5)
-			if len(parts) < 4 {
+			parts := strings.SplitN(line, "|", 6)
+			if len(parts) < 5 {
 				continue
 			}
 			commit := types.GitCommit{
 				Hash:    parts[0],
 				Short:   parts[1],
 				Subject: parts[2],
-				Author:  "",
-				Date:    parts[3],
+				Author:  parts[3],
+				Date:    parts[4],
 			}
-			if len(parts) == 5 && parts[4] != "" {
-				commit.Parents = strings.Fields(parts[4])
+			if len(parts) == 6 && parts[5] != "" {
+				commit.Parents = strings.Fields(parts[5])
 			}
 			commits = append(commits, commit)
 		}
@@ -149,6 +149,9 @@ func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleDiff returns diff between refs.
+// Supports:
+//   - ?ref=X         — git diff X (working tree vs ref, legacy)
+//   - ?base=A&head=B — git diff A..B (commit-to-commit comparison)
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -156,11 +159,23 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	ref := r.URL.Query().Get("ref")
-	if ref == "" {
-		ref = "HEAD"
+
+	base := r.URL.Query().Get("base")
+	head := r.URL.Query().Get("head")
+
+	var c *exec.Cmd
+	if base != "" && head != "" {
+		// Commit-to-commit comparison
+		c = exec.Command("git", "-C", project.Path, "diff", base+".."+head)
+	} else {
+		// Legacy: working tree vs ref
+		ref := r.URL.Query().Get("ref")
+		if ref == "" {
+			ref = "HEAD"
+		}
+		c = exec.Command("git", "-C", project.Path, "diff", ref)
 	}
-	c := exec.Command("git", "-C", project.Path, "diff", ref)
+
 	out, err := c.CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))

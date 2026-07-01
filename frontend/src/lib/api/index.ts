@@ -91,6 +91,7 @@ export {
     getUntrackedFileContent,
     resetWorktree,
     getGitLogFull,
+    getCommitDiff,
     getGitBranches,
     checkoutBranch,
 } from './git';

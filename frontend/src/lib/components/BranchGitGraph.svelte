@@ -1,11 +1,13 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
 
-    let { projectId, currentBranch, commits, loading }: {
+    let { projectId, currentBranch, commits, loading, onCommitSelected, selectedCommitHash }: {
         projectId: string;
         currentBranch: string;
         commits: GitCommit[];
         loading: boolean;
+        onCommitSelected?: (commit: GitCommit, index: number) => void;
+        selectedCommitHash?: string;
     } = $props();
 
     function formatDate(dateStr: string): string {
@@ -39,7 +41,15 @@
             <div class="git-graph-empty">No commits</div>
         {:else}
             {#each commits as commit, i}
-                <div class="git-commit-row" role="listitem">
+                <div
+                    class="git-commit-row"
+                    class:selectable={!!onCommitSelected}
+                    class:selected={commit.hash === selectedCommitHash}
+                    role={onCommitSelected ? 'button' : 'listitem'}
+                    tabindex={onCommitSelected ? 0 : undefined}
+                    onclick={() => onCommitSelected?.(commit, i)}
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCommitSelected?.(commit, i); } }}
+                >
                     <!-- Timeline line -->
                     <div class="git-timeline">
                         <div class="git-dot" title={commit.short}></div>
@@ -53,6 +63,9 @@
                         <div class="git-commit-subject" title={commit.subject}>{commit.subject}</div>
                         <div class="git-commit-meta">
                             <span class="git-commit-hash" title={commit.hash}>{commit.short}</span>
+                            {#if commit.author}
+                                <span class="git-commit-author" title={commit.author}>{commit.author}</span>
+                            {/if}
                             {#if commit.date}
                                 <span class="git-commit-date">{formatDate(commit.date)}</span>
                             {/if}
@@ -115,6 +128,27 @@
     .git-commit-row:hover {
         background: var(--color-surface-2);
     }
+    .git-commit-row.selectable {
+        cursor: pointer;
+    }
+    .git-commit-row.selectable:hover {
+        background: var(--color-surface-3);
+    }
+    .git-commit-row.selectable:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+    }
+    .git-commit-row.selected {
+        background: var(--color-accent)15;
+    }
+    .git-commit-row.selected .git-dot {
+        background: var(--color-accent);
+        box-shadow: 0 0 0 3px var(--color-accent)33;
+    }
+    .git-commit-row.selected .git-commit-subject {
+        color: var(--color-accent);
+        font-weight: 500;
+    }
 
     .git-timeline {
         display: flex;
@@ -160,7 +194,7 @@
     .git-commit-meta {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         margin-top: 1px;
     }
 
@@ -168,6 +202,21 @@
         font-size: 0.75rem;
         font-family: var(--font-mono);
         color: var(--color-text-tertiary);
+    }
+
+    .git-commit-author {
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+    .git-commit-author::before {
+        content: '·';
+        margin-right: 6px;
+        opacity: 0.5;
     }
 
     .git-commit-date {

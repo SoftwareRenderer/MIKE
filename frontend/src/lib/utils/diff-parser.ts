@@ -316,4 +316,108 @@ export function truncatePath(path: string, maxLength = 48): string {
     return `${path.slice(0, head)}…${path.slice(path.length - tail)}`;
 }
 
+/** A single row in a side-by-side diff view. */
+export interface SideBySideRow {
+    leftLineNum: number | null;
+    leftText: string;
+    leftVariant: 'context' | 'removed' | '';
+    rightLineNum: number | null;
+    rightText: string;
+    rightVariant: 'context' | 'added' | '';
+}
+
+/**
+ * Convert unified diff rows into side-by-side pairs.
+ * Paired removed/added lines appear on the same row (left/right).
+ * Context lines appear in both columns.
+ * Unpaired removed lines have an empty right side.
+ * Unpaired added lines have an empty left side.
+ */
+export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
+    const result: SideBySideRow[] = [];
+    let i = 0;
+
+    while (i < rows.length) {
+        const row = rows[i];
+        if (!row) { i++; continue; }
+
+        if (row.variant === 'context') {
+            // Context line appears in both columns
+            result.push({
+                leftLineNum: row.lineNumber,
+                leftText: row.text,
+                leftVariant: 'context',
+                rightLineNum: row.lineNumber,
+                rightText: row.text,
+                rightVariant: 'context',
+            });
+            i++;
+        } else if (row.variant === 'removed') {
+            // Collect contiguous removed block
+            const removedStart = i;
+            while (i < rows.length && rows[i]?.variant === 'removed') i++;
+            const removedBlock = rows.slice(removedStart, i);
+
+            // Collect contiguous added block immediately following
+            const addedStart = i;
+            while (i < rows.length && rows[i]?.variant === 'added') i++;
+            const addedBlock = rows.slice(addedStart, i);
+
+            // Pair positionally
+            const pairCount = Math.min(removedBlock.length, addedBlock.length);
+            for (let p = 0; p < pairCount; p++) {
+                const r = removedBlock[p]!;
+                const a = addedBlock[p]!;
+                result.push({
+                    leftLineNum: r.lineNumber,
+                    leftText: r.text,
+                    leftVariant: 'removed',
+                    rightLineNum: a.lineNumber,
+                    rightText: a.text,
+                    rightVariant: 'added',
+                });
+            }
+            // Unpaired removed lines
+            for (let p = pairCount; p < removedBlock.length; p++) {
+                const r = removedBlock[p]!;
+                result.push({
+                    leftLineNum: r.lineNumber,
+                    leftText: r.text,
+                    leftVariant: 'removed',
+                    rightLineNum: null,
+                    rightText: '',
+                    rightVariant: '',
+                });
+            }
+            // Unpaired added lines
+            for (let p = pairCount; p < addedBlock.length; p++) {
+                const a = addedBlock[p]!;
+                result.push({
+                    leftLineNum: null,
+                    leftText: '',
+                    leftVariant: '',
+                    rightLineNum: a.lineNumber,
+                    rightText: a.text,
+                    rightVariant: 'added',
+                });
+            }
+        } else if (row.variant === 'added') {
+            // Standalone added line (no preceding removed block)
+            result.push({
+                leftLineNum: null,
+                leftText: '',
+                leftVariant: '',
+                rightLineNum: row.lineNumber,
+                rightText: row.text,
+                rightVariant: 'added',
+            });
+            i++;
+        } else {
+            i++;
+        }
+    }
+
+    return result;
+}
+
 

@@ -17,6 +17,14 @@ export async function getGitLogFull(projectId: string, branch?: string): Promise
     return res.json();
 }
 
+/** Fetch the unified diff between two commits as raw text. */
+export async function getCommitDiff(projectId: string, baseHash: string, headHash: string): Promise<string> {
+    const params = new URLSearchParams({ base: baseHash, head: headHash });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch commit diff');
+    return res.text();
+}
+
 /** List all branches for a project. */
 export async function getGitBranches(projectId: string): Promise<string[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
