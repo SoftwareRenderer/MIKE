@@ -406,7 +406,7 @@
     </div>
 
     <!-- Mobile Tab Bar -->
-    {#if isMobile}
+    {#if isMobile && !diffCommit}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -438,7 +438,7 @@
     <!-- 3-column layout -->
     <div class="branch-body">
         <!-- Left column: file browser + git graph -->
-        <div class="branch-left-column" class:hidden={isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
+        <div class="branch-left-column" class:hidden={isMobile && (activeTab !== 'files' || diffCommit)} style="width: {leftWidth}px">
             <div class="branch-split-container">
                 <!-- Top: File browser -->
                 <div class="branch-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
@@ -875,6 +875,12 @@
         }
         .branch-body {
             flex-direction: column;
+            min-height: 0;
+        }
+        .branch-diff-overlay {
+            width: 100% !important;
+            border-left: none;
+            flex: 1 !important;
             min-height: 0;
         }
     }

@@ -57,6 +57,52 @@
         return highlightMap[formatPath(path)]?.get(text) || '';
     }
 
+    // Max change lines to show before truncating a file
+    const TRUNCATE_AFTER = 60;
+
+    /** Build side-by-side rows for a file, optionally truncated to first N change lines. */
+    function getSideBySideRows(rows: DiffRow[], expanded: boolean): SideBySideRow[] {
+        if (expanded) return buildSideBySideRows(rows);
+        // Truncate: keep rows until we've seen TRUNCATE_AFTER change lines
+        const truncated: DiffRow[] = [];
+        let changeCount = 0;
+        for (const row of rows) {
+            if (row.variant === 'added' || row.variant === 'removed') {
+                changeCount++;
+                if (changeCount > TRUNCATE_AFTER) break;
+            }
+            truncated.push(row);
+        }
+        return buildSideBySideRows(truncated);
+    }
+
+    /** Check if a file has more change lines than the threshold. */
+    function isTruncated(rows: DiffRow[]): boolean {
+        return rows.filter(r => r.variant === 'added' || r.variant === 'removed').length > TRUNCATE_AFTER;
+    }
+
+    /** Count remaining change lines after the threshold. */
+    function remainingChanges(rows: DiffRow[]): number {
+        return rows.filter(r => r.variant === 'added' || r.variant === 'removed').length - TRUNCATE_AFTER;
+    }
+
+    // Expanded file state — track which truncated files are fully expanded
+    let expandedFiles = $state<Set<string>>(new Set());
+
+    function toggleExpand(path: string) {
+        const next = new Set(expandedFiles);
+        if (next.has(path)) {
+            next.delete(path);
+        } else {
+            next.add(path);
+        }
+        expandedFiles = next;
+    }
+
+    function isExpanded(path: string): boolean {
+        return expandedFiles.has(path);
+    }
+
     // Collapsed file state — track which files are collapsed
     let collapsedFiles = $state<Set<string>>(new Set());
 
@@ -72,11 +118,6 @@
 
     function isFileCollapsed(path: string): boolean {
         return collapsedFiles.has(path);
-    }
-
-    // Build side-by-side rows for a given file's rows
-    function getSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
-        return buildSideBySideRows(rows);
     }
 
     // Format file path for display (strip a/b/ prefix)
@@ -235,7 +276,7 @@
                                     <!-- Left column (old) -->
                                     <div class="diff-sbs-column diff-sbs-left">
                                         <div class="diff-sbs-scroll">
-                                            {#each getSideBySideRows(file.rows) as row}
+                                            {#each getSideBySideRows(file.rows, isExpanded(file.path)) as row}
                                                 <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:removed={row.leftVariant === 'removed'} class:context={row.leftVariant === 'context'}>
@@ -248,7 +289,7 @@
                                     <!-- Right column (new) -->
                                     <div class="diff-sbs-column diff-sbs-right">
                                         <div class="diff-sbs-scroll">
-                                            {#each getSideBySideRows(file.rows) as row}
+                                            {#each getSideBySideRows(file.rows, isExpanded(file.path)) as row}
                                                 <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:added={row.rightVariant === 'added'} class:context={row.rightVariant === 'context'}>
@@ -260,6 +301,11 @@
                                     </div>
                                 </div>
                                 </div>
+                                {#if isTruncated(file.rows) && !isExpanded(file.path)}
+                                    <button type="button" class="diff-expand-btn" onclick={(e) => { e.stopPropagation(); toggleExpand(file.path); }}>
+                                        Show all changes
+                                    </button>
+                                {/if}
                             {/if}
                         {/if}
                     </section>
@@ -526,9 +572,6 @@
         overflow: hidden;
         cursor: pointer;
     }
-    .diff-sbs-columns:hover .diff-line-content {
-        opacity: 0.85;
-    }
     .diff-sbs-column {
         flex: 1;
         min-width: 0;
@@ -567,7 +610,7 @@
         padding: 0 12px;
         white-space: pre;
         color: var(--color-text-secondary);
-        transition: opacity 0.1s ease;
+        cursor: text;
     }
     .diff-line-content.added {
         background: rgba(63, 185, 80, 0.15);
@@ -579,6 +622,28 @@
     }
     .diff-line-content.context {
         color: var(--color-text-secondary);
+    }
+
+    /* Expand button for truncated files */
+    .diff-expand-btn {
+        display: block;
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--color-surface-2);
+        border: none;
+        border-radius: 0 0 6px 6px;
+        color: var(--color-accent);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        text-align: center;
+    }
+    .diff-expand-btn:hover {
+        background: var(--color-surface-3);
+    }
+    .diff-expand-btn:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
     }
 
     @media (max-width: 768px) {
