@@ -84,8 +84,9 @@
         if (trigger) {
             mentionTrigger = trigger;
             mentionActiveIndex = 0;
-            // Position dropdown over the input area
-            const rect = getInputRect(textareaEl);
+            // Position dropdown over the input area (chat-form-inner = textarea's parent)
+            const container = textareaEl.parentElement as HTMLElement;
+            const rect = getInputRect(container);
             mentionPosition = rect;
 
             // Debounced search

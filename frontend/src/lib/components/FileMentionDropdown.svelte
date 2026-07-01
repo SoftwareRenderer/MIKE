@@ -14,38 +14,60 @@
     let dropdownEl: HTMLUListElement | null = $state(null);
     let visible = $derived(position !== null && results.length > 0);
 
-    // Compute final dropdown position with viewport overflow adjustment
-    let dropdownTop = $derived(0);
-    let dropdownLeft = $derived(0);
+    // Compute final dropdown position with viewport overflow adjustment.
+    // Anchored by BOTTOM edge so it stays pinned to the input as results
+    // filter in/out (changing dropdown height). Position calculated ONCE
+    // on open, then locked — no jumps on result updates.
+    let dropdownBottom = $state(0);
+    let dropdownLeft = $state(0);
+    let dropdownWidth = $state(0);
+    let placed = $state(false);
+    const MIN_WIDTH = 260;
+    const MAX_WIDTH = 400;
 
     $effect(() => {
-        if (!visible || !dropdownEl || !position) {
-            dropdownTop = 0;
+        if (!position) {
+            // Dropdown closed — reset for next open
+            dropdownBottom = 0;
             dropdownLeft = 0;
+            dropdownWidth = 0;
+            placed = false;
             return;
         }
+        if (!dropdownEl || results.length === 0) {
+            return;
+        }
+        // If already placed, skip — prevents jumps when results update.
+        if (placed) return;
+
         // Use requestAnimationFrame to measure after render
         const raf = requestAnimationFrame(() => {
             const rect = dropdownEl!.getBoundingClientRect();
-            const viewportHeight = window.innerHeight;
             const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
 
-            // Position above the input area
-            let top = position.top - rect.height - 4;
-            let left = position.left;
+            // Lock width to the input width, clamped to [MIN, MAX].
+            const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, position.width));
+            dropdownWidth = width;
 
-            // Adjust vertical: show below input if it would overflow top
-            if (top < 8) {
-                top = position.bottom + 4;
+            // Anchor by bottom edge so it stays pinned as height changes.
+            // CSS `bottom` is distance from viewport bottom, so convert viewport coords.
+            // Default: show above input, bottom pinned to input's top edge.
+            let bottom = viewportHeight - position.top;
+            // If dropdown would overflow viewport top, show below input instead.
+            if (position.top - rect.height < 8) {
+                bottom = viewportHeight - position.bottom;
             }
-            // Adjust horizontal: constrain to viewport
-            if (left + rect.width > viewportWidth - 8) {
-                left = viewportWidth - rect.width - 8;
+            // Horizontal: constrain to viewport
+            let left = position.left;
+            if (left + width > viewportWidth - 8) {
+                left = viewportWidth - width - 8;
             }
             if (left < 8) left = 8;
 
-            dropdownTop = top;
+            dropdownBottom = bottom;
             dropdownLeft = left;
+            placed = true;
         });
         return () => cancelAnimationFrame(raf);
     });
@@ -75,7 +97,7 @@
     <ul
         class="mention-dropdown"
         bind:this={dropdownEl}
-        style="position:fixed; top:{dropdownTop}px; left:{dropdownLeft}px; z-index:1000;"
+        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:1000;"
         role="listbox"
         aria-label="File suggestions"
     >
@@ -101,8 +123,6 @@
 
 <style>
     .mention-dropdown {
-        min-width: 260px;
-        max-width: 400px;
         max-height: 240px;
         overflow-y: auto;
         background: var(--color-surface-1);
@@ -147,8 +167,7 @@
 
     @media (max-width: 768px) {
         .mention-dropdown {
-            min-width: 200px;
-            max-width: calc(100vw - 16px);
+            width: calc(100vw - 16px) !important;
         }
     }
 </style>

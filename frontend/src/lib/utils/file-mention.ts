@@ -70,12 +70,13 @@ export function insertMention(value: string, atIndex: number, query: string, pat
 }
 
 /**
- * Get the textarea's bounding rectangle as viewport coordinates.
- * Used to position the @ mention dropdown over the input area.
+ * Get the bounding rectangle of the input area as viewport coordinates.
+ * Uses the provided container element (e.g., the styled input wrapper)
+ * so the dropdown aligns with the visible input boundary, not the textarea content.
  */
-export function getInputRect(textarea: HTMLTextAreaElement): { top: number; bottom: number; left: number; width: number } | null {
+export function getInputRect(container: HTMLElement): { top: number; bottom: number; left: number; width: number } | null {
 	try {
-		const rect = textarea.getBoundingClientRect();
+		const rect = container.getBoundingClientRect();
 		return { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width };
 	} catch {
 		return null;
