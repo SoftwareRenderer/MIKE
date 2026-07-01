@@ -664,6 +664,7 @@
     }
     .diff-file-header:hover {
         filter: brightness(1.2);
+        opacity: 1;
     }
 
     .diff-chevron {
