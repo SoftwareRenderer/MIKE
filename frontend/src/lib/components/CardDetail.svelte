@@ -29,7 +29,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
 
-    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
+    let { task, tasks: columnTasks, projectPath, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -189,10 +189,12 @@
     let editingFile = $state<{ path: string; lineNumber: number; displayPath: string } | null>(null);
 
     function resolveFilePath(relativePath: string): string | null {
-        if (!workspaceDir || !task.id) return null;
+        if (!task.id) return null;
         if (sandboxEnabled) {
-            return `/sandbox/${task.id}/${relativePath}`;
+            if (!projectName) return null;
+            return `/sandbox/${projectName}/${relativePath}`;
         }
+        if (!workspaceDir) return null;
         return `${workspaceDir.replace(/\/+$/, '')}/${task.id}/${relativePath}`;
     }
 

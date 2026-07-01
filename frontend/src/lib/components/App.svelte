@@ -733,7 +733,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         updateUrl({ project: currentProject?.id }, true, true);
