@@ -172,7 +172,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	// the actual working directory inside the sandbox.
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + filepath.Base(worktreePath)
+		promptPath = "/sandbox/" + projectName
 	}
 	var systemPrompt string
 	if task.PlanMode {

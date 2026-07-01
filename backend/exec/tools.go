@@ -110,7 +110,7 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 	var rootErr error
 	makeRead := func() readFunc {
 		return func(p string) ([]byte, error) {
-			norm := normalizePath(worktreePath, p)
+			norm := normalizePath(worktreePath, state.projectName, p)
 			if !filepath.IsAbs(norm) {
 				norm = filepath.Join(worktreePath, norm)
 			}
@@ -127,7 +127,7 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 			if rootErr != nil {
 				return rootErr
 			}
-			norm := normalizePath(worktreePath, p)
+			norm := normalizePath(worktreePath, state.projectName, p)
 			dir := filepath.Dir(filepath.Join(worktreePath, norm))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
@@ -402,13 +402,13 @@ func parseToolArgs(s string) map[string]any {
 
 // normalizePath strips the sandbox mount prefix from absolute paths.
 // Relative paths are returned as-is (os.Root handles traversal prevention).
-func normalizePath(worktreePath, path string) string {
+func normalizePath(worktreePath, projectName, path string) string {
 	cleaned := filepath.Clean(path)
 	if !filepath.IsAbs(cleaned) {
 		return cleaned
 	}
-	// Strip sandbox mount prefix: /sandbox/<basename>/...
-	mountPath := "/sandbox/" + filepath.Base(worktreePath)
+	// Strip sandbox mount prefix: /sandbox/<projectName>/...
+	mountPath := "/sandbox/" + projectName
 	mountPrefix := mountPath + "/"
 	if cleaned == mountPath {
 		return "."

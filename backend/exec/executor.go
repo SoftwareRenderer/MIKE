@@ -39,6 +39,7 @@ type executionState struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	userMsgChan chan stream.UserMessage
+	projectName string
 	createdIDs  []string // task IDs created by create_task during this execution
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
 	sandboxExec  execFunc
@@ -635,9 +636,6 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
-	te.taskMu.Lock()
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan}
-	te.taskMu.Unlock()
 
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -647,6 +645,10 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		te.taskMu.Unlock()
 		return nil, fmt.Errorf("get project for sandbox check: %w", err)
 	}
+
+	te.taskMu.Lock()
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, projectName: project.Name}
+	te.taskMu.Unlock()
 
 	return &taskExecSetup{
 		task:                task,

@@ -3,7 +3,6 @@ package exec
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -470,27 +469,29 @@ func TestExtractCommandTarget(t *testing.T) {
 
 func TestPromptPath_SandboxEnabled(t *testing.T) {
 	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
+	projectName := "my-project"
 	sandboxEnabled := true
 
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + filepath.Base(worktreePath)
+		promptPath = "/sandbox/" + projectName
 	}
 
-	if promptPath != "/sandbox/alpha-bravo-charlie" {
-		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/sandbox/alpha-bravo-charlie")
+	if promptPath != "/sandbox/my-project" {
+		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/sandbox/my-project")
 	}
 }
 
 func TestPromptPath_SandboxDisabled(t *testing.T) {
 	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
+	projectName := "my-project"
 	sandboxEnabled := false
 
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + filepath.Base(worktreePath)
+		promptPath = "/sandbox/" + projectName
 	}
 
 	if promptPath != worktreePath {

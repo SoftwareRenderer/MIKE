@@ -329,7 +329,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Translate sandbox path to host path
-		mountPath := "/sandbox/" + filepath.Base(worktreePath)
+		mountPath := "/sandbox/" + project.Name
 		cleanPath := filepath.Clean(path)
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			rel := cleanPath[len(mountPath):]
@@ -407,7 +407,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Translate sandbox path to host path
-		mountPath := "/sandbox/" + filepath.Base(worktreePath)
+		mountPath := "/sandbox/" + project.Name
 		cleanPath := filepath.Clean(req.Path)
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			rel := cleanPath[len(mountPath):]
@@ -475,7 +475,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Convert path to sandbox path (accept both host and sandbox paths)
-		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		mountPath := "/sandbox/" + project.Name
 		cleanPath := filepath.Clean(path)
 		var sandboxPath string
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
@@ -792,7 +792,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Initialize git repo inside the sandbox
-		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		mountPath := "/sandbox/" + project.Name
 		relPath, _ := filepath.Rel(project.Path, req.Path)
 		sandboxPath := filepath.Join(mountPath, relPath)
 
@@ -894,7 +894,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Create directory inside the sandbox
-		mountPath := "/sandbox/" + filepath.Base(project.Path)
+		mountPath := "/sandbox/" + project.Name
 		relPath, _ := filepath.Rel(project.Path, req.Path)
 		sandboxPath := filepath.Join(mountPath, relPath)
 		sandboxParent := filepath.Dir(sandboxPath)
