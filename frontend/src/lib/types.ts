@@ -45,8 +45,8 @@ export interface Task {
     reasoning_effort?: string;
     max_consecutive_failed_turns: number;
     auto_commit: boolean;
-    merge_on_commit: boolean;
-    merge_children: boolean;
+    auto_merge: boolean;
+    subtasks_auto_merge: boolean;
     plan_mode: boolean;
     parent_task_id?: string;
     title_generating: boolean;
@@ -78,8 +78,8 @@ export interface Config {
     providers: Provider[];
     default_provider: string;
     default_auto_commit?: boolean;
-    default_merge_on_commit?: boolean;
-    default_merge_children?: boolean;
+    default_auto_merge?: boolean;
+    default_subtasks_auto_merge?: boolean;
     default_plan_mode?: boolean;
     default_max_failed_turns?: number;
     encryption_enabled?: boolean;

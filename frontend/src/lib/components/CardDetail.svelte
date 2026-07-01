@@ -361,8 +361,8 @@
     let editingTitleInput: HTMLInputElement | null = $state(null);
     let editingPlanMode = $state(false);
     let editingAutoCommit = $state(false);
-    let editingMergeOnCommit = $state(true);
-    let editingMergeChildren = $state(true);
+    let editingAutoMerge = $state(true);
+    let editingSubtasksAutoMerge = $state(true);
     let editingModel = $state('');
     let editingUrl = $state('');
     let editingReasoningEffort = $state('');
@@ -375,8 +375,8 @@
         editingTitleDraft = currentTitle;
         editingPlanMode = t?.plan_mode ?? false;
         editingAutoCommit = t?.auto_commit ?? false;
-        editingMergeOnCommit = t?.merge_on_commit ?? true;
-        editingMergeChildren = t?.merge_children ?? true;
+        editingAutoMerge = t?.auto_merge ?? true;
+        editingSubtasksAutoMerge = t?.subtasks_auto_merge ?? true;
         editingModel = t?.model_name ?? '';
         editingUrl = t?.llama_server_url ?? '';
         editingReasoningEffort = t?.reasoning_effort ?? '';
@@ -395,9 +395,9 @@
         const updates: Record<string, unknown> = { title: trimmed };
         updates.plan_mode = editingPlanMode;
         updates.auto_commit = editingAutoCommit;
-        updates.auto_commit = editingMergeOnCommit; // auto-commit is prerequisite for auto-merge
-        updates.merge_on_commit = editingMergeOnCommit;
-        updates.merge_children = editingMergeChildren;
+        updates.auto_commit = editingAutoMerge; // auto-commit is prerequisite for auto-merge
+        updates.auto_merge = editingAutoMerge;
+        updates.subtasks_auto_merge = editingSubtasksAutoMerge;
         if (editingModel) updates.model_name = editingModel;
         if (editingUrl) updates.llama_server_url = editingUrl;
         if (editingReasoningEffort) updates.reasoning_effort = editingReasoningEffort;
@@ -405,8 +405,8 @@
             targetTask.title = trimmed;
             targetTask.plan_mode = editingPlanMode;
             targetTask.auto_commit = editingAutoCommit;
-            targetTask.merge_on_commit = editingMergeOnCommit;
-            targetTask.merge_children = editingMergeChildren;
+            targetTask.auto_merge = editingAutoMerge;
+            targetTask.subtasks_auto_merge = editingSubtasksAutoMerge;
             if (editingModel) targetTask.model_name = editingModel;
             if (editingUrl) targetTask.llama_server_url = editingUrl;
             if (editingReasoningEffort) targetTask.reasoning_effort = editingReasoningEffort;
@@ -427,8 +427,8 @@
         editingTitleDraft = '';
         editingPlanMode = false;
         editingAutoCommit = false;
-        editingMergeOnCommit = true;
-        editingMergeChildren = true;
+        editingAutoMerge = true;
+        editingSubtasksAutoMerge = true;
         editingModel = '';
         editingUrl = '';
         editingReasoningEffort = '';

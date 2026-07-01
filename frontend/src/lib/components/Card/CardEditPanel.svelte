@@ -10,8 +10,8 @@
         editUrl,
         editReasoningEffort,
         editPlanMode,
-        editMergeOnCommit,
-        editMergeChildren,
+        editAutoMerge,
+        editSubtasksAutoMerge,
         isAgentSelected,
         taskHasParent,
         targetBranch,
@@ -26,8 +26,8 @@
         editUrl: string;
         editReasoningEffort: string;
         editPlanMode: boolean;
-        editMergeOnCommit: boolean;
-        editMergeChildren: boolean;
+        editAutoMerge: boolean;
+        editSubtasksAutoMerge: boolean;
         isAgentSelected: () => boolean;
         taskHasParent: boolean;
         targetBranch: string;
@@ -97,7 +97,7 @@
                         </svg>
                     </span>
                 </div>
-                <ToggleSwitch bind:checked={editMergeOnCommit} ariaLabel="Auto-merge on completion" />
+                <ToggleSwitch bind:checked={editAutoMerge} ariaLabel="Auto-merge on completion" />
             </div>
             {#if !taskHasParent}
             <div class="config-row">
@@ -110,7 +110,7 @@
                         </svg>
                     </span>
                 </div>
-                <ToggleSwitch bind:checked={editMergeChildren} ariaLabel="Allow subtasks to auto-merge" />
+                <ToggleSwitch bind:checked={editSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" />
             </div>
             {/if}
         </div>

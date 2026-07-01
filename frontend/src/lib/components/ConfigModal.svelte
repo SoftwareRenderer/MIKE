@@ -27,8 +27,8 @@
     let workspaceDir = $state('');
     let defaultProvider = $state('');
     let defaultAutoCommit = $state(false);
-    let defaultMergeOnCommit = $state(false);
-    let defaultMergeChildren = $state(true);
+    let defaultAutoMerge = $state(true);
+    let defaultSubtasksAutoMerge = $state(true);
     let defaultPlanMode = $state(false);
     let defaultMaxFailedTurns = $state(3);
     let loading = $state(false);
@@ -166,8 +166,8 @@
         workspaceDir = config?.workspace_dir || '';
         defaultProvider = config?.default_provider || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
-        defaultMergeOnCommit = config?.default_merge_on_commit ?? true;
-        defaultMergeChildren = config?.default_merge_children ?? true;
+        defaultAutoMerge = config?.default_auto_merge ?? true;
+        defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
         defaultPlanMode = config?.default_plan_mode ?? false;
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
@@ -493,9 +493,9 @@
                 workspace_dir: workspaceDir.trim(),
                 providers: savedProviders,
                 default_provider: defaultProvider,
-                default_auto_commit: defaultMergeOnCommit, // auto-commit is prerequisite for auto-merge
-                default_merge_on_commit: defaultMergeOnCommit,
-                default_merge_children: defaultMergeChildren,
+                default_auto_commit: defaultAutoMerge, // auto-commit is prerequisite for auto-merge
+                default_auto_merge: defaultAutoMerge,
+                default_subtasks_auto_merge: defaultSubtasksAutoMerge,
                 default_plan_mode: defaultPlanMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
             } as Config);
@@ -899,8 +899,8 @@
             <!-- Task Defaults Section -->
             <TaskDefaults
                 bind:defaultPlanMode
-                bind:defaultMergeOnCommit
-                bind:defaultMergeChildren
+                bind:defaultAutoMerge
+                bind:defaultSubtasksAutoMerge
                 bind:defaultMaxFailedTurns
                 originBranch={$selectedProject?.origin_branch || 'main'}
             />

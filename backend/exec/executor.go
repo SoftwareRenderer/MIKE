@@ -594,7 +594,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	// Generate branch name: use slugified title for separate branches, task ID for merge-to-main
 	branchName := fmt.Sprintf("task/%s", task.ID)
-	if !task.MergeOnCommit && task.Title != "" {
+	if !task.AutoMerge && task.Title != "" {
 		branchName = "task/" + slugifyBranchName(task.Title)
 		// Ensure uniqueness: append task ID suffix if branch already exists
 		if te.branchExists(projectID, branchName) {

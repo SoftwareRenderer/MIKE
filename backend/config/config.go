@@ -67,8 +67,8 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		return nil, err
 	}
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
-	defaultMergeOnCommitRaw, _ := cs.store.GetConfigValue("default_merge_on_commit")
-	defaultMergeChildrenRaw, _ := cs.store.GetConfigValue("default_merge_children")
+	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
+	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
 	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
@@ -81,11 +81,11 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if v, err := parseBoolPtr(defaultAutoCommitRaw); err == nil && v != nil {
 		cfg.DefaultAutoCommit = v
 	}
-	if v, err := parseBoolPtr(defaultMergeOnCommitRaw); err == nil && v != nil {
-		cfg.DefaultMergeOnCommit = v
+	if v, err := parseBoolPtr(defaultAutoMergeRaw); err == nil && v != nil {
+		cfg.DefaultAutoMerge = v
 	}
-	if v, err := parseBoolPtr(defaultMergeChildrenRaw); err == nil && v != nil {
-		cfg.DefaultMergeChildren = v
+	if v, err := parseBoolPtr(defaultSubtasksAutoMergeRaw); err == nil && v != nil {
+		cfg.DefaultSubtasksAutoMerge = v
 	}
 	if v, err := parseBoolPtr(defaultPlanModeRaw); err == nil && v != nil {
 		cfg.DefaultPlanMode = v
@@ -130,13 +130,13 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	if c.DefaultMergeOnCommit != nil {
-		if err := cs.store.SetConfigValue("default_merge_on_commit", fmt.Sprintf("%t", *c.DefaultMergeOnCommit)); err != nil {
+	if c.DefaultAutoMerge != nil {
+		if err := cs.store.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", *c.DefaultAutoMerge)); err != nil {
 			return err
 		}
 	}
-	if c.DefaultMergeChildren != nil {
-		if err := cs.store.SetConfigValue("default_merge_children", fmt.Sprintf("%t", *c.DefaultMergeChildren)); err != nil {
+	if c.DefaultSubtasksAutoMerge != nil {
+		if err := cs.store.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", *c.DefaultSubtasksAutoMerge)); err != nil {
 			return err
 		}
 	}
@@ -160,8 +160,8 @@ type configResponse struct {
 	Providers             []types.Provider `json:"providers"`
 	DefaultProvider       string           `json:"default_provider"`
 	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
-	DefaultMergeOnCommit  *bool            `json:"default_merge_on_commit"`
-	DefaultMergeChildren  *bool            `json:"default_merge_children"`
+	DefaultAutoMerge      *bool            `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge *bool         `json:"default_subtasks_auto_merge"`
 	DefaultPlanMode       *bool            `json:"default_plan_mode"`
 	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
 	EncryptionEnabled     bool             `json:"encryption_enabled"`
@@ -196,8 +196,8 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			Providers:             cfg.Providers,
 			DefaultProvider:       cfg.DefaultProvider,
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
-			DefaultMergeOnCommit:  cfg.DefaultMergeOnCommit,
-			DefaultMergeChildren:  cfg.DefaultMergeChildren,
+			DefaultAutoMerge:      cfg.DefaultAutoMerge,
+			DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
 			DefaultPlanMode:       cfg.DefaultPlanMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),
@@ -249,14 +249,14 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultAutoCommit = &v
 			}
 		}
-		if dmc, ok := updates["default_merge_on_commit"]; ok {
-			if v, ok := dmc.(bool); ok {
-				current.DefaultMergeOnCommit = &v
+		if dam, ok := updates["default_auto_merge"]; ok {
+			if v, ok := dam.(bool); ok {
+				current.DefaultAutoMerge = &v
 			}
 		}
-		if dmc, ok := updates["default_merge_children"]; ok {
-			if v, ok := dmc.(bool); ok {
-				current.DefaultMergeChildren = &v
+		if dsam, ok := updates["default_subtasks_auto_merge"]; ok {
+			if v, ok := dsam.(bool); ok {
+				current.DefaultSubtasksAutoMerge = &v
 			}
 		}
 		if dpm, ok := updates["default_plan_mode"]; ok {
@@ -282,8 +282,8 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			Providers:             current.Providers,
 			DefaultProvider:       current.DefaultProvider,
 			DefaultAutoCommit:     current.DefaultAutoCommit,
-			DefaultMergeOnCommit:  current.DefaultMergeOnCommit,
-			DefaultMergeChildren:  current.DefaultMergeChildren,
+			DefaultAutoMerge:      current.DefaultAutoMerge,
+			DefaultSubtasksAutoMerge: current.DefaultSubtasksAutoMerge,
 			DefaultPlanMode:       current.DefaultPlanMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),

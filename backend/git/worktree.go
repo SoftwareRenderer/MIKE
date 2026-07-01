@@ -171,7 +171,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		return "", "", fmt.Errorf("create worktrees dir: %w", err)
 	}
 
-	baselineBranch := fmt.Sprintf("__kanban_baseline_%s", taskID)
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
 
 	if _, err := os.Stat(worktreePath); err == nil {
@@ -187,51 +186,8 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		_ = wm.store.UpdateProjectOriginBranch(projectID, originalBranch)
 	}
 
-	cleanup := func() {
-		if originalBranch != "" {
-			wm.gitRun(project.Path, "checkout", originalBranch)
-		}
-		wm.gitRun(project.Path, "branch", "-D", baselineBranch)
-	}
-
-	hasChanges, err := wm.hasWorkingTreeChanges(project.Path)
-	if err != nil {
-		return "", "", fmt.Errorf("check working tree: %w", err)
-	}
-
-	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
-
-	if hasChanges {
-		// Create baseline branch from current HEAD
-		if err := wm.gitRun(project.Path, "branch", baselineBranch); err != nil {
-			return "", "", fmt.Errorf("create baseline branch: %w", err)
-		}
-		defer cleanup()
-
-		// Stash changes, checkout baseline, restore changes, commit
-		stashErr := wm.gitRun(project.Path, "stash", "push", "-u", "-m", "kanban baseline stash")
-		if stashErr != nil {
-			// Can't stash — create baseline from HEAD without working tree changes
-			log.Printf("[worktree] task=%s stash failed during baseline creation, using HEAD: %v", taskID, stashErr)
-		} else {
-			wm.gitRun(project.Path, "checkout", "-f", baselineBranch)
-			if err := wm.gitRun(project.Path, "stash", "pop"); err != nil {
-				wm.gitRun(project.Path, "stash", "drop")
-			}
-			wm.gitRun(project.Path, "add", "-A")
-			wm.gitRun(project.Path, "commit", "--allow-empty", "-m", fmt.Sprintf("Baseline for task %s", taskID))
-		}
-
-		if originalBranch != "" {
-			wm.gitRun(project.Path, "checkout", "-f", originalBranch)
-		}
-	}
-
-	sourceRef := baselineBranch
-	if !hasChanges {
-		sourceRef = "HEAD"
-		defer cleanup()
-	}
+	// Worktree starts from HEAD (committed state only — uncommitted changes are not carried)
+	sourceRef := "HEAD"
 	// If a source branch is specified (e.g., parent branch for child tasks), use it instead
 	if sourceBranch != "" {
 		sourceRef = sourceBranch
@@ -247,8 +203,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
 		return "", "", fmt.Errorf("create branch: %s: %w", out, err)
 	}
-
-	wm.gitRun(project.Path, "branch", "-D", baselineBranch)
 
 	// Resolve sourceRef to a commit hash so the base ref doesn't move after merges
 	baseCommit, _ := wm.gitRunOutput(worktreePath, "rev-parse", "--verify", sourceRef)
@@ -1285,14 +1239,6 @@ func isBinaryFile(path string, size int64) bool {
 		}
 	}
 	return false
-}
-
-func (wm *WorktreeManager) hasWorkingTreeChanges(dir string) (bool, error) {
-	out, err := wm.gitRunOutput(dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return len(strings.TrimSpace(out)) > 0, nil
 }
 
 func (wm *WorktreeManager) gitRun(dir string, args ...string) error {

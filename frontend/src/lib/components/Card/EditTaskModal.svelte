@@ -13,8 +13,8 @@
         editUrl,
         editReasoningEffort,
         editPlanMode,
-        editMergeOnCommit,
-        editMergeChildren,
+        editAutoMerge,
+        editSubtasksAutoMerge,
         taskHasParent,
         targetBranch,
         isAgentSelected,
@@ -28,12 +28,12 @@
         editUrl: string;
         editReasoningEffort: string;
         editPlanMode: boolean;
-        editMergeOnCommit: boolean;
-        editMergeChildren: boolean;
+        editAutoMerge: boolean;
+        editSubtasksAutoMerge: boolean;
         taskHasParent: boolean;
         targetBranch: string;
         isAgentSelected: () => boolean;
-        onSave: (title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, mergeOnCommit: boolean, mergeChildren: boolean) => void;
+        onSave: (title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) => void;
         onCancel: () => void;
     } = $props();
 
@@ -42,8 +42,8 @@
     let urlDraft = $state(editUrl);
     let effortDraft = $state(editReasoningEffort);
     let planModeDraft = $state(editPlanMode);
-    let mergeOnCommitDraft = $state(editMergeOnCommit);
-    let mergeChildrenDraft = $state(editMergeChildren);
+    let autoMergeDraft = $state(editAutoMerge);
+    let subtasksAutoMergeDraft = $state(editSubtasksAutoMerge);
 
     let modalEl: HTMLDivElement | null = null;
     let titleInput: HTMLInputElement | null = null;
@@ -74,7 +74,7 @@
     function handleSave() {
         const trimmed = titleDraft.trim();
         if (!trimmed) return;
-        onSave(trimmed, modelDraft, urlDraft, effortDraft, planModeDraft, mergeOnCommitDraft, mergeChildrenDraft);
+        onSave(trimmed, modelDraft, urlDraft, effortDraft, planModeDraft, autoMergeDraft, subtasksAutoMergeDraft);
     }
 
     function handleClose() {
@@ -137,7 +137,7 @@
                         <span class="config-label">Auto-merge</span>
                         <span class="config-desc">{taskHasParent ? 'Merge changes into parent task when complete' : `Merge changes into ${targetBranch} when complete`}</span>
                     </div>
-                    <ToggleSwitch bind:checked={mergeOnCommitDraft} ariaLabel="Auto-merge on completion" />
+                    <ToggleSwitch bind:checked={autoMergeDraft} ariaLabel="Auto-merge on completion" />
                 </div>
                 {#if !taskHasParent}
                 <div class="config-row">
@@ -145,7 +145,7 @@
                         <span class="config-label">Allow subtasks to auto-merge</span>
                         <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
                     </div>
-                    <ToggleSwitch bind:checked={mergeChildrenDraft} ariaLabel="Allow subtasks to auto-merge" />
+                    <ToggleSwitch bind:checked={subtasksAutoMergeDraft} ariaLabel="Allow subtasks to auto-merge" />
                 </div>
                 {/if}
             </div>

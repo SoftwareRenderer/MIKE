@@ -344,7 +344,7 @@
         editProviders = cfg?.providers || [];
     }
 
-    function saveEdit(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, mergeOnCommit: boolean, mergeChildren: boolean) {
+    function saveEdit(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) {
         const trimmed = title.trim();
         if (!trimmed || !projectId) {
             cancelEdit();
@@ -352,17 +352,17 @@
         }
         const updates: Record<string, unknown> = { title: trimmed };
         updates.plan_mode = planMode;
-        updates.auto_commit = mergeOnCommit; // auto-commit is prerequisite for auto-merge
-        updates.merge_on_commit = mergeOnCommit;
-        updates.merge_children = mergeChildren;
+        updates.auto_commit = autoMerge; // auto-commit is prerequisite for auto-merge
+        updates.auto_merge = autoMerge;
+        updates.subtasks_auto_merge = subtasksAutoMerge;
         if (model) updates.model_name = model;
         if (url) updates.llama_server_url = url;
         if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
         task.title = trimmed;
         task.plan_mode = planMode;
-        task.auto_commit = mergeOnCommit;
-        task.merge_on_commit = mergeOnCommit;
-        task.merge_children = mergeChildren;
+        task.auto_commit = autoMerge;
+        task.auto_merge = autoMerge;
+        task.subtasks_auto_merge = subtasksAutoMerge;
         if (model) task.model_name = model;
         if (url) task.llama_server_url = url;
         if (reasoningEffort) task.reasoning_effort = reasoningEffort;
@@ -749,8 +749,8 @@
         editUrl={task.llama_server_url || ''}
         editReasoningEffort={task.reasoning_effort || ''}
         editPlanMode={task.plan_mode ?? false}
-        editMergeOnCommit={task.merge_on_commit ?? true}
-        editMergeChildren={task.merge_children ?? true}
+        editAutoMerge={task.auto_merge ?? true}
+        editSubtasksAutoMerge={task.subtasks_auto_merge ?? true}
         taskHasParent={!!task.parent_task_id}
         {targetBranch}
         {isAgentSelected}

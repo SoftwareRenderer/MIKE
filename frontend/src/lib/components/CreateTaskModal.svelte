@@ -15,8 +15,8 @@
     let autoCommit = $state(false);
 
     let planMode = $state(false);
-    let mergeOnCommit = $state(false);
-    let mergeChildren = $state(true);
+    let autoMerge = $state(true);
+    let subtasksAutoMerge = $state(true);
     let loading = $state(false);
     let error = $state('');
     let parentTitle = $state('');
@@ -181,7 +181,7 @@
         if (cfg && !configLoaded) {
             configLoaded = true;
             autoCommit = cfg.default_auto_commit ?? false;
-            mergeOnCommit = cfg.default_merge_on_commit ?? true;
+            autoMerge = cfg.default_auto_merge ?? true;
             planMode = cfg.default_plan_mode ?? false;
         }
     });
@@ -193,9 +193,9 @@
             try {
                 const parentTask = await getTask(projectId, parentId);
                 parentTitle = parentTask.title;
-                // Inherit auto_commit and merge_on_commit from parent
+                // Inherit auto_commit and auto_merge from parent
                 autoCommit = parentTask.auto_commit ?? autoCommit;
-                mergeOnCommit = parentTask.merge_children ?? mergeOnCommit;
+                autoMerge = parentTask.subtasks_auto_merge ?? autoMerge;
             } catch {
                 parentTitle = 'Parent task';
             }
@@ -227,10 +227,10 @@
         error = '';
         const taskData: Record<string, unknown> = {
             prompt: prompt.trim(),
-            auto_commit: mergeOnCommit, // auto-commit is prerequisite for auto-merge
+            auto_commit: autoMerge, // auto-commit is prerequisite for auto-merge
             plan_mode: planMode,
-            merge_on_commit: mergeOnCommit,
-            merge_children: mergeChildren,
+            auto_merge: autoMerge,
+            subtasks_auto_merge: subtasksAutoMerge,
         };
         if (attachments.length > 0) {
             taskData.attachments = JSON.stringify(attachments);
@@ -371,7 +371,7 @@
                             </span>
                         </div>
                     </div>
-                    <ToggleSwitch bind:checked={mergeOnCommit} ariaLabel="Auto-merge on completion" />
+                    <ToggleSwitch bind:checked={autoMerge} ariaLabel="Auto-merge on completion" />
                 </div>
                 {#if !parentId}
                 <div class="config-row">
@@ -381,7 +381,7 @@
                             <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
                         </div>
                     </div>
-                    <ToggleSwitch bind:checked={mergeChildren} ariaLabel="Allow subtasks to auto-merge" />
+                    <ToggleSwitch bind:checked={subtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" />
                 </div>
                 {/if}
             </div>

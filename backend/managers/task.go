@@ -113,11 +113,11 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				if cfg.DefaultAutoCommit != nil && !hasField(rawBody, "auto_commit") {
 					task.AutoCommit = *cfg.DefaultAutoCommit
 				}
-				if cfg.DefaultMergeOnCommit != nil && !hasField(rawBody, "merge_on_commit") {
-					task.MergeOnCommit = *cfg.DefaultMergeOnCommit
+				if cfg.DefaultAutoMerge != nil && !hasField(rawBody, "auto_merge") {
+					task.AutoMerge = *cfg.DefaultAutoMerge
 				}
-				if cfg.DefaultMergeChildren != nil && !hasField(rawBody, "merge_children") {
-					task.MergeChildren = *cfg.DefaultMergeChildren
+				if cfg.DefaultSubtasksAutoMerge != nil && !hasField(rawBody, "subtasks_auto_merge") {
+					task.SubtasksAutoMerge = *cfg.DefaultSubtasksAutoMerge
 				}
 				if cfg.DefaultPlanMode != nil && !hasField(rawBody, "plan_mode") {
 					task.PlanMode = *cfg.DefaultPlanMode
@@ -127,15 +127,15 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		// If this is a child task, inherit auto_commit/merge_on_commit from parent
+		// If this is a child task, inherit auto_commit/auto_merge from parent
 		if task.ParentTaskID != "" {
 			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
 			if err == nil {
 				if !hasField(rawBody, "auto_commit") {
 					task.AutoCommit = parent.AutoCommit
 				}
-				if !hasField(rawBody, "merge_on_commit") {
-					task.MergeOnCommit = parent.MergeChildren
+				if !hasField(rawBody, "auto_merge") {
+					task.AutoMerge = parent.SubtasksAutoMerge
 				}
 			}
 		}
@@ -241,7 +241,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		task.ProjectID = projectID
 		task.UpdatedAt = time.Now()
 		// Auto-commit is a prerequisite for auto-merge
-		if task.MergeOnCommit {
+		if task.AutoMerge {
 			task.AutoCommit = true
 		}
 		if err := h.store.UpdateTask(task); err != nil {
@@ -496,9 +496,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Merge worktree into origin branch (skip if merge_on_commit is false)
+	// Merge worktree into origin branch (skip if auto_merge is false)
 	var mergeErr error
-	if task.MergeOnCommit {
+	if task.AutoMerge {
 		mergeErr = h.mergeWorktreeIntoOrigin(projectID, taskID, task)
 	}
 	if mergeErr != nil {

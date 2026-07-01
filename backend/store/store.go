@@ -109,8 +109,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     model_name                   TEXT NOT NULL DEFAULT '',
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
     auto_commit                  INTEGER NOT NULL DEFAULT 0,
-    merge_on_commit              INTEGER NOT NULL DEFAULT 1,
-    merge_children               INTEGER NOT NULL DEFAULT 1,
+    auto_merge                   INTEGER NOT NULL DEFAULT 1,
+    subtasks_auto_merge          INTEGER NOT NULL DEFAULT 1,
     plan_mode                    INTEGER NOT NULL DEFAULT 0,
     parent_task_id               TEXT NULL,
     change_summary               TEXT DEFAULT NULL,
@@ -223,6 +223,9 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_on_commit INTEGER NOT NULL DEFAULT 1`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_children INTEGER NOT NULL DEFAULT 1`)
+	// Rename merge_on_commit -> auto_merge, merge_children -> subtasks_auto_merge
+	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_on_commit TO auto_merge`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_children TO subtasks_auto_merge`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN model_name TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_tokens INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_tokens INTEGER DEFAULT 0`)
@@ -476,19 +479,19 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, mergeOnCommit, mergeChildren, planMode, titleGenerating int
+	var autoCommit, autoMerge, subtasksAutoMerge, planMode, titleGenerating int
 	var createdAt, updatedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.StatusState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &mergeOnCommit, &mergeChildren, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
 	t.AutoCommit = i2b(autoCommit)
-	t.MergeOnCommit = i2b(mergeOnCommit)
-	t.MergeChildren = i2b(mergeChildren)
+	t.AutoMerge = i2b(autoMerge)
+	t.SubtasksAutoMerge = i2b(subtasksAutoMerge)
 	t.PlanMode = i2b(planMode)
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)
