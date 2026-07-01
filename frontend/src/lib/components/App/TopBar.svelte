@@ -25,6 +25,8 @@
         onShowStats: () => void;
         onShowConfig: () => void;
     } = $props();
+
+    let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
 </script>
 
 <header class="top-bar">
@@ -47,19 +49,24 @@
     <span class="project-title">
         <span class="project-path">{toHomeRelative(currentProject.path)}</span>
         {#if currentBranch}
-            <button
-                class="icon-btn branch-btn"
-                onclick={onOpenBranchView}
-                aria-label={`Branch: ${currentBranch}`} title={`Branch: ${currentBranch} (click to explore)`}
-            >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <span class="branch-badge" class:main={isMainBranch}>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="6" cy="6" r="2.5"/>
                     <circle cx="10" cy="10" r="2.5"/>
                     <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
                     <line x1="6" y1="3.5" x2="6" y2="2"/>
                     <line x1="10" y1="12.5" x2="10" y2="14"/>
                 </svg>
-                <span>{currentBranch}</span>
+                {currentBranch}
+            </span>
+            <button
+                class="icon-btn explorer-btn"
+                onclick={onOpenBranchView}
+                aria-label="Open explorer" title="Open file explorer"
+            >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
             </button>
         {/if}
     </span>
@@ -113,10 +120,24 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .branch-btn {
+    .branch-badge {
+        display: inline-flex;
+        align-items: center;
         gap: 4px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 0.75rem;
         font-weight: 500;
         font-family: var(--font-mono);
+        white-space: nowrap;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        background: rgba(139, 92, 246, 0.1);
+        color: #a78bfa;
+    }
+    .branch-badge.main {
+        border-color: rgba(107, 114, 128, 0.3);
+        background: rgba(107, 114, 128, 0.1);
+        color: #9ca3af;
     }
     .actions {
         display: flex;
