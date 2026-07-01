@@ -175,6 +175,37 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_EarlyReturn_ReturnsBranchNameNotSHA(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create the worktree normally first
+	branchName := "task/" + taskID
+	_, baseRefFresh, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	// Fresh creation returns a commit SHA (40 hex chars)
+	if len(baseRefFresh) != 40 {
+		t.Logf("WARNING: fresh CreateWorktree returned baseRef %q (len=%d), expected 40-char SHA", baseRefFresh, len(baseRefFresh))
+	}
+
+	// Call CreateWorktree again — worktree already exists, hits early return
+	_, baseRefEarly, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("create worktree (early return): %v", err)
+	}
+	// Early return returns the main repo's current branch name (e.g. "master"), NOT a SHA
+	// This is a known issue: the caller (prepareTaskExecution) should preserve the original BaseRef
+	if baseRefEarly == baseRefFresh {
+		t.Error("early return should return a different value (branch name) than fresh creation (SHA)")
+	}
+	// The early return value is a short branch name, not a 40-char SHA
+	if len(baseRefEarly) == 40 {
+		t.Error("early return should NOT return a 40-char SHA, it returns the main repo's branch name")
+	}
+	t.Logf("fresh baseRef=%q (SHA), early return baseRef=%q (branch name)", baseRefFresh, baseRefEarly)
+}
+
 func TestTruncateDiffLines_NoTruncationNeeded(t *testing.T) {
 	diff := `diff --git a/file.txt b/file.txt
 index 1234567..abcdef 100644

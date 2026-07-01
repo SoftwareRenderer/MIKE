@@ -616,8 +616,13 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	task.Branch = branchName
-	task.BaseRef = baseRef
-	te.appStreamMgr.WatchWorktree(taskID, projectID, baseRef)
+	// Preserve existing BaseRef on restart: CreateWorktree returns the main repo's
+	// branch name (e.g. "master") when the worktree already exists, but we need
+	// the original commit SHA for correct diff computation.
+	if task.BaseRef == "" {
+		task.BaseRef = baseRef
+	}
+	te.appStreamMgr.WatchWorktree(taskID, projectID, task.BaseRef)
 
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
