@@ -2,7 +2,10 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"testing"
+
+	"kanban/backend/types"
 )
 
 func TestTaskCreate(t *testing.T) {
@@ -835,4 +838,151 @@ func TestCommitAndDone(t *testing.T) {
 	if result["status_state"] != "completed" {
 		t.Fatalf("expected status_state=completed, got %s", result["status_state"])
 	}
+}
+
+// Test: agent provider blocked when network isolation is enabled
+func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Set up an agent provider in config
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.Providers = append(cfg.Providers, types.Provider{
+		Name:         "test-agent",
+		Kind:         "pi",
+		URL:          "pi://agent",
+		Concurrency:  1,
+		DefaultModel: "agent-model",
+	})
+	if err := s.configStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// Enable network isolation on the project
+	if err := s.store.UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
+		t.Fatalf("enable network isolation: %v", err)
+	}
+
+	// Create a task with the agent provider URL
+	taskID := createTestTaskWithAgent(t, s, projID, "agent-blocked-task", "pi://agent")
+
+	// Try to start the task — should be blocked
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "agent requires network to be enabled") {
+		t.Fatalf("expected error about agent requiring network, got: %s", body)
+	}
+
+	// Verify task is still in backlog (not started)
+	status := getTaskStatus(t, s, projID, taskID)
+	if status != "backlog" {
+		t.Fatalf("expected task to remain in backlog, got %s", status)
+	}
+}
+
+// Test: agent provider allowed when network isolation is disabled
+func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Set up an agent provider in config
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.Providers = append(cfg.Providers, types.Provider{
+		Name:         "test-agent-2",
+		Kind:         "pi",
+		URL:          "pi://agent",
+		Concurrency:  1,
+		DefaultModel: "agent-model",
+	})
+	if err := s.configStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// Network isolation is disabled by default
+
+	// Create a task with the agent provider URL
+	taskID := createTestTaskWithAgent(t, s, projID, "agent-allowed-task", "pi://agent")
+
+	// Start the task — should succeed (no network isolation)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task is in_progress
+	status := getTaskStatus(t, s, projID, taskID)
+	if status != "in_progress" {
+		t.Fatalf("expected in_progress, got %s", status)
+	}
+}
+
+// Test: LLM provider allowed even with network isolation
+func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Set up an LLM provider in config
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.Providers = append(cfg.Providers, types.Provider{
+		Name:         "test-llm",
+		Kind:         "llm",
+		URL:          "http://localhost:9999/v1",
+		Concurrency:  1,
+		DefaultModel: "mock-model",
+	})
+	if err := s.configStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// Enable network isolation
+	if err := s.store.UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
+		t.Fatalf("enable network isolation: %v", err)
+	}
+
+	// Create a task with the LLM provider URL
+	taskID := createTestTaskWithLLM(t, s, projID, "llm-allowed-task")
+
+	// Start the task — should succeed (LLM provider, not an agent)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task is in_progress
+	status := getTaskStatus(t, s, projID, taskID)
+	if status != "in_progress" {
+		t.Fatalf("expected in_progress, got %s", status)
+	}
+}
+
+// Helper: create a task with an agent provider URL
+func createTestTaskWithAgent(t *testing.T, s *Server, projectID string, prompt string, serverURL string) string {
+	t.Helper()
+	task := map[string]any{
+		"prompt":           prompt,
+		"llama_server_url": serverURL,
+		"model_name":       "agent-model",
+	}
+	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create task with agent: %d %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	return result["id"].(string)
 }

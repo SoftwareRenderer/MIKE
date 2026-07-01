@@ -333,6 +333,27 @@ func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
 	return 1
 }
 
+// IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).
+// Also returns true for the pi://agent sentinel URL (Pi coding agent without a registered provider).
+// Returns false if no matching provider is found.
+func (cs *ConfigStore) IsAgentProvider(serverURL string) bool {
+	// Handle pi://agent sentinel URL (Pi coding agent without registered provider)
+	if strings.TrimRight(serverURL, "/") == "pi://agent" {
+		return true
+	}
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return false
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") == serverURL {
+			return provider.IsAgent()
+		}
+	}
+	return false
+}
+
 // GetModelContextWindow looks up the context window for a model by name and provider URL.
 // Returns nil if the context window is not known (not reported by the LLM).
 func (cs *ConfigStore) GetModelContextWindow(modelName, providerURL string) *int {
