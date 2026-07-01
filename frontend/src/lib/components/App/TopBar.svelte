@@ -47,28 +47,28 @@
         {/if}
     </button>
     <span class="project-title">
-        <span class="project-path">{toHomeRelative(currentProject.path)}</span>
-        {#if currentBranch}
-            <span class="branch-badge" class:main={isMainBranch}>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="6" cy="6" r="2.5"/>
-                    <circle cx="10" cy="10" r="2.5"/>
-                    <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
-                    <line x1="6" y1="3.5" x2="6" y2="2"/>
-                    <line x1="10" y1="12.5" x2="10" y2="14"/>
-                </svg>
-                {currentBranch}
-            </span>
-            <button
-                class="icon-btn explorer-btn"
-                onclick={onOpenBranchView}
-                aria-label="Open explorer" title="Open file explorer"
-            >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                </svg>
-            </button>
-        {/if}
+        <button
+            class="icon-btn explorer-btn"
+            onclick={onOpenBranchView}
+            aria-label="Open explorer" title="Open file explorer"
+        >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+            </svg>
+            <span class="project-path">{toHomeRelative(currentProject.path)}</span>
+            {#if currentBranch}
+                <span class="branch-badge" class:main={isMainBranch}>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="6" cy="6" r="2.5"/>
+                        <circle cx="10" cy="10" r="2.5"/>
+                        <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
+                        <line x1="6" y1="3.5" x2="6" y2="2"/>
+                        <line x1="10" y1="12.5" x2="10" y2="14"/>
+                    </svg>
+                    {currentBranch}
+                </span>
+            {/if}
+        </button>
     </span>
     <div class="actions">
         <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
@@ -115,7 +115,15 @@
         font-weight: 500;
         color: var(--color-text-primary);
     }
-    .project-path {
+    .icon-btn.explorer-btn {
+        gap: 6px;
+        padding-left: 6px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        justify-content: flex-start;
+        position: relative;
+    }
+    .explorer-btn .project-path {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -130,14 +138,14 @@
         font-weight: 500;
         font-family: var(--font-mono);
         white-space: nowrap;
-        border: 1px solid rgba(139, 92, 246, 0.3);
-        background: rgba(139, 92, 246, 0.1);
-        color: #a78bfa;
+        border: 1px solid rgba(139, 92, 246, 0.5);
+        background: rgba(139, 92, 246, 0.2);
+        color: #c4b5fd;
     }
     .branch-badge.main {
-        border-color: rgba(107, 114, 128, 0.3);
-        background: rgba(107, 114, 128, 0.1);
-        color: #9ca3af;
+        border-color: rgba(107, 114, 128, 0.5);
+        background: rgba(107, 114, 128, 0.2);
+        color: #d1d5db;
     }
     .actions {
         display: flex;
@@ -169,9 +177,35 @@
         display: flex;
     }
 
+    @media (max-width: 768px) {
+        .explorer-btn {
+            flex: 1;
+            min-width: 0;
+        }
+        .explorer-btn .branch-badge {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            background: #8b5cf6;
+            border-color: #8b5cf6;
+            font-size: 0.6875rem;
+            padding: 1px 6px;
+            color: #fff;
+        }
+        .explorer-btn .branch-badge.main {
+            background: #6b7280;
+            border-color: #6b7280;
+            color: #fff;
+        }
+    }
+
     @media (min-width: 769px) {
         .hamburger {
             display: none;
+        }
+        .explorer-btn {
+            flex-shrink: 0;
         }
     }
 </style>

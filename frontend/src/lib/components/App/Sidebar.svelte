@@ -34,9 +34,9 @@
     } = $props();
 </script>
 
-<aside id="sidebar" class="sidebar" class:collapsed class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
+<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
     <div class="sidebar-header">
-        <h2 class:collapsed>Projects</h2>
+        <h2 class:collapsed={!isMobile && collapsed}>Projects</h2>
         {#if isMobile}
             <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
         {:else}
@@ -54,7 +54,7 @@
                         onclick={() => onSelectProject(p)}
                         title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
-                        {#if !collapsed}
+                        {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
                                 <span class="sandbox-badge" aria-label="Sandbox enabled (gVisor)" title="Sandbox enabled (gVisor)">
                                     <img src={shieldIcon} width="14" height="14" alt="" />
@@ -67,7 +67,7 @@
                         {/if}
                         <span class="project-name">{p.name}</span>
                         <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>{getProjectAbbr(p.name)}</span>
-                        {#if !collapsed && projectCounts[p.id]}
+                        {#if (isMobile || !collapsed) && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -85,7 +85,7 @@
                         {/if}
                     </button>
                 </div>
-                {#if !collapsed}
+                {#if isMobile || !collapsed}
                 <button
                     class="project-remove-btn"
                     onclick={(e) => { e.stopPropagation(); onRemoveProject(p); }}
@@ -97,7 +97,7 @@
                 {/if}
             </div>
         {/each}
-        {#if !collapsed}
+        {#if isMobile || !collapsed}
             <button class="add-project-btn" onclick={onAddProject} aria-label="Add Project" title="Add Project">+ Add Project</button>
         {/if}
     </nav>
@@ -356,10 +356,6 @@
         }
         .sidebar.mobile-open {
             transform: translateX(0);
-        }
-        .sidebar.collapsed {
-            width: 260px;
-            min-width: 260px;
         }
         /* Mobile: no shrink, remove button always visible */
         .project-item-content {
