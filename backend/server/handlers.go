@@ -812,7 +812,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			"git -C "+sandboxPath+" init && " +
 			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
 			"git -C "+sandboxPath+" add README.md && " +
-			"git -C "+sandboxPath+" -c user.email=kanban@local -c user.name=Kanban commit -m 'Initial commit'",
+			"git -C "+sandboxPath+" -c user.email="+git.GitAuthorEmail+" -c user.name="+git.GitAuthorName+" commit -m 'Initial commit'",
 			[]byte(encoded+"\n"))
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
@@ -857,7 +857,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
 		return
 	}
-	cmd = exec.Command("git", "-C", req.Path, "-c", "user.email=kanban@local", "-c", "user.name=Kanban", "commit", "-m", "Initial commit")
+	cmd = exec.Command("git", "-C", req.Path, "-c", "user.email="+git.GitAuthorEmail, "-c", "user.name="+git.GitAuthorName, "commit", "-m", "Initial commit")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", out))
 		return

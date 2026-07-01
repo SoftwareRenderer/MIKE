@@ -17,6 +17,24 @@ import (
 	"kanban/backend/store"
 )
 
+// Git author identity, configurable via environment variables.
+var (
+	GitAuthorName = envDefault("KANBAN_GIT_AUTHOR_NAME", "Kanban")
+	GitAuthorEmail = envDefault("KANBAN_GIT_AUTHOR_EMAIL", "kanban@local")
+)
+
+func envDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// GitAuthorFlags returns -c flags to set the commit author identity.
+func GitAuthorFlags() []string {
+	return []string{"-c", "user.name=" + GitAuthorName, "-c", "user.email=" + GitAuthorEmail}
+}
+
 // ignoredDirs is a set of well-known directory names that should never be
 // watched or shown in diffs. Covers directories found in virtually every
 // .gitignore file.
