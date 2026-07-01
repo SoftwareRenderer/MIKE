@@ -113,6 +113,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let showSandboxConfigVal = $state(false);
     let showFileBrowserVal = $state(false);
     let showBranchViewVal = $state(false);
+    let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
@@ -732,13 +733,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         updateUrl({ project: currentProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
+                        if (isMobile) cardDetailActiveTab = 'chat';
                         selectedTaskVal = t;
                         selectedTask.set(t);
                     }} onRefreshBoard={() => refreshBoard()} />

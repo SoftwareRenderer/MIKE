@@ -29,7 +29,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
 
-    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void } = $props();
+    let { task, tasks: columnTasks, projectPath, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks: Task[]; projectPath?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
     let allTasks: Task[] = $state([]);
 
@@ -313,7 +313,7 @@
      * Backend resolves stash refs to their common ancestor with baseRef.
      * Toggles closed if the same checkpoint is clicked again. */
     async function handleViewChanges(commitHash: string) {
-        if (isMobile) activeTab = 'diff';
+        if (isMobile) { activeTab = 'diff'; onActiveTabChange?.('diff'); }
         // Toggle: if same checkpoint is already open, close it
         if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
             closeCheckpointDiff();
@@ -487,8 +487,12 @@
         return { text: 'Idle', color: 'var(--color-text-tertiary)' };
     });
 
-    // Mobile tab
-    let activeTab = $state<'context' | 'chat' | 'diff'>('chat');
+    // Mobile tab — synced with prop from App.svelte
+    let activeTab = $state<'context' | 'chat' | 'diff'>(activeTabProp);
+
+    $effect(() => {
+        activeTab = activeTabProp;
+    });
     let isMobile = $derived(false);
 
 
@@ -1147,7 +1151,7 @@
 
         <!-- Mobile Tab Bar -->
         {#if isMobile}
-            <MobileTabBar activeTab={activeTab} onTabChange={(tab) => activeTab = tab} />
+            <MobileTabBar activeTab={activeTab} onTabChange={(tab: 'context' | 'chat' | 'diff') => { activeTab = tab; onActiveTabChange?.(tab); }} />
         {/if}
 
         <!-- 3-Column Layout -->
