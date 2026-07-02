@@ -51,6 +51,42 @@
         }
     }
 
+    // New folder creation
+    let showNewFolder = $state(false);
+    let newFolderName = $state('');
+    let creatingFolder = $state(false);
+    let createFolderError = $state('');
+
+    async function handleCreateFolder() {
+        const name = newFolderName.trim();
+        if (!name || creatingFolder) return;
+        creatingFolder = true;
+        createFolderError = '';
+        try {
+            const csrfToken = await ensureCsrfToken();
+            const res = await fetch(`/api/fs/mkdir?project=${encodeURIComponent(projectId)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+                },
+                body: JSON.stringify({ path: currentPath + '/' + name }),
+                credentials: 'include',
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to create folder');
+            }
+            showNewFolder = false;
+            newFolderName = '';
+            loadDir(currentPath);
+        } catch (e) {
+            createFolderError = String(e);
+        } finally {
+            creatingFolder = false;
+        }
+    }
+
     // Sandbox mount path for this project
     let mountPath = $derived(sandboxEnabled ? '/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
     // Current path: sandbox path when sandbox enabled, host path otherwise
@@ -193,14 +229,23 @@
 <div class="file-browser">
     <div class="file-browser-header">
         <span class="file-browser-label">Files</span>
-        {#if !showNewFile}
-            <button class="new-file-btn" onclick={() => { showNewFile = true; newFileName = ''; createError = ''; }} title="New file" aria-label="Create new file">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                    <line x1="8" y1="3" x2="8" y2="13"/>
-                    <line x1="3" y1="8" x2="13" y2="8"/>
-                </svg>
-            </button>
-        {:else}
+        {#if !showNewFile && !showNewFolder}
+            <div class="file-actions">
+                <button class="new-file-btn" onclick={() => { showNewFile = true; newFileName = ''; createError = ''; }} title="New file" aria-label="Create new file">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                        <line x1="8" y1="3" x2="8" y2="13"/>
+                        <line x1="3" y1="8" x2="13" y2="8"/>
+                    </svg>
+                </button>
+                <button class="new-file-btn" onclick={() => { showNewFolder = true; newFolderName = ''; createFolderError = ''; }} title="New folder" aria-label="Create new folder">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                        <line x1="12" y1="10" x2="12" y2="16"/>
+                        <line x1="9" y1="13" x2="15" y2="13"/>
+                    </svg>
+                </button>
+            </div>
+        {:else if showNewFile}
             <div class="new-file-input-row">
                 <input
                     type="text"
@@ -214,10 +259,27 @@
                     autofocus
                 />
             </div>
+        {:else}
+            <div class="new-file-input-row">
+                <input
+                    type="text"
+                    class="new-file-input"
+                    placeholder="folder name"
+                    value={newFolderName}
+                    oninput={(e) => newFolderName = (e.target as HTMLInputElement).value}
+                    onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; } }}
+                    onblur={() => { showNewFolder = false; newFolderName = ''; }}
+                    aria-label="New folder name"
+                    autofocus
+                />
+            </div>
         {/if}
     </div>
     {#if createError}
         <div class="file-browser-error">{createError}</div>
+    {/if}
+    {#if createFolderError}
+        <div class="file-browser-error">{createFolderError}</div>
     {/if}
 
     {#if error}
@@ -294,13 +356,18 @@
         letter-spacing: 0.05em;
     }
 
-    .new-file-btn {
+    .file-actions {
         margin-left: auto;
+        display: flex;
+        gap: 2px;
+    }
+
+    .new-file-btn {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         padding: 0;
         border: none;
         background: transparent;

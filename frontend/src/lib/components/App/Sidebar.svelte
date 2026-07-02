@@ -92,7 +92,10 @@
                     aria-label={`Remove project ${p.name}`}
                     title={`Remove project ${p.name}`}
                 >
-                    ✕
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
                 </button>
                 {/if}
             </div>
@@ -278,6 +281,7 @@
     .project-remove-btn {
         flex-shrink: 0;
         width: 32px;
+        height: 40px;
         background: none;
         border: none;
         color: var(--color-text-tertiary);

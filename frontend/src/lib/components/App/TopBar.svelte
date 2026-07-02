@@ -52,7 +52,7 @@
             onclick={onOpenBranchView}
             aria-label="Open explorer" title="Open file explorer"
         >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
             </svg>
             <span class="project-path">{toHomeRelative(currentProject.path)}</span>
@@ -122,6 +122,7 @@
         color: var(--color-text-primary);
         justify-content: flex-start;
         position: relative;
+        height: 28px;
     }
     .explorer-btn .project-path {
         overflow: hidden;
