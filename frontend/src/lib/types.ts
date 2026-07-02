@@ -148,6 +148,7 @@ export interface GitCommit {
     hash: string;
     short: string;
     subject: string;
+    body?: string; // full commit message body (excluding subject)
     author: string;
     date: string;
     parents?: string[];

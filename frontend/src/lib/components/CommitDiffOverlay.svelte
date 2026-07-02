@@ -164,6 +164,29 @@
     // Compute total stats
     let totalAdded = $derived(diffFiles.reduce((sum, f) => sum + f.added, 0));
     let totalRemoved = $derived(diffFiles.reduce((sum, f) => sum + f.removed, 0));
+
+    // Full message tooltip — shown when subject is clicked
+    let showFullMessage = $state(false);
+    let subjectBtnEl: HTMLButtonElement | null = null;
+    let hasBody = $derived.by(() => commit.body && commit.body.length > 0);
+    let fullMessage = $derived.by(() => {
+        const parts = [commit.subject];
+        if (commit.body && commit.body.length > 0) parts.push('', commit.body);
+        return parts.join('\n');
+    });
+
+    // Close tooltip on outside click
+    $effect(() => {
+        function handleClick(e: MouseEvent) {
+            if (subjectBtnEl && !subjectBtnEl.contains(e.target as Node)) {
+                showFullMessage = false;
+            }
+        }
+        if (showFullMessage) {
+            document.addEventListener('click', handleClick);
+            return () => document.removeEventListener('click', handleClick);
+        }
+    });
 </script>
 
 <div class="commit-diff-overlay" onkeydown={handleKeydown}>
@@ -176,7 +199,28 @@
                 </svg>
             </button>
             <div class="diff-commit-info">
-                <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
+                {#if hasBody}
+                    <button
+                        type="button"
+                        class="diff-commit-subject-btn"
+                        class:expanded={showFullMessage}
+                        bind:this={subjectBtnEl}
+                        onclick={() => { showFullMessage = !showFullMessage; }}
+                        title="Click to view full commit message"
+                    >
+                        <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
+                        <svg class="diff-subject-caret" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    {#if showFullMessage}
+                        <div class="diff-commit-body-tooltip">
+                            <pre>{fullMessage}</pre>
+                        </div>
+                    {/if}
+                {:else}
+                    <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
+                {/if}
                 <span class="diff-commit-hash" title={commit.hash}>{commit.short}</span>
                 {#if commit.date}
                     <span class="diff-commit-date" title={formatDateTime(commit.date)}>{formatDate(commit.date)}</span>
@@ -226,15 +270,9 @@
                             aria-expanded={!collapsed}
                             onclick={() => toggleFile(file.path)}
                         >
-                            {#if collapsed}
-                                <svg class="diff-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                    <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            {:else}
-                                <svg class="diff-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                    <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            {/if}
+                            <svg class="diff-chevron" class:expanded={!collapsed} width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
                             <span class="diff-file-path" title={cleanPath}>{cleanPath}</span>
                             <span class="diff-file-stats">
                                 {#if file.added > 0}
@@ -344,6 +382,28 @@
         align-items: center;
         gap: 8px;
         min-width: 0;
+        flex-wrap: wrap;
+        position: relative;
+    }
+    .diff-commit-subject-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 4px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        flex-shrink: 0;
+        max-width: 300px;
+        min-width: 0;
+    }
+    .diff-commit-subject-btn:hover {
+        background: var(--color-surface-3);
+    }
+    .diff-commit-subject-btn.expanded {
+        background: var(--color-surface-3);
     }
     .diff-commit-subject {
         font-size: 0.8125rem;
@@ -352,6 +412,51 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    .diff-subject-caret {
+        flex-shrink: 0;
+        transition: transform 0.15s ease;
+        color: var(--color-text-tertiary);
+    }
+    .diff-commit-subject-btn.expanded .diff-subject-caret {
+        transform: rotate(180deg);
+    }
+    /* Tooltip for full commit message */
+    .diff-commit-body-tooltip {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 100;
+        min-width: 280px;
+        max-width: 480px;
+        padding: 8px 12px;
+        background: var(--color-surface-3);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .diff-commit-body-tooltip::before {
+        content: '';
+        position: absolute;
+        top: -6px;
+        left: 16px;
+        width: 10px;
+        height: 10px;
+        background: var(--color-surface-3);
+        border-left: 1px solid var(--color-border);
+        border-top: 1px solid var(--color-border);
+        transform: rotate(45deg);
+    }
+    .diff-commit-body-tooltip pre {
+        margin: 0;
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 200px;
+        overflow-y: auto;
     }
     .diff-commit-hash {
         font-size: 0.75rem;
@@ -513,6 +618,9 @@
         flex-shrink: 0;
         color: var(--color-text-tertiary);
         transition: transform 0.15s ease;
+    }
+    .diff-chevron.expanded {
+        transform: rotate(90deg);
     }
     .diff-file-path {
         flex: 1;

@@ -170,6 +170,7 @@ type GitCommit struct {
 	Hash     string   `json:"hash"`
 	Short    string   `json:"short"`
 	Subject  string   `json:"subject"`
+	Body     string   `json:"body,omitempty"`       // full commit message body (excluding subject)
 	Author   string   `json:"author"`
 	Date     string   `json:"date"`
 	Parents  []string `json:"parents,omitempty"`

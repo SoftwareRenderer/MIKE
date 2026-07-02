@@ -53,19 +53,21 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	full := r.URL.Query().Get("full") == "1"
 
 	if full {
-		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aN|%aI|%P", branch)
+		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
 			return
 		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		blocks := strings.Split(string(out), "---END---")
 		var commits []types.GitCommit
-		for _, line := range lines {
-			if line == "" {
+		for _, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" {
 				continue
 			}
-			parts := strings.SplitN(line, "|", 6)
+			blockLines := strings.SplitN(block, "\n", 2)
+			parts := strings.SplitN(blockLines[0], "|", 6)
 			if len(parts) < 5 {
 				continue
 			}
@@ -78,6 +80,17 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 			}
 			if len(parts) == 6 && parts[5] != "" {
 				commit.Parents = strings.Fields(parts[5])
+			}
+			// Extract body from the rest of the block
+			if len(blockLines) > 1 {
+				rest := blockLines[1]
+				// Remove "---BODY---" prefix and leading blank line
+				if strings.HasPrefix(rest, "---BODY---\n") {
+					rest = strings.TrimPrefix(rest, "---BODY---\n")
+				} else if strings.HasPrefix(rest, "---BODY---") {
+					rest = ""
+				}
+				commit.Body = strings.TrimSpace(rest)
 			}
 			commits = append(commits, commit)
 		}

@@ -60,9 +60,9 @@
         return originTip && commit.hash === originTip;
     }
 
-    /** Check if this commit is unpushed (not at or before origin tip). */
+    /** Check if this commit is unpushed (not at or before origin tip, or no origin configured). */
     function isUnpushed(commit: GitCommit): boolean {
-        if (!originTip) return false;
+        if (!originTip) return true;
         return !pushedHashes.has(commit.hash);
     }
 
