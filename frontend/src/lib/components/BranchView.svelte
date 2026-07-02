@@ -172,6 +172,7 @@
         try {
             const resp: GitLogResponse = await getGitLogFull(projectId, { branch, limit: COMMIT_BATCH_SIZE, offset: 0 });
             commits = resp.commits;
+            commitOffset = resp.commits.length;
             originTip = resp.origin_tip || '';
             hasMoreCommits = resp.has_more || false;
         } catch (e) {

@@ -6,7 +6,7 @@
         projectId: string;
         currentBranch: string;
         commits: GitCommit[];
-        originTip: string; // full commit hash where origin/<branch> points
+        originTip: string;
         loading: boolean;
         hasMore: boolean;
         onCommitSelected?: (commit: GitCommit, index: number) => void;
@@ -14,7 +14,6 @@
         selectedCommitHash?: string;
     } = $props();
 
-    // Pre-compute per-commit display data once — avoids O(n×m) inline calls in template
     interface CommitDisplay {
         commit: GitCommit;
         dateFormatted: string;
@@ -76,20 +75,24 @@
         });
     });
 
-    // Lazy-load: IntersectionObserver on sentinel fetches next batch from server
-    let sentinelEl: HTMLDivElement | null = null;
+    // Lazy-load on scroll
+    let listEl: HTMLDivElement | null = null;
+    let listScrollTop = $state(0);
+    let scrollEndFired = $state(false);
+
+    function handleListScroll() {
+        if (!listEl || scrollEndFired || loading || !commitDisplays.length) return;
+        listScrollTop = listEl.scrollTop;
+        const { scrollHeight, clientHeight, scrollTop } = listEl;
+        if (scrollTop + clientHeight >= scrollHeight - 200) {
+            scrollEndFired = true;
+            if (hasMore) onLoadMore?.();
+        }
+    }
 
     $effect(() => {
-        commits;
-        if (sentinelEl && hasMore) {
-            const obs = new IntersectionObserver((entries) => {
-                if (entries[0]?.isIntersecting) {
-                    onLoadMore?.();
-                }
-            }, { rootMargin: '100px' });
-            obs.observe(sentinelEl);
-            return () => obs.disconnect();
-        }
+        commits.length;
+        scrollEndFired = false;
     });
 </script>
 
@@ -98,13 +101,13 @@
         <span class="git-graph-label">History</span>
     </div>
 
-    <div class="git-graph-list" role="list" aria-label="Commit history">
+    <div class="git-graph-list" role="list" aria-label="Commit history" bind:this={listEl} onscroll={handleListScroll}>
         {#if loading}
             <div class="git-graph-loading">Loading commits...</div>
         {:else if commitDisplays.length === 0}
             <div class="git-graph-empty">No commits</div>
         {:else}
-            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} let:item={d} let:index={idx}>
+            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} scrollTop={listScrollTop} let:item={d} let:index={idx}>
                 {@const commit = d.commit}
                 <div
                     class="git-commit-row"
@@ -172,9 +175,6 @@
                     </div>
                 </div>
             </VirtualList>
-            {#if hasMore}
-                <div class="git-sentinel" bind:this={sentinelEl}></div>
-            {/if}
         {/if}
     </div>
 </div>
@@ -209,6 +209,9 @@
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
         padding: 4px 0;
     }
 
@@ -219,11 +222,7 @@
         font-size: 0.75rem;
     }
 
-    .git-sentinel {
-        height: 1px;
-    }
-
-    .git-commit-row {
+.git-commit-row {
         display: flex;
         align-items: flex-start;
         gap: 6px;

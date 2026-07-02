@@ -9,18 +9,21 @@
      */
     import { onMount, onDestroy } from 'svelte';
 
-    let { items, itemHeight = 28, minThreshold = 50, buffer = 5, role, 'aria-label': ariaLabel }: {
+    let { items, itemHeight = 28, minThreshold = 50, buffer = 5, role, 'aria-label': ariaLabel, scrollTop: scrollTopProp }: {
         items: any[];
         itemHeight?: number;
         minThreshold?: number;
         buffer?: number;
         role?: string;
         'aria-label'?: string;
+        scrollTop?: number; // external scroll position
     } = $props();
 
     let scrollEl: HTMLDivElement | null = null;
-    let scrollTop = $state(0);
+    let internalScrollTop = $state(0);
     let containerHeight = $state(0);
+
+    let scrollTop = $derived(scrollTopProp ?? internalScrollTop);
 
     let virtualized = $derived(items.length >= minThreshold);
     let totalHeight = $derived(items.length * itemHeight);
@@ -29,7 +32,7 @@
     let visibleOffset = $derived(startIndex * itemHeight);
 
     function handleScroll() {
-        if (scrollEl) scrollTop = scrollEl.scrollTop;
+        if (scrollEl) internalScrollTop = scrollEl.scrollTop;
     }
 
     function handleResize() {
@@ -76,9 +79,8 @@
         flex-direction: column;
         flex: 1;
         min-height: 0;
-        overflow-y: auto;
-        overflow-x: hidden;
     }
+
     .virtual-spacer {
         position: relative;
         width: 100%;
