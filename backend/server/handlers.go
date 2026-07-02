@@ -1067,7 +1067,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Stop executor if running
-	if task.StatusState == "running" {
+	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
 	}
 	// Stash current worktree state before switching threads.

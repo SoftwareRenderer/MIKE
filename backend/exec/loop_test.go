@@ -881,12 +881,12 @@ func TestStopProjectTasks(t *testing.T) {
 
 	// Verify task statuses were reset to idle
 	t1, _ := te.store.GetTaskByTaskID(task1.ID)
-	if t1.StatusState != "idle" {
-		t.Errorf("expected task1 status_state='idle', got %q", t1.StatusState)
+	if t1.ExecutionState != "idle" {
+		t.Errorf("expected task1 execution_state='idle', got %q", t1.ExecutionState)
 	}
 	t2, _ := te.store.GetTaskByTaskID(task2.ID)
-	if t2.StatusState != "idle" {
-		t.Errorf("expected task2 status_state='idle', got %q", t2.StatusState)
+	if t2.ExecutionState != "idle" {
+		t.Errorf("expected task2 execution_state='idle', got %q", t2.ExecutionState)
 	}
 }
 
@@ -919,7 +919,7 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	reviewTask := createTaskInProject(t, te.store, proj.ID, "review-task")
 	// Move review task to review status
 	reviewTask.Status = "review"
-	reviewTask.StatusState = "awaiting_review"
+	reviewTask.ExecutionState = "awaiting_review"
 	_ = te.store.UpdateTask(reviewTask)
 
 	// Only runningTask has an active executor
@@ -936,8 +936,8 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 
 	// Verify running task was stopped and reset to idle
 	runningTaskAfter, _ := te.store.GetTaskByTaskID(runningTask.ID)
-	if runningTaskAfter.StatusState != "idle" {
-		t.Errorf("expected running task status_state='idle', got %q", runningTaskAfter.StatusState)
+	if runningTaskAfter.ExecutionState != "idle" {
+		t.Errorf("expected running task execution_state='idle', got %q", runningTaskAfter.ExecutionState)
 	}
 
 	// Verify review task was NOT modified
@@ -945,8 +945,8 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	if reviewTaskAfter.Status != "review" {
 		t.Errorf("expected review task status='review', got %q", reviewTaskAfter.Status)
 	}
-	if reviewTaskAfter.StatusState != "awaiting_review" {
-		t.Errorf("expected review task status_state='awaiting_review', got %q", reviewTaskAfter.StatusState)
+	if reviewTaskAfter.ExecutionState != "awaiting_review" {
+		t.Errorf("expected review task execution_state='awaiting_review', got %q", reviewTaskAfter.ExecutionState)
 	}
 }
 
@@ -960,7 +960,7 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 		Title:       "Test Task",
 		Prompt:      "Test prompt",
 		Status:      "backlog",
-		StatusState: "idle",
+		ExecutionState: "idle",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

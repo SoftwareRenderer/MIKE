@@ -15,7 +15,7 @@ type Task struct {
 	BaseRef                   string    `json:"base_ref,omitempty"`
 	BranchTip                 string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
 	Output                    string    `json:"output"`
-	StatusState               string    `json:"status_state"`
+	ExecutionState            string    `json:"execution_state"`
 	LlamaServerURL            string    `json:"llama_server_url"`
 	ModelName                 string    `json:"model_name"`
 	ReasoningEffort           string    `json:"reasoning_effort"`

@@ -325,41 +325,39 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	task.UpdatedAt = time.Now()
 
 	if req.Status == "done" {
-		task.StatusState = "completed"
+		task.ExecutionState = "completed"
 		if h.executor != nil {
 			h.executor.StopSandbox(taskID)
 		}
-	} else if task.StatusState == "completed" {
+	} else if task.ExecutionState == "completed" {
 		// Task moved away from Done — reset status so it can run again
-		task.StatusState = "idle"
+		task.ExecutionState = "idle"
 	}
-	if req.Status == "in_progress" && task.StatusState != "running" {
+	if req.Status == "in_progress" && task.ExecutionState != "running" {
 		// If this task is a subtask, use subtask-aware start (moves parent only, not siblings)
 		if task.ParentTaskID != "" {
 			if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Output = err.Error()
 			}
 		} else {
 			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
 			children, _ := h.store.GetChildren(taskID)
 			if len(children) > 0 {
-				// Move all incomplete descendants (children, grandchildren, etc.) to in_progress
-				h.moveAllDescendantsToInProgress(taskID)
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
 					if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
 						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-						task.StatusState = "failed"
+						task.ExecutionState = "failed"
 						task.Output = err.Error()
 					}
 				}
 			} else {
 				if err := h.executor.StartTask(projectID, taskID); err != nil {
 					log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Output = err.Error()
 				}
 			}
@@ -369,6 +367,9 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Move all descendants to the same column (recursive, leaf-first)
+	h.moveAllDescendants(projectID, taskID, req.Status)
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
@@ -393,15 +394,55 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 		return
 	}
 	for i := range descendants {
-		if descendants[i].Status == "backlog" || (descendants[i].Status == "in_progress" && descendants[i].StatusState == "idle") {
+		if descendants[i].Status == "backlog" || (descendants[i].Status == "in_progress" && descendants[i].ExecutionState == "idle") {
 			descendants[i].Status = "in_progress"
-			descendants[i].StatusState = "idle"
+			descendants[i].ExecutionState = "idle"
 			descendants[i].UpdatedAt = time.Now().UTC()
 			if err := h.store.UpdateTask(&descendants[i]); err != nil {
 				log.Printf("[move-descendants] failed to update descendant %s: %v", descendants[i].ID, err)
 			} else {
 				h.boardStreamMgr.BroadcastTaskUpdated(descendants[i].ProjectID, &descendants[i])
 			}
+		}
+	}
+}
+
+// moveAllDescendants recursively moves all descendant tasks (children, grandchildren, etc.)
+// to the target status. Skips descendants that are already running (e.g., just auto-started).
+// Processes in reverse order (leaves first) to ensure child tasks are moved before their parents.
+func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string) {
+	descendants, err := h.store.GetAllDescendants(taskID)
+	if err != nil {
+		log.Printf("[move-descendants] failed to get descendants of %s: %v", taskID, err)
+		return
+	}
+	// Process in reverse order (leaves first) so children are moved before their parents
+	for i := len(descendants) - 1; i >= 0; i-- {
+		d := &descendants[i]
+		// Skip already-running descendants (e.g., just auto-started by the move handler)
+		if d.ExecutionState == "running" {
+			continue
+		}
+		d.Status = targetStatus
+		d.UpdatedAt = time.Now().UTC()
+		// Set execution_state based on target column
+		switch targetStatus {
+		case "done":
+			d.ExecutionState = "completed"
+			if h.executor != nil {
+				h.executor.StopSandbox(d.ID)
+			}
+		case "backlog", "in_progress", "review":
+			if d.ExecutionState == "completed" {
+				// Moved away from done — reset
+				d.ExecutionState = "idle"
+			}
+			// Keep existing state (failed, stopped, awaiting_review, idle) if not overridden above
+		}
+		if err := h.store.UpdateTask(d); err != nil {
+			log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
+		} else {
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
 		}
 	}
 }
@@ -508,7 +549,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	// Move task to Done
 	task.Status = "done"
-	task.StatusState = "completed"
+	task.ExecutionState = "completed"
 	task.UpdatedAt = time.Now()
 	if err := h.store.UpdateTask(task); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
@@ -823,11 +864,11 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	// Stop all running descendants (leaf-first order: reverse the list)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := descendants[i]
-		if d.StatusState == "running" {
+		if d.ExecutionState == "running" {
 			if err := h.executor.StopTask(d.ID); err != nil {
 				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
 			}
-			d.StatusState = "stopped"
+			d.ExecutionState = "stopped"
 			d.Output = "Stopped by parent"
 			d.UpdatedAt = time.Now().UTC()
 			_ = h.store.UpdateTask(&d)
@@ -839,8 +880,8 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	if err := h.executor.StopTask(taskID); err != nil {
 		// Task might not be running (parent may be idle while subtask runs)
 		task, _ := h.store.GetTask(projectID, taskID)
-		if task != nil && task.StatusState == "running" {
-			task.StatusState = "stopped"
+		if task != nil && task.ExecutionState == "running" {
+			task.ExecutionState = "stopped"
 			task.Output = "Stopped by user"
 			task.UpdatedAt = time.Now().UTC()
 			_ = h.store.UpdateTask(task)
@@ -850,7 +891,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 
 	task, _ := h.store.GetTask(projectID, taskID)
 	if task != nil {
-		task.StatusState = "stopped"
+		task.ExecutionState = "stopped"
 		task.Output = "Stopped by user"
 		task.UpdatedAt = time.Now().UTC()
 		_ = h.store.UpdateTask(task)

@@ -182,7 +182,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	// Move task to in_progress if it's in review or done
 	if task.Status == "review" || task.Status == "done" {
 		task.Status = "in_progress"
-		task.StatusState = "idle"
+		task.ExecutionState = "idle"
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.store.UpdateTask(task)
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
@@ -353,7 +353,7 @@ func isIncompleteForStart(t types.Task) bool {
 	if t.Status == "backlog" {
 		return true
 	}
-	if t.Status == "in_progress" && t.StatusState == "idle" {
+	if t.Status == "in_progress" && t.ExecutionState == "idle" {
 		return true
 	}
 	return false
@@ -531,7 +531,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	if parent.Status != "in_progress" && parent.Status != "backlog" {
 		return nil
 	}
-	if parent.StatusState == "paused" || parent.StatusState == "completed" {
+	if parent.ExecutionState == "paused" || parent.ExecutionState == "completed" {
 		return nil
 	}
 
@@ -635,7 +635,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	// Reset stale running state (executor crashed/server restarted)
-	if task.StatusState == "running" {
+	if task.ExecutionState == "running" {
 		te.taskMu.Lock()
 		_, activelyRunning := te.tasks[taskID]
 		te.taskMu.Unlock()
@@ -643,7 +643,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			return nil, fmt.Errorf("task already running")
 		}
 		log.Printf("[start] task=%s stale running state detected, resetting", taskID)
-		task.StatusState = "idle"
+		task.ExecutionState = "idle"
 	}
 
 	serverURL := overrideServerURL
@@ -720,7 +720,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if modelName != "" {
 		task.ModelName = modelName
 	}
-	task.StatusState = "running"
+	task.ExecutionState = "running"
 	task.Status = "in_progress"
 	if err := te.store.UpdateTask(task); err != nil {
 		return nil, err
@@ -745,7 +745,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
 		// Clean up resources created before this check
-		task.StatusState = "idle"
+		task.ExecutionState = "idle"
 		task.Status = "backlog"
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.store.UpdateTask(task)
@@ -844,7 +844,7 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 			stopped++
 			log.Printf("[stop-project-tasks] task=%s project=%s stopped (settings change)", task.ID, projectID)
 			// Reset only the running task to idle; preserve its column (status)
-			task.StatusState = "idle"
+			task.ExecutionState = "idle"
 			te.taskMu.Unlock()
 			_ = te.store.UpdateTask(&task)
 		} else {
@@ -904,7 +904,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	if err != nil {
 		return err
 	}
-	task.StatusState = "idle"
+	task.ExecutionState = "idle"
 	te.store.UpdateTask(task)
 	return te.StartTask(projectID, taskID)
 }
@@ -934,7 +934,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s setup failed: %v", taskID, err)
-		task.StatusState = "failed"
+		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = err.Error()
 		_ = te.store.UpdateTask(task)

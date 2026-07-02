@@ -37,15 +37,15 @@ test.describe('Pi Coding Agent', () => {
     );
     expect(moveResult.ok).toBe(true);
 
-    // Wait for the task to start processing (executor updates status_state)
-    // Poll until status_state changes from empty
+    // Wait for the task to start processing (executor updates execution_state)
+    // Poll until execution_state changes from empty
     for (let i = 0; i < 15; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       const check = await page.evaluate(async ({ pid, tid }) => {
         const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
         return res.ok ? res.json() : null;
       }, { pid: projectId, tid: taskId });
-      if (check?.status_state) break; // status_state is set
+      if (check?.execution_state) break; // execution_state is set
     }
 
     // Verify the task exists and has a valid state (not crashed)
@@ -59,12 +59,12 @@ test.describe('Pi Coding Agent', () => {
 
     // Valid states: running (processing), idle/completed/awaiting_review (done),
     // failed (timeout or error), stopped (user cancelled), or empty (not started)
-    console.log(`[pi-test] task state: status=${taskData.status}, status_state=${taskData.status_state}, output=${taskData.output || '(none)'}`);
+    console.log(`[pi-test] task state: status=${taskData.status}, execution_state=${taskData.execution_state}, output=${taskData.output || '(none)'}`);
     const validStates = ['', 'running', 'idle', 'completed', 'awaiting_review', 'failed', 'stopped'];
-    expect(validStates.includes(taskData.status_state)).toBe(true);
+    expect(validStates.includes(taskData.execution_state)).toBe(true);
 
     // If the task failed, it should have a descriptive error message
-    if (taskData.status_state === 'failed') {
+    if (taskData.execution_state === 'failed') {
       expect(taskData.output).toBeTruthy();
       expect(taskData.output.length).toBeGreaterThan(0);
     }

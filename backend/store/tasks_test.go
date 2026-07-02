@@ -108,7 +108,7 @@ func TestUpdateTask(t *testing.T) {
 
 	// Update status
 	task.Status = "in_progress"
-	task.StatusState = "running"
+	task.ExecutionState = "running"
 	if err := s.UpdateTask(task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -117,12 +117,12 @@ func TestUpdateTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.Status != "in_progress" || got.StatusState != "running" {
-		t.Fatalf("unexpected status: %s, %s", got.Status, got.StatusState)
+	if got.Status != "in_progress" || got.ExecutionState != "running" {
+		t.Fatalf("unexpected status: %s, %s", got.Status, got.ExecutionState)
 	}
 }
 
-func TestUpdateTaskStatusState(t *testing.T) {
+func TestUpdateTaskExecutionState(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -134,7 +134,7 @@ func TestUpdateTaskStatusState(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := s.UpdateTaskStatusState("task-1", "proj-1", "running"); err != nil {
+	if err := s.UpdateTaskExecutionState("task-1", "proj-1", "running"); err != nil {
 		t.Fatalf("update status state: %v", err)
 	}
 
@@ -142,8 +142,8 @@ func TestUpdateTaskStatusState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.StatusState != "running" {
-		t.Fatalf("unexpected status state: %s", got.StatusState)
+	if got.ExecutionState != "running" {
+		t.Fatalf("unexpected status state: %s", got.ExecutionState)
 	}
 	// Status should be unchanged
 	if got.Status != "backlog" {
@@ -171,8 +171,8 @@ func TestUpdateTaskStatusAndState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.Status != "in_progress" || got.StatusState != "running" {
-		t.Fatalf("unexpected status/state: %s/%s", got.Status, got.StatusState)
+	if got.Status != "in_progress" || got.ExecutionState != "running" {
+		t.Fatalf("unexpected status/state: %s/%s", got.Status, got.ExecutionState)
 	}
 }
 

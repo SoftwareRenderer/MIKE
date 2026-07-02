@@ -39,7 +39,7 @@ export interface Task {
     session_id?: string;
     branch?: string;
     output?: string;
-    status_state: string;
+    execution_state: string;
     llama_server_url?: string;
     model_name?: string;
     reasoning_effort?: string;

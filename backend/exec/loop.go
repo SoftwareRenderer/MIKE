@@ -51,7 +51,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 	if sandboxEnabled {
 			if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
 				te.store.UpdateTask(task)
@@ -68,7 +68,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if err := te.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
 				}); err != nil {
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to build sandbox image: %v", err)
 					te.store.UpdateTask(task)
@@ -88,7 +88,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if err := te.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
 				}); err != nil {
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Failed to pull sandbox image: %v", err)
 					te.store.UpdateTask(task)
@@ -114,7 +114,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
 			}
 			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
 				te.store.UpdateTask(task)
@@ -131,7 +131,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Get agent client for tool calls (required — sandbox creation ensures agent is running)
 		agentClient, err := te.sandboxMgr.GetClient(task.ID)
 		if err != nil {
-			task.StatusState = "failed"
+			task.ExecutionState = "failed"
 			task.Status = "review"
 			task.Output = fmt.Sprintf("Failed to connect to sandbox bridge: %v", err)
 			te.store.UpdateTask(task)
@@ -145,7 +145,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Read uses plain os.ReadFile (no isolation).
 		root, err := os.OpenRoot(worktreePath)
 		if err != nil {
-			task.StatusState = "failed"
+			task.ExecutionState = "failed"
 			task.Status = "review"
 			task.Output = fmt.Sprintf("Failed to create worktree root: %v", err)
 			te.store.UpdateTask(task)
@@ -285,7 +285,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	for {
 		select {
 		case <-ctx.Done():
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -386,7 +386,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		if err != nil {
 			close(queueDone)
 			// Context cancelled while waiting for slot
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
@@ -506,7 +506,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			callCancel()
 			te.gate.Release(serverURL) // Release gate immediately so other tasks can proceed
 			<-streamDone               // Then wait for goroutine to finish
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -726,18 +726,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 								log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
 							}
 						}
-						task.StatusState = "completed"
+						task.ExecutionState = "completed"
 						task.Status = "done"
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(task.ID)
 						}
 					} else {
-						task.StatusState = "awaiting_review"
+						task.ExecutionState = "awaiting_review"
 						task.Status = "review"
 					}
 					te.store.UpdateTask(task)
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-						"state":                task.StatusState,
+						"state":                task.ExecutionState,
 						"assistant_message_id": assistantMsgID,
 						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
@@ -765,7 +765,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			// Check consecutive identical tool call failures (turn-level).
 			if count := tracker.recordTurn(turnFailures); count >= maxFailures {
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 				te.store.UpdateTask(task)
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -804,7 +804,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			loopType := detector.recordTurn(pendingToolCalls, assistantText)
 			if loopType != LoopNone {
 				if detector.hintCount >= maxLoopHints {
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -881,7 +881,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			if loopType != LoopNone {
 				if detector.hintCount >= maxLoopHints {
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Status = "review"
 					task.Output = "Model stuck in loop (max hints exhausted)"
 					te.store.UpdateTask(task)
@@ -894,7 +894,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
 				detector.hintCount++
 				detector.reset()
-				task.StatusState = "running"
+				task.ExecutionState = "running"
 				te.store.UpdateTask(task)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 				continue
@@ -920,14 +920,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					task.ModelName = um.ModelName
 					task.ReasoningEffort = newReasoningEffort
 				}
-				task.StatusState = "running"
+				task.ExecutionState = "running"
 				te.store.UpdateTask(task)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				continue
 			default:
 			}
 			task.Status = "review"
-			task.StatusState = "idle"
+			task.ExecutionState = "idle"
 			te.store.UpdateTask(task)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			// Broadcast diff so the frontend updates the diff panel
@@ -983,7 +983,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// with the same conversation (text-only response already added to history).
 		select {
 		case <-ctx.Done():
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -1009,7 +1009,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				task.ModelName = um.ModelName
 				task.ReasoningEffort = newReasoningEffort
 			}
-			task.StatusState = "running"
+			task.ExecutionState = "running"
 			te.store.UpdateTask(task)
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 		}
@@ -1080,7 +1080,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	if sandboxEnabled {
 		// Pre-flight: check if pi binary exists in the container
 		if !te.sandboxMgr.PiAvailable(task.ID) {
-			task.StatusState = "failed"
+			task.ExecutionState = "failed"
 			task.Status = "review"
 			task.Output = "Pi Coding Agent binary not found in sandbox container. Ensure the container image includes the `pi` binary."
 			te.store.UpdateTask(task)
@@ -1109,7 +1109,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	}
 
 	if err != nil {
-		task.StatusState = "failed"
+		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to start Pi Coding Agent: %v", err)
 		te.store.UpdateTask(task)
@@ -1153,7 +1153,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	}
 	err = client.Prompt(ctx, initialPrompt)
 	if err != nil {
-		task.StatusState = "failed"
+		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Failed to send prompt to Pi: %v", err)
 		te.store.UpdateTask(task)
@@ -1174,7 +1174,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		if time.Now().After(startupDeadline) {
 			log.Printf("[pi] task=%s startup timeout (no agent_start within %v)", task.ID, startupTimeout)
 			client.Abort(ctx)
-			task.StatusState = "failed"
+			task.ExecutionState = "failed"
 			task.Status = "review"
 			task.Output = "Pi Coding Agent failed to start (timeout waiting for agent)"
 			te.store.UpdateTask(task)
@@ -1193,7 +1193,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				// Channel closed — Pi process exited
 				log.Printf("[pi] task=%s event channel closed during startup", task.ID)
 				client.Abort(ctx)
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = "Pi Coding Agent process exited unexpectedly"
 				te.store.UpdateTask(task)
@@ -1211,7 +1211,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				startupValidated = true
 			case "agent_end":
 				// Pi ended immediately after prompt — treat as failure
-				task.StatusState = "failed"
+				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = "Pi Coding Agent ended immediately after starting"
 				te.store.UpdateTask(task)
@@ -1221,7 +1221,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			case "response":
 				if !event.Success && event.Error != "" && event.Command == "prompt" {
 					// Prompt was rejected by Pi
-					task.StatusState = "failed"
+					task.ExecutionState = "failed"
 					task.Status = "review"
 					task.Output = fmt.Sprintf("Pi rejected prompt: %s", event.Error)
 					te.store.UpdateTask(task)
@@ -1235,7 +1235,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			}
 		case <-ctx.Done():
 			timer.Stop()
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -1258,7 +1258,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		case <-ctx.Done():
 			log.Printf("[pi] task=%s context cancelled", task.ID)
 			client.Abort(ctx)
-			task.StatusState = "stopped"
+			task.ExecutionState = "stopped"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
@@ -1514,13 +1514,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
 				}
 			}
-			task.StatusState = "completed"
+			task.ExecutionState = "completed"
 			task.Status = "done"
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 		} else {
-			task.StatusState = "awaiting_review"
+			task.ExecutionState = "awaiting_review"
 			task.Status = "review"
 		}
 		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
@@ -1528,7 +1528,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 		// Broadcast complete event
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-			"state":            task.StatusState,
+			"state":            task.ExecutionState,
 			"summary":          "Pi Coding Agent finished",
 			"model_name":       client.ModelName(),
 			"prompt_tokens":    totalPromptTokens,

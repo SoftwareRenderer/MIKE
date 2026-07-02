@@ -60,7 +60,7 @@ func TestBranchPollerLifecycle(t *testing.T) {
 		Title:       "Test task",
 		Prompt:      "Test prompt",
 		Status:      "in_progress",
-		StatusState: "running",
+		ExecutionState: "running",
 		Branch:      branchName,
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -140,7 +140,7 @@ func TestBranchPollerSkipsBacklog(t *testing.T) {
 		Title:       "Test task",
 		Prompt:      "Test prompt",
 		Status:      "in_progress",
-		StatusState: "running",
+		ExecutionState: "running",
 	}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -204,7 +204,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 		Title:       "Test task",
 		Prompt:      "Test prompt",
 		Status:      "in_progress",
-		StatusState: "running",
+		ExecutionState: "running",
 		Branch:      branchName,
 	}
 	if err := s.CreateTask(task); err != nil {

@@ -67,16 +67,16 @@
     // Check if any descendant is running (for pause button on parent)
     let hasRunningDescendant = $derived.by(() => {
         const isActive = (s: string) => s === 'running' || s === 'pulling_image';
-        if (!hasChildren) return isActive(task.status_state);
+        if (!hasChildren) return isActive(task.execution_state);
         for (const child of children) {
-            if (isActive(child.status_state)) return true;
+            if (isActive(child.execution_state)) return true;
             // Recursively check (childrenMap has all tasks, not just same-column)
             const grandChildren = childrenMap?.get(child.id) ?? [];
             for (const gc of grandChildren) {
-                if (isActive(gc.status_state)) return true;
+                if (isActive(gc.execution_state)) return true;
             }
         }
-        return isActive(task.status_state);
+        return isActive(task.execution_state);
     });
 
     // Number of action icons in the title bar (for dynamic padding)
@@ -138,7 +138,7 @@
 
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingIdsContext).has(task.id);
-        const state = $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state;
+        const state = $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
@@ -424,17 +424,17 @@
     }
 
     // Pause/Resume for In Progress column
-    // Derive liveStatusState from boardStore so it updates reactively
+    // Derive liveExecutionState from boardStore so it updates reactively
     // when WebSocket broadcasts a board refresh. Falls back to task prop.
     const STOPPED_STATES = ['stopped', 'paused', 'failed'];
-    let liveStatusState = $derived(
-        $boardStore?.tasks.find(t => t.id === task.id)?.status_state ?? task.status_state
+    let liveExecutionState = $derived(
+        $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state
     );
 
     // Pause/Resume: for parent tasks, show based on descendant state
     let isPausable = $derived(columnId === 'in_progress' && hasRunningDescendant);
-    let isResumable = $derived(columnId === 'in_progress' && STOPPED_STATES.includes(liveStatusState));
-    let isIdle = $derived(columnId === 'in_progress' && liveStatusState === 'idle' && !hasRunningDescendant);
+    let isResumable = $derived(columnId === 'in_progress' && STOPPED_STATES.includes(liveExecutionState));
+    let isIdle = $derived(columnId === 'in_progress' && liveExecutionState === 'idle' && !hasRunningDescendant);
 
     async function handlePause(e: MouseEvent) {
         e.stopPropagation();

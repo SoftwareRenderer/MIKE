@@ -689,7 +689,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 			Title:             "Subtask " + id,
 			Prompt:            "Subtask prompt",
 			Status:            "in_progress",
-			StatusState:       "idle",
+			ExecutionState:       "idle",
 			ParentTaskID:      parentID,
 			CurrentThreadID:   "thread-subtask-" + string(rune('1'+i)),
 			LlamaServerURL:    "http://localhost:8080",
@@ -723,7 +723,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	// Simulate subtask1 completing (move to review)
 	subtask1, _ := te.store.GetTaskByTaskID(subtask1ID)
 	subtask1.Status = "review"
-	subtask1.StatusState = "idle"
+	subtask1.ExecutionState = "idle"
 	te.store.UpdateTask(subtask1)
 
 	// Stop subtask1 executor
@@ -738,8 +738,8 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 
 	// Verify subtask2 is now running
 	subtask2, _ := te.store.GetTaskByTaskID(subtask2ID)
-	if subtask2.StatusState != "running" {
-		t.Errorf("subtask2 should be running, got status_state %q", subtask2.StatusState)
+	if subtask2.ExecutionState != "running" {
+		t.Errorf("subtask2 should be running, got execution_state %q", subtask2.ExecutionState)
 	}
 
 	// Verify parent is STILL in backlog
@@ -780,7 +780,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 		Title:             "Last Subtask",
 		Prompt:            "Subtask prompt",
 		Status:            "in_progress",
-		StatusState:       "idle",
+		ExecutionState:       "idle",
 		ParentTaskID:      parentID,
 		CurrentThreadID:   "thread-subtask",
 		LlamaServerURL:    "http://localhost:8080",
@@ -804,7 +804,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	// Simulate subtask completing (move to done — last and only subtask)
 	subtask, _ = te.store.GetTaskByTaskID(subtaskID)
 	subtask.Status = "done"
-	subtask.StatusState = "completed"
+	subtask.ExecutionState = "completed"
 	te.store.UpdateTask(subtask)
 
 	// Stop subtask executor
@@ -822,7 +822,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	if parentFromDB.Status != "backlog" {
 		t.Errorf("parent should stay in backlog after all children done, got status %q", parentFromDB.Status)
 	}
-	if parentFromDB.StatusState == "running" {
+	if parentFromDB.ExecutionState == "running" {
 		t.Error("parent should NOT be running — it was auto-started when it should stay in backlog")
 	}
 }

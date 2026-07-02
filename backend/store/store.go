@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     base_ref                     TEXT DEFAULT NULL,
     branch_tip                   TEXT DEFAULT NULL,
     output                       TEXT,
-    status_state                 TEXT NOT NULL DEFAULT 'idle',
+    execution_state              TEXT NOT NULL DEFAULT 'idle',
     llama_server_url             TEXT NOT NULL DEFAULT '',
     model_name                   TEXT NOT NULL DEFAULT '',
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
@@ -259,6 +259,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)
+	// Rename status_state -> execution_state
+	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN status_state TO execution_state`)
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
@@ -483,7 +485,7 @@ func scanTask(s scanner, t *types.Task) error {
 	var createdAt, updatedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
-		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.StatusState,
+		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.ExecutionState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
 		&autoCommit, &autoMerge, &subtasksAutoMerge, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
 	if err != nil {

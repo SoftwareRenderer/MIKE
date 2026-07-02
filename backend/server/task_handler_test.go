@@ -301,8 +301,8 @@ func getTaskStatus(t *testing.T, s *Server, projectID string, taskID string) str
 	return result["status"].(string)
 }
 
-// Helper: get a task by ID and return its status_state
-func getTaskStatusState(t *testing.T, s *Server, projectID string, taskID string) string {
+// Helper: get a task by ID and return its execution_state
+func getTaskExecutionState(t *testing.T, s *Server, projectID string, taskID string) string {
 	t.Helper()
 	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
 	rr := testResponseAuth(t, s, req)
@@ -310,7 +310,7 @@ func getTaskStatusState(t *testing.T, s *Server, projectID string, taskID string
 		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
 	}
 	result := mustJSON[map[string]any](t, rr.Body)
-	if ss, ok := result["status_state"].(string); ok {
+	if ss, ok := result["execution_state"].(string); ok {
 		return ss
 	}
 	return ""
@@ -388,10 +388,15 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 	// Move subtask to review
 	moveTask(t, s, projID, subID, "review")
 
-	// Move parent to in_progress
+	// Move parent to in_progress — subtask follows (new behavior: all descendants move with parent)
 	moveTask(t, s, projID, parentID, "in_progress")
 
-	// Try to move subtask to backlog — should be blocked
+	// Subtask should have been moved to in_progress with its parent
+	if getTaskStatus(t, s, projID, subID) != "in_progress" {
+		t.Fatalf("subtask should follow parent to in_progress, got %s", getTaskStatus(t, s, projID, subID))
+	}
+
+	// Try to move subtask to backlog — should be blocked (ancestor is in_progress)
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+subID+"/move", map[string]any{
 		"status": "backlog",
 	})
@@ -400,10 +405,10 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Subtask should still be in review
+	// Subtask should still be in in_progress (blocked from moving to backlog)
 	status := getTaskStatus(t, s, projID, subID)
-	if status != "review" {
-		t.Fatalf("expected review (blocked), got %s", status)
+	if status != "in_progress" {
+		t.Fatalf("expected in_progress (blocked), got %s", status)
 	}
 }
 
@@ -441,9 +446,9 @@ func TestSubtaskSiblingIsolation(t *testing.T) {
 	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
 
 	// Set all three to in_progress/idle via direct PUT (bypasses move endpoint's executor)
-	updateTask(t, s, projID, parentID, map[string]any{"status": "in_progress", "status_state": "idle"})
-	updateTask(t, s, projID, subA, map[string]any{"status": "in_progress", "status_state": "idle"})
-	updateTask(t, s, projID, subB, map[string]any{"status": "in_progress", "status_state": "idle"})
+	updateTask(t, s, projID, parentID, map[string]any{"status": "in_progress", "execution_state": "idle"})
+	updateTask(t, s, projID, subA, map[string]any{"status": "in_progress", "execution_state": "idle"})
+	updateTask(t, s, projID, subB, map[string]any{"status": "in_progress", "execution_state": "idle"})
 
 	// Move subA to review
 	moveTask(t, s, projID, subA, "review")
@@ -611,18 +616,18 @@ func TestClearDoneCascadesToSubtasks(t *testing.T) {
 	// Move subtask to review (different state from parent)
 	moveTask(t, s, projID, subID, "review")
 
-	// Move parent to done
+	// Move parent to done — subtask follows (new behavior: all descendants move with parent)
 	moveTask(t, s, projID, parentID, "done")
 
-	// Verify states
+	// Verify both are in done
 	if getTaskStatus(t, s, projID, parentID) != "done" {
 		t.Fatal("parent should be done")
 	}
-	if getTaskStatus(t, s, projID, subID) != "review" {
-		t.Fatal("subtask should be review")
+	if getTaskStatus(t, s, projID, subID) != "done" {
+		t.Fatalf("subtask should follow parent to done, got %s", getTaskStatus(t, s, projID, subID))
 	}
 
-	// Clear done tasks
+	// Clear done tasks — both should be deleted
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/done", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
@@ -665,20 +670,20 @@ func TestSubtaskConsolidation(t *testing.T) {
 	}
 }
 
-// Test: task move to done sets status_state to completed
+// Test: task move to done sets execution_state to completed
 func TestTaskMoveDoneSetsCompleted(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "done-state")
 
 	moveTask(t, s, projID, taskID, "done")
-	statusState := getTaskStatusState(t, s, projID, taskID)
+	statusState := getTaskExecutionState(t, s, projID, taskID)
 	if statusState != "completed" {
 		t.Fatalf("expected completed, got %s", statusState)
 	}
 }
 
-// Test: task moved away from done resets status_state
+// Test: task moved away from done resets execution_state
 func TestTaskMoveAwayFromDoneResetsState(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -686,13 +691,13 @@ func TestTaskMoveAwayFromDoneResetsState(t *testing.T) {
 
 	// Move to done
 	moveTask(t, s, projID, taskID, "done")
-	if getTaskStatusState(t, s, projID, taskID) != "completed" {
+	if getTaskExecutionState(t, s, projID, taskID) != "completed" {
 		t.Fatal("should be completed")
 	}
 
 	// Move away from done
 	moveTask(t, s, projID, taskID, "review")
-	statusState := getTaskStatusState(t, s, projID, taskID)
+	statusState := getTaskExecutionState(t, s, projID, taskID)
 	if statusState != "idle" {
 		t.Fatalf("expected idle after moving away from done, got %s", statusState)
 	}
@@ -835,8 +840,8 @@ func TestCommitAndDone(t *testing.T) {
 	if result["status"] != "done" {
 		t.Fatalf("expected status=done, got %s", result["status"])
 	}
-	if result["status_state"] != "completed" {
-		t.Fatalf("expected status_state=completed, got %s", result["status_state"])
+	if result["execution_state"] != "completed" {
+		t.Fatalf("expected execution_state=completed, got %s", result["execution_state"])
 	}
 }
 
@@ -967,6 +972,134 @@ func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
 	status := getTaskStatus(t, s, projID, taskID)
 	if status != "in_progress" {
 		t.Fatalf("expected in_progress, got %s", status)
+	}
+}
+
+// Test: moving a parent task moves all subtasks recursively to the same column
+func TestMoveParentMovesAllSubtasks(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "parent-cascade")
+	subA := createTestSubtask(t, s, projID, parentID, "sub-a")
+	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
+
+	// All start in backlog
+	if getTaskStatus(t, s, projID, parentID) != "backlog" {
+		t.Fatal("parent should be backlog")
+	}
+	if getTaskStatus(t, s, projID, subA) != "backlog" {
+		t.Fatal("subA should be backlog")
+	}
+	if getTaskStatus(t, s, projID, subB) != "backlog" {
+		t.Fatal("subB should be backlog")
+	}
+
+	// Move parent to review — all subtasks should follow
+	moveTask(t, s, projID, parentID, "review")
+
+	if getTaskStatus(t, s, projID, parentID) != "review" {
+		t.Fatal("parent should be review")
+	}
+	if getTaskStatus(t, s, projID, subA) != "review" {
+		t.Fatalf("subA should follow parent to review, got %s", getTaskStatus(t, s, projID, subA))
+	}
+	if getTaskStatus(t, s, projID, subB) != "review" {
+		t.Fatalf("subB should follow parent to review, got %s", getTaskStatus(t, s, projID, subB))
+	}
+}
+
+// Test: moving a parent task moves nested subtasks (grandchildren) recursively
+func TestMoveParentMovesNestedSubtasks(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	grandparentID := createTestTask(t, s, projID, "grandparent")
+	parentID := createTestSubtask(t, s, projID, grandparentID, "parent")
+	childID := createTestSubtask(t, s, projID, parentID, "child")
+
+	// Move grandparent to done — all descendants should follow
+	moveTask(t, s, projID, grandparentID, "done")
+
+	if getTaskStatus(t, s, projID, grandparentID) != "done" {
+		t.Fatal("grandparent should be done")
+	}
+	if getTaskStatus(t, s, projID, parentID) != "done" {
+		t.Fatalf("parent should follow to done, got %s", getTaskStatus(t, s, projID, parentID))
+	}
+	if getTaskStatus(t, s, projID, childID) != "done" {
+		t.Fatalf("child should follow to done, got %s", getTaskStatus(t, s, projID, childID))
+	}
+	// Check execution_state is "completed" for done tasks
+	if getTaskExecutionState(t, s, projID, grandparentID) != "completed" {
+		t.Fatalf("grandparent execution_state should be completed, got %s", getTaskExecutionState(t, s, projID, grandparentID))
+	}
+	if getTaskExecutionState(t, s, projID, parentID) != "completed" {
+		t.Fatalf("parent execution_state should be completed, got %s", getTaskExecutionState(t, s, projID, parentID))
+	}
+	if getTaskExecutionState(t, s, projID, childID) != "completed" {
+		t.Fatalf("child execution_state should be completed, got %s", getTaskExecutionState(t, s, projID, childID))
+	}
+}
+
+// Test: moving a parent task moves subtasks that are in different columns
+func TestMoveParentMovesSubtasksInDifferentColumns(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "parent-mixed")
+	subBacklog := createTestSubtask(t, s, projID, parentID, "sub-backlog")
+	subReview := createTestSubtask(t, s, projID, parentID, "sub-review")
+	subDone := createTestSubtask(t, s, projID, parentID, "sub-done")
+
+	// Move subtasks to different columns
+	moveTask(t, s, projID, subReview, "review")
+	moveTask(t, s, projID, subDone, "done")
+
+	// Verify different columns
+	if getTaskStatus(t, s, projID, subBacklog) != "backlog" {
+		t.Fatal("subBacklog should be backlog")
+	}
+	if getTaskStatus(t, s, projID, subReview) != "review" {
+		t.Fatal("subReview should be review")
+	}
+	if getTaskStatus(t, s, projID, subDone) != "done" {
+		t.Fatal("subDone should be done")
+	}
+
+	// Move parent to review — all subtasks should follow
+	moveTask(t, s, projID, parentID, "review")
+
+	if getTaskStatus(t, s, projID, parentID) != "review" {
+		t.Fatal("parent should be review")
+	}
+	if getTaskStatus(t, s, projID, subBacklog) != "review" {
+		t.Fatalf("subBacklog should follow to review, got %s", getTaskStatus(t, s, projID, subBacklog))
+	}
+	if getTaskStatus(t, s, projID, subReview) != "review" {
+		t.Fatalf("subReview should stay in review, got %s", getTaskStatus(t, s, projID, subReview))
+	}
+	if getTaskStatus(t, s, projID, subDone) != "review" {
+		t.Fatalf("subDone should follow to review, got %s", getTaskStatus(t, s, projID, subDone))
+	}
+}
+
+// Test: moving a subtask does NOT move its siblings or parent
+func TestMoveSubtaskDoesNotMoveSiblingsOrParent(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "parent-isolated")
+	subA := createTestSubtask(t, s, projID, parentID, "sub-a")
+	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
+
+	// Move subA to review — parent and subB should stay in backlog
+	moveTask(t, s, projID, subA, "review")
+
+	if getTaskStatus(t, s, projID, subA) != "review" {
+		t.Fatal("subA should be review")
+	}
+	if getTaskStatus(t, s, projID, parentID) != "backlog" {
+		t.Fatalf("parent should stay in backlog, got %s", getTaskStatus(t, s, projID, parentID))
+	}
+	if getTaskStatus(t, s, projID, subB) != "backlog" {
+		t.Fatalf("subB should stay in backlog (sibling isolation), got %s", getTaskStatus(t, s, projID, subB))
 	}
 }
 

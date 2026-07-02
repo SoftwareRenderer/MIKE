@@ -32,7 +32,7 @@ func newTask(id, projectID string) *types.Task {
 		Title:       id,
 		Prompt:      "test prompt",
 		Status:      "backlog",
-		StatusState: "idle",
+		ExecutionState: "idle",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
