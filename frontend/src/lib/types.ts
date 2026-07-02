@@ -216,7 +216,7 @@ export type StreamEventType =
     | 'user_message'
     | 'stats'
     | 'thread_switch'
-    | 'compression'
+    | 'summarization'
     | 'git_checkpoint_pending'
     | 'git_checkpoint_complete'
     | 'merge_resolution'

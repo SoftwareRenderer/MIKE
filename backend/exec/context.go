@@ -10,17 +10,17 @@ import (
 	"kanban/backend/types"
 )
 
-// compressResult holds the result of a context compression operation.
-type compressResult struct {
-	newMessages        []types.ChatMessage
-	newLastCompressIdx int
-	summary            string
-	oldLen             int
+// summarizeResult holds the result of a context summarization operation.
+type summarizeResult struct {
+	newMessages         []types.ChatMessage
+	newLastSummarizeIdx int
+	summary             string
+	oldLen              int
 }
 
-// shouldCompress checks if the current context (estimated from messages) is approaching the context window limit.
+// shouldSummarize checks if the current context (estimated from messages) is approaching the context window limit.
 // Uses the same token estimation as estimatePromptTokens for consistency.
-func shouldCompress(messages []types.ChatMessage, contextWindow int) bool {
+func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 	if contextWindow <= 0 {
 		return false
 	}
@@ -28,33 +28,33 @@ func shouldCompress(messages []types.ChatMessage, contextWindow int) bool {
 	return estimatedTokens >= contextWindow*8/10
 }
 
-// compressContext summarizes the conversation history to reduce context size.
+// summarizeContext summarizes the conversation history to reduce context size.
 // It sends a non-streaming chat completion with a summarization prompt,
 // then returns a new messages array: [system, summary] + last N recent messages.
-func (te *TaskExecutor) compressContext(messages []types.ChatMessage, lastCompressIdx int, systemPrompt, serverURL, modelName string) (compressResult, error) {
+func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName string) (summarizeResult, error) {
 	oldLen := len(messages)
 
-	// Build the summarization request: system prompt + all messages since last compression
-	compressFrom := max(lastCompressIdx, 0)
+	// Build the summarization request: system prompt + all messages since last summarization
+	summarizeFrom := max(lastSummarizeIdx, 0)
 
-	compressMessages := []types.ChatMessage{
+	summarizeMessages := []types.ChatMessage{
 		{Role: "system", Content: "Summarize the key events, decisions, and lessons learned in this conversation. " +
 			"Preserve technical details, file paths, code decisions, and any important context. " +
 			"This summary will be used to restore context in a truncated conversation. " +
 			"Be concise but thorough. Include: what was done, what files were changed, what commands were run, " +
 			"what errors were encountered, and what the current state of the task is."},
 	}
-	// Include messages from after last compression (skip system prompt at index 0)
-	for i := compressFrom; i < len(messages); i++ {
-		compressMessages = append(compressMessages, messages[i])
+	// Include messages from after last summarization (skip system prompt at index 0)
+	for i := summarizeFrom; i < len(messages); i++ {
+		summarizeMessages = append(summarizeMessages, messages[i])
 	}
 
 	// Send non-streaming summarization request (concurrency handled by ChatCompletion)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	_, summary, err := te.ChatCompletion(ctx, serverURL, modelName, compressMessages)
+	_, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages)
 	cancel()
 	if err != nil {
-		return compressResult{}, fmt.Errorf("summarization call failed: %w", err)
+		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
 
 	// Keep last N messages for continuity (system + last ~10 messages = ~5 turns)
@@ -73,12 +73,12 @@ func (te *TaskExecutor) compressContext(messages []types.ChatMessage, lastCompre
 	}
 	newMessages = append(newMessages, recent...)
 
-	// New lastCompressIdx: points to the summary message (index 1)
-	newLastCompressIdx := 1
+	// New lastSummarizeIdx: points to the summary message (index 1)
+	newLastSummarizeIdx := 1
 
-	return compressResult{
-		newMessages:        newMessages,
-		newLastCompressIdx: newLastCompressIdx,
+	return summarizeResult{
+		newMessages:         newMessages,
+		newLastSummarizeIdx: newLastSummarizeIdx,
 		summary:            summary,
 		oldLen:             oldLen,
 	}, nil

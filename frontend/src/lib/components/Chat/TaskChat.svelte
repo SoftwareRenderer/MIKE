@@ -728,12 +728,12 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 }
                 break;
             }
-            case 'compression': {
+            case 'summarization': {
                 const data = event.data as { summary: string };
-                // Add a compression checkpoint entry
+                // Add a summarization checkpoint entry
                 entries = [...entries, {
                     id: genId(),
-                    role: 'compression',
+                    role: 'summarization',
                     content: data.summary || 'Context was summarized to free space',
                     isStreaming: false,
                     createdAt: new Date().toISOString(),

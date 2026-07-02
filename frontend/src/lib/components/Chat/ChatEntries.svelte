@@ -145,19 +145,19 @@
                         {/if}
                     </div>
                 </div>
-            {:else if entry.role === 'compression'}
-                <div class="compression-entry">
-                    <div class="compression-divider">
+            {:else if entry.role === 'summarization'}
+                <div class="summarization-entry">
+                    <div class="summarization-divider">
                         <div class="divider-line"></div>
                         <div class="divider-content">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
                             </svg>
-                            <span class="compression-label">Context compressed</span>
+                            <span class="summarization-label">Context summarized</span>
                         </div>
                         <div class="divider-line"></div>
                     </div>
-                    <div class="compression-summary">{entry.content}</div>
+                    <div class="summarization-summary">{entry.content}</div>
                 </div>
             {:else if entry.role === 'merge_resolution'}
                 <div class="merge-resolution-entry">
@@ -350,36 +350,36 @@
     }
     .btn-retry:hover { opacity: 0.85; }
 
-    .compression-entry {
+    .summarization-entry {
         padding: 8px 0;
         content-visibility: auto;
         contain-intrinsic-size: 1px 100px;
     }
-    .compression-divider {
+    .summarization-divider {
         display: flex;
         align-items: center;
         gap: 10px;
         padding: 4px 0;
     }
-    .compression-divider .divider-line {
+    .summarization-divider .divider-line {
         flex: 1;
         height: 1px;
         background: var(--color-accent);
         opacity: 0.7;
     }
-    .compression-divider .divider-content {
+    .summarization-divider .divider-content {
         display: flex;
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
     }
-    .compression-label {
+    .summarization-label {
         font-size: 0.75rem;
         color: var(--color-accent);
         opacity: 0.8;
         white-space: nowrap;
     }
-    .compression-summary {
+    .summarization-summary {
         margin-top: 6px;
         padding: 8px 12px;
         background: color-mix(in srgb, var(--color-accent) 5%, transparent);

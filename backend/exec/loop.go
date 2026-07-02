@@ -274,7 +274,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		te.configStore.SaveModelContextWindow(modelName, serverURL, *discovered)
 		log.Printf("[context] discovered context window for %s: %d", modelName, *discovered)
 	}
-	lastCompressIdx := -1 // index in messages slice up to which content was already compressed
+	lastSummarizeIdx := -1 // index in messages slice up to which content was already summarized
 
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
@@ -954,26 +954,26 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 		}
 
-		// Context compression: check if we're approaching the context window limit
-		if contextWindow != nil && lastCompressIdx < len(messages)-1 {
-			if shouldCompress(messages, *contextWindow) {
-				compressResult, err := te.compressContext(messages, lastCompressIdx, systemPrompt, serverURL, activeModel)
+		// Context summarization: check if we're approaching the context window limit
+		if contextWindow != nil && lastSummarizeIdx < len(messages)-1 {
+			if shouldSummarize(messages, *contextWindow) {
+				sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel)
 				if err != nil {
-					log.Printf("[compress] task=%s compression failed: %v", task.ID, err)
+					log.Printf("[summarize] task=%s summarization failed: %v", task.ID, err)
 				} else {
-					messages = compressResult.newMessages
-					lastCompressIdx = compressResult.newLastCompressIdx
-					// Persist compression checkpoint message
+					messages = sumResult.newMessages
+					lastSummarizeIdx = sumResult.newLastSummarizeIdx
+					// Persist summarization checkpoint message
 					_ = te.store.CreateTaskMessage(&types.TaskMessage{
 						ID:        uuid.New().String(),
 						TaskID:    task.ID,
 						ThreadID:  task.CurrentThreadID,
-						Role:      "compression",
-						Content:   compressResult.summary,
+						Role:      "summarization",
+						Content:   sumResult.summary,
 						CreatedAt: time.Now().UTC(),
 					})
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "compression", Data: map[string]string{"summary": compressResult.summary}})
-					log.Printf("[compress] task=%s compressed context: %d messages -> %d messages", task.ID, compressResult.oldLen, len(messages))
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]string{"summary": sumResult.summary}})
+					log.Printf("[summarize] task=%s summarized context: %d messages -> %d messages", task.ID, sumResult.oldLen, len(messages))
 				}
 			}
 		}
