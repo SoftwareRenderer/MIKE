@@ -79,7 +79,8 @@
         return buildSideBySideRows(truncated);
     }
 
-    // Pre-compute once — template was calling buildSideBySideRows twice per file (left + right column)
+    // Pre-compute side-by-side rows for all files.
+    // Recomputes when diff or expandedFiles changes.
     let fileRows = $derived.by(() => {
         const result: Record<string, SideBySideRow[]> = {};
         for (const file of diffFiles) {

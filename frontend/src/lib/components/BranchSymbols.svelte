@@ -1,4 +1,6 @@
 <script lang="ts">
+    import VirtualList from '$lib/components/VirtualList.svelte';
+
     let { symbols, onSymbolClick }: {
         symbols: Array<{ name: string; kind: string; line: number; indent: number }>;
         onSymbolClick: (line: number) => void;
@@ -68,6 +70,20 @@
     }
 
     let headingTree = $derived(isOutlineMode ? buildHeadingTree(symbols) : []);
+
+    /** Flatten heading tree into a linear list for virtualization */
+    let flatHeadings = $derived.by(() => {
+        if (!isOutlineMode) return [];
+        const flat: Array<{ node: HeadingNode; depth: number }> = [];
+        function walk(nodes: HeadingNode[], depth: number) {
+            for (const node of nodes) {
+                flat.push({ node, depth });
+                if (node.children.length > 0) walk(node.children, depth + 1);
+            }
+        }
+        walk(headingTree, 0);
+        return flat;
+    });
 </script>
 
 <div class="symbol-outline">
@@ -78,60 +94,52 @@
         {/if}
     </div>
 
-    <div class="symbol-list" role="tree" aria-label={isOutlineMode ? 'Document outline' : 'Symbol outline'}>
-        {#if symbols.length === 0}
+    {#if symbols.length === 0}
+        <div class="symbol-list">
             <div class="symbol-empty">No {isOutlineMode ? 'headings' : 'symbols'}</div>
-        {:else if isOutlineMode}
-            <!-- Nested tree for markdown headings -->
-            {#snippet renderTree(nodes: HeadingNode[], depth: number)}
-                <ul class={`outline-tree depth-${depth}`}>
-                    {#each nodes as node}
-                        <li class="outline-item">
-                            <button
-                                class="symbol-item"
-                                onclick={() => onSymbolClick(node.symbol.line)}
-                                role="treeitem"
-                                aria-selected="false"
-                                title={`Line ${node.symbol.line}: ${node.symbol.name}`}
-                            >
-                                <span class="outline-number">{node.number}</span>
-                                <span class="symbol-name">
-                                    {node.symbol.name}
-                                </span>
-                                <span class="symbol-line">{node.symbol.line}</span>
-                            </button>
-                            {#if node.children.length > 0}
-                                {@render renderTree(node.children, depth + 1)}
-                            {/if}
-                        </li>
-                    {/each}
-                </ul>
-            {/snippet}
-            {@render renderTree(headingTree, 0)}
-        {:else}
-            <!-- Flat list for code symbols -->
-            {#each symbols as symbol}
+        </div>
+    {:else if isOutlineMode}
+        <!-- Flattened outline for virtualization -->
+        <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} let:item={h} role="tree" aria-label="Document outline">
+            <div class={`outline-item depth-${h.depth}`}>
                 <button
                     class="symbol-item"
-                    onclick={() => onSymbolClick(symbol.line)}
+                    onclick={() => onSymbolClick(h.node.symbol.line)}
                     role="treeitem"
                     aria-selected="false"
-                    title={`Line ${symbol.line}: ${symbol.name}`}
+                    title={`Line ${h.node.symbol.line}: ${h.node.symbol.name}`}
                 >
-                    <span
-                        class="symbol-icon"
-                        style="color: {getSymbolColor(symbol.kind)}"
-                    >
-                        {getSymbolIcon(symbol.kind)}
+                    <span class="outline-number">{h.node.number}</span>
+                    <span class="symbol-name">
+                        {h.node.symbol.name}
                     </span>
-                    <span class="symbol-name" style="padding-left: {symbol.indent * 8}px">
-                        {symbol.name}
-                    </span>
-                    <span class="symbol-line">{symbol.line}</span>
+                    <span class="symbol-line">{h.node.symbol.line}</span>
                 </button>
-            {/each}
-        {/if}
-    </div>
+            </div>
+        </VirtualList>
+    {:else}
+        <!-- Flat list for code symbols -->
+        <VirtualList items={symbols} itemHeight={22} minThreshold={50} let:item={symbol} role="tree" aria-label="Symbol outline">
+            <button
+                class="symbol-item"
+                onclick={() => onSymbolClick(symbol.line)}
+                role="treeitem"
+                aria-selected="false"
+                title={`Line ${symbol.line}: ${symbol.name}`}
+            >
+                <span
+                    class="symbol-icon"
+                    style="color: {getSymbolColor(symbol.kind)}"
+                >
+                    {getSymbolIcon(symbol.kind)}
+                </span>
+                <span class="symbol-name" style="padding-left: {symbol.indent * 8}px">
+                    {symbol.name}
+                </span>
+                <span class="symbol-line">{symbol.line}</span>
+            </button>
+        </VirtualList>
+    {/if}
 </div>
 
 <style>
@@ -225,15 +233,8 @@
         font-size: 0.75rem;
     }
 
-    /* Outline tree styles */
-    .outline-tree {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-    }
-
+    /* Outline styles (flattened for virtualization) */
     .outline-item {
-        list-style: none;
         margin: 0;
         padding: 0;
     }
@@ -254,11 +255,14 @@
         padding-left: 4px;
     }
 
-    /* Depth-based indentation for nested trees */
-    .outline-tree.depth-1 {
-        margin-left: 8px;
+    /* Depth-based indentation for flattened outline */
+    .outline-item.depth-1 {
+        padding-left: 8px;
     }
-    .outline-tree.depth-2 {
-        margin-left: 8px;
+    .outline-item.depth-2 {
+        padding-left: 16px;
+    }
+    .outline-item.depth-3 {
+        padding-left: 24px;
     }
 </style>

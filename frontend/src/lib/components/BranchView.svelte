@@ -87,7 +87,8 @@
     // Selected file state
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
-    let unsavedFiles = $state<string[]>(loadUnsavedFiles(projectId));
+    // O(1) lookup — replaces Array.includes/filter in handleHasChanges and close handler
+    let unsavedFiles = $state(new Set<string>(loadUnsavedFiles(projectId)));
 
     // Sync selected file from URL on mount and when initialFile updates
     $effect(() => {
@@ -98,10 +99,10 @@
     });
     let editorFocused = $state(false);
 
-    // Persist unsaved files to localStorage
+    // Persist unsaved files to localStorage (convert Set → array for stable JSON format)
     $effect(() => {
         unsavedFiles;
-        saveUnsavedFiles(projectId, unsavedFiles);
+        saveUnsavedFiles(projectId, [...unsavedFiles]);
     });
 
     // Mobile layout
@@ -272,11 +273,15 @@
 
     function handleHasChanges(hasChanges: boolean) {
         if (!selectedFilePath) return;
-        const currentlyUnsaved = unsavedFiles.includes(selectedFilePath);
+        const currentlyUnsaved = unsavedFiles.has(selectedFilePath);
         if (hasChanges && !currentlyUnsaved) {
-            unsavedFiles = [...unsavedFiles, selectedFilePath];
+            const next = new Set(unsavedFiles);
+            next.add(selectedFilePath);
+            unsavedFiles = next;
         } else if (!hasChanges && currentlyUnsaved) {
-            unsavedFiles = unsavedFiles.filter(p => p !== selectedFilePath);
+            const next = new Set(unsavedFiles);
+            next.delete(selectedFilePath);
+            unsavedFiles = next;
         }
     }
 
@@ -506,7 +511,7 @@
                         projectPath={projectPath}
                         initialPath={currentFolderPath}
                         sandboxEnabled={sandboxEnabled}
-                        unsavedFiles={unsavedFiles}
+                        unsavedFiles={[...unsavedFiles]}
                         pendingFsEvent={pendingFsEvent}
                         onFileSelected={handleFileSelected}
                         onPathChange={(p) => currentFolderPath = p}
@@ -583,7 +588,7 @@
                     onFocused={handleEditorFocused}
                     onSymbolsUpdate={handleSymbolsUpdate}
                     onHasChanges={handleHasChanges}
-                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; unsavedFiles = unsavedFiles.filter(p => p !== path); onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
                     onToggleFullscreen={toggleEditorFullscreen}
                     mobileFullscreen={editorFullscreen}
                     isMobile={isMobile}

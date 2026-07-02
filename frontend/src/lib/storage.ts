@@ -30,6 +30,7 @@ const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
 const QUEUE_KEY = 'kanban-offline-queue';
 const DRAFT_KEY_PREFIX = 'kanban:draft:';
 const EDITOR_DRAFT_KEY_PREFIX = 'kanban:editor-draft:';
+const EDITOR_HISTORY_KEY_PREFIX = 'kanban:editor-history:';
 const UNSAVED_FILES_KEY_PREFIX = 'kanban:unsaved-files:';
 const EXPLORER_LAYOUT_KEY = 'kanban:explorer:layout';
 
@@ -100,6 +101,64 @@ export function clearEditorDraft(path: string): void {
     try {
         if (typeof localStorage === 'undefined') return;
         localStorage.removeItem(EDITOR_DRAFT_KEY_PREFIX + path);
+    } catch { /* ignore */ }
+}
+
+// ─── Editor undo/redo history (localStorage, per-file) ──────────────────────
+// Stores a base snapshot + deltas (from/to/insert) so undo/redo survives refreshes.
+// Max 1000 delta entries per file. FIFO. Entries older than 72h are discarded.
+
+interface EditorDelta {
+    from: number;
+    to: number;
+    insert: string;
+}
+
+interface EditorHistory {
+    // Timestamp when this history was created (ms)
+    ts: number;
+    // Base document content (first snapshot)
+    base: string;
+    // Ordered list of deltas applied on top of base (and each other)
+    deltas: EditorDelta[];
+}
+
+const MAX_HISTORY_DELTAS = 1000;
+const HISTORY_MAX_AGE_MS = 72 * 60 * 60 * 1000; // 72 hours
+
+/** Load persisted undo/redo history for a file. Returns `null` if none exists or expired. */
+export function loadEditorHistory(path: string): EditorHistory | null {
+    try {
+        if (typeof localStorage === 'undefined') return null;
+        const raw = localStorage.getItem(EDITOR_HISTORY_KEY_PREFIX + path);
+        if (raw) {
+            const history = JSON.parse(raw) as EditorHistory;
+            if (Date.now() - history.ts > HISTORY_MAX_AGE_MS) {
+                clearEditorHistory(path);
+                return null;
+            }
+            return history;
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+/** Save undo/redo history for a file. Appends a new delta. */
+export function saveEditorHistory(path: string, base: string, deltas: EditorDelta[]): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const trimmed = deltas.slice(-MAX_HISTORY_DELTAS);
+        localStorage.setItem(EDITOR_HISTORY_KEY_PREFIX + path, JSON.stringify({ ts: Date.now(), base, deltas: trimmed }));
+    } catch {
+        // localStorage full — silently ignore
+    }
+}
+
+/** Clear undo/redo history for a file. */
+export function clearEditorHistory(path: string): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.removeItem(EDITOR_HISTORY_KEY_PREFIX + path);
     } catch { /* ignore */ }
 }
 
@@ -386,6 +445,11 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>)
     if (allProjectPaths) {
         cleanEditorDraftsByProject(allProjectPaths);
     }
+
+    // 6. Clean editor history (if project paths provided)
+    if (allProjectPaths) {
+        cleanEditorHistoryByProject(allProjectPaths);
+    }
 }
 
 /** Remove collapsed task entries for deleted tasks. */
@@ -465,6 +529,26 @@ function cleanEditorDraftsByProject(allProjectPaths: Set<string>): void {
             if (key && key.startsWith(prefix)) {
                 const path = key.slice(prefixLen);
                 // Check if the file path belongs to any known project
+                const belongsToProject = allProjectPaths.has(path) ||
+                    [...allProjectPaths].some(p => path.startsWith(p + '/'));
+                if (!belongsToProject) {
+                    localStorage.removeItem(key);
+                }
+            }
+        }
+    } catch { /* ignore */ }
+}
+
+/** Remove editor history for files in projects that no longer exist. */
+function cleanEditorHistoryByProject(allProjectPaths: Set<string>): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const prefix = EDITOR_HISTORY_KEY_PREFIX;
+        const prefixLen = prefix.length;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(prefix)) {
+                const path = key.slice(prefixLen);
                 const belongsToProject = allProjectPaths.has(path) ||
                     [...allProjectPaths].some(p => path.startsWith(p + '/'));
                 if (!belongsToProject) {

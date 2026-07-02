@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { getEditorDraft, setEditorDraft, clearEditorDraft } from '$lib/storage';
+    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState } from '@codemirror/state';
     import { keymap, ViewPlugin } from '@codemirror/view';
@@ -102,6 +102,12 @@
     let lineCount = $state(0);
     let charCount = $state(0);
 
+    // Undo/redo history persistence
+    // historyBase: the base document content (first snapshot)
+    // historyDeltas: ordered list of (from, to, insert) deltas applied sequentially
+    let historyBase = $state('');
+    let historyDeltas = $state<{ from: number; to: number; insert: string }[]>([]);
+
     // Notify parent when unsaved changes state changes
     $effect(() => {
         onHasChanges(hasChanges);
@@ -119,6 +125,10 @@
         showConfirm = false;
         if (discard) {
             hasChanges = false;
+            historyBase = '';
+            historyDeltas = [];
+            clearTimeout((view as any)._draftTimer);
+            clearTimeout((view as any)._historyTimer);
             clearEditorDraft(filePath);
             onClose();
         }
@@ -227,6 +237,8 @@
         if (!editorEl || editorCreating) return;
         editorCreating = true;
         const langSupport = getLanguageSupport(filePath);
+        // Use base content so delta replay starts from the saved state.
+        const initialDoc = historyBase || content;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
             lineNumbers(),
@@ -258,11 +270,27 @@
             syntaxHighlighting(githubDarkHighlight),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
+                    // Sync content first, then compute hasChanges
+                    content = update.state.doc.toString();
                     hasChanges = content !== originalContent;
                     lineCount = update.state.doc.lines;
                     charCount = update.state.doc.length;
-                    // Sync for save/draft persistence.
-                    content = update.state.doc.toString();
+                    // Capture delta for undo/redo history persistence.
+                    // Only capture user edits (not programmatic changes during restore).
+                    if (!view.__restoring) {
+                        const deltas: { from: number; to: number; insert: string }[] = [];
+                        update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+                            deltas.push({ from: fromA, to: toA, insert: inserted.toString() });
+                        });
+                        if (deltas.length > 0) {
+                            historyDeltas = [...historyDeltas, ...deltas];
+                            // Persist history (throttled)
+                            clearTimeout((view as any)._historyTimer);
+                            (view as any)._historyTimer = setTimeout(() => {
+                                saveEditorHistory(filePath, historyBase, historyDeltas);
+                            }, 500);
+                        }
+                    }
                     // Persist unsaved draft (throttled)
                     clearTimeout((view as any)._draftTimer);
                     (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
@@ -277,8 +305,24 @@
             ...(langSupport ? [langSupport] : []),
         ];
 
-        const state = EditorState.create({ doc: content, extensions });
+        const state = EditorState.create({ doc: initialDoc, extensions });
         view = new EditorView({ state, parent: editorEl });
+
+        // Replay persisted deltas to reach current document state.
+        // Each delta is applied as a change dispatch, building up the undo stack.
+        if (historyDeltas.length > 0) {
+            (view as any).__restoring = true;
+            for (const delta of historyDeltas) {
+                view.dispatch({
+                    changes: { from: delta.from, to: delta.to, insert: delta.insert },
+                    userEvent: 'internal.restore',
+                });
+            }
+            (view as any).__restoring = false;
+            // Sync content after replay
+            content = view.state.doc.toString();
+            hasChanges = content !== originalContent;
+        }
 
         // Track focus/blur via DOM events on the editor's dom element
         if (view.dom) {
@@ -320,6 +364,8 @@
         hasChanges = false;
         lineCount = 0;
         charCount = 0;
+        historyBase = '';
+        historyDeltas = [];
 
         try {
             const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}`);
@@ -339,6 +385,17 @@
             hasChanges = content !== originalContent;
             lineCount = content ? content.split('\n').length : 0;
             charCount = content.length;
+
+            // Load persisted undo/redo history (auto-evicted if older than 72h)
+            const savedHistory = loadEditorHistory(filePath);
+            if (savedHistory && Array.isArray(savedHistory.deltas)) {
+                historyBase = savedHistory.base;
+                historyDeltas = savedHistory.deltas;
+            } else {
+                // No history or expired — start fresh
+                historyBase = originalContent;
+                historyDeltas = [];
+            }
         } catch (e) {
             error = String(e);
         } finally {

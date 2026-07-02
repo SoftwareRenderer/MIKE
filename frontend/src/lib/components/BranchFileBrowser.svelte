@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
+    import VirtualList from '$lib/components/VirtualList.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
@@ -96,6 +97,8 @@
 
     // O(1) lookup — replaces Array.includes/some in template
     let unsavedPaths = $derived(new Set(unsavedFiles));
+    // O(1) lookup for fs event handler — replaces entries.some()
+    let entryPaths = $derived(new Set(entries.map(e => e.path)));
     let unsavedDirPrefixes = $derived.by(() => {
         const prefixes = new Set<string>();
         for (const p of unsavedFiles) {
@@ -208,7 +211,7 @@
         if (eventDir === currentPath) {
             // Always refresh on delete (entry removed)
             // For create, check if it's already in the listing (skip redundant refresh)
-            if (op === 'delete' || !entries.some(e => e.path === eventFullPath)) {
+            if (op === 'delete' || !entryPaths.has(eventFullPath)) {
                 loadDir(currentPath);
             }
             return;
@@ -311,8 +314,10 @@
                 title={currentPath}
             />
         </div>
-        <div class="file-browser-list" role="tree" aria-label="File browser">
-            {#each entries as entry}
+        {#if entries.length === 0 && !loading}
+            <div class="file-browser-empty">Empty directory</div>
+        {:else}
+            <VirtualList items={entries} itemHeight={28} minThreshold={50} role="tree" aria-label="File tree" let:item={entry}>
                 <button
                     class="file-browser-item"
                     class:dir={entry.isDir}
@@ -335,11 +340,8 @@
                         </span>
                     {/if}
                 </button>
-            {/each}
-            {#if entries.length === 0 && !loading}
-                <div class="file-browser-empty">Empty directory</div>
-            {/if}
-        </div>
+            </VirtualList>
+        {/if}
     {/if}
 </div>
 

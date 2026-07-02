@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
+    import VirtualList from '$lib/components/VirtualList.svelte';
 
     let { projectId, currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         projectId: string;
@@ -31,8 +32,7 @@
         const hasOrigin = originTip && tipIndex >= 0;
         const now = Date.now();
 
-        return commits.map((c) => {
-            const idx = commits.indexOf(c);
+        return commits.map((c, idx) => {
             const isUnpushed = !hasOrigin || idx < tipIndex;
             const isOriginTip = c.hash === originTip;
 
@@ -104,7 +104,7 @@
         {:else if commitDisplays.length === 0}
             <div class="git-graph-empty">No commits</div>
         {:else}
-            {#each commitDisplays as d, i}
+            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} let:item={d} let:index={idx}>
                 {@const commit = d.commit}
                 <div
                     class="git-commit-row"
@@ -113,8 +113,8 @@
                     class:unpushed={d.isUnpushed}
                     role={onCommitSelected ? 'button' : 'listitem'}
                     tabindex={onCommitSelected ? 0 : undefined}
-                    onclick={() => onCommitSelected?.(commit, i)}
-                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCommitSelected?.(commit, i); } }}
+                    onclick={() => onCommitSelected?.(commit, idx)}
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCommitSelected?.(commit, idx); } }}
                 >
                     <!-- Timeline line -->
                     <div class="git-timeline">
@@ -171,7 +171,7 @@
                         </div>
                     </div>
                 </div>
-            {/each}
+            </VirtualList>
             {#if hasMore}
                 <div class="git-sentinel" bind:this={sentinelEl}></div>
             {/if}
