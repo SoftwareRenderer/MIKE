@@ -167,12 +167,20 @@ type ReviewComment struct {
 
 // GitCommit represents a git commit in the log.
 type GitCommit struct {
-	Hash    string   `json:"hash"`
-	Short   string   `json:"short"`
-	Subject string   `json:"subject"`
-	Author  string   `json:"author"`
-	Date    string   `json:"date"`
-	Parents []string `json:"parents,omitempty"`
+	Hash     string   `json:"hash"`
+	Short    string   `json:"short"`
+	Subject  string   `json:"subject"`
+	Author   string   `json:"author"`
+	Date     string   `json:"date"`
+	Parents  []string `json:"parents,omitempty"`
+	Branches []string `json:"branches,omitempty"` // branch names pointing at this commit
+}
+
+// GitLogResponse wraps the commit log with branch/origin metadata.
+type GitLogResponse struct {
+	Commits       []GitCommit `json:"commits"`
+	CurrentBranch string      `json:"current_branch"` // name of the checked-out branch
+	OriginTip     string      `json:"origin_tip,omitempty"` // commit hash where origin/<branch> points
 }
 
 // GitBranch represents a git branch.

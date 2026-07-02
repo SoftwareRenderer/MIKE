@@ -151,6 +151,13 @@ export interface GitCommit {
     author: string;
     date: string;
     parents?: string[];
+    branches?: string[]; // branch names pointing at this commit
+}
+
+export interface GitLogResponse {
+    commits: GitCommit[];
+    current_branch: string;
+    origin_tip?: string; // commit hash where origin/<branch> points
 }
 
 /** A commit from a task's worktree history. */

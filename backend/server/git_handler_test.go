@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -76,9 +75,20 @@ func TestGitLogFull(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	commits := mustJSON[[]map[string]any](t, rr.Body)
+	resp := mustJSON[map[string]any](t, rr.Body)
+	commitsAny := resp["commits"].([]any)
+	commits := make([]map[string]any, len(commitsAny))
+	for i, c := range commitsAny {
+		commits[i] = c.(map[string]any)
+	}
+
 	if len(commits) != 3 {
 		t.Fatalf("expected 3 commits, got %d", len(commits))
+	}
+
+	// Check wrapper fields
+	if resp["current_branch"] == nil || resp["current_branch"].(string) == "" {
+		t.Fatal("expected current_branch field in response")
 	}
 
 	// Check first commit has full fields
@@ -131,12 +141,21 @@ func TestGitLogFullWithBranch(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	commits := mustJSON[[]map[string]any](t, rr.Body)
+	resp := mustJSON[map[string]any](t, rr.Body)
+	commitsAny := resp["commits"].([]any)
+	commits := make([]map[string]any, len(commitsAny))
+	for i, c := range commitsAny {
+		commits[i] = c.(map[string]any)
+	}
 	if len(commits) != 3 {
 		t.Fatalf("expected 3 commits on feature branch, got %d", len(commits))
 	}
 	if !strings.Contains(commits[0]["subject"].(string), "On feature") {
 		t.Fatalf("unexpected subject: %s", commits[0]["subject"])
+	}
+	// current_branch should be "feature" (the branch checked out in the test repo)
+	if resp["current_branch"].(string) != "feature" {
+		t.Fatalf("expected current_branch 'feature', got '%s'", resp["current_branch"])
 	}
 }
 
@@ -193,10 +212,12 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Decode as raw JSON to check parents field
-	var commits []map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&commits); err != nil {
-		t.Fatalf("decode: %v", err)
+	// Decode as wrapper response
+	resp := mustJSON[map[string]any](t, rr.Body)
+	commitsAny := resp["commits"].([]any)
+	commits := make([]map[string]any, len(commitsAny))
+	for i, c := range commitsAny {
+		commits[i] = c.(map[string]any)
 	}
 
 	// Most recent commit should have 1 parent
@@ -214,5 +235,91 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 	// Parent hash should match the second commit's hash
 	if parentSlice[0] != commits[1]["hash"] {
 		t.Fatalf("parent hash mismatch: %s != %s", parentSlice[0], commits[1]["hash"])
+	}
+}
+
+func TestGitLogFullBranchesAndOrigin(t *testing.T) {
+	s := testServer(t)
+	projID, dir := createTestProjectWithPath(t, s)
+
+	// Add commits on master
+	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit A")
+	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit B")
+
+	// Create a branch pointing at Commit A
+	cmd := exec.Command("git", "rev-parse", "HEAD~1")
+	cmd.Dir = dir
+	aHashOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %s: %v", string(aHashOut), err)
+	}
+	mustRunGit(t, dir, "branch", "release", strings.TrimSpace(string(aHashOut)))
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := authenticatedRequest(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	resp := mustJSON[map[string]any](t, rr.Body)
+	commitsAny := resp["commits"].([]any)
+	commits := make([]map[string]any, len(commitsAny))
+	for i, c := range commitsAny {
+		commits[i] = c.(map[string]any)
+	}
+
+	// current_branch should be "master"
+	if resp["current_branch"].(string) != "master" {
+		t.Fatalf("expected current_branch 'master', got '%s'", resp["current_branch"])
+	}
+
+	// origin_tip should be empty (no remote configured)
+	if resp["origin_tip"] != nil && resp["origin_tip"].(string) != "" {
+		t.Fatalf("expected empty origin_tip, got '%s'", resp["origin_tip"])
+	}
+
+	// Find the commit with the "release" branch
+	found := false
+	for _, c := range commits {
+		branches, ok := c["branches"]
+		if !ok {
+			continue
+		}
+		branchSlice := branches.([]any)
+		for _, b := range branchSlice {
+			if b.(string) == "release" {
+				found = true
+				// This should be Commit A (the older one)
+				if !strings.Contains(c["subject"].(string), "Commit A") {
+					t.Fatalf("release branch should point to 'Commit A', got subject: %s", c["subject"])
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find 'release' branch in commit branches")
+	}
+
+	// Find the commit with "master" branch (most recent = Commit B)
+	masterFound := false
+	for _, c := range commits {
+		branches, ok := c["branches"]
+		if !ok {
+			continue
+		}
+		branchSlice := branches.([]any)
+		for _, b := range branchSlice {
+			if b.(string) == "master" {
+				masterFound = true
+				if !strings.Contains(c["subject"].(string), "Commit B") {
+					t.Fatalf("master branch should point to 'Commit B', got subject: %s", c["subject"])
+				}
+			}
+		}
+	}
+	if !masterFound {
+		t.Fatal("expected to find 'master' branch in commit branches")
 	}
 }

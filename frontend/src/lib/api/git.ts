@@ -1,4 +1,4 @@
-import type { GitCommit, TaskCommit } from '../types';
+import type { GitCommit, GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import {
     getOfflineStatus,
@@ -8,8 +8,9 @@ import {
 
 // -- Git endpoints --
 
-/** Fetch git log with full commit details (hash, parents, date). Optional branch filter. */
-export async function getGitLogFull(projectId: string, branch?: string): Promise<GitCommit[]> {
+/** Fetch git log with full commit details (hash, parents, date, branches). Optional branch filter.
+ * Returns commits array plus current_branch and origin_tip metadata. */
+export async function getGitLogFull(projectId: string, branch?: string): Promise<GitLogResponse> {
     const params = new URLSearchParams({ full: '1' });
     if (branch) params.set('branch', branch);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);

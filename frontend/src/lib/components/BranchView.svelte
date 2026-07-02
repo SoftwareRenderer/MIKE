@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiff } from '$lib/api';
     import { toHomeRelative } from '$lib/utils/path';
-    import type { GitCommit } from '$lib/types';
+    import type { GitCommit, GitLogResponse } from '$lib/types';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchEditor from './BranchEditor.svelte';
@@ -23,6 +23,7 @@
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
+    let originTip = $state(''); // commit hash where origin/<branch> points
     let branches = $state<string[]>([]);
     let selectedBranch = $state(currentBranch);
     let currentBranchRef = $derived(currentBranch);
@@ -152,10 +153,13 @@
     async function loadCommits(branch?: string) {
         loadingCommits = true;
         try {
-            commits = await getGitLogFull(projectId, branch);
+            const resp: GitLogResponse = await getGitLogFull(projectId, branch);
+            commits = resp.commits;
+            originTip = resp.origin_tip || '';
         } catch (e) {
             console.error('Failed to load commits:', e);
             commits = [];
+            originTip = '';
         } finally {
             loadingCommits = false;
         }
@@ -506,6 +510,7 @@
                         projectId={projectId}
                         currentBranch={selectedBranch}
                         commits={commits}
+                        originTip={originTip}
                         loading={loadingCommits}
                         onCommitSelected={handleCommitSelected}
                         selectedCommitHash={diffCommit?.hash}

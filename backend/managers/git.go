@@ -36,7 +36,8 @@ func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
 }
 
 // HandleLog returns commit log for a project.
-// With ?full=1 query param, returns extended fields: hash, author, date, parents.
+// With ?full=1 query param, returns extended fields: hash, author, date, parents, branches.
+// Also includes current_branch and origin_tip metadata.
 func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -80,8 +81,33 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 			}
 			commits = append(commits, commit)
 		}
+
+		// Resolve current branch name
+		currentBranch := h.getCurrentBranch(project.Path)
+
+		// Build branch-to-commit mapping from local refs
+		branchMap := h.getBranchMap(project.Path)
+
+		// Attach branch names to commits
+		for i := range commits {
+			if branches, ok := branchMap[commits[i].Hash]; ok {
+				commits[i].Branches = branches
+			}
+		}
+
+		// Get origin tip (where origin/<current-branch> points)
+		originTip := ""
+		if currentBranch != "" && currentBranch != "HEAD" {
+			originTip = h.getOriginTip(project.Path, currentBranch)
+		}
+
+		resp := types.GitLogResponse{
+			Commits:       commits,
+			CurrentBranch: currentBranch,
+			OriginTip:     originTip,
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(commits)
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -103,6 +129,46 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(commits)
+}
+
+// getCurrentBranch returns the name of the currently checked-out branch.
+func (h *GitHandler) getCurrentBranch(path string) string {
+	c := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// getBranchMap returns a map of commit hash -> branch names for all local branches.
+func (h *GitHandler) getBranchMap(path string) map[string][]string {
+	c := exec.Command("git", "-C", path, "for-each-ref", "--format=%(objectname)|%(refname:short)", "refs/heads/")
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	m := make(map[string][]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) == 2 {
+			m[parts[0]] = append(m[parts[0]], parts[1])
+		}
+	}
+	return m
+}
+
+// getOriginTip returns the commit hash where origin/<branch> points, or empty string if no remote.
+func (h *GitHandler) getOriginTip(path, branch string) string {
+	c := exec.Command("git", "-C", path, "rev-parse", "origin/"+branch)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // HandleBranches lists branches for a project.
