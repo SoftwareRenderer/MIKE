@@ -357,106 +357,12 @@
         checkpointDiffHash = '';
     }
 
-    // Inline editing for task list items
-    let editingTaskId = $state<string | null>(null);
-    let editingTitleDraft = $state('');
-    let editingTitleInput: HTMLInputElement | null = $state(null);
-    let editingPlanMode = $state(false);
-    let editingAutoCommit = $state(false);
-    let editingAutoMerge = $state(true);
-    let editingSubtasksAutoMerge = $state(true);
-    let editingModel = $state('');
-    let editingUrl = $state('');
-    let editingReasoningEffort = $state('');
-    let editingProviders: Provider[] = $state([]);
-
-    function startEditTaskTitle(taskId: string, currentTitle: string, e: MouseEvent) {
-        e.stopPropagation();
-        const t = allTasks.find(t => t.id === taskId);
-        editingTaskId = taskId;
-        editingTitleDraft = currentTitle;
-        editingPlanMode = t?.plan_mode ?? false;
-        editingAutoCommit = t?.auto_commit ?? false;
-        editingAutoMerge = t?.auto_merge ?? true;
-        editingSubtasksAutoMerge = t?.subtasks_auto_merge ?? true;
-        editingModel = t?.model_name ?? '';
-        editingUrl = t?.llama_server_url ?? '';
-        editingReasoningEffort = t?.reasoning_effort ?? '';
-        // Load providers from config store
-        const cfg = get(configStore);
-        editingProviders = cfg?.providers || [];
-    }
-
-    function finishEditTask() {
-        if (!editingTaskId || !editingTitleDraft.trim() || !task.project_id) {
-            cancelEditTask();
-            return;
-        }
-        const trimmed = editingTitleDraft.trim();
-        const targetTask = allTasks.find(t => t.id === editingTaskId);
-        const updates: Record<string, unknown> = { title: trimmed };
-        updates.plan_mode = editingPlanMode;
-        updates.auto_commit = editingAutoCommit;
-        updates.auto_commit = editingAutoMerge; // auto-commit is prerequisite for auto-merge
-        updates.auto_merge = editingAutoMerge;
-        updates.subtasks_auto_merge = editingSubtasksAutoMerge;
-        if (editingModel) updates.model_name = editingModel;
-        if (editingUrl) updates.llama_server_url = editingUrl;
-        if (editingReasoningEffort) updates.reasoning_effort = editingReasoningEffort;
-        if (targetTask) {
-            targetTask.title = trimmed;
-            targetTask.plan_mode = editingPlanMode;
-            targetTask.auto_commit = editingAutoCommit;
-            targetTask.auto_merge = editingAutoMerge;
-            targetTask.subtasks_auto_merge = editingSubtasksAutoMerge;
-            if (editingModel) targetTask.model_name = editingModel;
-            if (editingUrl) targetTask.llama_server_url = editingUrl;
-            if (editingReasoningEffort) targetTask.reasoning_effort = editingReasoningEffort;
-            // Update board store so TaskChat picks up the changes
-            boardStore.update(b => {
-                if (!b) return b;
-                return { ...b, tasks: b.tasks.map(t => t.id === editingTaskId ? targetTask : t) };
-            });
-            updateTask(task.project_id, editingTaskId, updates).catch(err => {
-                console.error('Failed to update task:', err);
-            });
-        }
-        cancelEditTask();
-    }
-
-    function cancelEditTask() {
-        editingTaskId = null;
-        editingTitleDraft = '';
-        editingPlanMode = false;
-        editingAutoCommit = false;
-        editingAutoMerge = true;
-        editingSubtasksAutoMerge = true;
-        editingModel = '';
-        editingUrl = '';
-        editingReasoningEffort = '';
-        editingProviders = [];
-    }
-
-    function handleEditModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
-        editingModel = modelName;
-        editingUrl = providerUrl;
-        editingReasoningEffort = reasoningEffort || '';
-    }
-
     // Context stores
     let streamingIds = getStreamingContext();
     let expandedTasksContext = getExpandedTasksContext();
     let taskDiffStats = getTaskDiffStatsContext();
     // Sync store to reactive state for $effect tracking
     let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[] }>>({});
-
-    $effect(() => {
-        if (editingTaskId && editingTitleInput) {
-            const input = editingTitleInput as HTMLInputElement;
-            input.focus();
-            input.select();
-        }
-    });
 
     // Reload diff when task changes (switching tasks via task view keeps CardDetail mounted)
     let previousTaskId = $state<string | null>(null);

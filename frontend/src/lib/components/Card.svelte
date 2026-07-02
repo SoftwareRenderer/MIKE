@@ -5,10 +5,10 @@
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
-    import EditTaskModal from './Card/EditTaskModal.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { showEditTask, editTaskData } from '$lib/store';
     import { fade } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
@@ -327,32 +327,45 @@
         return unsub;
     });
 
-    // Edit task modal
-    let editingTitle = $state(false);
-    let editProviders: Provider[] = $state([]);
-    let isAgentSelected = $derived(() => {
-        const url = task.llama_server_url;
-        if (!url) return false;
-        const p = editProviders.find(p => p.url === url);
-        return p ? p.kind !== 'llm' : false;
-    });
-
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
-        editingTitle = true;
         const cfg = $configStore;
-        editProviders = cfg?.providers || [];
+        const providers = cfg?.providers || [];
+        const selProject = get(selectedProject);
+        editTaskData.set({
+            taskId: task.id,
+            projectId: projectId!,
+            taskTitle: task.title,
+            taskPrompt: task.prompt,
+            editProviders: providers,
+            editModel: task.model_name || '',
+            editUrl: task.llama_server_url || '',
+            editReasoningEffort: task.reasoning_effort || '',
+            editPlanMode: task.plan_mode ?? false,
+            editAutoMerge: task.auto_merge ?? true,
+            editSubtasksAutoMerge: task.subtasks_auto_merge ?? true,
+            taskHasParent: !!task.parent_task_id,
+            targetBranch: selProject?.origin_branch || 'main',
+            isAgentSelected: () => {
+                const url = task.llama_server_url;
+                if (!url) return false;
+                const p = providers.find(p => p.url === url);
+                return p ? p.kind !== 'llm' : false;
+            },
+        });
+        showEditTask.set(true);
     }
 
-    function saveEdit(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) {
+    function handleEditSaved(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) {
         const trimmed = title.trim();
         if (!trimmed || !projectId) {
-            cancelEdit();
+            showEditTask.set(false);
+            editTaskData.set(null);
             return;
         }
         const updates: Record<string, unknown> = { title: trimmed };
         updates.plan_mode = planMode;
-        updates.auto_commit = autoMerge; // auto-commit is prerequisite for auto-merge
+        updates.auto_commit = autoMerge;
         updates.auto_merge = autoMerge;
         updates.subtasks_auto_merge = subtasksAutoMerge;
         if (model) updates.model_name = model;
@@ -373,12 +386,13 @@
         updateTask(projectId, task.id, updates).catch(err => {
             console.error('Failed to update task:', err);
         });
-        cancelEdit();
+        showEditTask.set(false);
+        editTaskData.set(null);
     }
 
-    function cancelEdit() {
-        editingTitle = false;
-        editProviders = [];
+    function handleEditCancelled() {
+        showEditTask.set(false);
+        editTaskData.set(null);
     }
 
     function truncate(s: string, max: number): string {
@@ -736,26 +750,6 @@
         rect={pickerRect}
         onSelectAgent={selectAgent}
         onSelectModel={selectModel}
-    />
-{/if}
-
-<!-- Edit task modal -->
-{#if editingTitle}
-    <EditTaskModal
-        taskTitle={task.title}
-        taskPrompt={task.prompt}
-        {editProviders}
-        editModel={task.model_name || ''}
-        editUrl={task.llama_server_url || ''}
-        editReasoningEffort={task.reasoning_effort || ''}
-        editPlanMode={task.plan_mode ?? false}
-        editAutoMerge={task.auto_merge ?? true}
-        editSubtasksAutoMerge={task.subtasks_auto_merge ?? true}
-        taskHasParent={!!task.parent_task_id}
-        {targetBranch}
-        {isAgentSelected}
-        onSave={saveEdit}
-        onCancel={cancelEdit}
     />
 {/if}
 

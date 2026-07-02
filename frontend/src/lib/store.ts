@@ -30,6 +30,27 @@ export const showStats = writable(false);
 export const showCardDetail = writable(false);
 export const showSandboxConfig = writable(false);
 
+// Edit task modal state
+export interface EditTaskData {
+    taskId: string;
+    projectId: string;
+    taskTitle: string;
+    taskPrompt: string;
+    editProviders: Array<any>; // Provider[]
+    editModel: string;
+    editUrl: string;
+    editReasoningEffort: string;
+    editPlanMode: boolean;
+    editAutoMerge: boolean;
+    editSubtasksAutoMerge: boolean;
+    taskHasParent: boolean;
+    targetBranch: string;
+    isAgentSelected: () => boolean;
+}
+
+export const showEditTask = writable(false);
+export const editTaskData = writable<EditTaskData | null>(null);
+
 /**
  * expandedTasks store — tracks which task cards are expanded in the board view.
  * Subtasks are expanded by default. Collapsed state is persisted in localStorage.

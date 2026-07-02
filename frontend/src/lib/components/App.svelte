@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, showConfirm, showToast } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, showConfirm, showToast, showEditTask, editTaskData as editTaskDataStore } from '$lib/store';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
@@ -13,6 +13,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
+    import EditTaskModal from './Card/EditTaskModal.svelte';
     import ConfigModal from './ConfigModal.svelte';
     import StatsModal from './StatsModal.svelte';
     import Board from './Board.svelte';
@@ -111,6 +112,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let showStatsVal = $state(false);
     let showCardDetailVal = $state(false);
     let showSandboxConfigVal = $state(false);
+    let showEditTaskVal = $state(false);
+    let editTaskDataVal: import('$lib/store').EditTaskData | null = $state(null);
     let showFileBrowserVal = $state(false);
     let showBranchViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
@@ -144,6 +147,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             showTerminal.subscribe(v => { showTerminalVal = v; if (v) loadTerminalPanel(); }),
             showStats.subscribe(v => showStatsVal = v),
             showCardDetail.subscribe(v => showCardDetailVal = v),
+            showEditTask.subscribe(v => showEditTaskVal = v),
+            editTaskDataStore.subscribe(v => editTaskDataVal = v),
             configStore.subscribe(v => { if (v) cfg = v; }),
             selectedTask.subscribe(t => {
                 selectedTaskVal = t;
@@ -785,6 +790,60 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { const idx = tasks.findIndex(t => t.id === optimisticId); if (idx !== -1) { tasks[idx] = realTask; } }}
+        />
+    {/if}
+    {#if showEditTaskVal && editTaskDataVal}
+        <EditTaskModal
+            taskTitle={editTaskDataVal.taskTitle}
+            taskPrompt={editTaskDataVal.taskPrompt}
+            editProviders={editTaskDataVal.editProviders}
+            editModel={editTaskDataVal.editModel}
+            editUrl={editTaskDataVal.editUrl}
+            editReasoningEffort={editTaskDataVal.editReasoningEffort}
+            editPlanMode={editTaskDataVal.editPlanMode}
+            editAutoMerge={editTaskDataVal.editAutoMerge}
+            editSubtasksAutoMerge={editTaskDataVal.editSubtasksAutoMerge}
+            taskHasParent={editTaskDataVal.taskHasParent}
+            targetBranch={editTaskDataVal.targetBranch}
+            isAgentSelected={editTaskDataVal.isAgentSelected}
+            onSave={(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) => {
+                const taskId = editTaskDataVal!.taskId;
+                const projectId = editTaskDataVal!.projectId;
+                // Find the task in the board and update it
+                const task = tasks.find(t => t.id === taskId);
+                if (task) {
+                    const trimmed = title.trim();
+                    const updates: Record<string, unknown> = { title: trimmed };
+                    updates.plan_mode = planMode;
+                    updates.auto_commit = autoMerge;
+                    updates.auto_merge = autoMerge;
+                    updates.subtasks_auto_merge = subtasksAutoMerge;
+                    if (model) updates.model_name = model;
+                    if (url) updates.llama_server_url = url;
+                    if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
+                    task.title = trimmed;
+                    task.plan_mode = planMode;
+                    task.auto_commit = autoMerge;
+                    task.auto_merge = autoMerge;
+                    task.subtasks_auto_merge = subtasksAutoMerge;
+                    if (model) task.model_name = model;
+                    if (url) task.llama_server_url = url;
+                    if (reasoningEffort) task.reasoning_effort = reasoningEffort;
+                    boardStore.update(b => {
+                        if (!b) return b;
+                        return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
+                    });
+                    import('$lib/api').then(({ updateTask }) => updateTask(projectId, taskId, updates)).catch(err => {
+                        console.error('Failed to update task:', err);
+                    });
+                }
+                showEditTask.set(false);
+                editTaskDataStore.set(null);
+            }}
+            onCancel={() => {
+                showEditTask.set(false);
+                editTaskDataStore.set(null);
+            }}
         />
     {/if}
     {#if showConfigVal}
