@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -430,9 +431,10 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	return deepest[0].ID
 }
 
-// StartSubtaskWithParent moves the parent to in_progress and starts the executor
-// for the specified subtask only. Siblings are NOT moved — that is handled by
-// HandleMove when a parent task (not an individual subtask) is moved.
+// StartSubtaskWithParent starts the executor for the specified subtask.
+// The parent stays in its current column (e.g., backlog) while subtasks run.
+// Siblings are NOT moved — that is handled by HandleMove when a parent task
+// (not an individual subtask) is moved.
 func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) error {
 	subtask, err := te.store.GetTaskByTaskID(subtaskID)
 	if err != nil {
@@ -447,34 +449,89 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 		return fmt.Errorf("get parent: %w", err)
 	}
 
-	// Move parent to in_progress (no auto-start)
-	parent.Status = "in_progress"
-	parent.StatusState = "idle"
-	parent.UpdatedAt = time.Now().UTC()
-	if err := te.store.UpdateTask(parent); err != nil {
-		return fmt.Errorf("update parent: %w", err)
+	// Ensure the parent has a branch (needed for subtask merge target).
+	// This does NOT change the parent's status — it stays in its current column.
+	if parent.Branch == "" {
+		if err := te.ensureParentBranch(projectID, parent); err != nil {
+			return fmt.Errorf("ensure parent branch: %w", err)
+		}
+		// Broadcast the updated parent (branch now set)
+		parent, _ = te.store.GetTaskByTaskID(subtask.ParentTaskID)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
 	}
 
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, subtask)
-
-	// Start the subtask executor
 
 	// Start the subtask executor
 	return te.StartTask(projectID, subtaskID)
 }
 
+// ensureParentBranch creates the parent task's git branch if it doesn't exist yet.
+// This is called when a subtask is being prepared for execution and the parent
+// hasn't started (parent.Branch == ""). The parent's branch is needed as the
+// merge target when the subtask completes with auto_merge enabled.
+//
+// A full worktree is created for the parent (not just a bare branch) so that
+// when the parent eventually starts, prepareTaskExecution finds the worktree
+// already exists and reuses it. The worktree is created from HEAD (origin).
+//
+// The parent's status is NOT changed — it stays in its current column (e.g.,
+// backlog) while subtasks run. Only the branch field is set.
+//
+// If the parent already has a branch, this is a no-op.
+func (te *TaskExecutor) ensureParentBranch(projectID string, parent *types.Task) error {
+	if parent.Branch != "" {
+		return nil // already has a branch
+	}
+
+	// Generate branch name for the parent (same logic as prepareTaskExecution)
+	branchName := fmt.Sprintf("task/%s", parent.ID)
+	if !parent.AutoMerge && parent.Title != "" {
+		branchName = "task/" + slugifyBranchName(parent.Title)
+		if te.branchExists(projectID, branchName) {
+			branchName = branchName + "-" + parent.ID[:8]
+		}
+	}
+
+	// Create a worktree for the parent from HEAD.
+	// This creates the branch AND the worktree directory in one step.
+	// When the parent starts later, CreateWorktree will find the directory
+	// already exists and return early (reusing this worktree).
+	_, _, err := te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, "")
+	if err != nil {
+		return fmt.Errorf("create parent worktree: %w", err)
+	}
+
+	// Update parent task with the branch only — do NOT change status.
+	// The parent stays in its current column (backlog) while subtasks run.
+	parent.Branch = branchName
+	parent.UpdatedAt = time.Now().UTC()
+	if err := te.store.UpdateTask(parent); err != nil {
+		// Clean up the worktree if DB update fails
+		_ = te.worktreeMgr.RemoveWorktree(projectID, parent.ID, branchName)
+		return fmt.Errorf("update parent task with branch: %w", err)
+	}
+
+	log.Printf("[ensure-parent-branch] task=%s created worktree with branch %s for parent", parent.ID, branchName)
+	return nil
+}
+
 // autoStartNextSibling finds the next incomplete sibling of the given task and starts it.
-// Only runs if the parent is in_progress and not paused.
-// When all siblings are done and finishedStatus is "done", recurses up the ancestor chain.
+// Runs if the parent is in_progress or backlog (parent stays in backlog while subtasks run).
+// When all siblings are done, the parent is only auto-started if it was already moved
+// to In Progress by the user. If the parent is in Backlog, it stays there.
 // Ancestors in "backlog" are never auto-started (they are their own tasks).
 func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
 	parent, err := te.store.GetTaskByTaskID(parentTaskID)
 	if err != nil {
 		return fmt.Errorf("get parent task: %w", err)
 	}
-	// Only auto-start if parent is actively in progress (not paused, not done)
-	if parent.Status != "in_progress" || parent.StatusState == "paused" {
+	// Auto-start if parent is in_progress or backlog (parent stays in backlog while subtasks run).
+	// Skip if paused or already done.
+	if parent.Status != "in_progress" && parent.Status != "backlog" {
+		return nil
+	}
+	if parent.StatusState == "paused" || parent.StatusState == "completed" {
 		return nil
 	}
 
@@ -520,16 +577,21 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 			log.Printf("[auto-start] task=%s no incomplete siblings, parent %s not all done, recursing up to %s", finishedTaskID, parent.ID, parent.ParentTaskID)
 			return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID, finishedStatus)
 		}
-		// All children done — start the parent's own execution.
-		// When the parent was first started, only children ran. Now it gets its turn.
-		log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
-		if err := te.StartTask(projectID, parent.ID); err != nil {
-			log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
-		} else {
-			started, _ := te.store.GetTaskByTaskID(parent.ID)
-			if started != nil {
-				te.appStreamMgr.BroadcastTaskUpdated(projectID, started)
+		// All children done — only start the parent if the user already moved it
+		// to In Progress. If the parent is in Backlog, leave it there; the user
+		// needs to explicitly start or move it.
+		if parent.Status == "in_progress" {
+			log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
+			if err := te.StartTask(projectID, parent.ID); err != nil {
+				log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
+			} else {
+				started, _ := te.store.GetTaskByTaskID(parent.ID)
+				if started != nil {
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, started)
+				}
 			}
+		} else {
+			log.Printf("[auto-start] task=%s all children done, parent %s in backlog — waiting for user to start", finishedTaskID, parent.ID)
 		}
 		return nil
 	}
@@ -606,6 +668,18 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			branchName = branchName + "-" + taskID[:8]
 		}
 	}
+	// If this is a child task, ensure the parent has a branch first.
+	// The parent's branch is the merge target for subtask auto-merge.
+	// If the parent hasn't started yet (no branch), create one now.
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch == "" {
+			if err := te.ensureParentBranch(projectID, parent); err != nil {
+				return nil, fmt.Errorf("ensure parent branch: %w", err)
+			}
+		}
+	}
+
 	// If this is a child task, branch from the parent's branch
 	sourceBranch := ""
 	if task.ParentTaskID != "" {
@@ -883,6 +957,11 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 // mergeBranch merges the task's branch into the target branch.
 // For child tasks, merges into the parent's branch. For root tasks, merges into origin.
 // Returns nil on success or if merge is not applicable.
+//
+// If the target branch is checked out in another worktree (e.g., a parent whose
+// worktree was created by ensureParentBranch), the merge is performed inside
+// that worktree instead of the main repo, since git won't allow checking out
+// a branch that's already used by a worktree.
 func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -895,12 +974,22 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		return nil
 	}
 
-	// Determine target branch: parent's branch for child tasks, origin for root tasks
+	// Determine target branch and the git directory to run merge in.
+	// For child tasks, the target is the parent's branch.
+	// If the parent has a worktree, merge inside it (branch is checked out there).
 	var targetBranch string
+	var mergeInWorktree string // non-empty: run merge in this worktree path
 	if task.ParentTaskID != "" {
 		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
 		if err == nil && parent.Branch != "" {
 			targetBranch = parent.Branch
+			// Check if parent has a worktree (created by ensureParentBranch)
+			parentWorktreePath, wtErr := te.worktreeMgr.WorktreePath(parent.ID)
+			if wtErr == nil {
+				if _, statErr := os.Stat(parentWorktreePath); statErr == nil {
+					mergeInWorktree = parentWorktreePath
+				}
+			}
 		}
 	}
 	if targetBranch == "" {
@@ -919,6 +1008,16 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		return nil
 	}
 
+	if mergeInWorktree != "" {
+		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID)
+	}
+	return te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
+}
+
+// mergeInProject performs a merge in the project's main directory.
+func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
+	project, _ := te.store.GetProject(projectID)
+
 	// Stash any working tree changes
 	hadStash := false
 	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban auto-merge stash"); err == nil {
@@ -936,13 +1035,55 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 	}
 
 	// Merge the task branch
-	mergeOut, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
+	_, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
-		_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
-		return fmt.Errorf("merge failed: %w (output: %s)", mergeErr, mergeOut)
+		// Merge conflict — try LLM resolution
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, task); resolveErr != nil {
+			_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
+		}
+	} else {
+		log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
+	}
+	return nil
+}
+
+// mergeInWorktree performs a merge inside a specific worktree directory.
+// Used when the target branch is checked out in another worktree (e.g., parent's worktree).
+func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
+	// Stash any working tree changes in the worktree
+	hadStash := false
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-m", "kanban auto-merge stash"); err == nil {
+		hadStash = true
+	}
+	defer func() {
+		if hadStash {
+			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+		}
+	}()
+
+	// Ensure we're on the target branch
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", targetBranch); err != nil {
+		return fmt.Errorf("checkout target branch %s in worktree: %w", targetBranch, err)
 	}
 
-	log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
+	// Merge the task branch
+	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", taskBranch, "--no-edit")
+	if mergeErr != nil {
+		// Merge conflict — try LLM resolution
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, task); resolveErr != nil {
+			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
+			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
+		}
+	} else {
+		log.Printf("[merge] task=%s merged %s into %s (in worktree) successfully", taskID, taskBranch, targetBranch)
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
+	}
 	return nil
 }
 

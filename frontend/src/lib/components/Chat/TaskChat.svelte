@@ -17,6 +17,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         id: string;
         role: string;
         content: string;
+        mergeLabel?: string; // label for merge_resolution cards
         reasoningContent?: string;
         hasReasoning?: boolean; // true if message has reasoning (even if content is suppressed)
         isStreaming?: boolean;
@@ -739,11 +740,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 break;
             }
             case 'merge_resolution': {
-                const data = event.data as { id: string; conflicted_files: string[]; summary: string; content: string; created_at: string };
+                const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string };
+                const content = data.content || 'Merged';
+                const label = data.label || (content.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
                 entries = [...entries, {
                     id: data.id || genId(),
                     role: 'merge_resolution',
-                    content: data.content || `Merge conflicts resolved in ${data.conflicted_files?.length || 0} file(s)`,
+                    content,
+                    mergeLabel: label,
                     isStreaming: false,
                     createdAt: data.created_at || new Date().toISOString(),
                 }];
@@ -886,8 +890,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                         if (Array.isArray(atts)) parsedAttachments = atts;
                     } catch { /* ignore parse errors */ }
                 }
-                return {
+                const entry: Partial<ChatEntry> = {
                     ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
+                };
+                if (m.role === 'merge_resolution') {
+                    (entry as ChatEntry).mergeLabel = m.content?.includes('conflict') ? 'Merge conflicts resolved' : 'Merged';
+                }
+                return {
+                    ...entry,
                     stats: m.model_name ? {
                         model_name: m.model_name,
                         prompt_tokens: m.prompt_tokens ?? 0,

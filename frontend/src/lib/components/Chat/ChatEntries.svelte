@@ -169,7 +169,7 @@
                                 <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
                                 <line x1="6" y1="9" x2="6" y2="21"/>
                             </svg>
-                            <span class="merge-resolution-label">Merge conflicts resolved</span>
+                            <span class="merge-resolution-label">{entry.mergeLabel || 'Merge conflicts resolved'}</span>
                         </div>
                         <div class="merge-resolution-content">{entry.content}</div>
                     </div>

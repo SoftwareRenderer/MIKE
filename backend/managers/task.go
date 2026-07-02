@@ -694,14 +694,9 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 
 	if len(children) > 0 {
-		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress
+		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress.
+		// The parent stays in its current column (e.g., backlog) while subtasks run.
 		h.moveAllDescendantsToInProgress(taskID)
-		// Move the parent itself to in_progress
-		task.Status = "in_progress"
-		task.StatusState = "idle"
-		task.UpdatedAt = time.Now().UTC()
-		_ = h.store.UpdateTask(task)
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		// Task has subtasks — use LLM to pick the best one
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {

@@ -221,9 +221,19 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		return "", "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
 
-	if out, err := wm.gitRunOutput(worktreePath, "checkout", "-B", branchName); err != nil {
+	// Create the branch in the worktree. If the branch already exists (e.g., created
+	// by ensureParentBranch for a parent whose subtask started first), just checkout it.
+	// Otherwise, create it with -B (forces creation at current commit).
+	branchExists := wm.branchExistsInRepo(project.Path, branchName)
+	var branchErr error
+	if branchExists {
+		_, branchErr = wm.gitRunOutput(worktreePath, "checkout", branchName)
+	} else {
+		_, branchErr = wm.gitRunOutput(worktreePath, "checkout", "-B", branchName)
+	}
+	if branchErr != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
-		return "", "", fmt.Errorf("create branch: %s: %w", out, err)
+		return "", "", fmt.Errorf("create branch %s: %w", branchName, branchErr)
 	}
 
 	// Resolve sourceRef to a commit hash so the base ref doesn't move after merges
@@ -1325,6 +1335,16 @@ func (wm *WorktreeManager) GitRunInProjectOutput(projectID string, args ...strin
 	return wm.gitRunOutput(project.Path, args...)
 }
 
+// GitRunInDir runs a git command in the given directory.
+func (wm *WorktreeManager) GitRunInDir(dir string, args ...string) error {
+	return wm.gitRun(dir, args...)
+}
+
+// GitRunInDirOutput runs a git command in the given directory and returns its output.
+func (wm *WorktreeManager) GitRunInDirOutput(dir string, args ...string) (string, error) {
+	return wm.gitRunOutput(dir, args...)
+}
+
 // TaskCommit represents a single commit in the task's worktree history.
 type TaskCommit struct {
 	Hash    string `json:"hash"`
@@ -1548,6 +1568,12 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 		return strings.TrimSpace(parent), nil
 	}
 	return headRef, nil
+}
+
+// branchExistsInRepo checks if a branch exists in the given git repo.
+func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool {
+	_, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", branchName)
+	return err == nil
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
