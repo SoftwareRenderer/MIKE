@@ -542,8 +542,8 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	mergeErr = h.mergeWorktreeIntoOrigin(projectID, taskID, task)
 	if mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
-		// Log merge error as system message in the task thread
-		h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", mergeErr))
+		// Log merge error as merge_resolution message (styled as error in UI)
+		h.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", mergeErr))
 		// Continue to move task to done even if merge fails
 	}
 

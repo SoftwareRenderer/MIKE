@@ -1,0 +1,31 @@
+You are resolving merge conflicts when merging branch "{{ .TaskBranch }}" (task branch) into "{{ .TargetBranch }}" (target branch).
+
+The task branch contains changes made to fulfill this task. The target branch has evolved independently.
+
+Task title: {{ .TaskTitle }}
+Task description: {{ .TaskDescription }}
+
+Conflict markers in each file:
+  - Above ======= (HEAD / "{{ .TargetBranch }}") = target branch — independent changes to preserve
+  - Below ======= ("{{ .TaskBranch }}") = task branch — the changes made to fulfill the task
+
+Resolution strategy:
+  1. Prefer the task branch's changes (below =======) — they fulfill the task
+  2. Incorporate target branch changes (above =======) where they don't conflict with the task
+  3. Only drop target changes when they truly conflict with the task's intent
+
+Conflicted files:
+
+{{ .ConflictedFiles }}
+
+For each file, provide the fully resolved content WITHOUT any conflict markers. If any functionality was lost during resolution, note it in the summary.
+
+Output format: For each file, output:
+RESOLVE <filepath>
+<full resolved file content>
+END_RESOLVE
+
+Then output a summary:
+SUMMARY
+<Brief summary of changes made and any lost functionality>
+END_SUMMARY

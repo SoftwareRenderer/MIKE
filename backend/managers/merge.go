@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
 
@@ -62,7 +63,7 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 
 	// Stash any working tree changes to allow clean checkout
 	hadStash := false
-	if err := h.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban merge stash"); err == nil {
+	if err := h.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", "kanban merge stash"); err == nil {
 		hadStash = true
 	}
 	defer func() {
@@ -80,6 +81,7 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 	mergeOut, mergeErr := h.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch)
 	if mergeErr == nil {
 		log.Printf("[merge] task=%s merged into %s successfully: %s", taskID, originBranch, strings.TrimSpace(mergeOut))
+		h.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, originBranch)
 		return nil
 	}
 
@@ -97,7 +99,7 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 	h.logSystemMessage(taskID, task.CurrentThreadID, fmt.Sprintf("Merge conflict detected in: %s. Resolving with LLM...", fileList))
 
 	// Resolve conflicts with LLM
-	resolutionMsg, resolveErr := h.resolveMergeConflicts(projectID, taskID, task, conflictedFiles)
+	resolutionMsg, resolveErr := h.resolveMergeConflicts(projectID, taskID, originBranch, taskBranch, task, conflictedFiles)
 	if resolveErr != nil {
 		log.Printf("[merge] task=%s LLM conflict resolution failed: %v", taskID, resolveErr)
 		// Abort merge and return error
@@ -123,23 +125,34 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 }
 
 // getConflictedFiles returns a list of files with merge conflicts.
+// Uses git status --porcelain which catches ALL conflict types (UU, AD, DU, AA, DD, UD, UA),
+// unlike git diff --name-only --diff-filter=U which misses directory/file type conflicts.
 func (h *TaskHandler) getConflictedFiles(projectID string) []string {
-	statusOut, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "diff", "--name-only", "--diff-filter=U")
+	statusOut, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "status", "--porcelain")
 	if err != nil {
 		return nil
 	}
 	var files []string
 	for line := range strings.SplitSeq(statusOut, "\n") {
-		f := strings.TrimSpace(line)
-		if f != "" {
-			files = append(files, f)
+		line = strings.TrimSpace(line)
+		if len(line) < 4 {
+			continue
+		}
+		// Unmerged entries start with two status letters, one of which is 'U'
+		status := line[:2]
+		if strings.ContainsRune(status, 'U') {
+			f := strings.TrimSpace(line[3:]) // skip "XY " prefix
+			if f != "" {
+				files = append(files, f)
+			}
 		}
 	}
 	return files
 }
 
 // resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
-func (h *TaskHandler) resolveMergeConflicts(projectID, taskID string, task *types.Task, conflictedFiles []string) (string, error) {
+// targetBranch is the branch being merged into, taskBranch is the branch being merged.
+func (h *TaskHandler) resolveMergeConflicts(projectID, taskID, targetBranch, taskBranch string, task *types.Task, conflictedFiles []string) (string, error) {
 	serverURL := task.LlamaServerURL
 	modelName := task.ModelName
 	if serverURL == "" || modelName == "" {
@@ -164,26 +177,16 @@ func (h *TaskHandler) resolveMergeConflicts(projectID, taskID string, task *type
 	}
 
 	conflictContext := strings.Join(conflictParts, "\n\n")
-	prompt := fmt.Sprintf(`You are resolving merge conflicts. The following files have merge conflict markers (<<<<<<< , =======, >>>>>>> ).
-
-Task title: %s
-Task description: %s
-
-Conflicted files:
-
-%s
-
-For each file, provide the fully resolved content WITHOUT any conflict markers. Maintain the intent of the newer changes. If any functionality was lost during resolution, note it.
-
-Output format: For each file, output:
-RESOLVE <filepath>
-<full resolved file content>
-END_RESOLVE
-
-Then output a summary:
-SUMMARY
-<Brief summary of changes made and any lost functionality>
-END_SUMMARY`, task.Title, task.Prompt, conflictContext)
+	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+		TaskBranch:      taskBranch,
+		TargetBranch:    targetBranch,
+		TaskTitle:       task.Title,
+		TaskDescription: task.Prompt,
+		ConflictedFiles: conflictContext,
+	})
+	if err != nil {
+		return "", fmt.Errorf("render merge conflict prompt: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -313,6 +316,65 @@ func (h *TaskHandler) logMergeResolution(taskID, threadID string, conflictedFile
 			"summary":          summary,
 			"content":          content,
 			"created_at":       time.Now().UTC().Format(time.RFC3339),
+		}})
+	}
+}
+
+// logMergeComplete logs a merge message for a clean (no-conflict) merge.
+func (h *TaskHandler) logMergeComplete(taskID, threadID, taskBranch, targetBranch string) {
+	if threadID == "" {
+		return
+	}
+	content := fmt.Sprintf("Branch %s merged into %s", taskBranch, targetBranch)
+	msgID := uuid.New().String()
+	if err := h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        msgID,
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "merge_resolution",
+		Content:   content,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		return
+	}
+	// Broadcast to task stream clients for real-time display
+	task, _ := h.store.GetTaskByTaskID(taskID)
+	if task != nil && h.boardStreamMgr != nil {
+		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
+			"id":         msgID,
+			"content":    content,
+			"label":      "Merged",
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		}})
+	}
+}
+
+// logMergeFailed logs a merge failure as a merge_resolution error message.
+func (h *TaskHandler) logMergeFailed(taskID, threadID, errorMsg string) {
+	if threadID == "" {
+		return
+	}
+	msgID := uuid.New().String()
+	if err := h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        msgID,
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "merge_resolution",
+		Content:   errorMsg,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		return
+	}
+	task, _ := h.store.GetTaskByTaskID(taskID)
+	if task != nil && h.boardStreamMgr != nil {
+		h.boardStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
+			"id":         msgID,
+			"content":    errorMsg,
+			"label":      "Merge failed",
+			"is_error":   true,
+			"created_at": time.Now().UTC().Format(time.RFC3339),
 		}})
 	}
 }

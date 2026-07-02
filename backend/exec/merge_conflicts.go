@@ -13,13 +13,15 @@ import (
 	"github.com/google/uuid"
 
 	"kanban/backend/git"
+	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
 
 // resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
 // basePath is the directory containing the conflicted files (worktree or project dir).
+// targetBranch is the branch being merged into, taskBranch is the branch being merged.
 // Returns the LLM-generated summary of the resolution.
-func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID string, task *types.Task, conflictedFiles []string) (string, error) {
+func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targetBranch, taskBranch string, task *types.Task, conflictedFiles []string) (string, error) {
 	serverURL := task.LlamaServerURL
 	modelName := task.ModelName
 	if serverURL == "" || modelName == "" {
@@ -43,26 +45,16 @@ func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID string
 	}
 
 	conflictContext := strings.Join(conflictParts, "\n\n")
-	prompt := fmt.Sprintf(`You are resolving merge conflicts. The following files have merge conflict markers (<<<<<<< , =======, >>>>>>> ).
-
-Task title: %s
-Task description: %s
-
-Conflicted files:
-
-%s
-
-For each file, provide the fully resolved content WITHOUT any conflict markers. Maintain the intent of the newer changes. If any functionality was lost during resolution, note it.
-
-Output format: For each file, output:
-RESOLVE <filepath>
-<full resolved file content>
-END_RESOLVE
-
-Then output a summary:
-SUMMARY
-<Brief summary of changes made and any lost functionality>
-END_SUMMARY`, task.Title, task.Prompt, conflictContext)
+	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+		TaskBranch:      taskBranch,
+		TargetBranch:    targetBranch,
+		TaskTitle:       task.Title,
+		TaskDescription: task.Prompt,
+		ConflictedFiles: conflictContext,
+	})
+	if err != nil {
+		return "", fmt.Errorf("render merge conflict prompt: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -144,8 +136,10 @@ END_SUMMARY`, task.Title, task.Prompt, conflictContext)
 }
 
 // getConflictedFilesInDir returns a list of files with merge conflicts in the given directory.
+// Uses git status --porcelain which catches ALL conflict types (UU, AD, DU, AA, DD, UD, UA),
+// unlike git diff --name-only --diff-filter=U which misses directory/file type conflicts.
 func getConflictedFilesInDir(dir string) []string {
-	cmd := osexec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd := osexec.Command("git", "status", "--porcelain")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -153,9 +147,17 @@ func getConflictedFilesInDir(dir string) []string {
 	}
 	var files []string
 	for line := range strings.SplitSeq(string(out), "\n") {
-		f := strings.TrimSpace(line)
-		if f != "" {
-			files = append(files, f)
+		line = strings.TrimSpace(line)
+		if len(line) < 4 {
+			continue
+		}
+		// Unmerged entries start with two status letters, one of which is 'U'
+		status := line[:2]
+		if strings.ContainsRune(status, 'U') {
+			f := strings.TrimSpace(line[3:]) // skip "XY " prefix
+			if f != "" {
+				files = append(files, f)
+			}
 		}
 	}
 	return files
@@ -164,7 +166,7 @@ func getConflictedFilesInDir(dir string) []string {
 // tryResolveMergeConflicts attempts LLM-based conflict resolution after a failed merge.
 // On success, stages files, commits, and logs a merge_resolution message.
 // On failure, aborts the merge and returns the error (caller should handle gracefully).
-func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID string, task *types.Task) error {
+func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	conflictedFiles := getConflictedFilesInDir(dir)
 	if len(conflictedFiles) == 0 {
 		// No conflicted files found — abort merge
@@ -180,7 +182,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID string, 
 		fmt.Sprintf("Merge conflict detected in: %s. Resolving with LLM...", strings.Join(conflictedFiles, ", ")))
 
 	// Resolve conflicts with LLM
-	summary, err := te.resolveMergeConflicts(dir, projectID, taskID, task, conflictedFiles)
+	summary, err := te.resolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, task, conflictedFiles)
 	if err != nil {
 		log.Printf("[merge] task=%s LLM conflict resolution failed: %v", taskID, err)
 		_ = runGitDir(dir, "merge", "--abort")
@@ -235,6 +237,35 @@ func (te *TaskExecutor) logMergeComplete(taskID, threadID, taskBranch, targetBra
 	}
 	content := fmt.Sprintf("Branch %s merged into %s", taskBranch, targetBranch)
 	te.persistAndBroadcastMergeMessage(taskID, threadID, content, "Merged")
+}
+
+// logMergeFailed logs a merge failure as a merge_resolution error message.
+func (te *TaskExecutor) logMergeFailed(taskID, threadID, errorMsg string) {
+	if threadID == "" {
+		return
+	}
+	msgID := uuid.New().String()
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        msgID,
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "merge_resolution",
+		Content:   errorMsg,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		return
+	}
+	task, _ := te.store.GetTaskByTaskID(taskID)
+	if task != nil && te.appStreamMgr != nil {
+		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
+			"id":        msgID,
+			"content":   errorMsg,
+			"label":     "Merge failed",
+			"is_error":  true,
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		}})
+	}
 }
 
 // persistAndBroadcastMergeMessage creates a merge_resolution message and broadcasts it.

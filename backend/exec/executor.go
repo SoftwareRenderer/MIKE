@@ -1020,7 +1020,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 
 	// Stash any working tree changes
 	hadStash := false
-	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-m", "kanban auto-merge stash"); err == nil {
+	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
 		hadStash = true
 	}
 	defer func() {
@@ -1039,8 +1039,9 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, task); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
 			_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
 			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
 		}
 	} else {
@@ -1056,7 +1057,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
 	// Stash any working tree changes in the worktree
 	hadStash := false
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-m", "kanban auto-merge stash"); err == nil {
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
 		hadStash = true
 	}
 	defer func() {
@@ -1075,8 +1076,9 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, task); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
 			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
+			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
 			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
 		}
 	} else {

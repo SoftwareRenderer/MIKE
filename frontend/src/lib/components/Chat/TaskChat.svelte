@@ -18,6 +18,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         role: string;
         content: string;
         mergeLabel?: string; // label for merge_resolution cards
+        isError?: boolean; // true for merge error cards
         reasoningContent?: string;
         hasReasoning?: boolean; // true if message has reasoning (even if content is suppressed)
         isStreaming?: boolean;
@@ -740,7 +741,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 break;
             }
             case 'merge_resolution': {
-                const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string };
+                const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string; is_error?: boolean };
                 const content = data.content || 'Merged';
                 const label = data.label || (content.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
                 entries = [...entries, {
@@ -748,6 +749,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     role: 'merge_resolution',
                     content,
                     mergeLabel: label,
+                    isError: data.is_error || false,
                     isStreaming: false,
                     createdAt: data.created_at || new Date().toISOString(),
                 }];
@@ -894,7 +896,9 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
                 };
                 if (m.role === 'merge_resolution') {
-                    (entry as ChatEntry).mergeLabel = m.content?.includes('conflict') ? 'Merge conflicts resolved' : 'Merged';
+                    const isErr = m.content?.includes('Merge failed');
+                    (entry as ChatEntry).mergeLabel = isErr ? 'Merge failed' : (m.content?.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
+                    (entry as ChatEntry).isError = isErr || false;
                 }
                 return {
                     ...entry,

@@ -75,6 +75,33 @@ func RenderSystemPrompt(data PromptData) (string, error) {
 	return buf.String(), nil
 }
 
+// MergeConflictData holds the variables for the merge conflict resolution prompt.
+type MergeConflictData struct {
+	TaskBranch      string
+	TargetBranch    string
+	TaskTitle       string
+	TaskDescription string
+	ConflictedFiles string
+}
+
+// RenderMergeConflictPrompt renders the merge conflict resolution prompt from a template file.
+func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
+	dir := promptDir()
+	path := filepath.Join(dir, "merge_conflict.tmpl")
+
+	tmpl, err := template.ParseFiles(path)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
 // ValidateTemplates parses and dry-runs the templates to check for errors.
 // Returns the list of template file basenames and any error encountered.
 func ValidateTemplates() ([]string, error) {

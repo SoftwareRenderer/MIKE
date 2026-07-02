@@ -161,14 +161,22 @@
                 </div>
             {:else if entry.role === 'merge_resolution'}
                 <div class="merge-resolution-entry">
-                    <div class="merge-resolution-card">
+                    <div class="merge-resolution-card" class:merge-resolution-error={entry.isError}>
                         <div class="merge-resolution-header">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <circle cx="18" cy="18" r="3"/>
-                                <circle cx="6" cy="6" r="3"/>
-                                <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
-                                <line x1="6" y1="9" x2="6" y2="21"/>
-                            </svg>
+                            {#if entry.isError}
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="15" y1="9" x2="9" y2="15"/>
+                                    <line x1="9" y1="9" x2="15" y2="15"/>
+                                </svg>
+                            {:else}
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="18" cy="18" r="3"/>
+                                    <circle cx="6" cy="6" r="3"/>
+                                    <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+                                    <line x1="6" y1="9" x2="6" y2="21"/>
+                                </svg>
+                            {/if}
                             <span class="merge-resolution-label">{entry.mergeLabel || 'Merge conflicts resolved'}</span>
                         </div>
                         <div class="merge-resolution-content">{entry.content}</div>
@@ -392,6 +400,14 @@
         border-radius: var(--radius-md);
         border-left: 3px solid var(--color-status-green);
         overflow: hidden;
+    }
+    .merge-resolution-error {
+        background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
+        border-left-color: var(--color-status-red);
+    }
+    .merge-resolution-error .merge-resolution-header,
+    .merge-resolution-error .merge-resolution-label {
+        color: var(--color-status-red);
     }
     .merge-resolution-header {
         display: flex;
