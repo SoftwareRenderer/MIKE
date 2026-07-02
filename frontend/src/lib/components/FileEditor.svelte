@@ -27,6 +27,7 @@
     import { sql } from '@codemirror/lang-sql';
     import { html } from '@codemirror/lang-html';
     import { css } from '@codemirror/lang-css';
+    import { goTemplate } from '$lib/gotemplate';
 
     // GitHub Dark theme — matches shiki's github-dark token colors
     const githubDarkHighlight = HighlightStyle.define([
@@ -142,6 +143,7 @@
             sql: sql,
             html: html, htm: html,
             css: css, scss: css, sass: css, less: css,
+            tmpl: goTemplate, gohtml: goTemplate,
         };
 
         if (base === 'dockerfile') return null;

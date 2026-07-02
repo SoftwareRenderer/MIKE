@@ -64,6 +64,9 @@ function getLanguage(path: string): Language | null {
     // Special basenames — no CodeMirror support, return null
     if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') return null;
 
+    // Go templates — handled by custom regex-based highlighter (no Lezer grammar)
+    if (ext === 'tmpl' || ext === 'gohtml') return null;
+
     const extMap: Record<string, Language> = {
         js: _js, mjs: _js, cjs: _js, jsx: _js, mx: _js,
         ts: _js, tsx: _js,
@@ -111,6 +114,206 @@ function contentHash(lines: string[]): string {
 }
 
 /**
+ * Go template action keywords.
+ */
+const goTemplateKeywords = new Set([
+    'if', 'else', 'end', 'range', 'with',
+    'template', 'define', 'block',
+    'nil', 'true', 'false',
+    'and', 'or', 'not',
+    'eq', 'ne', 'lt', 'le', 'gt', 'ge',
+    'printf', 'print', 'println',
+    'len', 'index', 'html', 'js', 'urlquery', 'printf',
+    'slice', 'substr', 'default', 'timeout', 'recover',
+]);
+
+/**
+ * Highlight Go template lines using regex-based tokenization.
+ * Recognizes template actions {{ ... }}, keywords, variables, strings, comments.
+ * Base content (HTML) is left unstyled — the focus is on template action highlighting.
+ */
+function highlightGoTemplateLines(lines: string[]): string[] {
+    const result: string[] = new Array(lines.length).fill('');
+    const source = lines.join('\n');
+
+    // Compute line boundaries
+    const lineStarts: number[] = new Array(lines.length);
+    const lineEnds: number[] = new Array(lines.length);
+    let pos = 0;
+    for (let i = 0; i < lines.length; i++) {
+        lineStarts[i] = pos;
+        lineEnds[i] = pos + lines[i].length;
+        if (i < lines.length - 1) pos += lines[i].length + 1;
+    }
+
+    const styledSpans: { from: number; to: number; cls: string }[] = [];
+
+    // Find all {{ ... }} actions in the source
+    // Pattern: {{-? ... -?}} (non-greedy, but handle nested braces)
+    let scanPos = 0;
+    while (scanPos < source.length) {
+        const actionStart = source.indexOf('{{', scanPos);
+        if (actionStart === -1) break;
+
+        // Find matching }}
+        let depth = 0;
+        let actionEnd = -1;
+        for (let i = actionStart; i < source.length - 1; i++) {
+            if (source[i] === '{' && source[i + 1] === '{') depth++;
+            else if (source[i] === '}' && source[i + 1] === '}') {
+                depth--;
+                if (depth === 0) {
+                    actionEnd = i + 2;
+                    break;
+                }
+            }
+        }
+        if (actionEnd === -1) break; // unmatched {{
+
+        // Extract action content (between {{ and }})
+        let contentStart = actionStart + 2;
+        while (contentStart < actionEnd && /\s|-/.test(source[contentStart])) contentStart++;
+        let contentEnd = actionEnd - 2;
+        while (contentEnd > contentStart && /\s|-/.test(source[contentEnd])) contentEnd--;
+        const actionContent = source.substring(contentStart, contentEnd);
+
+        // Check for comment action: {{/* ... */}}
+        if (actionContent.startsWith('/*')) {
+            styledSpans.push({ from: actionStart, to: actionEnd, cls: 'hl-comment' });
+            scanPos = actionEnd;
+            continue;
+        }
+
+        // Highlight the delimiters
+        styledSpans.push({ from: actionStart, to: actionStart + 2, cls: 'hl-meta' });
+        // Close delimiter
+        let closeStart = actionEnd - 2;
+        if (source[closeStart - 1] === '-') closeStart--;
+        styledSpans.push({ from: closeStart, to: actionEnd, cls: 'hl-meta' });
+
+        // Tokenize action content
+        const tokens = tokenizeGoAction(actionContent, actionStart + (contentStart - actionStart));
+        styledSpans.push(...tokens);
+
+        scanPos = actionEnd;
+    }
+
+    // Build per-line output
+    for (let i = 0; i < lines.length; i++) {
+        const lStart = lineStarts[i];
+        const lEnd = lineEnds[i];
+        if (lStart === lEnd) continue;
+
+        let cursor = lStart;
+        let spanIdx = 0;
+
+        while (spanIdx < styledSpans.length && styledSpans[spanIdx].to <= cursor) {
+            spanIdx++;
+        }
+
+        while (cursor < lEnd && spanIdx < styledSpans.length) {
+            const span = styledSpans[spanIdx];
+            if (span.from >= lEnd) {
+                if (span.from > cursor) {
+                    result[i] += escapeHtml(source.substring(cursor, lEnd));
+                }
+                cursor = lEnd;
+                break;
+            }
+            if (span.to <= cursor) { spanIdx++; continue; }
+
+            if (span.from > cursor) {
+                result[i] += escapeHtml(source.substring(cursor, Math.min(span.from, lEnd)));
+            }
+            const sFrom = Math.max(span.from, cursor);
+            const sTo = Math.min(span.to, lEnd);
+            if (sTo > sFrom) {
+                result[i] += `<span class="${span.cls}">${escapeHtml(source.substring(sFrom, sTo))}</span>`;
+            }
+            cursor = Math.max(cursor, Math.min(span.to, lEnd));
+            if (span.to >= lEnd) spanIdx++;
+        }
+        if (cursor < lEnd) {
+            result[i] += escapeHtml(source.substring(cursor, lEnd));
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Tokenize Go template action content into styled spans.
+ */
+function tokenizeGoAction(content: string, baseOffset: number): { from: number; to: number; cls: string }[] {
+    const spans: { from: number; to: number; cls: string }[] = [];
+    let pos = 0;
+
+    while (pos < content.length) {
+        // Strings
+        const stringMatch = /^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)/.exec(content.slice(pos));
+        if (stringMatch) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + stringMatch[0].length, cls: 'hl-string' });
+            pos += stringMatch[0].length;
+            continue;
+        }
+
+        // Dot variables: .Field or .
+        const dotMatch = /^(\.[a-zA-Z_][a-zA-Z0-9_]*)|(\.(?=\s|$|\||\}))/.exec(content.slice(pos));
+        if (dotMatch) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + dotMatch[0].length, cls: 'hl-variable' });
+            pos += dotMatch[0].length;
+            continue;
+        }
+
+        // Named variables: $var
+        const varMatch = /^(\$[a-zA-Z_][a-zA-Z0-9_]*)/.exec(content.slice(pos));
+        if (varMatch) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + varMatch[0].length, cls: 'hl-variable' });
+            pos += varMatch[0].length;
+            continue;
+        }
+
+        // Keywords and identifiers
+        const identMatch = /^([a-zA-Z_][a-zA-Z0-9_]*)/.exec(content.slice(pos));
+        if (identMatch) {
+            const word = identMatch[1];
+            const cls = goTemplateKeywords.has(word) ? 'hl-keyword' : 'hl-function';
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + word.length, cls });
+            pos += word.length;
+            continue;
+        }
+
+        // Numbers
+        const numMatch = /^(\d+(?:\.\d+)?)/.exec(content.slice(pos));
+        if (numMatch) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + numMatch[1].length, cls: 'hl-number' });
+            pos += numMatch[1].length;
+            continue;
+        }
+
+        // Operators: | == != <= >= = < >
+        const opMatch = /^(\||==|!=|<=|>=|<|>|=)/.exec(content.slice(pos));
+        if (opMatch) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + opMatch[1].length, cls: 'hl-operator' });
+            pos += opMatch[1].length;
+            continue;
+        }
+
+        // Punctuation: () [] , :
+        if ('()[]:,'.includes(content[pos])) {
+            spans.push({ from: baseOffset + pos, to: baseOffset + pos + 1, cls: 'hl-punctuation' });
+            pos++;
+            continue;
+        }
+
+        // Skip whitespace and other chars
+        pos++;
+    }
+
+    return spans;
+}
+
+/**
  * Highlight multiple lines of code and return an array of HTML fragments (one per line).
  * Uses Lezer parsers from CodeMirror language packages for token-level highlighting.
  * Returns empty string for lines that should fall back to plain text rendering.
@@ -118,6 +321,12 @@ function contentHash(lines: string[]): string {
  */
 export function highlightLines(lines: string[], path: string): string[] {
     if (lines.length === 0) return [];
+
+    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
+    const ext = path.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'tmpl' || ext === 'gohtml') {
+        return highlightGoTemplateLines(lines);
+    }
 
     const lang = getLanguage(path);
     if (!lang) return lines.map(() => '');
@@ -231,15 +440,97 @@ export function highlightLines(lines: string[], path: string): string[] {
 }
 
 /**
+ * Extract symbols from Go template source using regex.
+ * Finds: {{define "name"}}, {{block "name" .}}, $var := assignments.
+ */
+function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+
+    // Match {{define "name"}} and {{block "name" ...}}
+    const defineRegex = /\{\{-?\s*(define|block)\s+["']([^"']+)["']/g;
+    let m;
+    while ((m = defineRegex.exec(source)) !== null) {
+        const line = lineInfo.lineAt(m.index).number;
+        symbols.push({ name: m[2], kind: 'class', line, indent: 0 });
+    }
+
+    // Match $var := ... (variable assignments inside actions)
+    const varRegex = /\{\{-?\s*(?:with\s+)?(\$[a-zA-Z_][a-zA-Z0-9_]*)\s*:=/g;
+    while ((m = varRegex.exec(source)) !== null) {
+        const name = m[1].substring(1); // strip $
+        const line = lineInfo.lineAt(m.index).number;
+        symbols.push({ name, kind: 'variable', line, indent: 0 });
+    }
+
+    // Match .Field references inside actions (e.g., {{ .TaskTitle }}, {{ .User.Name }})
+    // Skip common built-in methods/fields
+    const skipFields = new Set([
+        'Page', 'Site', 'Root', 'Get', 'Set', 'Merge', 'String', 'Time', 'Date',
+        'HTML', 'SafeHTML', 'SafeCSS', 'SafeJS', 'SafeURL', 'URL', 'Transform',
+        'Fingerprint', 'Resources', 'Params', 'Weight', 'Title', 'Summary',
+        'Content', 'Plain', 'Lang', 'Language', 'RelPermalink', 'Permalink',
+        'File', 'OutputFormat', 'OutputFormats', 'Data', 'Sections', 'Ancestors',
+        'Parent', 'CurrentSection', 'FirstSection', 'Next', 'Prev', 'NextSection',
+        'PrevSection', 'Site', 'Sites', 'All', 'ByTitle', 'ByWeight', 'ByDate',
+        'ByLang', 'DefaultContentLanguage', 'Translations', 'AllTranslations',
+        'IsTranslated', 'Render', 'Resources', 'Store', 'Meta', 'Keywords',
+        'Description', 'Description', 'Description',
+    ]);
+    const fieldRegex = /\.(([a-zA-Z_][a-zA-Z0-9_]*))(?=\s|\||\}|"|'|[,)])/g;
+    let fm;
+    while ((fm = fieldRegex.exec(source)) !== null) {
+        const fieldName = fm[1];
+        // Check it's inside a {{ }} action (look back for {{)
+        const beforeAction = source.lastIndexOf('{{', fm.index);
+        const afterAction = source.indexOf('}}', fm.index);
+        if (beforeAction === -1 || afterAction === -1 || beforeAction > afterAction) continue;
+        if (skipFields.has(fieldName)) continue;
+        const line = lineInfo.lineAt(fm.index).number;
+        symbols.push({ name: fieldName, kind: 'property', line, indent: 0 });
+    }
+
+    // Deduplicate by name (keep first occurrence)
+    const seen = new Set<string>();
+    const unique: typeof symbols = [];
+    for (const s of symbols) {
+        if (!seen.has(s.name)) {
+            seen.add(s.name);
+            unique.push(s);
+        }
+    }
+
+    // Sort: templates (class) first, then variables, then properties, each group by line number
+    unique.sort((a, b) => {
+        const kindOrder = { class: 0, variable: 1, property: 2 };
+        const aOrder = kindOrder[a.kind] ?? 9;
+        const bOrder = kindOrder[b.kind] ?? 9;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.line - b.line;
+    });
+
+    return unique;
+}
+
+/**
  * Extract global symbols (functions, classes, variables) from a CodeMirror EditorView.
  * Walks the language syntax tree and collects top-level definitions.
+ * For Go templates, uses regex-based extraction (StreamLanguage has no Lezer tree).
  * Returns an array of { name, kind, line, indent } sorted by line number.
  */
-export function getLanguageTreeFromView(view: any): Array<{ name: string; kind: string; line: number; indent: number }> {
+export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
     try {
-        const tree = syntaxTree(view.state);
         const doc = view.state.doc;
+
+        // Go templates — use regex-based extraction
+        if (path) {
+            const ext = path.split('.').pop()?.toLowerCase() || '';
+            if (ext === 'tmpl' || ext === 'gohtml') {
+                return extractGoTemplateSymbols(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
+            }
+        }
+
+        const tree = syntaxTree(view.state);
 
         // Map from declaration node types to symbol kinds
         const kindMap: Record<string, string> = {

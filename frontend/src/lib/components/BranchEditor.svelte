@@ -25,6 +25,7 @@
     import { sql } from '@codemirror/lang-sql';
     import { html } from '@codemirror/lang-html';
     import { css } from '@codemirror/lang-css';
+    import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
     // GitHub Dark theme — matches app colors
@@ -143,6 +144,7 @@
             sql: sql,
             html: html, htm: html,
             css: css, scss: css, sass: css, less: css,
+            tmpl: goTemplate, gohtml: goTemplate,
         };
         if (base === 'dockerfile' || base === 'makefile' || base === 'cmakeLists.txt') return null;
         const support = extMap[ext];
@@ -151,7 +153,7 @@
 
     function extractSymbols() {
         if (!view) return;
-        const symbols = getLanguageTreeFromView(view);
+        const symbols = getLanguageTreeFromView(view, filePath);
         onSymbolsUpdate(symbols);
     }
 
