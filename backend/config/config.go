@@ -53,12 +53,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	for i := range providers {
 		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
 			decrypted, err := crypto.Decrypt(*providers[i].APIKey)
-			if err != nil {
-				// If decryption fails, leave the value as-is (may be plain text from before encryption was added)
-				providers[i].APIKey = &decrypted
-			} else {
+			if err == nil {
 				providers[i].APIKey = &decrypted
 			}
+			// If decryption fails, leave the value as-is (may be plain text from before encryption was added)
 		}
 	}
 
