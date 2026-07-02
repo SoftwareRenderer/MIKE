@@ -512,9 +512,55 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
 }
 
 /**
+ * Strip inline markdown formatting from heading text.
+ * Removes: **bold**, *italic*, __bold__, _italic_, `code`, [link](url), ![img](url).
+ */
+function stripMarkdownFormatting(text: string): string {
+    return text
+        .replace(/!\[([^"]]*)"]\([^)]*\)/g, '$1')  // ![alt](url) → alt
+        .replace(/\[([^"]]*)"]\([^)]*\)/g, '$1')      // [text](url) → text
+        .replace(/`([^`]*)`/g, '$1')                     // `code` → code
+        .replace(/\*\*([^`]*)\*\*/g, '$1')              // **bold** → bold
+        .replace(/__([^_]*)__/g, '$1')                   // __bold__ → bold
+        .replace(/\*([^`]*)\*/g, '$1')                   // *italic* → italic
+        .replace(/_([^_]*)_/g, '$1')                     // _italic_ → italic
+        .trim();
+}
+
+/**
+ * Extract markdown headings (ATX format) from source text.
+ * Returns headings up to depth 3 (h1, h2, h3) with inline formatting stripped.
+ */
+function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+    const lines = source.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const match = /^(#{1,3})\s+(.+?)\s*$/.exec(line);
+        if (match) {
+            const level = match[1].length; // 1, 2, or 3
+            const rawText = match[2];
+            const name = stripMarkdownFormatting(rawText);
+            if (name) {
+                symbols.push({
+                    name,
+                    kind: 'heading',
+                    line: i + 1,
+                    indent: level - 1, // 0 for h1, 1 for h2, 2 for h3
+                });
+            }
+        }
+    }
+
+    return symbols;
+}
+
+/**
  * Extract global symbols (functions, classes, variables) from a CodeMirror EditorView.
  * Walks the language syntax tree and collects top-level definitions.
  * For Go templates, uses regex-based extraction (StreamLanguage has no Lezer tree).
+ * For markdown, extracts ATX headings as a document outline.
  * Returns an array of { name, kind, line, indent } sorted by line number.
  */
 export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; indent: number }> {
@@ -527,6 +573,10 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             const ext = path.split('.').pop()?.toLowerCase() || '';
             if (ext === 'tmpl' || ext === 'gohtml') {
                 return extractGoTemplateSymbols(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
+            }
+            // Markdown — extract headings as outline
+            if (ext === 'md' || ext === 'mdx') {
+                return extractMarkdownHeadings(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
             }
         }
 

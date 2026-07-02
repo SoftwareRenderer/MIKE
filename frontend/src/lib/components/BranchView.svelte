@@ -560,7 +560,8 @@
                 />
             </div>
 
-            <!-- Resize handle: right column -->
+            <!-- Resize handle: right column (only when symbols exist) -->
+            {#if symbols.length > 0}
             <div
                 class="branch-resize-handle"
                 class:active={activeResize === 'right'}
@@ -571,9 +572,10 @@
                 aria-orientation="vertical"
                 tabindex="-1"
             ></div>
+            {/if}
 
-            <!-- Right column: Symbol outline -->
-            <div class="branch-right-column" class:hidden={isMobile && activeTab !== 'symbols'} style="width: {rightWidth}px">
+            <!-- Right column: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
+            <div class="branch-right-column" class:hidden={(symbols.length === 0 && !isMobile) || (isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
                     onSymbolClick={(line: number) => {
@@ -861,6 +863,9 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
+    }
+    .branch-right-column.hidden {
+        display: none;
     }
 
     .branch-diff-overlay {

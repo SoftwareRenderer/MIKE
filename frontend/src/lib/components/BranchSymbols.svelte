@@ -12,6 +12,7 @@
             case 'constant': return 'K';
             case 'property': return 'P';
             case 'variable': return 'V';
+            case 'heading': return 'H';
             default: return '•';
         }
     }
@@ -23,23 +24,92 @@
             case 'constant': return '#79C0FF';
             case 'property': return '#79C0FF';
             case 'variable': return '#FFA657';
+            case 'heading': return '#7EE787';
             default: return '#AEB2B8';
         }
     }
+
+    /** Check if all symbols are headings (markdown outline mode) */
+    let isOutlineMode = $derived(symbols.length > 0 && symbols.every(s => s.kind === 'heading'));
+
+    type HeadingNode = {
+        symbol: typeof symbols[0];
+        children: HeadingNode[];
+        number: string;
+    };
+
+    /** Build a nested tree from flat heading list, computing outline numbers */
+    function buildHeadingTree(headings: typeof symbols): HeadingNode[] {
+        // Track counters per depth level: [h1Count, h2Count, h3Count]
+        const counters: number[] = [0, 0, 0];
+        const root: { children: HeadingNode[] } = { children: [] };
+        const stack: { node: typeof root | HeadingNode; level: number }[] = [{ node: root, level: -1 }];
+
+        for (const sym of headings) {
+            const level = sym.indent; // 0, 1, 2
+            counters[level]++;
+
+            // Build the outline number: "1", "1.2", "1.2.3"
+            const number = counters.slice(0, level + 1).join('.');
+
+            const node: HeadingNode = { symbol: sym, children: [], number };
+
+            // Pop stack until we find a parent at a lower level
+            while (stack.length > 1 && stack[stack.length - 1]!.level >= level) {
+                stack.pop();
+            }
+
+            const parent = stack[stack.length - 1]!;
+            parent.node.children.push(node);
+            stack.push({ node, level });
+        }
+
+        return root.children;
+    }
+
+    let headingTree = $derived(isOutlineMode ? buildHeadingTree(symbols) : []);
 </script>
 
 <div class="symbol-outline">
     <div class="symbol-header">
-        <span class="symbol-label">Symbols</span>
+        <span class="symbol-label">{isOutlineMode ? 'Outline' : 'Symbols'}</span>
         {#if symbols.length > 0}
             <span class="symbol-count">{symbols.length}</span>
         {/if}
     </div>
 
-    <div class="symbol-list" role="tree" aria-label="Symbol outline">
+    <div class="symbol-list" role="tree" aria-label={isOutlineMode ? 'Document outline' : 'Symbol outline'}>
         {#if symbols.length === 0}
-            <div class="symbol-empty">No symbols</div>
+            <div class="symbol-empty">No {isOutlineMode ? 'headings' : 'symbols'}</div>
+        {:else if isOutlineMode}
+            <!-- Nested tree for markdown headings -->
+            {#snippet renderTree(nodes: HeadingNode[], depth: number)}
+                <ul class={`outline-tree depth-${depth}`}>
+                    {#each nodes as node}
+                        <li class="outline-item">
+                            <button
+                                class="symbol-item"
+                                onclick={() => onSymbolClick(node.symbol.line)}
+                                role="treeitem"
+                                aria-selected="false"
+                                title={`Line ${node.symbol.line}: ${node.symbol.name}`}
+                            >
+                                <span class="outline-number">{node.number}</span>
+                                <span class="symbol-name">
+                                    {node.symbol.name}
+                                </span>
+                                <span class="symbol-line">{node.symbol.line}</span>
+                            </button>
+                            {#if node.children.length > 0}
+                                {@render renderTree(node.children, depth + 1)}
+                            {/if}
+                        </li>
+                    {/each}
+                </ul>
+            {/snippet}
+            {@render renderTree(headingTree, 0)}
         {:else}
+            <!-- Flat list for code symbols -->
             {#each symbols as symbol}
                 <button
                     class="symbol-item"
@@ -153,5 +223,42 @@
         padding: 8px 10px;
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
+    }
+
+    /* Outline tree styles */
+    .outline-tree {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .outline-item {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .outline-number {
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+        font-family: var(--font-mono);
+        min-width: 14px;
+        text-align: left;
+        user-select: none;
+        margin-right: 6px;
+    }
+
+    /* Tighter left padding for outline items vs regular symbols */
+    .outline-item > .symbol-item {
+        padding-left: 4px;
+    }
+
+    /* Depth-based indentation for nested trees */
+    .outline-tree.depth-1 {
+        margin-left: 8px;
+    }
+    .outline-tree.depth-2 {
+        margin-left: 8px;
     }
 </style>
