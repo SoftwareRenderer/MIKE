@@ -182,6 +182,7 @@ type GitLogResponse struct {
 	Commits       []GitCommit `json:"commits"`
 	CurrentBranch string      `json:"current_branch"` // name of the checked-out branch
 	OriginTip     string      `json:"origin_tip,omitempty"` // commit hash where origin/<branch> points
+	HasMore       bool        `json:"has_more,omitempty"` // true if more commits available beyond this batch
 }
 
 // GitBranch represents a git branch.

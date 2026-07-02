@@ -159,6 +159,7 @@ export interface GitLogResponse {
     commits: GitCommit[];
     current_branch: string;
     origin_tip?: string; // commit hash where origin/<branch> points
+    has_more?: boolean; // true if more commits available beyond this batch
 }
 
 /** A commit from a task's worktree history. */

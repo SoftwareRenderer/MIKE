@@ -1,13 +1,15 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
 
-    let { projectId, currentBranch, commits, originTip, loading, onCommitSelected, selectedCommitHash }: {
+    let { projectId, currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         projectId: string;
         currentBranch: string;
         commits: GitCommit[];
         originTip: string; // full commit hash where origin/<branch> points
         loading: boolean;
+        hasMore: boolean;
         onCommitSelected?: (commit: GitCommit, index: number) => void;
+        onLoadMore?: () => void;
         selectedCommitHash?: string;
     } = $props();
 
@@ -72,6 +74,22 @@
 
             return { commit: c, dateFormatted, primaryBranch, isCurrentBranch, isUnpushed, isOriginTip };
         });
+    });
+
+    // Lazy-load: IntersectionObserver on sentinel fetches next batch from server
+    let sentinelEl: HTMLDivElement | null = null;
+
+    $effect(() => {
+        commits;
+        if (sentinelEl && hasMore) {
+            const obs = new IntersectionObserver((entries) => {
+                if (entries[0]?.isIntersecting) {
+                    onLoadMore?.();
+                }
+            }, { rootMargin: '100px' });
+            obs.observe(sentinelEl);
+            return () => obs.disconnect();
+        }
     });
 </script>
 
@@ -154,6 +172,9 @@
                     </div>
                 </div>
             {/each}
+            {#if hasMore}
+                <div class="git-sentinel" bind:this={sentinelEl}></div>
+            {/if}
         {/if}
     </div>
 </div>
@@ -196,6 +217,10 @@
         padding: 8px 10px;
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
+    }
+
+    .git-sentinel {
+        height: 1px;
     }
 
     .git-commit-row {

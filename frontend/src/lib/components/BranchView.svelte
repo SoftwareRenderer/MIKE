@@ -150,18 +150,41 @@
     // Active resize handle: 'left', 'right', 'split', or null
     let activeResize = $state<'left' | 'right' | 'split' | null>(null);
 
+    const COMMIT_BATCH_SIZE = 30;
+    let commitOffset = $state(0);
+    let hasMoreCommits = $state(false);
+    let loadingMoreCommits = $state(false);
+
     async function loadCommits(branch?: string) {
         loadingCommits = true;
+        commitOffset = 0;
         try {
-            const resp: GitLogResponse = await getGitLogFull(projectId, branch);
+            const resp: GitLogResponse = await getGitLogFull(projectId, { branch, limit: COMMIT_BATCH_SIZE, offset: 0 });
             commits = resp.commits;
             originTip = resp.origin_tip || '';
+            hasMoreCommits = resp.has_more || false;
         } catch (e) {
             console.error('Failed to load commits:', e);
             commits = [];
             originTip = '';
+            hasMoreCommits = false;
         } finally {
             loadingCommits = false;
+        }
+    }
+
+    async function loadMoreCommits() {
+        if (loadingMoreCommits || !hasMoreCommits) return;
+        loadingMoreCommits = true;
+        try {
+            const resp: GitLogResponse = await getGitLogFull(projectId, { limit: COMMIT_BATCH_SIZE, offset: commitOffset });
+            commits = [...commits, ...resp.commits];
+            commitOffset += resp.commits.length;
+            hasMoreCommits = resp.has_more || false;
+        } catch (e) {
+            console.error('Failed to load more commits:', e);
+        } finally {
+            loadingMoreCommits = false;
         }
     }
 
@@ -512,7 +535,9 @@
                         commits={commits}
                         originTip={originTip}
                         loading={loadingCommits}
+                        hasMore={hasMoreCommits}
                         onCommitSelected={handleCommitSelected}
+                        onLoadMore={loadMoreCommits}
                         selectedCommitHash={diffCommit?.hash}
                     />
                 </div>

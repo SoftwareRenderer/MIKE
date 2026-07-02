@@ -93,6 +93,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             } else {
                 history.replaceState(null, '', newUrl);
             }
+            // Keep urlFileId in sync — replaceState doesn't fire popstate
+            if (params.file !== undefined) {
+                urlFileId = params.file || '';
+            }
         }
     }
 

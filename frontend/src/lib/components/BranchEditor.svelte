@@ -411,8 +411,10 @@
         }
     });
 
-    // Create editor after DOM is ready (editorEl is in a conditional block)
+    // Create editor after content is loaded and DOM is ready.
+    // Tracks originalContent so it waits for loadFile() to complete.
     $effect(() => {
+        const _ = originalContent; // force dependency on load completion
         if (!loading && !fileTooLarge && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
                 if (editorEl && !view && !editorCreating) {

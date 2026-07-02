@@ -9,10 +9,12 @@ import {
 // -- Git endpoints --
 
 /** Fetch git log with full commit details (hash, parents, date, branches). Optional branch filter.
- * Returns commits array plus current_branch and origin_tip metadata. */
-export async function getGitLogFull(projectId: string, branch?: string): Promise<GitLogResponse> {
+ * Returns commits array plus current_branch, origin_tip, and has_more metadata. */
+export async function getGitLogFull(projectId: string, options?: { branch?: string; limit?: number; offset?: number }): Promise<GitLogResponse> {
     const params = new URLSearchParams({ full: '1' });
-    if (branch) params.set('branch', branch);
+    if (options?.branch) params.set('branch', options.branch);
+    if (options?.limit != null) params.set('limit', String(options.limit));
+    if (options?.offset != null) params.set('offset', String(options.offset));
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
     return res.json();

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -51,9 +52,20 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	full := r.URL.Query().Get("full") == "1"
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
 	if full {
-		c := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
+		args := []string{"-C", project.Path, "log"}
+		if offset > 0 {
+			args = append(args, "--skip", strconv.Itoa(offset))
+		}
+		if limit > 0 {
+			// Fetch one extra to detect if more commits exist
+			args = append(args, "-n", strconv.Itoa(limit+1))
+		}
+		args = append(args, "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
+		c := exec.Command("git", args...)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
@@ -114,17 +126,33 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 			originTip = h.getOriginTip(project.Path, currentBranch)
 		}
 
+		// Trim extra commit used to detect if more exist
+		hasMore := false
+		if limit > 0 && len(commits) > limit {
+			hasMore = true
+			commits = commits[:limit]
+		}
+
 		resp := types.GitLogResponse{
 			Commits:       commits,
 			CurrentBranch: currentBranch,
 			OriginTip:     originTip,
+			HasMore:       hasMore,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
-	c := exec.Command("git", "-C", project.Path, "log", "--oneline", "--decorate", branch)
+	args := []string{"-C", project.Path, "log", "--oneline", "--decorate"}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	if limit > 0 {
+		args = append(args, "-n", strconv.Itoa(limit))
+	}
+	args = append(args, branch)
+	c := exec.Command("git", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
