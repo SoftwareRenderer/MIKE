@@ -40,8 +40,10 @@
         {#if isMobile}
             <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
         {:else}
-            <button class="toggle-btn" onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                {collapsed ? '▸' : '◂'}
+            <button class="toggle-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
             </button>
         {/if}
     </div>
@@ -170,8 +172,17 @@
         cursor: pointer;
         padding: 4px;
         border-radius: 4px;
-        font-size: 0.875rem;
         flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .toggle-btn svg {
+        transition: transform 0.15s ease;
+        transform: rotate(180deg);
+    }
+    .toggle-btn.collapsed svg {
+        transform: rotate(0deg);
     }
     .toggle-btn:hover {
         background: var(--color-surface-2);
