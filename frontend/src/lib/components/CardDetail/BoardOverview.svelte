@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { fade } from 'svelte/transition';
+    import { fade, slide } from 'svelte/transition';
     import type { Task } from '$lib/types';
     import Card from '../Card.svelte';
 
@@ -90,7 +90,7 @@
                 <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             {#if !collapsedSections.has(section.id)}
-            <div class="section-body">
+            <div class="section-body" transition:slide={{ duration: 200 }}>
                 {#each sectionTasks as t (t.id)}
                     {@const selectHandler = (selected: Task) => { if (onSelectTask) onSelectTask(selected); }}
                     <div class="task-wrapper" transition:fade={{ duration: 200 }}>

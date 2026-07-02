@@ -4,6 +4,7 @@
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
     import { highlightLines } from '$lib/highlighter';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
+import { slide } from 'svelte/transition';
 
 
     let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
@@ -223,7 +224,8 @@
                     <span class="diff-untracked-badge">untracked</span>
                 </button>
                 {#if isUntrackedExpanded}
-                    {#if isLarge}
+                    <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
+                        {#if isLarge}
                         <div class="diff-file-content">
                             <div class="diff-gutter">
                                 <div class="diff-gutter-spacer"></div>
@@ -403,7 +405,8 @@
                                 </div>
                             </div>
                         </div>
-                    {/if}
+                        {/if}
+                    </div>
                 {/if}
             </section>
         {/each}
@@ -428,7 +431,8 @@
                     </span>
                 </button>
                 {#if isFileExpanded}
-                    {#if file.fileSize}
+                    <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
+                        {#if file.fileSize}
                         <div class="diff-file-content">
                             <div class="diff-gutter">
                                 <div class="diff-gutter-spacer"></div>
@@ -573,7 +577,8 @@
                                 </button>
                             {/if}
                         </div>
-                    {/if}
+                        {/if}
+                    </div>
                 {/if}
             </section>
         {/each}

@@ -9,7 +9,7 @@
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { showEditTask, editTaskData } from '$lib/store';
-    import { fade } from 'svelte/transition';
+    import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
@@ -730,7 +730,7 @@
         </button>
     {/if}
     {#if expanded && hasChildren}
-        <div class="subtask-list">
+        <div class="subtask-list" transition:slide={{ duration: 200 }}>
             {#each children as child}
                 <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
                     <Card task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />

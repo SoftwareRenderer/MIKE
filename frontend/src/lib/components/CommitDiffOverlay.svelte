@@ -4,6 +4,7 @@
     import { parseUnifiedDiff, buildSideBySideRows } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { highlightLines } from '$lib/highlighter';
+import { slide } from 'svelte/transition';
 
     interface Props {
         commit: GitCommit;
@@ -224,7 +225,7 @@
                         </svg>
                     </button>
                     {#if showFullMessage}
-                        <div class="diff-commit-body-tooltip">
+                        <div class="diff-commit-body-tooltip" transition:slide={{ duration: 200 }}>
                             <pre>{fullMessage}</pre>
                         </div>
                     {/if}
@@ -296,7 +297,8 @@
 
                         <!-- File content (when expanded) -->
                         {#if !collapsed}
-                            {#if file.rows.length === 0}
+                            <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
+                                {#if file.rows.length === 0}
                                 <div class="diff-binary-notice">Binary file</div>
                             {:else}
                                 {@const rows = fileRows[file.path]}
@@ -346,6 +348,7 @@
                                     </button>
                                 {/if}
                             {/if}
+                            </div>
                         {/if}
                     </section>
                 {/each}

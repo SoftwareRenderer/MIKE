@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+import { slide } from 'svelte/transition';
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
@@ -627,7 +628,7 @@
 
                             <!-- Expanded details -->
                             {#if p.expanded}
-                                <div class="provider-details">
+                                <div class="provider-details" transition:slide={{ duration: 200 }}>
                                     {#if p.kind === 'pi'}
                                         <!-- Pi Coding Agent Info -->
                                         <div class="pi-info-section">
