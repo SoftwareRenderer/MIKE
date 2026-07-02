@@ -3,6 +3,7 @@
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
     import { highlightLines } from '$lib/highlighter';
+    import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 
 
     let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
@@ -26,29 +27,17 @@
     let expandedBlocks = $state<Record<string, boolean>>({});
 
     // Track which file sections are expanded (file headers)
-    // Persisted to localStorage so collapsed state survives page refreshes.
+    // Persisted to IndexedDB so collapsed state survives page refreshes.
     // Single global key — stale paths are cleaned up by the $effect below.
-    const COLLAPSED_DIFF_KEY = 'diff_collapsed_files';
+    let collapsedFiles = $state(new Set<string>());
 
-    function loadCollapsedFiles(): Set<string> {
-        try {
-            const raw = localStorage.getItem(COLLAPSED_DIFF_KEY);
-            if (raw) return new Set(JSON.parse(raw) as string[]);
-        } catch {
-            // ignore
-        }
-        return new Set();
+    // Load collapsed files from IndexedDB on init
+    loadCollapsedDiffFiles().then(ids => { collapsedFiles = ids; }).catch(() => {});
+
+    /** Save collapsed files to IndexedDB. */
+    async function saveCollapsedFiles(collapsed: Set<string>): Promise<void> {
+        await saveCollapsedDiffFiles(collapsed);
     }
-
-    function saveCollapsedFiles(collapsed: Set<string>) {
-        try {
-            localStorage.setItem(COLLAPSED_DIFF_KEY, JSON.stringify([...collapsed]));
-        } catch {
-            // ignore
-        }
-    }
-
-    let collapsedFiles = $state(loadCollapsedFiles());
 
     // Clean up stale entries: remove paths that no longer exist in the current diff
     $effect(() => {
@@ -69,7 +58,7 @@
         }
         if (changed) {
             collapsedFiles = next;
-            saveCollapsedFiles(next);
+            saveCollapsedFiles(next).catch(() => {});
         }
     });
 

@@ -86,32 +86,33 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let inputValue = $state('');
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
-    // Load draft text from localStorage on init
-    const savedDraft = getDraftText(taskId);
-    if (savedDraft !== null) {
-        inputValue = savedDraft;
-    }
+    // Load draft text from IndexedDB on init
+    getDraftText(taskId).then(savedDraft => {
+        if (savedDraft !== null) {
+            inputValue = savedDraft;
+        }
+    }).catch(() => {});
 
     // Load draft attachments from IndexedDB on init
     loadDraftAttachments(taskId).then(atts => {
         if (atts.length > 0) {
-            draftAttachments = atts.map(a => ({
+            draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
                 file: new File([], '', { type: a.mimeType }),
                 preview: `data:${a.mimeType};base64,${a.data}`,
                 mimeType: a.mimeType,
                 base64: a.data,
             }));
         }
-    });
+    }).catch(() => {});
 
-    // Save draft text to localStorage (debounced to avoid writes on every keystroke)
+    // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
     let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
     const DRAFT_SAVE_DEBOUNCE = 100; // ms
     function handleInputSave(val: string) {
         if (draftSaveTimer) clearTimeout(draftSaveTimer);
         if (val) {
             draftSaveTimer = setTimeout(() => {
-                setDraftText(taskId, val);
+                setDraftText(taskId, val).catch(() => {});
                 draftSaveTimer = null;
             }, DRAFT_SAVE_DEBOUNCE);
         }
@@ -119,7 +120,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     // Clear draft text and attachments on send (called synchronously from ChatForm)
     function handleClearDraft() {
-        clearDraftText(taskId);
+        clearDraftText(taskId).catch(() => {});
         draftAttachments = [];
     }
 
@@ -961,7 +962,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         } catch (e) {
             // Task may have been deleted — clear stale draft
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
-                clearDraftText(taskId);
+                clearDraftText(taskId).catch(() => {});
                 draftAttachments = [];
             }
             // Otherwise: no history yet, ignore
@@ -1767,7 +1768,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             draftSaveTimer = null;
         }
         if (inputValue) {
-            setDraftText(taskId, inputValue);
+            setDraftText(taskId, inputValue).catch(() => {});
         }
     });
 
@@ -1778,7 +1779,9 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             draftSaveTimer = null;
         }
         if (inputValue) {
-            setDraftText(taskId, inputValue);
+            // Sync write for beforeunload — use navigator.sendBeacon-style approach
+            // Since IndexedDB is async, best-effort only
+            setDraftText(taskId, inputValue).catch(() => {});
         }
     }
     window.addEventListener('beforeunload', handleBeforeUnload);

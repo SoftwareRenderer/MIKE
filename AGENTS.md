@@ -255,25 +255,36 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 ## Common Patterns
 
 ### Client-Side Storage (`storage.ts`)
-All localStorage and IndexedDB access goes through `frontend/src/lib/storage.ts`. Never access localStorage or IndexedDB directly in components.
+All client-side storage goes through `frontend/src/lib/storage.ts`. Never access IndexedDB directly in components.
+All functions are **async** (return `Promise`).
+
+**Single IndexedDB database:** `kanban-storage` (v1) with these object stores:
+- `drafts` — draft chat text per task (key: taskId)
+- `editor-drafts` — draft file content per file path (key: path)
+- `editor-history` — undo/redo history per file (key: path)
+- `collapsed-tasks` — collapsed parent task IDs (single key)
+- `collapsed-sections` — collapsed board section IDs (single key)
+- `collapsed-diff-files` — collapsed diff file paths (single key)
+- `unsaved-files` — unsaved file paths per project (key: projectId)
+- `offline-queue` — queued write actions (single key)
+- `explorer-layout` — explorer column widths (single key)
+- `app-settings` — generic key-value for component settings (terminal height, panel ratios, sidebar)
+- `attachments` — draft image attachments per task (key: taskId)
 
 **Key functions:**
 - `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
-- `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts (IndexedDB)
-- `gc(allTaskIds: Set<string>)` — garbage-collect ALL stale entries for deleted tasks (collapsed tasks, drafts, offline queue, attachments)
+- `getEditorDraft(path)` / `setEditorDraft(path, text)` / `clearEditorDraft(path)` — per-file editor drafts
+- `loadEditorHistory(path)` / `saveEditorHistory(path, base, deltas)` / `clearEditorHistory(path)` — editor undo/redo
+- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` — collapsed parent task IDs
+- `loadCollapsedSections()` / `saveCollapsedSections(ids)` — collapsed board sections
+- `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids)` — collapsed diff file paths
+- `loadQueue()` / `saveQueue(actions)` — offline action queue
+- `loadExplorerLayout()` / `saveExplorerLayout(layout)` — explorer column widths
+- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` — generic key-value settings
+- `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts
+- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>)` — garbage-collect ALL stale entries
 
 **GC trigger:** Called in `Board.svelte` after the board is loaded. Components should NOT call `gc()` themselves.
-
-**Storage keys managed by `storage.ts`:**
-- `kanban-collapsed-tasks` — collapsed parent task IDs
-- `kanban:draft:<taskId>` — draft chat text per task
-- `kanban-offline-queue` — queued write actions
-- IndexedDB `kanban-drafts` — draft image attachments per task
-
-**Keys NOT managed by `storage.ts`** (no task reference, no GC needed):
-- `kanban:terminal:height` — terminal panel resize
-- `kanban:detail:boardRatio` / `kanban:detail:chatRatio` — panel split ratios
-- `diff_collapsed_files` — collapsed diff file paths (cleaned reactively in DiffViewer)
 
 ### Svelte 5 Reactivity
 - Use `$state()` for reactive variables

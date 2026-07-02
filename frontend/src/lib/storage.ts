@@ -1,22 +1,23 @@
 // =============================================================================
 // Unified client-side storage module
 // =============================================================================
-// All localStorage / IndexedDB access for the Kanban app goes through this module.
-// Components should NEVER access localStorage or IndexedDB directly.
+// All client-side storage for the Kanban app goes through this module.
+// Components should NEVER access IndexedDB directly.
 //
-// Storage keys:
-//   localStorage:
-//     kanban-collapsed-tasks   — Set<string> of collapsed parent task IDs
-//     kanban:draft:<taskId>    — Draft chat text per task
-//     kanban:editor-draft:<path> — Draft file content per file path (branch editor)
-//     kanban-offline-queue     — Queued write actions (managed by api.ts)
-//     kanban:terminal:height   — Terminal panel resize height
-//     kanban:detail:boardRatio — CardDetail board/chat split ratio
-//     kanban:detail:chatRatio  — CardDetail chat/stream split ratio
-//     kanban:explorer:layout   — Explorer column widths and split ratio
-//     diff_collapsed_files     — Set<string> of collapsed diff file paths
-//   IndexedDB (kanban-drafts):
-//     attachments store        — Draft image attachments per task (key: taskId)
+// Single IndexedDB database: `kanban-storage` (v1)
+//
+// Object stores:
+//   collapsed-tasks      — Single key 'ids' → string[] of collapsed parent task IDs
+//   collapsed-sections   — Single key 'ids' → string[] of collapsed board section IDs
+//   drafts               — key: taskId → string (draft chat text)
+//   editor-drafts        — key: file path → string (draft file content)
+//   editor-history       — key: file path → EditorHistory (undo/redo history)
+//   unsaved-files        — key: projectId → string[] (unsaved file paths)
+//   offline-queue        — Single key 'actions' → QueuedAction[]
+//   explorer-layout      — Single key 'layout' → ExplorerLayout
+//   collapsed-diff-files — Single key 'ids' → string[] of collapsed diff file paths
+//   app-settings         — key: setting key → any (terminal height, panel ratios, sidebar, etc.)
+//   attachments          — key: taskId → DraftAttachment[] (draft image attachments)
 //
 // Garbage collection:
 //   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
@@ -26,321 +27,63 @@
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const COLLAPSED_TASKS_KEY = 'kanban-collapsed-tasks';
-const QUEUE_KEY = 'kanban-offline-queue';
-const DRAFT_KEY_PREFIX = 'kanban:draft:';
-const EDITOR_DRAFT_KEY_PREFIX = 'kanban:editor-draft:';
-const EDITOR_HISTORY_KEY_PREFIX = 'kanban:editor-history:';
-const UNSAVED_FILES_KEY_PREFIX = 'kanban:unsaved-files:';
-const EXPLORER_LAYOUT_KEY = 'kanban:explorer:layout';
-
-const DB_NAME = 'kanban-drafts';
+const DB_NAME = 'kanban-storage';
 const DB_VERSION = 1;
-const ATTACHMENTS_STORE = 'attachments';
 
-// ─── Draft text (localStorage) ───────────────────────────────────────────────
+// Object store names
+const STORE_COLLAPSED_TASKS = 'collapsed-tasks';
+const STORE_COLLAPSED_SECTIONS = 'collapsed-sections';
+const STORE_DRAFTS = 'drafts';
+const STORE_EDITOR_DRAFTS = 'editor-drafts';
+const STORE_EDITOR_HISTORY = 'editor-history';
+const STORE_UNSAVED_FILES = 'unsaved-files';
+const STORE_OFFLINE_QUEUE = 'offline-queue';
+const STORE_EXPLORER_LAYOUT = 'explorer-layout';
+const STORE_COLLAPSED_DIFF_FILES = 'collapsed-diff-files';
+const STORE_APP_SETTINGS = 'app-settings';
+const STORE_ATTACHMENTS = 'attachments';
 
-/** Get saved draft text for a task. Returns `null` if no draft exists. */
-export function getDraftText(taskId: string): string | null {
-    try {
-        if (typeof localStorage === 'undefined') return null;
-        return localStorage.getItem(DRAFT_KEY_PREFIX + taskId);
-    } catch {
-        return null;
-    }
+// Fixed keys for single-value stores
+const KEY_IDS = 'ids';
+const KEY_ACTIONS = 'actions';
+const KEY_LAYOUT = 'layout';
+
+const ALL_STORES = [
+    STORE_COLLAPSED_TASKS,
+    STORE_COLLAPSED_SECTIONS,
+    STORE_DRAFTS,
+    STORE_EDITOR_DRAFTS,
+    STORE_EDITOR_HISTORY,
+    STORE_UNSAVED_FILES,
+    STORE_OFFLINE_QUEUE,
+    STORE_EXPLORER_LAYOUT,
+    STORE_COLLAPSED_DIFF_FILES,
+    STORE_APP_SETTINGS,
+    STORE_ATTACHMENTS,
+];
+
+// ─── Proxy-to-plain conversion ──────────────────────────────────────────────
+// Svelte 5's $state() creates reactive proxies that IndexedDB cannot clone
+// (structured clone algorithm rejects Proxy objects). Convert to plain values.
+
+/** Convert a Svelte 5 $state proxy to a plain value for IndexedDB storage. */
+function toPlain<T>(value: T): T {
+    if (value === null || value === undefined) return value;
+    const type = typeof value;
+    if (type !== 'object') return value; // primitives (string, number, boolean)
+    if (Array.isArray(value)) return value.map(toPlain) as unknown as T;
+    if (value instanceof Set) return [...value].map(toPlain) as unknown as T;
+    if (value instanceof Date) return value;
+    // Plain object — recurse into values
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toPlain(v)])) as T;
 }
 
-/** Save draft text for a task. Pass empty string to clear. */
-export function setDraftText(taskId: string, text: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        if (text === null) {
-            localStorage.removeItem(DRAFT_KEY_PREFIX + taskId);
-        } else if (text === '') {
-            localStorage.removeItem(DRAFT_KEY_PREFIX + taskId);
-        } else {
-            localStorage.setItem(DRAFT_KEY_PREFIX + taskId, text);
-        }
-    } catch {
-        // localStorage full or unavailable — silently ignore
-    }
-}
-
-/** Remove draft text for a task. */
-export function clearDraftText(taskId: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.removeItem(DRAFT_KEY_PREFIX + taskId);
-    } catch { /* ignore */ }
-}
-
-// ─── Branch editor drafts (localStorage) ────────────────────────────────────
-
-/** Get saved draft content for a file. Returns `null` if no draft exists. */
-export function getEditorDraft(path: string): string | null {
-    try {
-        if (typeof localStorage === 'undefined') return null;
-        return localStorage.getItem(EDITOR_DRAFT_KEY_PREFIX + path);
-    } catch {
-        return null;
-    }
-}
-
-/** Save draft content for a file. */
-export function setEditorDraft(path: string, text: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(EDITOR_DRAFT_KEY_PREFIX + path, text);
-    } catch {
-        // localStorage full or unavailable — silently ignore
-    }
-}
-
-/** Remove draft content for a file. */
-export function clearEditorDraft(path: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.removeItem(EDITOR_DRAFT_KEY_PREFIX + path);
-    } catch { /* ignore */ }
-}
-
-// ─── Editor undo/redo history (localStorage, per-file) ──────────────────────
-// Stores a base snapshot + deltas (from/to/insert) so undo/redo survives refreshes.
-// Max 1000 delta entries per file. FIFO. Entries older than 72h are discarded.
-
-interface EditorDelta {
-    from: number;
-    to: number;
-    insert: string;
-}
-
-interface EditorHistory {
-    // Timestamp when this history was created (ms)
-    ts: number;
-    // Base document content (first snapshot)
-    base: string;
-    // Ordered list of deltas applied on top of base (and each other)
-    deltas: EditorDelta[];
-}
-
-const MAX_HISTORY_DELTAS = 1000;
-const HISTORY_MAX_AGE_MS = 72 * 60 * 60 * 1000; // 72 hours
-
-/** Load persisted undo/redo history for a file. Returns `null` if none exists or expired. */
-export function loadEditorHistory(path: string): EditorHistory | null {
-    try {
-        if (typeof localStorage === 'undefined') return null;
-        const raw = localStorage.getItem(EDITOR_HISTORY_KEY_PREFIX + path);
-        if (raw) {
-            const history = JSON.parse(raw) as EditorHistory;
-            if (Date.now() - history.ts > HISTORY_MAX_AGE_MS) {
-                clearEditorHistory(path);
-                return null;
-            }
-            return history;
-        }
-    } catch { /* ignore */ }
-    return null;
-}
-
-/** Save undo/redo history for a file. Appends a new delta. */
-export function saveEditorHistory(path: string, base: string, deltas: EditorDelta[]): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        const trimmed = deltas.slice(-MAX_HISTORY_DELTAS);
-        localStorage.setItem(EDITOR_HISTORY_KEY_PREFIX + path, JSON.stringify({ ts: Date.now(), base, deltas: trimmed }));
-    } catch {
-        // localStorage full — silently ignore
-    }
-}
-
-/** Clear undo/redo history for a file. */
-export function clearEditorHistory(path: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.removeItem(EDITOR_HISTORY_KEY_PREFIX + path);
-    } catch { /* ignore */ }
-}
-
-// ─── Unsaved files (localStorage, per-project) ───────────────────────────────
-
-/** Load unsaved file paths for a project from localStorage. */
-export function loadUnsavedFiles(projectId: string): string[] {
-    try {
-        if (typeof localStorage === 'undefined') return [];
-        const raw = localStorage.getItem(UNSAVED_FILES_KEY_PREFIX + projectId);
-        if (raw) return JSON.parse(raw) as string[];
-    } catch { /* ignore */ }
-    return [];
-}
-
-/** Save unsaved file paths for a project to localStorage. */
-export function saveUnsavedFiles(projectId: string, paths: string[]): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(UNSAVED_FILES_KEY_PREFIX + projectId, JSON.stringify(paths));
-    } catch { /* ignore */ }
-}
-
-/** Remove unsaved files entry for a project. */
-export function clearUnsavedFiles(projectId: string): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.removeItem(UNSAVED_FILES_KEY_PREFIX + projectId);
-    } catch { /* ignore */ }
-}
-
-// ─── Explorer layout (localStorage) ──────────────────────────────────────────
-
-interface ExplorerLayout {
-    leftWidth: number;
-    rightWidth: number;
-    splitRatio: number;
-}
-
-const DEFAULT_EXPLORER_LAYOUT: ExplorerLayout = {
-    leftWidth: 250,
-    rightWidth: 180,
-    splitRatio: 0.5,
-};
-
-/** Load saved explorer column layout from localStorage. Returns defaults if none saved. */
-export function loadExplorerLayout(): ExplorerLayout {
-    try {
-        if (typeof localStorage === 'undefined') return { ...DEFAULT_EXPLORER_LAYOUT };
-        const raw = localStorage.getItem(EXPLORER_LAYOUT_KEY);
-        if (raw) {
-            const saved = JSON.parse(raw) as Partial<ExplorerLayout>;
-            return {
-                leftWidth: saved.leftWidth ?? DEFAULT_EXPLORER_LAYOUT.leftWidth,
-                rightWidth: saved.rightWidth ?? DEFAULT_EXPLORER_LAYOUT.rightWidth,
-                splitRatio: saved.splitRatio ?? DEFAULT_EXPLORER_LAYOUT.splitRatio,
-            };
-        }
-    } catch { /* ignore */ }
-    return { ...DEFAULT_EXPLORER_LAYOUT };
-}
-
-/** Save explorer column layout to localStorage. */
-export function saveExplorerLayout(layout: ExplorerLayout): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(EXPLORER_LAYOUT_KEY, JSON.stringify(layout));
-    } catch { /* ignore */ }
-}
-
-/** Remove all stale editor draft entries for paths that no longer exist. */
-export function gcEditorDrafts(allPaths: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        const prefix = EDITOR_DRAFT_KEY_PREFIX;
-        const prefixLen = prefix.length;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(prefix)) {
-                const path = key.slice(prefixLen);
-                if (!allPaths.has(path)) {
-                    localStorage.removeItem(key);
-                }
-            }
-        }
-    } catch { /* ignore */ }
-}
-
-// ─── Collapsed tasks (localStorage) ─────────────────────────────────────────
-
-/** Load collapsed task IDs from localStorage. */
-export function loadCollapsedTasks(): Set<string> {
-    try {
-        if (typeof localStorage === 'undefined') return new Set();
-        const raw = localStorage.getItem(COLLAPSED_TASKS_KEY);
-        if (raw) {
-            const ids = JSON.parse(raw) as string[];
-            return new Set(ids);
-        }
-    } catch { /* ignore */ }
-    return new Set();
-}
-
-/** Save collapsed task IDs to localStorage. */
-export function saveCollapsedTasks(ids: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(COLLAPSED_TASKS_KEY, JSON.stringify([...ids]));
-    } catch { /* ignore */ }
-}
-
-/** Remove collapsed state for a specific task. */
-export function clearCollapsedTask(taskId: string): void {
-    const collapsed = loadCollapsedTasks();
-    collapsed.delete(taskId);
-    saveCollapsedTasks(collapsed);
-}
-
-// ─── Collapsed board sections (localStorage) ────────────────────────────────
-
-const COLLAPSED_SECTIONS_KEY = 'kanban-collapsed-sections';
-
-/** Load collapsed board section IDs from localStorage. */
-export function loadCollapsedSections(): Set<string> {
-    try {
-        if (typeof localStorage === 'undefined') return new Set();
-        const raw = localStorage.getItem(COLLAPSED_SECTIONS_KEY);
-        if (raw) {
-            const ids = JSON.parse(raw) as string[];
-            return new Set(ids);
-        }
-    } catch { /* ignore */ }
-    return new Set();
-}
-
-/** Save collapsed board section IDs to localStorage. */
-export function saveCollapsedSections(ids: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify([...ids]));
-    } catch { /* ignore */ }
-}
-
-// ─── Offline queue (localStorage) ────────────────────────────────────────────
-
-interface QueuedAction {
-    id: string;
-    type: string;
-    params: Record<string, any>;
-    timestamp: number;
-}
-
-/** Load offline queue from localStorage. */
-export function loadQueue(): QueuedAction[] {
-    try {
-        if (typeof localStorage === 'undefined') return [];
-        const raw = localStorage.getItem(QUEUE_KEY);
-        if (raw) return JSON.parse(raw) as QueuedAction[];
-    } catch { /* ignore */ }
-    return [];
-}
-
-/** Save offline queue to localStorage. */
-export function saveQueue(actions: QueuedAction[]): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        localStorage.setItem(QUEUE_KEY, JSON.stringify(actions));
-    } catch { /* ignore */ }
-}
-
-// ─── Draft attachments (IndexedDB) ──────────────────────────────────────────
-
-/** Serializable draft attachment (no File objects — only base64 data). */
-export interface DraftAttachment {
-    mimeType: string;
-    data: string;   // base64-encoded image data
-}
+// ─── Database access ─────────────────────────────────────────────────────────
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-/** Open (or create) the IndexedDB database for draft attachments. */
-function openDraftDB(): Promise<IDBDatabase> {
+/** Open (or create) the kanban-storage IndexedDB database. */
+export function openDB(): Promise<IDBDatabase> {
     if (dbPromise) return dbPromise;
 
     dbPromise = new Promise((resolve, reject) => {
@@ -353,8 +96,10 @@ function openDraftDB(): Promise<IDBDatabase> {
 
         request.onupgradeneeded = (event: any) => {
             const db = event.target.result as IDBDatabase;
-            if (!db.objectStoreNames.contains(ATTACHMENTS_STORE)) {
-                db.createObjectStore(ATTACHMENTS_STORE);
+            for (const store of ALL_STORES) {
+                if (!db.objectStoreNames.contains(store)) {
+                    db.createObjectStore(store);
+                }
             }
         };
 
@@ -371,18 +116,45 @@ function openDraftDB(): Promise<IDBDatabase> {
     return dbPromise;
 }
 
-/** Save draft attachments for a task. Pass empty array to clear. */
-export async function saveDraftAttachments(taskId: string, attachments: DraftAttachment[]): Promise<void> {
+// ─── Generic IndexedDB helpers ───────────────────────────────────────────────
+
+/** Get a raw value from an object store by key. Returns `null` if not found or on error. */
+async function dbGetRaw(store: string, key: string): Promise<any> {
     try {
-        const db = await openDraftDB();
+        const db = await openDB();
+        return new Promise((resolve) => {
+            const tx = db.transaction(store, 'readonly');
+            const s = tx.objectStore(store);
+            const req = s.get(key);
+            req.onsuccess = () => resolve(req.result ?? null);
+            req.onerror = () => resolve(null);
+        });
+    } catch {
+        return null;
+    }
+}
+
+/** Get a value typed as T. When `validate` is provided, returns `null` if the stored value
+    doesn't pass validation (e.g., corrupted data). Without validator, returns raw value or null. */
+async function dbGet<T>(store: string, key: string, validate?: (v: any) => v is T): Promise<T | null> {
+    const raw = await dbGetRaw(store, key);
+    if (raw === null) return null;
+    if (validate && !validate(raw)) return null;
+    return raw as T;
+}
+
+/** Type guard: value is a non-null array. */
+function isArray(v: any): v is any[] {
+    return Array.isArray(v);
+}
+
+/** Put a value into an object store by key. Converts Svelte 5 $state proxies to plain values. */
+async function dbPut<T>(store: string, key: string, value: T): Promise<void> {
+    try {
+        const db = await openDB();
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
-            const store = tx.objectStore(ATTACHMENTS_STORE);
-            if (attachments.length === 0) {
-                store.delete(taskId);
-            } else {
-                store.put(attachments, taskId);
-            }
+            const tx = db.transaction(store, 'readwrite');
+            tx.objectStore(store).put(toPlain(value), key);
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
@@ -391,32 +163,285 @@ export async function saveDraftAttachments(taskId: string, attachments: DraftAtt
     }
 }
 
-/** Load draft attachments for a task. Returns empty array if none exist. */
-export async function loadDraftAttachments(taskId: string): Promise<DraftAttachment[]> {
+/** Delete a key from an object store. */
+async function dbDelete(store: string, key: string): Promise<void> {
     try {
-        const db = await openDraftDB();
+        const db = await openDB();
         return new Promise((resolve) => {
-            const tx = db.transaction(ATTACHMENTS_STORE, 'readonly');
-            const store = tx.objectStore(ATTACHMENTS_STORE);
-            const request = store.get(taskId);
-            request.onsuccess = () => resolve(request.result as DraftAttachment[] || []);
-            tx.onerror = () => resolve([]);
+            const tx = db.transaction(store, 'readwrite');
+            tx.objectStore(store).delete(key);
+            tx.oncomplete = () => resolve();
+        });
+    } catch { /* ignore */ }
+}
+
+/** Get all keys from an object store. */
+async function dbGetAllKeys(store: string): Promise<string[]> {
+    try {
+        const db = await openDB();
+        return new Promise((resolve) => {
+            const tx = db.transaction(store, 'readonly');
+            const req = tx.objectStore(store).getAllKeys();
+            req.onsuccess = () => resolve(req.result as string[]);
+            req.onerror = () => resolve([]);
         });
     } catch {
         return [];
     }
 }
 
-/** Remove draft attachments for a task. */
-export async function clearDraftAttachments(taskId: string): Promise<void> {
+/** Delete multiple keys from an object store. */
+async function dbDeleteKeys(store: string, keys: string[]): Promise<void> {
     try {
-        const db = await openDraftDB();
+        const db = await openDB();
         return new Promise((resolve) => {
-            const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
-            tx.objectStore(ATTACHMENTS_STORE).delete(taskId);
+            const tx = db.transaction(store, 'readwrite');
+            const s = tx.objectStore(store);
+            for (const key of keys) {
+                s.delete(key);
+            }
             tx.oncomplete = () => resolve();
         });
     } catch { /* ignore */ }
+}
+
+// ─── Draft text (IndexedDB: drafts store) ────────────────────────────────────
+
+/** Get saved draft text for a task. Returns `null` if no draft exists. */
+export async function getDraftText(taskId: string): Promise<string | null> {
+    return dbGet<string>(STORE_DRAFTS, taskId);
+}
+
+/** Save draft text for a task. Pass empty string to clear. */
+export async function setDraftText(taskId: string, text: string): Promise<void> {
+    if (!text) {
+        return dbDelete(STORE_DRAFTS, taskId);
+    }
+    return dbPut(STORE_DRAFTS, taskId, text);
+}
+
+/** Remove draft text for a task. */
+export async function clearDraftText(taskId: string): Promise<void> {
+    return dbDelete(STORE_DRAFTS, taskId);
+}
+
+// ─── Branch editor drafts (IndexedDB: editor-drafts store) ──────────────────
+
+/** Get saved draft content for a file. Returns `null` if no draft exists. */
+export async function getEditorDraft(path: string): Promise<string | null> {
+    return dbGet<string>(STORE_EDITOR_DRAFTS, path);
+}
+
+/** Save draft content for a file. */
+export async function setEditorDraft(path: string, text: string): Promise<void> {
+    return dbPut(STORE_EDITOR_DRAFTS, path, text);
+}
+
+/** Remove draft content for a file. */
+export async function clearEditorDraft(path: string): Promise<void> {
+    return dbDelete(STORE_EDITOR_DRAFTS, path);
+}
+
+// ─── Editor undo/redo history (IndexedDB: editor-history store) ──────────────
+// Stores a base snapshot + deltas (from/to/insert) so undo/redo survives refreshes.
+// Max 1000 delta entries per file. FIFO. Entries older than 72h are discarded.
+
+export interface EditorDelta {
+    from: number;
+    to: number;
+    insert: string;
+}
+
+export interface EditorHistory {
+    // Timestamp when this history was created (ms)
+    ts: number;
+    // Base document content (first snapshot)
+    base: string;
+    // Ordered list of deltas applied on top of base (and each other)
+    deltas: EditorDelta[];
+}
+
+const MAX_HISTORY_DELTAS = 1000;
+const HISTORY_MAX_AGE_MS = 72 * 60 * 60 * 1000; // 72 hours
+
+/** Load persisted undo/redo history for a file. Returns `null` if none exists or expired. */
+export async function loadEditorHistory(path: string): Promise<EditorHistory | null> {
+    const history = await dbGet<EditorHistory>(STORE_EDITOR_HISTORY, path);
+    if (history && Date.now() - history.ts > HISTORY_MAX_AGE_MS) {
+        await clearEditorHistory(path);
+        return null;
+    }
+    return history;
+}
+
+/** Save undo/redo history for a file. Appends a new delta. */
+export async function saveEditorHistory(path: string, base: string, deltas: EditorDelta[]): Promise<void> {
+    const trimmed = deltas.slice(-MAX_HISTORY_DELTAS);
+    return dbPut(STORE_EDITOR_HISTORY, path, { ts: Date.now(), base, deltas: trimmed });
+}
+
+/** Clear undo/redo history for a file. */
+export async function clearEditorHistory(path: string): Promise<void> {
+    return dbDelete(STORE_EDITOR_HISTORY, path);
+}
+
+// ─── Unsaved files (IndexedDB: unsaved-files store) ─────────────────────────
+
+/** Load unsaved file paths for a project. */
+export async function loadUnsavedFiles(projectId: string): Promise<string[]> {
+    return dbGet<string[]>(STORE_UNSAVED_FILES, projectId, isArray) ?? [];
+}
+
+/** Save unsaved file paths for a project. */
+export async function saveUnsavedFiles(projectId: string, paths: string[]): Promise<void> {
+    return dbPut(STORE_UNSAVED_FILES, projectId, paths);
+}
+
+/** Remove unsaved files entry for a project. */
+export async function clearUnsavedFiles(projectId: string): Promise<void> {
+    return dbDelete(STORE_UNSAVED_FILES, projectId);
+}
+
+// ─── Explorer layout (IndexedDB: explorer-layout store) ─────────────────────
+
+export interface ExplorerLayout {
+    leftWidth: number;
+    rightWidth: number;
+    splitRatio: number;
+}
+
+const DEFAULT_EXPLORER_LAYOUT: ExplorerLayout = {
+    leftWidth: 250,
+    rightWidth: 180,
+    splitRatio: 0.5,
+};
+
+/** Load saved explorer column layout. Returns defaults if none saved. */
+export async function loadExplorerLayout(): Promise<ExplorerLayout> {
+    const saved = await dbGet<Partial<ExplorerLayout>>(STORE_EXPLORER_LAYOUT, KEY_LAYOUT);
+    if (saved) {
+        return {
+            leftWidth: saved.leftWidth ?? DEFAULT_EXPLORER_LAYOUT.leftWidth,
+            rightWidth: saved.rightWidth ?? DEFAULT_EXPLORER_LAYOUT.rightWidth,
+            splitRatio: saved.splitRatio ?? DEFAULT_EXPLORER_LAYOUT.splitRatio,
+        };
+    }
+    return { ...DEFAULT_EXPLORER_LAYOUT };
+}
+
+/** Save explorer column layout. */
+export async function saveExplorerLayout(layout: ExplorerLayout): Promise<void> {
+    return dbPut(STORE_EXPLORER_LAYOUT, KEY_LAYOUT, layout);
+}
+
+// ─── Collapsed tasks (IndexedDB: collapsed-tasks store) ─────────────────────
+
+/** Load collapsed task IDs. */
+export async function loadCollapsedTasks(): Promise<Set<string>> {
+    const ids = await dbGet<string[]>(STORE_COLLAPSED_TASKS, KEY_IDS, isArray);
+    return ids ? new Set(ids) : new Set();
+}
+
+/** Save collapsed task IDs. */
+export async function saveCollapsedTasks(ids: Set<string>): Promise<void> {
+    return dbPut(STORE_COLLAPSED_TASKS, KEY_IDS, [...ids]);
+}
+
+/** Remove collapsed state for a specific task. */
+export async function clearCollapsedTask(taskId: string): Promise<void> {
+    const collapsed = await loadCollapsedTasks();
+    collapsed.delete(taskId);
+    await saveCollapsedTasks(collapsed);
+}
+
+// ─── Collapsed board sections (IndexedDB: collapsed-sections store) ─────────
+
+/** Load collapsed board section IDs. */
+export async function loadCollapsedSections(): Promise<Set<string>> {
+    const ids = await dbGet<string[]>(STORE_COLLAPSED_SECTIONS, KEY_IDS, isArray);
+    return ids ? new Set(ids) : new Set();
+}
+
+/** Save collapsed board section IDs. */
+export async function saveCollapsedSections(ids: Set<string>): Promise<void> {
+    return dbPut(STORE_COLLAPSED_SECTIONS, KEY_IDS, [...ids]);
+}
+
+// ─── Offline queue (IndexedDB: offline-queue store) ─────────────────────────
+
+export interface QueuedAction {
+    id: string;
+    type: string;
+    params: Record<string, any>;
+    timestamp: number;
+}
+
+/** Load offline queue. */
+export async function loadQueue(): Promise<QueuedAction[]> {
+    return dbGet<QueuedAction[]>(STORE_OFFLINE_QUEUE, KEY_ACTIONS, isArray) ?? [];
+}
+
+/** Save offline queue. */
+export async function saveQueue(actions: QueuedAction[]): Promise<void> {
+    return dbPut(STORE_OFFLINE_QUEUE, KEY_ACTIONS, actions);
+}
+
+// ─── Draft attachments (IndexedDB: attachments store) ───────────────────────
+
+/** Serializable draft attachment (no File objects — only base64 data). */
+export interface DraftAttachment {
+    mimeType: string;
+    data: string;   // base64-encoded image data
+}
+
+/** Save draft attachments for a task. Pass empty array to clear. */
+export async function saveDraftAttachments(taskId: string, attachments: DraftAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+        return dbDelete(STORE_ATTACHMENTS, taskId);
+    }
+    return dbPut(STORE_ATTACHMENTS, taskId, attachments);
+}
+
+/** Load draft attachments for a task. Returns empty array if none exist. */
+export async function loadDraftAttachments(taskId: string): Promise<DraftAttachment[]> {
+    return dbGet<DraftAttachment[]>(STORE_ATTACHMENTS, taskId, isArray) ?? [];
+}
+
+/** Remove draft attachments for a task. */
+export async function clearDraftAttachments(taskId: string): Promise<void> {
+    return dbDelete(STORE_ATTACHMENTS, taskId);
+}
+
+// ─── App settings (IndexedDB: app-settings store) ───────────────────────────
+// Generic key-value store for component-level settings (terminal height, panel ratios, sidebar, etc.)
+
+/** Load an app setting by key. Returns `defaultValue` if not found. */
+export async function loadAppSetting<T>(key: string, defaultValue: T): Promise<T> {
+    const value = await dbGet<T>(STORE_APP_SETTINGS, key);
+    return value ?? defaultValue;
+}
+
+/** Save an app setting by key. */
+export async function saveAppSetting<T>(key: string, value: T): Promise<void> {
+    return dbPut(STORE_APP_SETTINGS, key, value);
+}
+
+/** Clear an app setting by key. */
+export async function clearAppSetting(key: string): Promise<void> {
+    return dbDelete(STORE_APP_SETTINGS, key);
+}
+
+// ─── Collapsed diff files (IndexedDB: collapsed-diff-files store) ────────────
+
+/** Load collapsed diff file paths. */
+export async function loadCollapsedDiffFiles(): Promise<Set<string>> {
+    const ids = await dbGet<string[]>(STORE_COLLAPSED_DIFF_FILES, KEY_IDS, isArray);
+    return ids ? new Set(ids) : new Set();
+}
+
+/** Save collapsed diff file paths. */
+export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
+    return dbPut(STORE_COLLAPSED_DIFF_FILES, KEY_IDS, [...ids]);
 }
 
 // ─── Garbage collection ─────────────────────────────────────────────────────
@@ -430,31 +455,31 @@ export async function clearDraftAttachments(taskId: string): Promise<void> {
  */
 export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>): Promise<void> {
     // 1. Clean collapsed tasks
-    cleanCollapsedTasks(allTaskIds);
+    await cleanCollapsedTasks(allTaskIds);
 
     // 2. Clean draft texts
-    cleanDraftTexts(allTaskIds);
+    await cleanDraftTexts(allTaskIds);
 
     // 3. Clean offline queue
-    cleanQueue(allTaskIds);
+    await cleanQueue(allTaskIds);
 
-    // 4. Clean draft attachments (IndexedDB)
+    // 4. Clean draft attachments
     await cleanDraftAttachments(allTaskIds);
 
     // 5. Clean editor drafts (if project paths provided)
     if (allProjectPaths) {
-        cleanEditorDraftsByProject(allProjectPaths);
+        await cleanEditorDraftsByProject(allProjectPaths);
     }
 
     // 6. Clean editor history (if project paths provided)
     if (allProjectPaths) {
-        cleanEditorHistoryByProject(allProjectPaths);
+        await cleanEditorHistoryByProject(allProjectPaths);
     }
 }
 
 /** Remove collapsed task entries for deleted tasks. */
-function cleanCollapsedTasks(allTaskIds: Set<string>): void {
-    const collapsed = loadCollapsedTasks();
+async function cleanCollapsedTasks(allTaskIds: Set<string>): Promise<void> {
+    const collapsed = await loadCollapsedTasks();
     let changed = false;
     for (const id of collapsed) {
         if (!allTaskIds.has(id)) {
@@ -463,98 +488,60 @@ function cleanCollapsedTasks(allTaskIds: Set<string>): void {
         }
     }
     if (changed) {
-        saveCollapsedTasks(collapsed);
+        await saveCollapsedTasks(collapsed);
     }
 }
 
 /** Remove draft text entries for deleted tasks. */
-function cleanDraftTexts(allTaskIds: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        const prefix = DRAFT_KEY_PREFIX;
-        const prefixLen = prefix.length;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(prefix)) {
-                const taskId = key.slice(prefixLen);
-                if (!allTaskIds.has(taskId)) {
-                    localStorage.removeItem(key);
-                }
-            }
-        }
-    } catch { /* ignore */ }
+async function cleanDraftTexts(allTaskIds: Set<string>): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_DRAFTS);
+    const toDelete = keys.filter(taskId => !allTaskIds.has(taskId));
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_DRAFTS, toDelete);
+    }
 }
 
 /** Remove offline queue entries that reference deleted tasks. */
-function cleanQueue(allTaskIds: Set<string>): void {
-    const actions = loadQueue();
+async function cleanQueue(allTaskIds: Set<string>): Promise<void> {
+    const actions = await loadQueue();
     const filtered = actions.filter(action => {
         const taskId = action.params?.taskId;
         return !taskId || allTaskIds.has(taskId);
     });
     if (filtered.length !== actions.length) {
-        saveQueue(filtered);
+        await saveQueue(filtered);
     }
 }
 
-/** Remove draft attachments for deleted tasks (IndexedDB). */
+/** Remove draft attachments for deleted tasks. */
 async function cleanDraftAttachments(allTaskIds: Set<string>): Promise<void> {
-    try {
-        const db = await openDraftDB();
-        return new Promise((resolve) => {
-            const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
-            const store = tx.objectStore(ATTACHMENTS_STORE);
-            const request = store.getAllKeys();
-            request.onsuccess = () => {
-                for (const key of request.result as string[]) {
-                    if (!allTaskIds.has(key)) {
-                        store.delete(key);
-                    }
-                }
-            };
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => resolve(); // best-effort
-        });
-    } catch { /* ignore */ }
+    const keys = await dbGetAllKeys(STORE_ATTACHMENTS);
+    const toDelete = keys.filter(key => !allTaskIds.has(key));
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_ATTACHMENTS, toDelete);
+    }
 }
 
 /** Remove editor drafts for files in projects that no longer exist. */
-function cleanEditorDraftsByProject(allProjectPaths: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        const prefix = EDITOR_DRAFT_KEY_PREFIX;
-        const prefixLen = prefix.length;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(prefix)) {
-                const path = key.slice(prefixLen);
-                // Check if the file path belongs to any known project
-                const belongsToProject = allProjectPaths.has(path) ||
-                    [...allProjectPaths].some(p => path.startsWith(p + '/'));
-                if (!belongsToProject) {
-                    localStorage.removeItem(key);
-                }
-            }
-        }
-    } catch { /* ignore */ }
+async function cleanEditorDraftsByProject(allProjectPaths: Set<string>): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_EDITOR_DRAFTS);
+    const toDelete = keys.filter(path => {
+        return !allProjectPaths.has(path) &&
+            ![...allProjectPaths].some(p => path.startsWith(p + '/'));
+    });
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_EDITOR_DRAFTS, toDelete);
+    }
 }
 
 /** Remove editor history for files in projects that no longer exist. */
-function cleanEditorHistoryByProject(allProjectPaths: Set<string>): void {
-    try {
-        if (typeof localStorage === 'undefined') return;
-        const prefix = EDITOR_HISTORY_KEY_PREFIX;
-        const prefixLen = prefix.length;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(prefix)) {
-                const path = key.slice(prefixLen);
-                const belongsToProject = allProjectPaths.has(path) ||
-                    [...allProjectPaths].some(p => path.startsWith(p + '/'));
-                if (!belongsToProject) {
-                    localStorage.removeItem(key);
-                }
-            }
-        }
-    } catch { /* ignore */ }
+async function cleanEditorHistoryByProject(allProjectPaths: Set<string>): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_EDITOR_HISTORY);
+    const toDelete = keys.filter(path => {
+        return !allProjectPaths.has(path) &&
+            ![...allProjectPaths].some(p => path.startsWith(p + '/'));
+    });
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_EDITOR_HISTORY, toDelete);
+    }
 }

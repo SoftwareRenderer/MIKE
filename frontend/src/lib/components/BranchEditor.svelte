@@ -129,7 +129,7 @@
             historyDeltas = [];
             clearTimeout((view as any)._draftTimer);
             clearTimeout((view as any)._historyTimer);
-            clearEditorDraft(filePath);
+            clearEditorDraft(filePath).catch(() => {});
             onClose();
         }
     }
@@ -287,7 +287,7 @@
                             // Persist history (throttled)
                             clearTimeout((view as any)._historyTimer);
                             (view as any)._historyTimer = setTimeout(() => {
-                                saveEditorHistory(filePath, historyBase, historyDeltas);
+                                saveEditorHistory(filePath, historyBase, historyDeltas).catch(() => {});
                             }, 500);
                         }
                     }
@@ -380,14 +380,14 @@
             const data = await res.json();
             originalContent = data.content || '';
             // Use unsaved draft if available, otherwise use file content
-            const draft = getEditorDraft(filePath);
+            const draft = await getEditorDraft(filePath);
             content = draft !== null ? draft : originalContent;
             hasChanges = content !== originalContent;
             lineCount = content ? content.split('\n').length : 0;
             charCount = content.length;
 
             // Load persisted undo/redo history (auto-evicted if older than 72h)
-            const savedHistory = loadEditorHistory(filePath);
+            const savedHistory = await loadEditorHistory(filePath);
             if (savedHistory && Array.isArray(savedHistory.deltas)) {
                 historyBase = savedHistory.base;
                 historyDeltas = savedHistory.deltas;
@@ -431,7 +431,7 @@
             }
             originalContent = content;
             hasChanges = false;
-            clearEditorDraft(filePath);
+            await clearEditorDraft(filePath);
         } catch (e) {
             error = String(e);
         } finally {

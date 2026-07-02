@@ -247,7 +247,7 @@
         const taskDataWithId = { ...taskData, id };
         const optimisticTask = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true } as any;
         if (isOfflineNow) {
-            const queued = enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
             (optimisticTask as any).actionId = queued.id;
         }
         boardStore.update(b => {
@@ -278,10 +278,10 @@
                 });
                 // Also replace in App's tasks array
                 onReplaceOptimisticTask?.(id, realTask);
-            }).catch(() => {
+            }).catch(async () => {
                 // Server unreachable — queue the action as fallback
                 setOfflineStatus(true);
-                const queued = enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+                const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
                 (optimisticTask as any).actionId = queued.id;
             });
         }

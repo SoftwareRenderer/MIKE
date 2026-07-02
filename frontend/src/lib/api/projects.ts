@@ -37,7 +37,7 @@ export async function getProjectStats(projectId: string): Promise<ProjectStats> 
 /** Reset usage statistics for a specific model in a project. Queued when offline. */
 export async function resetProjectStats(projectId: string, modelName: string, providerName?: string): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'resetProjectStats', params: { projectId, modelName, providerName } });
+        await enqueueAction({ type: 'resetProjectStats', params: { projectId, modelName, providerName } });
         return;
     }
     return resetProjectStatsRaw(projectId, modelName, providerName);
@@ -46,7 +46,7 @@ export async function resetProjectStats(projectId: string, modelName: string, pr
 /** Create a new project at the given filesystem path. Queued when offline. */
 export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
     if (getOfflineStatus()) {
-        return queueWrite('createProject', { path, sandboxEnabled }, {
+        return await queueWrite('createProject', { path, sandboxEnabled }, {
             id: '', name: path, path, sandbox_enabled: sandboxEnabled,
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         } as Project);
@@ -57,7 +57,7 @@ export async function createProject(path: string, sandboxEnabled = false): Promi
 /** Update project metadata (name, sandbox settings). Queued when offline. */
 export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
     if (getOfflineStatus()) {
-        return queueWrite('updateProject', { id, updates }, { id, ...updates } as Project);
+        return await queueWrite('updateProject', { id, updates }, { id, ...updates } as Project);
     }
     return updateProjectRaw(id, updates);
 }
@@ -65,7 +65,7 @@ export async function updateProject(id: string, updates: { name?: string; sandbo
 /** Trigger a sandbox image build for a project. Queued when offline. */
 export async function buildSandboxImage(id: string): Promise<{ status: string; image: string; project: string }> {
     if (getOfflineStatus()) {
-        return queueWrite('buildSandboxImage', { id }, { status: 'queued', image: '', project: id });
+        return await queueWrite('buildSandboxImage', { id }, { status: 'queued', image: '', project: id });
     }
     return buildSandboxImageRaw(id);
 }
@@ -76,7 +76,7 @@ export { buildSandboxImageStream } from './queue';
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'deleteProject', params: { id } });
+        await enqueueAction({ type: 'deleteProject', params: { id } });
         return;
     }
     return deleteProjectRaw(id);
@@ -94,7 +94,7 @@ export async function getBoard(projectId: string): Promise<Board> {
 /** Reorder tasks within columns. Queued when offline. */
 export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'reorderTasks', params: { projectId, reorders } });
+        await enqueueAction({ type: 'reorderTasks', params: { projectId, reorders } });
         return;
     }
     return reorderTasksRaw(projectId, reorders);

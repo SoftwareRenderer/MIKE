@@ -12,7 +12,7 @@ registerSetOffline((offline: boolean) => setOfflineStatus(offline));
 // Offline Action Queue
 // =============================================================================
 // Queues write operations when the WebSocket is disconnected.
-// Persists to localStorage so actions survive page refresh.
+// Persists to IndexedDB so actions survive page refresh.
 // On reconnect, actions are replayed in order.
 // =============================================================================
 
@@ -26,6 +26,11 @@ export interface QueuedAction {
 let isOffline = false;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
+
+/** Safe access to actionQueue length (defensive against null/undefined). */
+function queueLength(): number {
+    return Array.isArray(actionQueue) ? actionQueue.length : 0;
+}
 let queueChangeCallbacks: Array<() => void> = [];
 let queueFlushedCallbacks: Array<(optimisticTaskIds: string[], resolvedTasks: Map<string, any>) => void> = [];
 
@@ -37,7 +42,7 @@ export function getOfflineStatus(): boolean {
 /** Set offline state. Triggers automatic flush when transitioning to online. */
 export function setOfflineStatus(offline: boolean) {
     isOffline = offline;
-    if (!offline && actionQueue.length > 0) {
+    if (!offline && queueLength() > 0) {
         flushQueue();
     }
 }
@@ -70,34 +75,35 @@ function notifyQueueFlushed(optimisticTaskIds: string[], resolvedTasks: Map<stri
     }
 }
 
-/** Load queue from localStorage. */
-export function loadQueue(): QueuedAction[] {
-    actionQueue = loadQueueFromStorage();
+/** Load queue from IndexedDB. */
+export async function loadQueue(): Promise<QueuedAction[]> {
+    const loaded = await loadQueueFromStorage();
+    actionQueue = Array.isArray(loaded) ? loaded : [];
     return actionQueue;
 }
 
-/** Save queue to localStorage. */
-function saveQueue() {
-    saveQueueToStorage(actionQueue);
+/** Save queue to IndexedDB. */
+async function saveQueue() {
+    await saveQueueToStorage(actionQueue);
     notifyQueueChanged();
 }
 
 /** Add an action to the queue and persist. */
-export function enqueueAction(action: Omit<QueuedAction, 'id' | 'timestamp'>): QueuedAction {
+export async function enqueueAction(action: Omit<QueuedAction, 'id' | 'timestamp'>): Promise<QueuedAction> {
     const item: QueuedAction = {
         ...action,
         id: generateId(),
         timestamp: Date.now(),
     };
     actionQueue.push(item);
-    saveQueue();
+    await saveQueue();
     return item;
 }
 
 /** Remove a specific action from the queue. */
-function removeAction(id: string) {
+async function removeAction(id: string) {
     actionQueue = actionQueue.filter(a => a.id !== id);
-    saveQueue();
+    await saveQueue();
 }
 
 /** Get set of task IDs that have pending queued actions. */
@@ -126,7 +132,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 
 /** Get current queue length. */
 export function getQueueLength(): number {
-    return actionQueue.length;
+    return queueLength();
 }
 
 /** Debug: expose offline status for testing. */
@@ -137,13 +143,13 @@ export function __debugOfflineStatus(): boolean {
 /** Flush queued actions via HTTP immediately (e.g., on page load). Independent of WebSocket state. */
 export async function flushQueueNow(): Promise<void> {
     if (flushPromise) return flushPromise;
-    if (actionQueue.length === 0) return;
+    if (queueLength() === 0) return;
 
     flushPromise = (async () => {
         const idMap = new Map<string, string>();
         const resolvedTasks = new Map<string, any>();
 
-        while (actionQueue.length > 0) {
+        while (queueLength() > 0) {
             const action = actionQueue[0];
             try {
                 const result = await executeQueuedAction(action, idMap);
@@ -158,11 +164,11 @@ export async function flushQueueNow(): Promise<void> {
                     resolvedTasks.set(result.id, result);
                 }
                 actionQueue.shift();
-                saveQueue();
+                await saveQueue();
             } catch (e) {
                 console.error('[Queue] Failed to flush action, skipping:', action.type, e);
                 actionQueue.shift();
-                saveQueue();
+                await saveQueue();
             }
         }
 
@@ -175,7 +181,7 @@ export async function flushQueueNow(): Promise<void> {
 /** Replay all queued actions in order. Triggered on WebSocket reconnect. */
 async function flushQueue() {
     if (flushPromise) return flushPromise;
-    if (actionQueue.length === 0) return;
+    if (queueLength() === 0) return;
 
     flushPromise = (async () => {
         const wasOffline = isOffline;
@@ -185,7 +191,7 @@ async function flushQueue() {
         const idMap = new Map<string, string>();
         const resolvedTasks = new Map<string, any>();
 
-        while (actionQueue.length > 0) {
+        while (queueLength() > 0) {
             const action = actionQueue[0];
             try {
                 const result = await executeQueuedAction(action, idMap);
@@ -202,12 +208,12 @@ async function flushQueue() {
                     resolvedTasks.set(result.id, result);
                 }
                 actionQueue.shift();
-                saveQueue();
+                await saveQueue();
             } catch (e) {
                 console.error('[Queue] Failed to flush action, skipping:', action.type, e);
                 // Skip failed action — don't block remaining actions or re-set offline
                 actionQueue.shift();
-                saveQueue();
+                await saveQueue();
             }
         }
 
@@ -320,8 +326,8 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
  * Helper: enqueue an action and return an optimistic result.
  * Returns the queued action's ID for tracking.
  */
-export function queueWrite<T>(type: string, params: Record<string, any>, optimistic: T): T {
-    const queued = enqueueAction({ type, params });
+export async function queueWrite<T>(type: string, params: Record<string, any>, optimistic: T): Promise<T> {
+    const queued = await enqueueAction({ type, params });
     return { ...optimistic, queued: true, actionId: queued.id } as T;
 }
 

@@ -274,7 +274,7 @@
         autoResize();
     });
 
-    // Notify parent when value changes — persists draft text to localStorage
+    // Notify parent when value changes — persists draft text to IndexedDB
     $effect(() => {
         const _val = value;
         onInput?.(_val);

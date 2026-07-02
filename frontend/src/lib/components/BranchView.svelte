@@ -88,7 +88,10 @@
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
     // O(1) lookup — replaces Array.includes/filter in handleHasChanges and close handler
-    let unsavedFiles = $state(new Set<string>(loadUnsavedFiles(projectId)));
+    let unsavedFiles = $state(new Set<string>());
+
+    // Load unsaved files from IndexedDB on init
+    loadUnsavedFiles(projectId).then(paths => { unsavedFiles = new Set(paths); }).catch(() => {});
 
     // Sync selected file from URL on mount and when initialFile updates
     $effect(() => {
@@ -99,10 +102,10 @@
     });
     let editorFocused = $state(false);
 
-    // Persist unsaved files to localStorage (convert Set → array for stable JSON format)
+    // Persist unsaved files to IndexedDB (convert Set → array for stable JSON format)
     $effect(() => {
         unsavedFiles;
-        saveUnsavedFiles(projectId, [...unsavedFiles]);
+        saveUnsavedFiles(projectId, [...unsavedFiles]).catch(() => {});
     });
 
     // Mobile layout
@@ -131,21 +134,28 @@
         }
     });
 
-    // Column widths (resizable) — loaded from localStorage with defaults
-    const savedLayout = loadExplorerLayout();
-    let leftWidth = $state(savedLayout.leftWidth);
-    let rightWidth = $state(savedLayout.rightWidth);
+    // Column widths (resizable) — loaded from IndexedDB with defaults
+    const DEFAULT_LAYOUT = { leftWidth: 250, rightWidth: 180, splitRatio: 0.5 };
+    let leftWidth = $state(DEFAULT_LAYOUT.leftWidth);
+    let rightWidth = $state(DEFAULT_LAYOUT.rightWidth);
     const MIN_LEFT = 180;
     const MAX_LEFT = 500;
     const MIN_RIGHT = 120;
     const MAX_RIGHT = 400;
 
     // Resize state for left column split (file browser / git graph)
-    let splitRatio = $state(savedLayout.splitRatio);
+    let splitRatio = $state(DEFAULT_LAYOUT.splitRatio);
 
-    /** Persist explorer layout to localStorage */
+    // Load saved explorer layout from IndexedDB on init
+    loadExplorerLayout().then(layout => {
+        leftWidth = layout.leftWidth;
+        rightWidth = layout.rightWidth;
+        splitRatio = layout.splitRatio;
+    }).catch(() => {});
+
+    /** Persist explorer layout to IndexedDB */
     function persistExplorerLayout() {
-        saveExplorerLayout({ leftWidth, rightWidth, splitRatio });
+        saveExplorerLayout({ leftWidth, rightWidth, splitRatio }).catch(() => {});
     }
 
     // Active resize handle: 'left', 'right', 'split', or null

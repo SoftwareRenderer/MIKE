@@ -5,6 +5,7 @@
     import { FitAddon } from '@xterm/addon-fit';
     import { showTerminal, selectedProject, selectedTask } from '$lib/store';
     import { createTerminal, createProjectTerminal } from '$lib/api';
+    import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
     import { startDrag } from '$lib/utils/use-resize-drag';
     import '@xterm/xterm/css/xterm.css';
@@ -20,24 +21,23 @@
     let panelEl: HTMLDivElement | null = null;
     let trap: ReturnType<typeof createFocusTrap> | null = null;
     let triggerEl: HTMLElement | null = null;
-    let panelHeight = $state(loadHeight());
+    let panelHeight = $state(DEFAULT_HEIGHT);
 
-    function loadHeight(): number {
-        try {
-            const stored = localStorage.getItem(HEIGHT_KEY);
-            if (stored !== null) {
-                const val = Number.parseInt(stored, 10);
-                if (!isNaN(val) && val >= MIN_HEIGHT && val <= MAX_HEIGHT) return val;
-            }
-        } catch {}
+    /** Load saved height from IndexedDB. */
+    async function loadHeight(): Promise<number> {
+        const stored = await loadAppSetting(HEIGHT_KEY, DEFAULT_HEIGHT);
+        const val = Number.parseInt(String(stored), 10);
+        if (!isNaN(val) && val >= MIN_HEIGHT && val <= MAX_HEIGHT) return val;
         return DEFAULT_HEIGHT;
     }
 
-    function saveHeight(value: number) {
-        try {
-            localStorage.setItem(HEIGHT_KEY, String(value));
-        } catch {}
+    /** Save height to IndexedDB. */
+    async function saveHeight(value: number): Promise<void> {
+        await saveAppSetting(HEIGHT_KEY, value);
     }
+
+    // Load saved height on init
+    loadHeight().then(h => { panelHeight = h; }).catch(() => {});
 
     function close() {
         trap?.destroy();
@@ -60,7 +60,7 @@
                 panelHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
             },
             onEnd: () => {
-                saveHeight(panelHeight);
+                saveHeight(panelHeight).catch(() => {});
             },
         });
     }

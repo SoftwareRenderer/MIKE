@@ -1,22 +1,19 @@
 import { writable } from 'svelte/store';
 import type { Project, Board, Config, Task, StreamEvent } from './types';
-import { loadCollapsedTasks, saveCollapsedTasks } from './storage';
+import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from './storage';
 
 export const projects = writable<Project[]>([]);
 export const selectedProject = writable<Project | null>(null);
-export const sidebarCollapsed = writable(false, () => {
-    // Initialize from localStorage
-    const stored = localStorage.getItem('kanban-sidebar-collapsed');
-    if (stored === 'true') {
-        sidebarCollapsed.set(true);
-    }
-    // Subscribe to save on change
-    return () => {};
-});
+export const sidebarCollapsed = writable(false);
+
+// Load sidebar collapsed state from IndexedDB on init
+loadAppSetting('kanban-sidebar-collapsed', false).then(v => {
+    sidebarCollapsed.set(v === true || v === 'true');
+}).catch(() => {});
 
 // Persist sidebar collapsed state whenever it changes
 sidebarCollapsed.subscribe(v => {
-    localStorage.setItem('kanban-sidebar-collapsed', String(v));
+    saveAppSetting('kanban-sidebar-collapsed', v).catch(() => {});
 });
 export const board = writable<Board | null>(null);
 export const selectedTask = writable<Task | null>(null);
@@ -53,29 +50,29 @@ export const editTaskData = writable<EditTaskData | null>(null);
 
 /**
  * expandedTasks store — tracks which task cards are expanded in the board view.
- * Subtasks are expanded by default. Collapsed state is persisted in localStorage.
+ * Subtasks are expanded by default. Collapsed state is persisted in IndexedDB.
  * Use `toggleExpandedTask(id, allTaskIds)` to toggle and auto-clean stale entries.
  */
 
 /**
- * Save the current collapsed state to localStorage.
+ * Save the current collapsed state to IndexedDB.
  * Collapsed = tasks with children that are NOT in the expanded set.
  */
-export function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>) {
+export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>): Promise<void> {
     const collapsed = new Set<string>();
     for (const id of parentTaskIds) {
         if (!expanded.has(id)) {
             collapsed.add(id);
         }
     }
-    saveCollapsedTasks(collapsed);
+    await saveCollapsedTasks(collapsed);
 }
 
 /**
- * Clean stale entries from localStorage (task IDs that no longer exist).
+ * Clean stale entries from IndexedDB (task IDs that no longer exist).
  */
-export function cleanupCollapsedTasks(allTaskIds: Set<string>) {
-    const collapsed = loadCollapsedTasks();
+export async function cleanupCollapsedTasks(allTaskIds: Set<string>): Promise<Set<string>> {
+    const collapsed = await loadCollapsedTasks();
     let changed = false;
     for (const id of collapsed) {
         if (!allTaskIds.has(id)) {
@@ -84,24 +81,24 @@ export function cleanupCollapsedTasks(allTaskIds: Set<string>) {
         }
     }
     if (changed) {
-        saveCollapsedTasks(collapsed);
+        await saveCollapsedTasks(collapsed);
     }
     return collapsed;
 }
 
 /**
- * Initialize expandedTasks from localStorage.
+ * Initialize expandedTasks from IndexedDB.
  * Returns the set of expanded task IDs (all parent IDs minus collapsed).
  */
-export function initExpandedTasks(parentTaskIds: Set<string>): Set<string> {
-    const collapsed = loadCollapsedTasks();
+export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
+    const collapsed = await loadCollapsedTasks();
     // Clean stale entries
     for (const id of collapsed) {
         if (!parentTaskIds.has(id)) {
             collapsed.delete(id);
         }
     }
-    saveCollapsedTasks(collapsed);
+    await saveCollapsedTasks(collapsed);
     // Expanded = all parent IDs minus collapsed
     const expanded = new Set<string>();
     for (const id of parentTaskIds) {

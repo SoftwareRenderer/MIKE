@@ -19,7 +19,7 @@ export async function getConfig(): Promise<Config> {
 /** Update server configuration. Sends partial updates — only changed fields are required. Queued when offline. */
 export async function updateConfig(config: Config): Promise<Config> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'updateConfig', params: { config } });
+        await enqueueAction({ type: 'updateConfig', params: { config } });
         return config;
     }
     return updateConfigRaw(config);
@@ -61,7 +61,7 @@ export async function testPiConnection(): Promise<{ success: boolean; message: s
 /** Reload prompt templates from disk. Queued when offline. */
 export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'reloadPrompts', params: {} });
+        await enqueueAction({ type: 'reloadPrompts', params: {} });
         return { status: 'queued', message: 'Queued', files: [] };
     }
     return reloadPromptsRaw();

@@ -58,18 +58,20 @@
     // IDs of tasks that have children (potential parents)
     const parentTaskIds = $derived(new Set(tasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
 
-    // Initialize expanded tasks from localStorage (default: all expanded) — run once
+    // Initialize expanded tasks from IndexedDB (default: all expanded) — run once
     let expandedInitialized = $state(false);
     $effect(() => {
         if (expandedInitialized) return;
         if (parentTaskIds.size > 0) {
             expandedInitialized = true;
-            const allIds = new Set(tasks.map(t => t.id));
-            cleanupCollapsedTasks(allIds);
-            expandedTasksContext.set(initExpandedTasks(parentTaskIds));
-            // Garbage-collect stale localStorage/IndexedDB entries for deleted tasks
-            const projectPaths = projectPath ? new Set([projectPath]) : undefined;
-            gc(allIds, projectPaths).catch(() => {});
+            (async () => {
+                const allIds = new Set(tasks.map(t => t.id));
+                await cleanupCollapsedTasks(allIds);
+                expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
+                // Garbage-collect stale IndexedDB entries for deleted tasks
+                const projectPaths = projectPath ? new Set([projectPath]) : undefined;
+                await gc(allIds, projectPaths);
+            })().catch(() => {});
         }
     });
 
@@ -105,8 +107,8 @@
         expandedTasksContext.set(next);
         // Persist collapsed state and clean stale entries
         const allIds = new Set(tasks.map(t => t.id));
-        persistCollapsedTasks(next, parentTaskIds);
-        cleanupCollapsedTasks(allIds);
+        persistCollapsedTasks(next, parentTaskIds).catch(() => {});
+        cleanupCollapsedTasks(allIds).catch(() => {});
     }
 
     function handleSelectTask(t: Task) {

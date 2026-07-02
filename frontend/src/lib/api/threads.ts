@@ -21,7 +21,7 @@ export async function getTaskThreads(projectId: string, taskId: string): Promise
 /** Switch the active conversation thread for a task. Queued when offline. */
 export async function switchTaskThread(projectId: string, taskId: string, threadId: string): Promise<Thread> {
     if (getOfflineStatus()) {
-        return queueWrite('switchTaskThread', { projectId, taskId, threadId }, {
+        return await queueWrite('switchTaskThread', { projectId, taskId, threadId }, {
             id: threadId, task_id: taskId, name: '', is_active: true, created_at: new Date().toISOString(),
         } as Thread);
     }
@@ -32,7 +32,7 @@ export async function switchTaskThread(projectId: string, taskId: string, thread
 export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return queueWrite('forkTaskThread', { projectId, taskId, fromThreadId, fromMessageId, newContent }, {
+        return await queueWrite('forkTaskThread', { projectId, taskId, fromThreadId, fromMessageId, newContent }, {
             id, task_id: taskId, name: '', is_active: true, created_at: new Date().toISOString(),
         } as Thread);
     }
@@ -42,7 +42,7 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
 /** Delete a conversation thread. Queued when offline. */
 export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'deleteTaskThread', params: { projectId, taskId, threadId } });
+        await enqueueAction({ type: 'deleteTaskThread', params: { projectId, taskId, threadId } });
         return { status: 'queued' };
     }
     return deleteTaskThreadRaw(projectId, taskId, threadId);

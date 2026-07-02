@@ -7,7 +7,7 @@
     import { getStreamingContext, getTaskDiffStatsContext, getTaskDiffContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
-    import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
+    import { loadCollapsedSections, saveCollapsedSections, loadAppSetting, saveAppSetting } from '$lib/storage';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -41,7 +41,10 @@
     ];
 
     // Collapsible sections
-    let collapsedSections: Set<string> = $state(loadCollapsedSections());
+    let collapsedSections: Set<string> = $state(new Set());
+
+    // Load collapsed sections from IndexedDB on init
+    loadCollapsedSections().then(ids => { collapsedSections = ids; }).catch(() => {});
 
     function toggleSection(sectionId: string) {
         const next = new Set(collapsedSections);
@@ -51,7 +54,7 @@
             next.add(sectionId);
         }
         collapsedSections = next;
-        saveCollapsedSections(next);
+        saveCollapsedSections(next).catch(() => {});
     }
 
     // --- Drag-and-drop for board overview ---
@@ -448,15 +451,17 @@
     // IDs of tasks that have children (potential parents)
     const parentTaskIds = $derived(new Set(allTasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
 
-    // Initialize expanded tasks from localStorage (default: all expanded) — run once
+    // Initialize expanded tasks from IndexedDB (default: all expanded) — run once
     let expandedInitialized = $state(false);
     $effect(() => {
         if (expandedInitialized) return;
         if (parentTaskIds.size > 0) {
             expandedInitialized = true;
-            const allIds = new Set(allTasks.map(t => t.id));
-            cleanupCollapsedTasks(allIds);
-            expandedTasksContext.set(initExpandedTasks(parentTaskIds));
+            (async () => {
+                const allIds = new Set(allTasks.map(t => t.id));
+                await cleanupCollapsedTasks(allIds);
+                expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
+            })().catch(() => {});
         }
     });
 
@@ -508,8 +513,8 @@
         expandedTasksContext.set(next);
         // Persist collapsed state and clean stale entries
         const allIds = new Set(allTasks.map(t => t.id));
-        persistCollapsedTasks(next, parentTaskIds);
-        cleanupCollapsedTasks(allIds);
+        persistCollapsedTasks(next, parentTaskIds).catch(() => {});
+        cleanupCollapsedTasks(allIds).catch(() => {});
     }
 
     // Column resize
@@ -523,25 +528,25 @@
     const MIN_CHAT_RATIO = 0.15;
     const MAX_CHAT_RATIO = 0.80;
 
-    let boardRatio = $state(loadRatio(BOARD_RATIO_KEY, DEFAULT_BOARD_RATIO));
-    let chatRatio = $state(loadRatio(CHAT_RATIO_KEY, DEFAULT_CHAT_RATIO));
+    let boardRatio = $state(DEFAULT_BOARD_RATIO);
+    let chatRatio = $state(DEFAULT_CHAT_RATIO);
 
-    function loadRatio(key: string, defaultVal: number): number {
-        try {
-            const stored = localStorage.getItem(key);
-            if (stored !== null) {
-                const val = Number.parseFloat(stored);
-                if (!isNaN(val) && val > 0) return val;
-            }
-        } catch {}
+    /** Load a ratio value from IndexedDB. */
+    async function loadRatio(key: string, defaultVal: number): Promise<number> {
+        const stored = await loadAppSetting(key, defaultVal);
+        const val = Number.parseFloat(String(stored));
+        if (!isNaN(val) && val > 0) return val;
         return defaultVal;
     }
 
-    function saveRatio(key: string, value: number) {
-        try {
-            localStorage.setItem(key, String(value));
-        } catch {}
+    /** Save a ratio value to IndexedDB. */
+    async function saveRatio(key: string, value: number): Promise<void> {
+        await saveAppSetting(key, value);
     }
+
+    // Load saved ratios on init
+    loadRatio(BOARD_RATIO_KEY, DEFAULT_BOARD_RATIO).then(v => { boardRatio = v; }).catch(() => {});
+    loadRatio(CHAT_RATIO_KEY, DEFAULT_CHAT_RATIO).then(v => { chatRatio = v; }).catch(() => {});
 
     function clampBoardRatio(val: number): number {
         return Math.max(MIN_BOARD_RATIO, Math.min(MAX_BOARD_RATIO, val));
@@ -574,7 +579,7 @@
         boardRatio = clampBoardRatio(boardDragStartRatio + delta);
     }
     function onBoardDragEnd() {
-        saveRatio(BOARD_RATIO_KEY, boardRatio);
+        saveRatio(BOARD_RATIO_KEY, boardRatio).catch(() => {});
     }
 
     function onChatDragStart(_event: MouseEvent, startX: number) {
@@ -590,7 +595,7 @@
         chatRatio = clampChatRatio(chatDragStartRatio + delta);
     }
     function onChatDragEnd() {
-        saveRatio(CHAT_RATIO_KEY, chatRatio);
+        saveRatio(CHAT_RATIO_KEY, chatRatio).catch(() => {});
     }
 
     $effect(() => {

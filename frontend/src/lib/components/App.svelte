@@ -251,8 +251,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
     async function loadAppData() {
         try {
-            // Restore offline action queue from localStorage
-            loadQueue();
+            // Restore offline action queue from IndexedDB
+            await loadQueue();
             // Flush queued actions via HTTP immediately (don't wait for WebSocket to connect)
             flushQueueNow();
             // After offline queue is flushed, replace optimistic tasks with real ones from HTTP responses

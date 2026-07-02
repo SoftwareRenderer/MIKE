@@ -38,7 +38,7 @@ export async function getBoard(projectId: string): Promise<Board> {
 export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: 'backlog', created_at: new Date().toISOString() } as Task);
+        return await queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: 'backlog', created_at: new Date().toISOString() } as Task);
     }
     return createTaskRaw(projectId, task);
 }
@@ -53,7 +53,7 @@ export async function getTask(projectId: string, taskId: string): Promise<Task> 
 /** Update task metadata (title, model, settings). Queued when offline. */
 export async function updateTask(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('updateTask', { projectId, taskId, taskData: task }, { id: taskId, ...task } as Task);
+        return await queueWrite('updateTask', { projectId, taskId, taskData: task }, { id: taskId, ...task } as Task);
     }
     return updateTaskRaw(projectId, taskId, task);
 }
@@ -61,7 +61,7 @@ export async function updateTask(projectId: string, taskId: string, task: Partia
 /** Delete a task and its worktree. Queued when offline. */
 export async function deleteTask(projectId: string, taskId: string): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'deleteTask', params: { projectId, taskId } });
+        await enqueueAction({ type: 'deleteTask', params: { projectId, taskId } });
         return;
     }
     return deleteTaskRaw(projectId, taskId);
@@ -70,7 +70,7 @@ export async function deleteTask(projectId: string, taskId: string): Promise<voi
 /** Move a task to a different column (status). Queued when offline. */
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status } as Task);
+        return await queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status } as Task);
     }
     return moveTaskRaw(projectId, taskId, status);
 }
@@ -78,7 +78,7 @@ export async function moveTask(projectId: string, taskId: string, status: string
 /** Commit changes and mark a task as done. Queued when offline. */
 export async function commitAndDone(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done' } as Task);
+        return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done' } as Task);
     }
     return commitAndDoneRaw(projectId, taskId);
 }
@@ -86,7 +86,7 @@ export async function commitAndDone(projectId: string, taskId: string): Promise<
 /** Delete all done tasks in a project. Queued when offline. */
 export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'clearDoneTasks', params: { projectId } });
+        await enqueueAction({ type: 'clearDoneTasks', params: { projectId } });
         return { deleted: 0 };
     }
     return clearDoneTasksRaw(projectId);
@@ -97,7 +97,7 @@ export async function clearDoneTasks(projectId: string): Promise<{ deleted: numb
 /** Start task execution. Creates a worktree and begins the LLM loop. Queued when offline. */
 export async function startTask(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('startTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
+        return await queueWrite('startTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
     }
     return startTaskRaw(projectId, taskId);
 }
@@ -105,7 +105,7 @@ export async function startTask(projectId: string, taskId: string): Promise<Task
 /** Start a subtask (child task) execution. Queued when offline. */
 export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('startSubtask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
+        return await queueWrite('startSubtask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
     }
     return startSubtaskRaw(projectId, taskId);
 }
@@ -113,7 +113,7 @@ export async function startSubtask(projectId: string, taskId: string): Promise<T
 /** Stop a running task. Queued when offline. */
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('stopTask', { projectId, taskId }, { id: taskId, execution_state: 'idle' } as Task);
+        return await queueWrite('stopTask', { projectId, taskId }, { id: taskId, execution_state: 'idle' } as Task);
     }
     return stopTaskRaw(projectId, taskId);
 }
@@ -121,7 +121,7 @@ export async function stopTask(projectId: string, taskId: string): Promise<Task>
 /** Resume a stopped task. Queued when offline. */
 export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return queueWrite('resumeTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
+        return await queueWrite('resumeTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
     }
     return resumeTaskRaw(projectId, taskId);
 }
@@ -140,7 +140,7 @@ export async function sendTaskMessage(
 ): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort }, { id, role: 'user', content });
+        return await queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort }, { id, role: 'user', content });
     }
     return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort);
 }
@@ -163,7 +163,7 @@ export async function getTaskMessageFull(projectId: string, taskId: string, mess
 export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return queueWrite('createTaskMessage', { projectId, taskId, role, content }, { id, task_id: taskId, thread_id: '', role, content, created_at: new Date().toISOString() });
+        return await queueWrite('createTaskMessage', { projectId, taskId, role, content }, { id, task_id: taskId, thread_id: '', role, content, created_at: new Date().toISOString() });
     }
     return createTaskMessageRaw(projectId, taskId, role, content);
 }
@@ -171,7 +171,7 @@ export async function createTaskMessage(projectId: string, taskId: string, role:
 /** Delete a message and all messages after it. Set regenerate=true to trigger LLM regeneration. Queued when offline. */
 export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'deleteTaskMessagesAfter', params: { projectId, taskId, messageId, regenerate } });
+        await enqueueAction({ type: 'deleteTaskMessagesAfter', params: { projectId, taskId, messageId, regenerate } });
         return;
     }
     return deleteTaskMessagesAfterRaw(projectId, taskId, messageId, regenerate);
@@ -180,7 +180,7 @@ export async function deleteTaskMessagesAfter(projectId: string, taskId: string,
 /** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. Queued when offline. */
 export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'deleteTaskMessage', params: { projectId, taskId, messageId } });
+        await enqueueAction({ type: 'deleteTaskMessage', params: { projectId, taskId, messageId } });
         return;
     }
     return deleteTaskMessageRaw(projectId, taskId, messageId);
@@ -199,7 +199,7 @@ export async function checkMessageDelete(projectId: string, taskId: string, mess
 /** Edit a message's content. Queued when offline. */
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } });
+        await enqueueAction({ type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } });
         return;
     }
     return updateTaskMessageRaw(projectId, taskId, messageId, content);
@@ -229,7 +229,7 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
 /** Reset a task's worktree to a specific commit. Queued when offline. */
 export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
     if (getOfflineStatus()) {
-        enqueueAction({ type: 'resetWorktree', params: { projectId, taskId, commitHash } });
+        await enqueueAction({ type: 'resetWorktree', params: { projectId, taskId, commitHash } });
         return { status: 'queued' };
     }
     return resetWorktreeRaw(projectId, taskId, commitHash);

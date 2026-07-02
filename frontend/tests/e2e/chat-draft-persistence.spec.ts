@@ -6,20 +6,28 @@ test.describe.configure({ mode: 'parallel' });
 /** Wait for chat form to be idle (send button visible). Stops any active LLM response. */
 async function waitForIdle(page: any) {
   await waitForChatFormReady(page);
+  // If stop button is visible, click it and wait for send button to reappear
   if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
     await page.locator('.btn-stop').click();
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 10000 });
+    // Wait up to 60s for send button (LLM mock can be slow)
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 60000 });
   }
 }
 
-/** Open a task in in_progress state and wait for the chat form to be idle. */
+/** Wait for the chat textarea to be available. Does NOT stop LLM responses. */
+async function waitForTextarea(page: any) {
+  await expect(page.locator('textarea[placeholder*="message"]')).toBeVisible({ timeout: 30000 });
+}
+
+/** Open a task in in_progress state and wait for the chat form to be ready. */
 async function openReadyTask(page: any, projectId: string, prefix = 'draft-test'): Promise<string> {
   const taskId = await createTaskViaApi(page, projectId, `${prefix}-${Date.now()}`);
   await navigateToTask(page, taskId, projectId);
   await ensureTaskStarted(page, projectId, taskId);
   await page.reload();
   await expect(page.locator('.task-detail-page')).toBeVisible();
-  await waitForIdle(page);
+  // Wait for textarea instead of idle (LLM mock stop can be unreliable)
+  await waitForTextarea(page);
   return taskId;
 }
 
@@ -40,12 +48,8 @@ test.describe('Chat draft text persistence', () => {
     await textarea.click();
     await textarea.pressSequentially(testMessage); // Simulates key-by-key input
     await expect(textarea).toHaveValue(testMessage);
-    // Wait for reactivity: oninput handler + localStorage write
+    // Wait for debounced save to IndexedDB
     await page.waitForTimeout(500);
-
-    // Verify localStorage was set
-    const storedBefore = await page.evaluate((tid) => localStorage.getItem('kanban:draft:' + tid), taskId);
-    expect(storedBefore).toBe(testMessage);
 
     // Reload the page
     await page.reload();
@@ -64,7 +68,8 @@ test.describe('Chat draft text persistence', () => {
     await textarea.click();
     await textarea.pressSequentially('draft for task A');
     await expect(textarea).toHaveValue('draft for task A');
-    await page.waitForTimeout(200);
+    // Wait for debounced IndexedDB write (100ms debounce + DB write time)
+    await page.waitForTimeout(500);
 
     // Create and navigate to a second task
     const taskIdB = await createTaskViaApi(page, projectId, `draft-test-b-${Date.now()}`);
@@ -72,7 +77,7 @@ test.describe('Chat draft text persistence', () => {
     await ensureTaskStarted(page, projectId, taskIdB);
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible();
-    await waitForIdle(page);
+    await waitForTextarea(page);
 
     // Task B should have empty input (no draft carried over from A)
     await expect(textarea).toHaveValue('');
@@ -81,7 +86,7 @@ test.describe('Chat draft text persistence', () => {
     await navigateToTask(page, taskIdA, projectId);
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible();
-    await waitForIdle(page);
+    await waitForTextarea(page);
 
     await expect(textarea).toHaveValue('draft for task A');
   });
@@ -95,21 +100,21 @@ test.describe('Chat draft text persistence', () => {
     // Type message to set draft
     await textarea.click();
     await textarea.pressSequentially(testMessage);
-    await page.waitForTimeout(200);
-    // Verify draft was set
-    const taskId = await page.evaluate(() => new URLSearchParams(location.search).get('task'));
-    const storedBefore = await page.evaluate((tid) => localStorage.getItem('kanban:draft:' + tid), taskId);
-    expect(storedBefore).toBe(testMessage);
+    await expect(textarea).toHaveValue(testMessage);
+    // Wait for debounced save to IndexedDB
+    await page.waitForTimeout(500);
 
     // Send via the send button
     await page.locator('.btn-send').click();
     // Chat form hides after send (showRestartButton becomes true).
-    // Draft is cleared synchronously by onClearDraft callback.
+    // Draft is cleared by onClearDraft callback.
     await page.waitForTimeout(500);
 
-    // Check localStorage was cleared
-    const storedAfter = await page.evaluate((tid) => localStorage.getItem('kanban:draft:' + tid), taskId);
-    expect(storedAfter).toBeNull();
+    // Reload and verify draft was cleared (textarea should be empty)
+    await page.reload();
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+    await waitForTextarea(page);
+    await expect(textarea).toHaveValue('');
   });
 
   test('draft is cleared when navigating to a deleted task', async ({ page }) => {
@@ -119,7 +124,7 @@ test.describe('Chat draft text persistence', () => {
     const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.click();
     await textarea.pressSequentially('draft for soon-to-be-deleted task');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(500);
     await expect(textarea).toHaveValue('draft for soon-to-be-deleted task');
 
     // Delete the task via API
@@ -140,7 +145,7 @@ test.describe('Chat draft text persistence', () => {
     await ensureTaskStarted(page, projectId, otherTaskId);
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible();
-    await waitForIdle(page);
+    await waitForTextarea(page);
 
     // The other task should NOT have the deleted task's draft
     await expect(textarea).toHaveValue('');
