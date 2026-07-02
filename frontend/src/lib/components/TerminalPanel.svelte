@@ -22,6 +22,7 @@
     let trap: ReturnType<typeof createFocusTrap> | null = null;
     let triggerEl: HTMLElement | null = null;
     let panelHeight = $state(DEFAULT_HEIGHT);
+    let terminalFullscreen = $state(false);
 
     /** Load saved height from IndexedDB. */
     async function loadHeight(): Promise<number> {
@@ -46,6 +47,15 @@
         if (ws) ws.close();
         ws = null;
         setTimeout(() => triggerEl?.focus(), 50);
+    }
+
+    function toggleFullscreen() {
+        terminalFullscreen = !terminalFullscreen;
+        // Resize terminal after transition
+        setTimeout(() => {
+            const fitAddon = term?.getAddon(FitAddon);
+            fitAddon?.fit?.();
+        }, 50);
     }
 
     function onResizeStart(event: MouseEvent) {
@@ -109,7 +119,14 @@
         observer.observe(container);
 
         function handleKey(e: KeyboardEvent) {
-            if (e.key === 'Escape') close();
+            if (e.key === 'Escape') {
+                if (terminalFullscreen) {
+                    terminalFullscreen = false;
+                    setTimeout(() => { const fa = term?.getAddon(FitAddon); fa?.fit?.(); }, 50);
+                } else {
+                    close();
+                }
+            }
         }
         window.addEventListener('keydown', handleKey);
 
@@ -123,12 +140,21 @@
 </script>
 
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
-<div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
+<div class="terminal-panel" class:fullscreen={terminalFullscreen} bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
     <div class="terminal-header">
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div class="resize-handle" onmousedown={onResizeStart} role="separator" aria-orientation="horizontal" aria-label="Resize terminal"></div>
         <span class="title">Terminal</span>
-        <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
+        <div class="header-actions">
+            <button type="button" class="icon-btn fullscreen-btn" onclick={toggleFullscreen} aria-label="Toggle fullscreen" title="Toggle fullscreen">
+                {#if terminalFullscreen}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {/if}
+            </button>
+            <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
+        </div>
     </div>
     <div class="terminal-container" bind:this={container}></div>
 </div>
@@ -193,6 +219,37 @@
         font-weight: 600;
         color: var(--color-text-secondary);
     }
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+    .icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+    }
+    .icon-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    /* Fullscreen toggle: visible only on mobile */
+    .fullscreen-btn {
+        display: none;
+    }
+    @media (max-width: 768px) {
+        .fullscreen-btn {
+            display: flex;
+        }
+    }
     .close-btn {
         background: none;
         border: none;
@@ -205,6 +262,20 @@
         flex: 1;
         padding: 4px;
         min-height: 0;
+    }
+    /* Fullscreen mode: expand to cover entire viewport */
+    .terminal-panel.fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 100vh !important;
+        z-index: 300;
+        border-radius: 0;
+    }
+    .terminal-panel.fullscreen .resize-handle {
+        display: none;
     }
     :global(.terminal) {
         height: 100%;
