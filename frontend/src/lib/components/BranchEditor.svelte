@@ -97,8 +97,10 @@
     let originalContent = $state('');
     let showConfirm = $state(false);
 
-    let hasChanges = $derived(content !== originalContent);
-    let lineCount = $derived(content.split('\n').length);
+    // Tracked incrementally to avoid O(n) string compare/split on every edit
+    let hasChanges = $state(false);
+    let lineCount = $state(0);
+    let charCount = $state(0);
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
@@ -116,6 +118,7 @@
     function confirmClose(discard: boolean) {
         showConfirm = false;
         if (discard) {
+            hasChanges = false;
             clearEditorDraft(filePath);
             onClose();
         }
@@ -126,6 +129,7 @@
     let view: EditorView | null = null;
     let searchVisible = $state(false);
     let searchApp: any = null;
+    let editorCreating = $state(false); // prevent race between loadFile() and $effect
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -220,7 +224,8 @@
     ]);
 
     function createEditor() {
-        if (!editorEl) return;
+        if (!editorEl || editorCreating) return;
+        editorCreating = true;
         const langSupport = getLanguageSupport(filePath);
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
@@ -253,8 +258,12 @@
             syntaxHighlighting(githubDarkHighlight),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
+                    hasChanges = content !== originalContent;
+                    lineCount = update.state.doc.lines;
+                    charCount = update.state.doc.length;
+                    // Sync for save/draft persistence.
                     content = update.state.doc.toString();
-                    // Persist unsaved draft
+                    // Persist unsaved draft (throttled)
                     clearTimeout((view as any)._draftTimer);
                     (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
                 }
@@ -305,8 +314,12 @@
         // Destroy old editor
         view?.destroy();
         view = null;
+        editorCreating = false;
         content = '';
         originalContent = '';
+        hasChanges = false;
+        lineCount = 0;
+        charCount = 0;
 
         try {
             const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}`);
@@ -323,6 +336,9 @@
             // Use unsaved draft if available, otherwise use file content
             const draft = getEditorDraft(filePath);
             content = draft !== null ? draft : originalContent;
+            hasChanges = content !== originalContent;
+            lineCount = content ? content.split('\n').length : 0;
+            charCount = content.length;
         } catch (e) {
             error = String(e);
         } finally {
@@ -357,6 +373,7 @@
                 throw new Error(err.error || 'Failed to save');
             }
             originalContent = content;
+            hasChanges = false;
             clearEditorDraft(filePath);
         } catch (e) {
             error = String(e);
@@ -396,10 +413,9 @@
 
     // Create editor after DOM is ready (editorEl is in a conditional block)
     $effect(() => {
-        if (!loading && !fileTooLarge && !view && editorEl) {
-            // Use rAF to ensure the DOM has been painted after the conditional block renders
+        if (!loading && !fileTooLarge && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
-                if (editorEl && !view) {
+                if (editorEl && !view && !editorCreating) {
                     createEditor();
                 }
             });
@@ -483,7 +499,7 @@
     {#if !loading && !error && !fileTooLarge && filePath}
         <div class="editor-footer">
             <div class="footer-left">
-                <span class="line-info">{lineCount} lines · {content.length} chars</span>
+                <span class="line-info">{lineCount} lines · {charCount} chars</span>
                 {#if hasChanges}
                     <span class="unsaved-info">Unsaved changes</span>
                 {/if}

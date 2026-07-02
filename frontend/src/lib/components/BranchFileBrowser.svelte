@@ -93,6 +93,18 @@
     let currentPath = $state('');
     // Reactive reference to projectPath for closures
     let currentProjectPath = $derived(projectPath);
+
+    // O(1) lookup — replaces Array.includes/some in template
+    let unsavedPaths = $derived(new Set(unsavedFiles));
+    let unsavedDirPrefixes = $derived.by(() => {
+        const prefixes = new Set<string>();
+        for (const p of unsavedFiles) {
+            const lastSlash = p.lastIndexOf('/');
+            if (lastSlash >= 0) prefixes.add(p.substring(0, lastSlash));
+        }
+        return prefixes;
+    });
+
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
     let loading = $state(true);
     let error = $state('');
@@ -315,7 +327,7 @@
                         <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
                     {/if}
                     <span class="file-name">{entry.name}</span>
-                    {#if (!entry.isDir && unsavedFiles.includes(entry.path)) || (entry.isDir && unsavedFiles.some(p => p.startsWith(entry.path + '/')))}
+                    {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
                         <span class="unsaved-dot" title="Unsaved changes">
                             <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
                                 <circle cx="4" cy="4" r="3.5" fill="currentColor"/>

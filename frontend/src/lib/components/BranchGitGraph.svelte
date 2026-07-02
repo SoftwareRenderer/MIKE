@@ -11,65 +11,68 @@
         selectedCommitHash?: string;
     } = $props();
 
-    // Set of commit hashes that are pushed (at or before origin tip)
-    let pushedHashes = $derived.by(() => {
-        const s = new Set<string>();
+    // Pre-compute per-commit display data once — avoids O(n×m) inline calls in template
+    interface CommitDisplay {
+        commit: GitCommit;
+        dateFormatted: string;
+        primaryBranch: string | null;
+        isCurrentBranch: boolean;
+        isUnpushed: boolean;
+        isOriginTip: boolean;
+    }
+
+    let commitDisplays = $derived.by<CommitDisplay[]>(() => {
+        let tipIndex = -1;
         if (originTip) {
-            const tipIndex = commits.findIndex(c => c.hash === originTip);
-            if (tipIndex >= 0) {
-                for (let i = tipIndex; i < commits.length; i++) {
-                    s.add(commits[i]!.hash);
+            tipIndex = commits.findIndex(c => c.hash === originTip);
+        }
+        const hasOrigin = originTip && tipIndex >= 0;
+        const now = Date.now();
+
+        return commits.map((c) => {
+            const idx = commits.indexOf(c);
+            const isUnpushed = !hasOrigin || idx < tipIndex;
+            const isOriginTip = c.hash === originTip;
+
+            let primaryBranch: string | null = null;
+            let isCurrentBranch = false;
+            if (c.branches && c.branches.length > 0) {
+                const currentIdx = c.branches.indexOf(currentBranch);
+                if (currentIdx >= 0) {
+                    primaryBranch = currentBranch;
+                    isCurrentBranch = true;
+                } else {
+                    primaryBranch = c.branches[0] || null;
                 }
             }
-        }
-        return s;
+
+            let dateFormatted = '';
+            if (c.date) {
+                try {
+                    const diffMs = now - new Date(c.date).getTime();
+                    const diffMinutes = Math.floor(diffMs / 60000);
+                    if (diffMinutes < 1) dateFormatted = 'just now';
+                    else if (diffMinutes < 60) dateFormatted = `${diffMinutes}m ago`;
+                    else {
+                        const diffHours = Math.floor(diffMs / 3600000);
+                        if (diffHours < 24) dateFormatted = `${diffHours}h ago`;
+                        else {
+                            const diffDays = Math.floor(diffMs / 86400000);
+                            if (diffDays === 1) dateFormatted = 'yesterday';
+                            else if (diffDays < 7) dateFormatted = `${diffDays}d ago`;
+                            else if (diffDays < 30) dateFormatted = `${Math.floor(diffDays / 7)}w ago`;
+                            else if (diffDays < 365) dateFormatted = `${Math.floor(diffDays / 30)}mo ago`;
+                            else dateFormatted = `${Math.floor(diffDays / 365)}y ago`;
+                        }
+                    }
+                } catch {
+                    dateFormatted = c.date.slice(0, 10);
+                }
+            }
+
+            return { commit: c, dateFormatted, primaryBranch, isCurrentBranch, isUnpushed, isOriginTip };
+        });
     });
-
-    function formatDate(dateStr: string): string {
-        if (!dateStr) return '';
-        try {
-            const date = new Date(dateStr);
-            const now = new Date();
-            const diffMs = now.getTime() - date.getTime();
-            const diffMinutes = Math.floor(diffMs / (1000 * 60));
-            if (diffMinutes < 1) return 'just now';
-            if (diffMinutes < 60) return `${diffMinutes}m ago`;
-            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-            if (diffHours < 24) return `${diffHours}h ago`;
-            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-            if (diffDays === 1) return 'yesterday';
-            if (diffDays < 7) return `${diffDays}d ago`;
-            if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-            if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
-            return `${Math.floor(diffDays / 365)}y ago`;
-        } catch {
-            return dateStr.slice(0, 10);
-        }
-    }
-
-    /** Get the primary branch name for a commit (current branch first, then first in list). */
-    function getPrimaryBranch(commit: GitCommit): string | null {
-        if (!commit.branches || commit.branches.length === 0) return null;
-        const current = commit.branches.find(b => b === currentBranch);
-        if (current) return current;
-        return commit.branches[0] || null;
-    }
-
-    /** Check if this commit is the origin tip. */
-    function isOriginTip(commit: GitCommit): boolean {
-        return originTip && commit.hash === originTip;
-    }
-
-    /** Check if this commit is unpushed (not at or before origin tip, or no origin configured). */
-    function isUnpushed(commit: GitCommit): boolean {
-        if (!originTip) return true;
-        return !pushedHashes.has(commit.hash);
-    }
-
-    /** Check if this commit has the current branch. */
-    function hasCurrentBranch(commit: GitCommit): boolean {
-        return commit.branches?.includes(currentBranch) ?? false;
-    }
 </script>
 
 <div class="git-graph">
@@ -80,15 +83,16 @@
     <div class="git-graph-list" role="list" aria-label="Commit history">
         {#if loading}
             <div class="git-graph-loading">Loading commits...</div>
-        {:else if commits.length === 0}
+        {:else if commitDisplays.length === 0}
             <div class="git-graph-empty">No commits</div>
         {:else}
-            {#each commits as commit, i}
+            {#each commitDisplays as d, i}
+                {@const commit = d.commit}
                 <div
                     class="git-commit-row"
                     class:selectable={!!onCommitSelected}
                     class:selected={commit.hash === selectedCommitHash}
-                    class:unpushed={isUnpushed(commit)}
+                    class:unpushed={d.isUnpushed}
                     role={onCommitSelected ? 'button' : 'listitem'}
                     tabindex={onCommitSelected ? 0 : undefined}
                     onclick={() => onCommitSelected?.(commit, i)}
@@ -98,7 +102,7 @@
                     <div class="git-timeline">
                         <div
                             class="git-dot"
-                            class:unpushed={isUnpushed(commit)}
+                            class:unpushed={d.isUnpushed}
                             title={commit.short}
                         ></div>
                     </div>
@@ -110,7 +114,7 @@
                             <span class="git-commit-subject" title={commit.subject}>{commit.subject}</span>
 
                             <!-- Origin tip badge — shown before branch badge -->
-                            {#if isOriginTip(commit)}
+                            {#if d.isOriginTip}
                                 <span class="git-badge origin-badge" title="Pushed to origin">
                                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <circle cx="6" cy="6" r="2"/>
@@ -124,8 +128,8 @@
                             {/if}
 
                             <!-- Branch badge -->
-                            {#if getPrimaryBranch(commit)}
-                                <span class="git-badge branch-badge" class:current={hasCurrentBranch(commit)} title="Branch">
+                            {#if d.primaryBranch}
+                                <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title="Branch">
                                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <circle cx="6" cy="6" r="2"/>
                                         <circle cx="10" cy="10" r="2"/>
@@ -133,7 +137,7 @@
                                         <line x1="6" y1="4" x2="6" y2="2"/>
                                         <line x1="10" y1="12" x2="10" y2="14"/>
                                     </svg>
-                                    {getPrimaryBranch(commit)}
+                                    {d.primaryBranch}
                                 </span>
                             {/if}
                         </div>
@@ -142,8 +146,8 @@
                             {#if commit.author}
                                 <span class="git-commit-author" title={commit.author}>{commit.author}</span>
                             {/if}
-                            {#if commit.date}
-                                <span class="git-commit-date">{formatDate(commit.date)}</span>
+                            {#if d.dateFormatted}
+                                <span class="git-commit-date">{d.dateFormatted}</span>
                             {/if}
                             <span class="git-commit-hash" title={commit.hash}>{commit.short}</span>
                         </div>

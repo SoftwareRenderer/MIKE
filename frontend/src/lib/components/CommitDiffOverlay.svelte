@@ -64,7 +64,7 @@
     const TRUNCATE_AFTER = 60;
 
     /** Build side-by-side rows for a file, optionally truncated to first N change lines. */
-    function getSideBySideRows(rows: DiffRow[], expanded: boolean): SideBySideRow[] {
+    function buildRowsForFile(rows: DiffRow[], expanded: boolean): SideBySideRow[] {
         if (expanded) return buildSideBySideRows(rows);
         // Truncate: keep rows until we've seen TRUNCATE_AFTER change lines
         const truncated: DiffRow[] = [];
@@ -78,6 +78,15 @@
         }
         return buildSideBySideRows(truncated);
     }
+
+    // Pre-compute once — template was calling buildSideBySideRows twice per file (left + right column)
+    let fileRows = $derived.by(() => {
+        const result: Record<string, SideBySideRow[]> = {};
+        for (const file of diffFiles) {
+            result[file.path] = buildRowsForFile(file.rows, isExpanded(file.path));
+        }
+        return result;
+    });
 
     /** Check if a file has more change lines than the threshold. */
     function isTruncated(rows: DiffRow[]): boolean {
@@ -289,6 +298,7 @@
                             {#if file.rows.length === 0}
                                 <div class="diff-binary-notice">Binary file</div>
                             {:else}
+                                {@const rows = fileRows[file.path]}
                                 <div class="diff-sbs-body">
                                     <!-- Column headers -->
                                     <div class="diff-sbs-header-row">
@@ -304,7 +314,7 @@
                                     <!-- Left column (old) -->
                                     <div class="diff-sbs-column diff-sbs-left">
                                         <div class="diff-sbs-scroll">
-                                            {#each getSideBySideRows(file.rows, isExpanded(file.path)) as row}
+                                            {#each rows as row}
                                                 <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:removed={row.leftVariant === 'removed'} class:context={row.leftVariant === 'context'}>
@@ -317,7 +327,7 @@
                                     <!-- Right column (new) -->
                                     <div class="diff-sbs-column diff-sbs-right">
                                         <div class="diff-sbs-scroll">
-                                            {#each getSideBySideRows(file.rows, isExpanded(file.path)) as row}
+                                            {#each rows as row}
                                                 <div class="diff-sbs-line">
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
                                                     <span class="diff-line-content" class:added={row.rightVariant === 'added'} class:context={row.rightVariant === 'context'}>
