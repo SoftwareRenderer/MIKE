@@ -768,21 +768,26 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	asm.BroadcastProjectCounts()
 
 	// Ping/pong keepalive
-	done := make(chan struct{})
-	defer close(done)
+	// If a ping fails, cancel the read context to unblock Read() and close the connection.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
+				// Per-ping timeout so Ping() itself can't hang forever
+				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 				asm.writeMu.Lock()
-				err := conn.Ping(context.Background())
+				err := conn.Ping(pingCtx)
 				asm.writeMu.Unlock()
+				pingCancel()
 				if err != nil {
+					cancel() // unblock Read() to tear down the connection
 					return
 				}
-			case <-done:
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -794,11 +799,11 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 			buf := asm.getBuffer(conn)
 			for _, frame := range buf {
 				select {
-				case <-done:
+				case <-ctx.Done():
 					return
 				default:
 				}
-				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+				if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
 					return
 				}
 			}
@@ -807,7 +812,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 
 	// Read loop — handle client messages
 	for {
-		_, msg, err := conn.Read(context.Background())
+		_, msg, err := conn.Read(ctx)
 		if err != nil {
 			break
 		}
