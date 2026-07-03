@@ -691,7 +691,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.taskMu.Lock()
 				state := te.tasks[task.ID]
 				te.taskMu.Unlock()
-				result, success := te.executeTool(tc.Function.Name, args, worktreePath, task, state)
+				result, success := te.executeTool(ctx, tc.Function.Name, args, worktreePath, task, state)
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})

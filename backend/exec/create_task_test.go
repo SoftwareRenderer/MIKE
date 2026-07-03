@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -393,7 +394,7 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 
 	// Try to complete without subtasks (empty state)
 	state := &executionState{createdIDs: nil}
-	result, ok := te.executeTool("task_complete", map[string]any{
+	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Plan complete",
 	}, "", parent, state)
 
@@ -430,7 +431,7 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	parent, _ = te.store.GetTask("proj-1", "plan-parent-1")
 
 	// Try to complete with subtask
-	result2, ok := te.executeTool("task_complete", map[string]any{
+	result2, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Plan complete",
 	}, "", parent, state)
 
@@ -461,7 +462,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 	}
 
 	// Try to complete without subtasks (should succeed)
-	result, ok := te.executeTool("task_complete", map[string]any{
+	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Task complete",
 	}, "", task, &executionState{})
 

@@ -21,7 +21,7 @@ import (
 )
 
 // execFunc runs a shell command. Provided by the sandbox in container mode.
-type execFunc func(command string, timeout int64) (string, error)
+type execFunc func(ctx context.Context, command string, timeout int64) (string, error)
 
 // readFunc reads a file. Provided by the sandbox in container mode.
 type readFunc func(path string) ([]byte, error)
@@ -32,8 +32,8 @@ type writeFunc func(path, content string) error
 // makeSandboxCallbacks creates exec/read/write callbacks that route through
 // the sandbox agent client inside a container.
 func makeSandboxCallbacks(client *sandbox.Client) (execFunc, readFunc, writeFunc) {
-	execCb := func(command string, timeout int64) (string, error) {
-		holder, err := client.Bash(command, timeout)
+	execCb := func(ctx context.Context, command string, timeout int64) (string, error) {
+		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
 			return "", fmt.Errorf("bash: %w", err)
 		}
@@ -99,7 +99,8 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 // executeTool dispatches a tool call to the appropriate handler.
 // Sandbox callbacks are read from state.
 // When nil, os.Root provides folder isolation on the host.
-func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePath string, task *types.Task, state *executionState) (string, bool) {
+// ctx is used to cancel long-running operations (e.g., bash) when the task is stopped.
+func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState) (string, bool) {
 	sandboxExec := state.sandboxExec
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
@@ -302,12 +303,10 @@ func (te *TaskExecutor) executeTool(name string, args map[string]any, worktreePa
 		var out string
 		var err error
 		if sandboxExec != nil {
-			// Use sandbox execution — pass the LLM's timeout
-			out, err = sandboxExec(cmd, timeout)
+			// Use sandbox execution — ctx propagates task cancellation
+			out, err = sandboxExec(ctx, cmd, timeout)
 		} else {
-			// Direct execution (no sandbox)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-			defer cancel()
+			// Direct execution (no sandbox) — ctx propagates task cancellation
 			c := exec.CommandContext(ctx, "bash", "-c", cmd)
 			c.Dir = worktreePath
 			rawOut, cmdErr := c.CombinedOutput()

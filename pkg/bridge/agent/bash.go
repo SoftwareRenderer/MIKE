@@ -20,6 +20,7 @@ const (
 
 // handleBash runs a shell command and streams output as Chunk frames.
 // Sends a Result frame with exit code when the command completes.
+// The process is tracked in h.bashProcs so it can be cancelled via bash_cancel.
 func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 	var p protocol.BashParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -53,6 +54,17 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
+	// Register the process for cancellation before starting
+	bp := &bashProc{cmd: cmd, done: make(chan struct{})}
+	h.mu.Lock()
+	h.bashProcs[req.MsgID] = bp
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.bashProcs, req.MsgID)
+		h.mu.Unlock()
+	}()
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start command: %w", err)
 	}
@@ -75,7 +87,7 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 	go streamOutput(stdout, bashStreamStdout)
 	go streamOutput(stderr, bashStreamStderr)
 
-	// Wait for command to complete with timeout
+	// Wait for command to complete with timeout or cancellation
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -94,17 +106,29 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 	}()
 
 	var exitCode int32
+	var cancelled bool
 	select {
 	case <-timer.C:
 		_ = cmd.Process.Kill()
 		<-waitDone // reap
 		exitCode = 124 // standard timeout exit code
 	case exitCode = <-waitDone:
+		// Process exited normally or was killed
+	case <-bp.done:
+		// Cancelled by bash_cancel — kill the process
+		cancelled = true
+		_ = cmd.Process.Kill()
+		exitCode = <-waitDone // reap
+		// Use 137 (128 + 9 = SIGKILL) to signal cancellation
+		if exitCode != 137 {
+			exitCode = 137
+		}
 	}
 
-	// Build result: exitCode + empty meta
+	// Build result: exitCode + meta with cancelled flag
 	meta, _ := json.Marshal(map[string]any{
 		"duration_ms": int64(0), // not tracked yet
+		"cancelled":   cancelled,
 	})
 	payload := protocol.NewBashResult(exitCode, meta)
 	result := protocol.NewResult(req.MsgID, payload)

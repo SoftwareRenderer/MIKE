@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -352,7 +353,8 @@ func (b *BashResultHolder) ExitCode() <-chan int32 {
 }
 
 // Bash runs a shell command in the sandbox with streaming output.
-func (c *Client) Bash(command string, timeout int64) (*BashResultHolder, error) {
+// If ctx is cancelled, the running bash process is killed on the agent.
+func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*BashResultHolder, error) {
 	if timeout <= 0 {
 		timeout = 5
 	}
@@ -392,9 +394,23 @@ func (c *Client) Bash(command string, timeout int64) (*BashResultHolder, error) 
 		return nil, fmt.Errorf("send bash request: %w", err)
 	}
 
+	// Watch for context cancellation — send cancel frame to agent
+	cancelled := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Send cancel frame to agent (fire-and-forget)
+			cancelFrame := protocol.NewBashCancelRequest(c.nextMsgID(), msgID)
+			_ = protocol.WriteFrame(c.conn, cancelFrame)
+		case <-cancelled:
+			// Request completed normally, no need to cancel
+		}
+	}()
+
 	// Process response in background
 	go func() {
 		defer func() {
+			close(cancelled) // signal the cancel goroutine to exit
 			c.cleanup(msgID)
 			close(holder.outputCh)
 			close(holder.exitCode)

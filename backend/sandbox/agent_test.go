@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestAgentClient(t *testing.T) {
 	}
 
 	// Run a bash command
-	holder, err := client.Bash("echo hello from sandbox", 5)
+	holder, err := client.Bash(context.Background(), "echo hello from sandbox", 5)
 	if err != nil {
 		t.Fatalf("bash: %v", err)
 	}

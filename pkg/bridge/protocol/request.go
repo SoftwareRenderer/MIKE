@@ -9,14 +9,15 @@ import (
 
 // Method identifiers.
 const (
-	MethodRead      uint8 = 0x01
-	MethodWrite     uint8 = 0x02
-	MethodEdit      uint8 = 0x03
-	MethodBash      uint8 = 0x04
-	MethodShellOpen uint8 = 0x05
-	MethodShellIO   uint8 = 0x06
+	MethodRead       uint8 = 0x01
+	MethodWrite      uint8 = 0x02
+	MethodEdit       uint8 = 0x03
+	MethodBash       uint8 = 0x04
+	MethodShellOpen  uint8 = 0x05
+	MethodShellIO    uint8 = 0x06
 	MethodShellResize uint8 = 0x07
 	MethodShellClose uint8 = 0x08
+	MethodBashCancel uint8 = 0x09
 )
 
 func methodString(m uint8) string {
@@ -37,6 +38,8 @@ func methodString(m uint8) string {
 		return "shell_resize"
 	case MethodShellClose:
 		return "shell_close"
+	case MethodBashCancel:
+		return "bash_cancel"
 	default:
 		return fmt.Sprintf("unknown(%d)", m)
 	}

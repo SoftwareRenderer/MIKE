@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"kanban/pkg/bridge/protocol"
 )
@@ -157,4 +160,113 @@ func TestEditParams_Marshal(t *testing.T) {
 	if got.Edits[0].OldText != "foo" || got.Edits[1].NewText != "qux" {
 		t.Error("edit round-trip failed")
 	}
+}
+
+// TestBashCancel kills a long-running bash process via bash_cancel.
+func TestBashCancel(t *testing.T) {
+	// Create pipes: test → agent (requests), agent → test (responses)
+	testToAgentPr, testToAgentPw := io.Pipe()
+	agentToTestPr, agentToTestPw := io.Pipe()
+
+	h := newHandler()
+	h.closed.Store(false)
+
+	// Start handler in background
+	handlerDone := make(chan struct{})
+	go func() {
+		_ = h.handleConn(&testPipeConn{reader: testToAgentPr, writer: agentToTestPw})
+		close(handlerDone)
+	}()
+
+	// Helper: send a frame to the agent
+	sendToAgent := func(f *protocol.Frame) {
+		err := protocol.WriteFrame(testToAgentPw, f)
+		if err != nil {
+			t.Errorf("write frame: %v", err)
+		}
+	}
+
+	// Send a long-running bash command
+	bashParams, _ := json.Marshal(protocol.BashParams{Command: "sleep 300", Timeout: 300})
+	bashReq := protocol.NewRequest(1, protocol.MethodBash, bashParams)
+	sendToAgent(bashReq)
+
+	// Give the agent time to start the process
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify process is tracked
+	h.mu.Lock()
+	if _, ok := h.bashProcs[1]; !ok {
+		h.mu.Unlock()
+		t.Fatal("bash process not tracked after start")
+	}
+	h.mu.Unlock()
+
+	// Send cancel
+	cancelFrame := protocol.NewBashCancelRequest(2, 1)
+	sendToAgent(cancelFrame)
+
+	// Wait for result frame (the process should be killed)
+	select {
+	case result := <-readFrameChan(agentToTestPr):
+		if result.Type != protocol.TypeResult {
+			t.Fatalf("expected Result frame, got %v", result.Type)
+		}
+		if result.MsgID != 1 {
+			t.Errorf("result MsgID = %d, want 1", result.MsgID)
+		}
+		bashResult, err := protocol.ParseBashResult(result.Payload)
+		if err != nil {
+			t.Fatalf("parse bash result: %v", err)
+		}
+		if bashResult.ExitCode != 137 {
+			t.Errorf("exit code = %d, want 137 (SIGKILL)", bashResult.ExitCode)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for result after cancel")
+	}
+
+	// Verify process is no longer tracked
+	h.mu.Lock()
+	if _, ok := h.bashProcs[1]; ok {
+		h.mu.Unlock()
+		t.Error("bash process still tracked after cancel")
+	} else {
+		h.mu.Unlock()
+	}
+
+	// Cleanup
+	h.closed.Store(true)
+	testToAgentPw.Close()
+	agentToTestPw.Close()
+	<-handlerDone
+}
+
+// testPipeConn wraps separate read/write pipes as a net.Conn.
+type testPipeConn struct {
+	reader io.ReadCloser
+	writer io.WriteCloser
+}
+
+func (c *testPipeConn) Read(b []byte) (int, error)        { return c.reader.Read(b) }
+func (c *testPipeConn) Write(b []byte) (int, error)       { return c.writer.Write(b) }
+func (c *testPipeConn) Close() error                      { return c.writer.Close() }
+func (c *testPipeConn) LocalAddr() net.Addr               { return nil }
+func (c *testPipeConn) RemoteAddr() net.Addr              { return nil }
+func (c *testPipeConn) SetDeadline(t time.Time) error      { return nil }
+func (c *testPipeConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *testPipeConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// readFrameChan reads a single frame and returns it on a channel.
+func readFrameChan(r io.Reader) <-chan *protocol.Frame {
+	ch := make(chan *protocol.Frame, 1)
+	go func() {
+		frame, err := protocol.ReadFrame(r)
+		if err != nil {
+			close(ch)
+			return
+		}
+		ch <- frame
+	}()
+	return ch
 }
