@@ -23,6 +23,8 @@ export interface DiffRow {
 export interface DiffFile {
     /** File path (e.g., "src/lib/utils.ts"). */
     path: string;
+    /** Original path for renames (e.g., "old-name.png" when path is "new-name.png"). */
+    origPath?: string;
     /** Diff rows for this file. Empty for binary/large files. */
     rows: DiffRow[];
     /** Count of added lines. */
@@ -31,6 +33,8 @@ export interface DiffFile {
     removed: number;
     /** File size in bytes, set when file is binary or too large to diff. */
     fileSize?: number;
+    /** True if git detected this as a binary file. */
+    isBinary?: boolean;
     /** True if this file was truncated (has more changes not shown). */
     truncated?: boolean;
     /** Original added count before truncation (for display in header). */

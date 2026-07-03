@@ -162,7 +162,7 @@
 
     // Diff state — per-file cache for incremental updates
     let diffFileCache = $state<Record<string, DiffFile>>({});       // tracked files: path → DiffFile
-    let untrackedCache = $state<Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }>>({}); // untracked: path → metadata
+    let untrackedCache = $state<Record<string, { fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean }>>({}); // untracked: path → metadata
     // Derived arrays for DiffViewer (sorted)
     let diffFiles = $derived(Object.values(diffFileCache).filter(f => !untrackedCache[f.path]));
     let untrackedFiles = $derived(Object.entries(untrackedCache).map(([path, meta]) => ({
@@ -776,7 +776,7 @@
         }
     }
 
-    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }> };
+    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean }> };
 
     function updateDiff(data: DiffData, source: 'http' | 'http-force' | 'websocket' = 'http') {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
@@ -795,13 +795,15 @@
                         rows: existing?.rows || [],
                         added: entry.added ?? 0,
                         removed: entry.removed ?? 0,
+                        fileSize: entry.file_size,
+                        isBinary: entry.is_binary,
                         truncated: !!entry.truncated,
                         origAdded: entry.origAdded,
                         origRemoved: entry.origRemoved,
                     };
                 } else if (entry.type === 'untracked') {
                     const existing = diffFileCache[path];
-                    newUntracked[path] = { fileSize: entry.file_size, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
+                    newUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
                     newCache[path] = {
                         path,
                         rows: existing?.rows || [],
@@ -843,7 +845,7 @@
         });
 
         (data.untracked || []).filter(u => ignoreSwp(u.path)).forEach(u => {
-            newUntracked[u.path] = { fileSize: u.file_size, truncated: u.truncated, origAdded: u.orig_added, loading: false };
+            newUntracked[u.path] = { fileSize: u.file_size, isBinary: u.is_binary, truncated: u.truncated, origAdded: u.orig_added, loading: false };
             newCache[u.path] = buildUntrackedDiffFile(u.path, u.lines, u.line_count);
         });
 

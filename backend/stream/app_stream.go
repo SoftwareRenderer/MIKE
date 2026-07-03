@@ -909,7 +909,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		// Send manifest for detail view (per-file metadata, no diff content)
 		files := make(map[string]map[string]any)
 		for path, f := range diffResult.Tracked {
-			files[path] = map[string]any{
+			entry := map[string]any{
 				"hash":        git.ComputeFileHash(f),
 				"type":        "tracked",
 				"added":       f.Added,
@@ -918,15 +918,26 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"origAdded":   f.OrigAdded,
 				"origRemoved": f.OrigRemoved,
 			}
+			if f.FileSize != nil {
+				entry["file_size"] = *f.FileSize
+			}
+			if f.IsBinary {
+				entry["is_binary"] = true
+			}
+			files[path] = entry
 		}
 		for _, u := range diffResult.Untracked {
-			files[u.Path] = map[string]any{
+			entry := map[string]any{
 				"hash":       git.ComputeUntrackedHash(u),
 				"type":       "untracked",
 				"line_count": len(u.Lines),
 				"file_size":  u.FileSize,
 				"added":      len(u.Lines),
 			}
+			if u.IsBinary {
+				entry["is_binary"] = true
+			}
+			files[u.Path] = entry
 		}
 		msg, _ := json.Marshal(map[string]any{
 			"type":       "task_diff",

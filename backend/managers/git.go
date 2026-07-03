@@ -585,7 +585,8 @@ type diffManifestFile struct {
 	OrigAdded int    `json:"origAdded,omitempty"`
 	OrigRemoved int  `json:"origRemoved,omitempty"`
 	LineCount int    `json:"line_count,omitempty"` // for untracked files
-	FileSize  int64  `json:"file_size,omitempty"`  // for untracked files
+	FileSize  int64  `json:"file_size,omitempty"`  // for binary/large files
+	IsBinary  bool   `json:"is_binary,omitempty"`  // true for binary files
 }
 
 // diffManifest is the lightweight manifest returned by GET /diff.
@@ -602,7 +603,7 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 		ShortStat: d.ShortStat,
 	}
 	for path, f := range d.Tracked {
-		manifest.Files[path] = diffManifestFile{
+		entry := diffManifestFile{
 			Hash:        git.ComputeFileHash(f),
 			Type:        "tracked",
 			Added:       f.Added,
@@ -611,6 +612,11 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 			OrigAdded:   f.OrigAdded,
 			OrigRemoved: f.OrigRemoved,
 		}
+		if f.FileSize != nil {
+			entry.FileSize = *f.FileSize
+		}
+		entry.IsBinary = f.IsBinary
+		manifest.Files[path] = entry
 	}
 	for _, u := range d.Untracked {
 		manifest.Files[u.Path] = diffManifestFile{
@@ -621,6 +627,7 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 			Added:       len(u.Lines),
 			Truncated:   u.Truncated,
 			OrigAdded:   u.OrigAdded,
+			IsBinary:    u.IsBinary,
 		}
 	}
 	return manifest

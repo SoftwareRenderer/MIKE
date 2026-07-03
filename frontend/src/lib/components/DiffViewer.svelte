@@ -7,7 +7,7 @@
 import { slide } from 'svelte/transition';
 
 
-    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
+    let { files = [], untracked = [], onExpandFile, onExpandUntracked, onLineClick }: { files: DiffFile[]; untracked: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void } = $props();
     let hasContent = $derived(files.length > 0 || untracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -198,6 +198,7 @@ import { slide } from 'svelte/transition';
             {@const ufile = entry.file}
             {@const isUntrackedExpanded = isFileOpen(entry.path)}
             {@const isLarge = entry.fileSize !== undefined}
+            {@const isBin = !!entry.isBinary}
             <section class="diff-file-section diff-file-section-untracked diff-file-enter">
                 <button
                     type="button"
@@ -232,13 +233,23 @@ import { slide } from 'svelte/transition';
                             </div>
                             <div class="diff-line-scroll">
                                 <div class="diff-line-content-wrapper">
-                                    <div class="diff-large-file-notice">
+                                    {#if isBin}
+                                    <div class="diff-binary-notice">
                                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                             <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                             <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                         </svg>
-                                        <span>Binary or large file: {formatFileSize(entry.fileSize ?? 0)}</span>
+                                        <span>Binary file — {formatFileSize(entry.fileSize ?? 0)}</span>
                                     </div>
+                                    {:else}
+                                    <div class="diff-large-file-notice">
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
+                                            <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+                                        </svg>
+                                        <span>Large file — {formatFileSize(entry.fileSize ?? 0)}</span>
+                                    </div>
+                                    {/if}
                                 </div>
                             </div>
                         </div>
@@ -424,7 +435,13 @@ import { slide } from 'svelte/transition';
                     <svg class="diff-chevron" class:expanded={isFileExpanded} width="12" height="12" viewBox="0 0 16 16" fill="none">
                         <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    <span class="diff-file-path" title={file.path}>{truncatePath(file.path)}</span>
+                    <span class="diff-file-path" title={file.path}>
+                        {#if file.origPath}
+                            {truncatePath(file.origPath)} → {truncatePath(file.path)}
+                        {:else}
+                            {truncatePath(file.path)}
+                        {/if}
+                    </span>
                     <span class="diff-file-stats">
                         <span class="diff-added">+{file.origAdded ?? file.added}</span>
                         <span class="diff-removed">-{file.origRemoved ?? file.removed}</span>
@@ -439,13 +456,23 @@ import { slide } from 'svelte/transition';
                             </div>
                             <div class="diff-line-scroll">
                                 <div class="diff-line-content-wrapper">
-                                    <div class="diff-large-file-notice">
+                                    {#if file.isBinary}
+                                    <div class="diff-binary-notice">
                                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                             <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                             <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                         </svg>
-                                        <span>Binary or large file: {formatFileSize(file.fileSize)}</span>
+                                        <span>Binary file — {formatFileSize(file.fileSize)}</span>
                                     </div>
+                                    {:else}
+                                    <div class="diff-large-file-notice">
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
+                                            <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+                                        </svg>
+                                        <span>Large file — {formatFileSize(file.fileSize)} (+{file.origAdded ?? file.added}/-{file.origRemoved ?? file.removed})</span>
+                                    </div>
+                                    {/if}
                                 </div>
                             </div>
                         </div>
@@ -927,6 +954,20 @@ import { slide } from 'svelte/transition';
     .diff-large-file-notice svg {
         flex-shrink: 0;
         opacity: 0.5;
+    }
+    /* Binary file notice — slightly distinct from large file */
+    .diff-binary-notice {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+    }
+    .diff-binary-notice svg {
+        flex-shrink: 0;
+        opacity: 0.6;
     }
 
     /* Empty file notice */

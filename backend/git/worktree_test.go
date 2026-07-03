@@ -519,7 +519,7 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	}
 
 	worktreePath, _ := wm.WorktreePath(taskID)
-	// Write binary content (null bytes trigger isBinaryFile detection)
+	// Write binary content (null bytes trigger isBinaryContent detection)
 	binaryContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00}
 	if err := os.WriteFile(filepath.Join(worktreePath, "binary-file.bin"), binaryContent, 0o644); err != nil {
 		t.Fatalf("write binary file: %v", err)
@@ -543,6 +543,208 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	}
 	if untracked.FileSize == 0 {
 		t.Error("expected binary file to have FileSize set")
+	}
+	if !untracked.IsBinary {
+		t.Error("expected IsBinary to be true for binary file")
+	}
+}
+
+func TestGetTaskDiff_BinaryUntrackedByExtension(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Write text content but with a binary extension — should be detected as binary by extension
+	if err := os.WriteFile(filepath.Join(worktreePath, "image.png"), []byte("fake png content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+	if !result.Untracked[0].IsBinary {
+		t.Error("expected IsBinary to be true for .png extension")
+	}
+}
+
+func TestGetTaskDiff_TrackedBinaryFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Add a binary file to the repo
+	binaryContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	writeFile(t, repoDir, "logo.png", string(binaryContent))
+	runGit(t, repoDir, "add", "logo.png")
+	runGit(t, repoDir, "commit", "-m", "Add logo")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Modify the binary file
+	newContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03}
+	if err := os.WriteFile(filepath.Join(worktreePath, "logo.png"), newContent, 0o644); err != nil {
+		t.Fatalf("write binary file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Binary file should appear in Tracked map
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	file, ok := result.Tracked["logo.png"]
+	if !ok {
+		t.Fatal("expected logo.png in Tracked map")
+	}
+	if !file.IsBinary {
+		t.Error("expected IsBinary to be true")
+	}
+	if file.FileSize == nil || *file.FileSize == 0 {
+		t.Error("expected FileSize to be set")
+	}
+	if len(file.Rows) != 0 {
+		t.Errorf("expected 0 rows for binary file, got %d", len(file.Rows))
+	}
+}
+
+func TestGetTaskDiff_LargeTextFile(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Create a large text file (>1MB = 1048576 bytes)
+	largeContent := strings.Repeat("line of text\n", 81000) // 81000*13 = 1053000 bytes
+	if err := os.WriteFile(filepath.Join(worktreePath, "large.txt"), []byte(largeContent), 0o644); err != nil {
+		t.Fatalf("write large file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+	untracked := result.Untracked[0]
+	if untracked.IsBinary {
+		t.Error("expected IsBinary to be false for large text file")
+	}
+	if untracked.FileSize == 0 {
+		t.Error("expected FileSize to be set for large file")
+	}
+}
+
+func TestIsBinaryExtension(t *testing.T) {
+	// Known binary extensions
+	for _, ext := range []string{"image.png", "file.jpg", "archive.zip", "font.woff2", "video.mp4", "doc.pdf"} {
+		if !isBinaryExtension(ext) {
+			t.Errorf("expected %s to be detected as binary extension", ext)
+		}
+	}
+	// Text extensions
+	for _, ext := range []string{"file.go", "script.py", "style.css", "data.json", "page.html", "notes.txt"} {
+		if isBinaryExtension(ext) {
+			t.Errorf("expected %s to NOT be detected as binary extension", ext)
+		}
+	}
+	// No extension
+	if isBinaryExtension("Makefile") {
+		t.Error("expected Makefile (no extension) to NOT be detected as binary")
+	}
+}
+
+func TestGetTaskDiff_DeletedBinaryFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Add a binary file to the repo
+	binaryContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	writeFile(t, repoDir, "logo.png", string(binaryContent))
+	runGit(t, repoDir, "add", "logo.png")
+	runGit(t, repoDir, "commit", "-m", "Add logo")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Delete the binary file
+	if err := os.Remove(filepath.Join(worktreePath, "logo.png")); err != nil {
+		t.Fatalf("remove binary file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Deleted binary file should appear in Tracked map
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	file, ok := result.Tracked["logo.png"]
+	if !ok {
+		t.Fatal("expected logo.png in Tracked map (deleted binary)")
+	}
+	if !file.IsBinary {
+		t.Error("expected IsBinary to be true for deleted binary file")
+	}
+}
+
+func TestGetTaskDiff_RenamedBinaryFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Add a binary file to the repo
+	binaryContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	writeFile(t, repoDir, "old-name.png", string(binaryContent))
+	runGit(t, repoDir, "add", "old-name.png")
+	runGit(t, repoDir, "commit", "-m", "Add logo")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Rename the binary file (delete old + add new = git sees as modify for same content)
+	newContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01}
+	os.Remove(filepath.Join(worktreePath, "old-name.png"))
+	os.WriteFile(filepath.Join(worktreePath, "new-name.png"), newContent, 0o644)
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Should have the deleted binary in tracked
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	oldFile, ok := result.Tracked["old-name.png"]
+	if !ok {
+		t.Fatal("expected old-name.png in Tracked map (deleted binary)")
+	}
+	if !oldFile.IsBinary {
+		t.Error("expected IsBinary to be true for old-name.png")
 	}
 }
 

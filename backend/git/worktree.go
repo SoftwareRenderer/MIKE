@@ -553,6 +553,7 @@ type UntrackedFile struct {
 	Lines     []string `json:"lines,omitempty"`      // file content lines (set for text files)
 	LineCount int      `json:"line_count,omitempty"` // total line count (set when Lines is omitted)
 	FileSize  int64    `json:"file_size,omitempty"`  // set when file is binary or >1MB (lines omitted)
+	IsBinary  bool     `json:"is_binary,omitempty"`  // true when file is detected as binary
 	Truncated bool     `json:"truncated,omitempty"`  // true when lines were truncated to maxChangeLines
 	OrigAdded int      `json:"orig_added,omitempty"` // original line count before truncation
 }
@@ -575,10 +576,12 @@ type InlineDiffSegment struct {
 // TrackedDiffFile holds the parsed diff for a single tracked file.
 type TrackedDiffFile struct {
 	Path      string    `json:"path"`
+	OrigPath  string    `json:"origPath,omitempty"`  // original path for renames (a/ path when different from b/)
 	Rows      []DiffRow `json:"rows"`
 	Added     int       `json:"added"`
 	Removed   int       `json:"removed"`
 	FileSize  *int64    `json:"fileSize,omitempty"`  // set for binary/large files
+	IsBinary  bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
 	Truncated bool      `json:"truncated,omitempty"`
 	OrigAdded int       `json:"origAdded,omitempty"`
 	OrigRemoved int     `json:"origRemoved,omitempty"`
@@ -798,8 +801,13 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 
 // parseUnifiedDiffToFiles parses a unified diff into per-file TrackedDiffFile entries.
 // This mirrors the frontend parseUnifiedDiff but runs on the backend for caching.
-func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map[string]FileChangeStats) map[string]*TrackedDiffFile {
+// annotations provides metadata for binary/large files whose hunks were replaced.
+func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map[string]FileChangeStats, annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
 	if diff == "" || !strings.Contains(diff, "\n") {
+		// Even with empty diff, annotations may have binary/large file entries
+		if len(annotations) > 0 {
+			return annotationsToFiles(annotations)
+		}
 		return nil
 	}
 
@@ -822,19 +830,35 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
-			match := fileRe.FindStringSubmatch(line)
-			path := "unknown"
-			if match != nil {
-				path = match[1]
-			}
-			current = &TrackedDiffFile{Path: path, Rows: nil}
-			files[path] = current
+			_, bPath := extractDiffPaths(line)
+			current = &TrackedDiffFile{Path: bPath, Rows: nil}
+			files[bPath] = current
 			inHunk = false
 			newLine = 0
 			rowIdx = 0
 			continue
 		}
 		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			continue
+		}
+		// Check for binary/large file annotation
+		if strings.HasPrefix(line, "# binary-file: ") || strings.HasPrefix(line, "# large-file: ") {
+			if current != nil {
+				isBinary := strings.HasPrefix(line, "# binary-file: ")
+				sizeStr := strings.TrimPrefix(line, "# binary-file: ")
+				if !isBinary {
+					sizeStr = strings.TrimPrefix(line, "# large-file: ")
+				}
+				if size, err := strconv.ParseInt(strings.TrimSpace(sizeStr), 10, 64); err == nil {
+					current.FileSize = &size
+					current.IsBinary = isBinary
+					// Enrich with annotation metadata (origPath for renames)
+					if ann := annotations[current.Path]; ann != nil && ann.origPath != "" {
+						current.OrigPath = ann.origPath
+					}
+				}
+			}
+			inHunk = false
 			continue
 		}
 		if strings.HasPrefix(line, "@@") {
@@ -879,9 +903,9 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		}
 	}
 
-	// Enrich with truncation metadata
+	// Enrich with truncation metadata + annotation data
 	for path, f := range files {
-		if len(f.Rows) == 0 {
+		if len(f.Rows) == 0 && f.FileSize == nil {
 			delete(files, path)
 			continue
 		}
@@ -892,8 +916,31 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 				f.OrigRemoved = s.Removed
 			}
 		}
+		// Enrich with annotation metadata for renames
+		if f.FileSize != nil {
+			if ann := annotations[path]; ann != nil && ann.origPath != "" {
+				f.OrigPath = ann.origPath
+			}
+		}
 	}
 
+	return files
+}
+
+// annotationsToFiles creates TrackedDiffFile entries from annotations (for empty diffs with binary files).
+func annotationsToFiles(annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
+	files := make(map[string]*TrackedDiffFile, len(annotations))
+	for path, ann := range annotations {
+		f := &TrackedDiffFile{
+			Path:     ann.path,
+			FileSize: &ann.size,
+			IsBinary: ann.isBinary,
+		}
+		if ann.origPath != "" {
+			f.OrigPath = ann.origPath
+		}
+		files[path] = f
+	}
 	return files
 }
 
@@ -1034,6 +1081,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 
 	var diffOut, shortStat string
 	var untracked []UntrackedFile
+	var annotations map[string]*fileAnnotation
 
 	if headRef != "" {
 		// Two-ref diff: compare baseRef..headRef (commit-to-commit)
@@ -1046,7 +1094,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
 		shortStat = shortStatFromDiff(diffOut)
-		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 		// No untracked files for commit-to-commit diff
 	} else {
 		// Single-ref diff: working tree vs baseRef.
@@ -1071,7 +1119,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			}
 		}
 		shortStat = shortStatFromDiff(diffOut)
-		diffOut = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
+		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 		// Get untracked files from git status --porcelain (lines starting with "?? ")
 		statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
@@ -1099,9 +1147,15 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 						continue
 					}
 					fileSize := info.Size()
-					// Skip content for large files or binary files
-					if fileSize > maxDiffSize || isBinaryFile(fullPath, fileSize) {
-						untracked = append(untracked, UntrackedFile{Path: filePath, FileSize: fileSize})
+					// Skip content for large files or binary files.
+					// Binary detection: extension check first (O(1)), null-byte scan as fallback.
+					isBin := isBinaryExtension(filePath) || isBinaryContent(fullPath, fileSize)
+					if fileSize > maxDiffSize || isBin {
+						untracked = append(untracked, UntrackedFile{
+							Path:     filePath,
+							FileSize: fileSize,
+							IsBinary: isBin,
+						})
 						continue
 					}
 					// Read file content directly (untracked = new file, all lines are additions)
@@ -1137,7 +1191,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 
 	return &TaskDiff{
 		Diff:              diffOut,
-		Tracked:           parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats),
+		Tracked:           parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations),
 		Untracked:         untracked,
 		ShortStat:         shortStat,
 		TruncatedFiles:    truncatedFiles,
@@ -1189,75 +1243,220 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 
 // -- Helper functions --
 
-// filterLargeBinaryDiffs replaces diff hunks for binary or >1MB files with a size annotation.
-func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string) string {
+// fileAnnotation holds metadata for a file whose diff was replaced with an annotation.
+type fileAnnotation struct {
+	path     string // b/ path (current name)
+	origPath string // a/ path (empty if same as path)
+	size     int64
+	isBinary bool
+}
+
+// filterLargeBinaryDiffs replaces diff hunks for binary or >1MB files with size annotations.
+// Returns the filtered diff and a map of file annotations for the parser to consume.
+// Binary detection uses git's own "Binary files a/X and b/Y differ" marker.
+// Large-file detection uses os.Stat() (>1MB text files).
+func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string) (string, map[string]*fileAnnotation) {
 	if diffText == "" {
-		return diffText
+		return diffText, nil
 	}
 	const maxDiffSize = 1 << 20 // 1MB
+	annotations := make(map[string]*fileAnnotation)
 	var result strings.Builder
 	lines := strings.Split(diffText, "\n")
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
-		// Detect file header: "diff --git a/path b/path"
 		if strings.HasPrefix(line, "diff --git ") {
-			// Extract file path from "diff --git a/X b/Y"
-			path := extractDiffPath(line)
-			fullPath := filepath.Join(worktreePath, path)
-			info, err := os.Stat(fullPath)
-			isLarge := err == nil && info.Mode().IsRegular() && (info.Size() > maxDiffSize || isBinaryFile(fullPath, info.Size()))
+			// Extract a/ and b/ paths from "diff --git a/X b/Y"
+			aPath, bPath := extractDiffPaths(line)
 
-			// Copy header lines until we hit the hunk or next file
+			// Scan header lines for "Binary files a/X and b/Y differ" marker
+			// and the index line for blob hashes (fallback size lookup).
+			isBinary := false
+			var binarySize int64
+			var blobHash string
+			// Write the "diff --git" line and advance past it
+			result.WriteString(line + "\n")
+			i++
 			for i < len(lines) {
 				l := lines[i]
 				if strings.HasPrefix(l, "@@ ") || strings.HasPrefix(l, "diff --git ") {
 					break
 				}
+				if strings.HasPrefix(l, "Binary files ") {
+					isBinary = true
+					binarySize = extractBinarySize(l)
+				}
+				if strings.HasPrefix(l, "index ") && blobHash == "" {
+					// index abc123..def456 mode — grab the second hash (new blob)
+					blobHash = extractBlobHash(l)
+				}
 				result.WriteString(l + "\n")
 				i++
 			}
 
-			// Replace hunk(s) for this file if large/binary
-			if isLarge {
-				fileSize := info.Size()
-				result.WriteString(fmt.Sprintf("# binary or large file: %d bytes\n", fileSize))
-				// Skip all hunk lines for this file
+			if isBinary {
+				// Git confirmed binary — resolve size.
+				if binarySize == 0 {
+					checkPath := bPath
+					if checkPath == "" || strings.Contains(line, "/dev/null") {
+						checkPath = aPath
+					}
+					if size, ok := getFileSize(worktreePath, checkPath, blobHash, wm); ok {
+						binarySize = size
+					}
+				}
+				result.WriteString(fmt.Sprintf("# binary-file: %d\n", binarySize))
 				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
 					i++
 				}
+				annotations[bPath] = &fileAnnotation{
+					path:     bPath,
+					origPath: aPath,
+					size:     binarySize,
+					isBinary: true,
+				}
 				continue
 			}
+
+			// Not binary — check if it's a large text file.
+			if size, ok := getFileSize(worktreePath, bPath, "", wm); ok && size > maxDiffSize {
+				result.WriteString(fmt.Sprintf("# large-file: %d\n", size))
+				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
+					i++
+				}
+				annotations[bPath] = &fileAnnotation{
+					path:     bPath,
+					origPath: aPath,
+					size:     size,
+					isBinary: false,
+				}
+				continue
+			}
+			// Normal text file — headers already written by inner loop.
+			// Continue outer loop to process hunk lines from current i position.
+			continue
 		}
 		result.WriteString(line + "\n")
 		i++
 	}
-	// Remove trailing newline that Split+Join adds
 	out := result.String()
 	if len(out) > 0 && out[len(out)-1] == '\n' {
 		out = out[:len(out)-1]
 	}
-	return out
+	if len(annotations) == 0 {
+		out = out
+	}
+	return out, annotations
 }
 
-// extractDiffPath pulls the file path from "diff --git a/X b/Y" header.
-func extractDiffPath(line string) string {
-	// Format: "diff --git a/path b/path" or "diff --git a/path b/path\n"
-	line = strings.TrimPrefix(line, "diff --git ")
-	// Take the "a/..." part
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) >= 1 && strings.HasPrefix(parts[0], "a/") {
-		return strings.TrimPrefix(parts[0], "a/")
+// getFileSize tries os.Stat() first, falls back to git cat-file -s for blob hash.
+func getFileSize(worktreePath, filePath, blobHash string, wm *WorktreeManager) (int64, bool) {
+	if filePath != "" {
+		fullPath := filepath.Join(worktreePath, filePath)
+		if info, err := os.Stat(fullPath); err == nil && info.Mode().IsRegular() {
+			return info.Size(), true
+		}
+	}
+	if blobHash != "" {
+		if size, err := wm.gitCatFileSize(blobHash); err == nil {
+			return size, true
+		}
+	}
+	return 0, false
+}
+
+// gitCatFileSize returns the size of a git blob object.
+func (wm *WorktreeManager) gitCatFileSize(hash string) (int64, error) {
+	out, err := wm.gitRunOutput("", "cat-file", "-s", hash)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+}
+
+// extractBinarySize tries to get the file size from a "Binary files a/X and b/Y differ" line.
+// Git doesn't include sizes in this line, so this always returns 0.
+// The caller must resolve the size via os.Stat() or git cat-file.
+func extractBinarySize(_ string) int64 {
+	return 0
+}
+
+// extractBlobHash extracts the second (new) hash from "index abc..def mode" line.
+func extractBlobHash(line string) string {
+	line = strings.TrimPrefix(line, "index ")
+	parts := strings.SplitN(line, "..", 2)
+	if len(parts) == 2 {
+		// Second hash may be followed by " mode..."
+		hash := strings.SplitN(parts[1], " ", 2)[0]
+		return hash
 	}
 	return ""
 }
 
-// isBinaryFile checks if a file is binary by scanning the first 8KB for null bytes.
-func isBinaryFile(path string, size int64) bool {
+// extractDiffPaths pulls both a/ and b/ paths from "diff --git a/X b/Y" header.
+func extractDiffPaths(line string) (aPath, bPath string) {
+	line = strings.TrimPrefix(line, "diff --git ")
+	// Parse "a/path b/path"
+	if !strings.HasPrefix(line, "a/") {
+		return "", ""
+	}
+	line = line[2:] // strip "a/"
+	aPath = line
+	// Find " b/" separator
+	if idx := strings.Index(line, " b/"); idx >= 0 {
+		aPath = line[:idx]
+		bPath = line[idx+3:] // strip " b/"
+	} else {
+		bPath = aPath
+	}
+	return aPath, bPath
+}
+
+// binaryExts is a set of file extensions considered binary.
+var binaryExts = map[string]bool{
+	// Images
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".bmp": true, ".ico": true, ".tiff": true, ".tif": true, ".svg": true,
+	".avif": true, ".heic": true, ".heif": true, ".psd": true, ".ai": true,
+	".raw": true, ".cr2": true, ".nef": true,
+	// Archives/Compressed
+	".zip": true, ".tar": true, ".gz": true, ".bz2": true, ".xz": true,
+	".7z": true, ".rar": true, ".tz": true, ".tgz": true, ".txz": true,
+	".deb": true, ".rpm": true, ".jar": true, ".war": true, ".ear": true,
+	// Fonts
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	// Media
+	".mp3": true, ".mp4": true, ".avi": true, ".mov": true, ".wav": true,
+	".webm": true, ".ogg": true, ".flac": true, ".m4a": true, ".wmv": true,
+	".mkv": true, ".flv": true, ".wma": true, ".aac": true, ".ogv": true,
+	// Executables/Binary
+	".dll": true, ".so": true, ".dylib": true, ".exe": true, ".bin": true,
+	".msi": true, ".dmg": true, ".appimage": true,
+	// Compiled/Object
+	".class": true, ".pyc": true, ".o": true, ".a": true, ".lib": true,
+	".pdb": true, ".pyo": true,
+	// Documents
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+	".ppt": true, ".pptx": true,
+	// Database
+	".sqlite": true, ".sqlite3": true, ".db": true,
+	// Other
+	".DS_Store": true, ".git": true, ".lock": true,
+}
+
+// isBinaryExtension checks if a file path has a known binary extension.
+func isBinaryExtension(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return binaryExts[ext]
+}
+
+// isBinaryContent checks if a file is binary by scanning the first 1KB for null bytes.
+func isBinaryContent(path string, size int64) bool {
 	if size == 0 {
 		return false
 	}
-	limit := min(size, int64(8192))
+	limit := min(size, int64(1024))
 	f, err := os.Open(path)
 	if err != nil {
 		return false
