@@ -40,7 +40,7 @@
         onDelete?: () => void;
         onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
         onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
-        onEdit?: (messageId: string, newContent: string) => void; // inline edit without fork
+        onEdit?: (messageId: string, newContent: string) => void;
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
@@ -149,6 +149,16 @@
     let textareaEl: HTMLTextAreaElement | null = $state(null);
     let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
     let editFileInput: HTMLInputElement | null = $state(null);
+    let mobileEditTextarea: HTMLTextAreaElement | null = $state(null);
+    let mobileEditDialog: HTMLDialogElement | null = $state(null);
+
+    // Mobile detection
+    let isMobile = $state(false);
+    {
+        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
+        check();
+        window.matchMedia('(max-width: 768px)').addEventListener('change', check);
+    }
 
     // @ file mention state (for edit mode)
     let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
@@ -296,15 +306,23 @@
         editContent = content;
         editAttachments = attachments ? [...attachments] : [];
         isEditing = true;
-        setTimeout(() => {
-            if (textareaEl) {
-                textareaEl.focus();
-                textareaEl.select();
-            }
-        }, 50);
+        if (isMobile) {
+            setTimeout(() => {
+                mobileEditDialog?.showModal();
+                mobileEditTextarea?.focus();
+            }, 50);
+        } else {
+            setTimeout(() => {
+                if (textareaEl) {
+                    textareaEl.focus();
+                    textareaEl.select();
+                }
+            }, 50);
+        }
     }
 
     function cancelEdit() {
+        mobileEditDialog?.close();
         isEditing = false;
         editContent = content;
         editAttachments = [];
@@ -488,13 +506,12 @@
         </div>
     {:else if role === 'assistant'}
         <div class="message-wrapper assistant-wrapper">
-            {#if isEditing}
+            {#if isEditing && !isMobile}
                 <div class="edit-form">
                     <textarea
                         bind:this={textareaEl}
                         bind:value={editContent}
                         onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
-                        oninput={handleMentionInput}
                         rows="5"
                         aria-label="Edit message content"
                     ></textarea>
@@ -604,6 +621,29 @@
         </div>
     {/if}
 </div>
+
+<!-- Mobile edit -->
+{#if isMobile && isEditing}
+    <dialog class="edit-dialog" bind:this={mobileEditDialog} onclick={(e) => { if (e.target === mobileEditDialog) cancelEdit(); }}>
+        <div class="edit-modal">
+            <div class="edit-modal-header">
+                <h3>Edit message</h3>
+                <button class="close-btn" onclick={cancelEdit} aria-label="Close">✕</button>
+            </div>
+            <textarea
+                bind:this={mobileEditTextarea}
+                bind:value={editContent}
+                onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
+                rows="8"
+                aria-label="Edit message content"
+            ></textarea>
+            <div class="edit-modal-footer">
+                <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>Cancel</button>
+                <button type="button" class="edit-save-btn" onclick={submitEdit}>Save</button>
+            </div>
+        </div>
+    </dialog>
+{/if}
 
 <style>
     .chat-message {
@@ -1067,6 +1107,104 @@
     @keyframes blink {
         0%, 100% { opacity: 1; }
         50% { opacity: 0; }
+    }
+
+    /* Mobile edit */
+    .edit-dialog {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100dvh;
+        max-width: none;
+        max-height: none;
+        padding: 0;
+        border: none;
+        background: transparent;
+        z-index: 10001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .edit-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.6);
+    }
+    .edit-modal {
+        background: var(--color-surface-1);
+        width: 100vw;
+        max-width: none;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        color: var(--color-text-primary);
+    }
+    .edit-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .edit-modal-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    .close-btn {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        font-size: 1.125rem;
+        cursor: pointer;
+        padding: 4px;
+    }
+    .edit-modal textarea {
+        flex: 1;
+        padding: 16px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-primary);
+        font-family: inherit;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        resize: none;
+        outline: none;
+    }
+    .edit-modal-footer {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        padding: 16px;
+        border-top: 1px solid var(--color-border);
+    }
+    .edit-cancel-btn {
+        padding: 7px 14px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        min-height: 44px;
+    }
+    .edit-cancel-btn:hover {
+        background: var(--color-surface-4);
+    }
+    .edit-save-btn {
+        padding: 7px 18px;
+        border-radius: var(--radius-md);
+        background: var(--color-accent);
+        color: #fff;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        min-height: 44px;
+    }
+    .edit-save-btn:hover {
+        opacity: 0.85;
     }
 
 

@@ -357,6 +357,7 @@
             border-top: 1px solid var(--color-border);
             user-select: none;
             -webkit-user-select: none;
+            touch-action: manipulation;
         }
         .kb-row {
             display: flex;
@@ -394,9 +395,11 @@
             border-color: var(--color-accent) !important;
             color: #fff !important;
         }
-        /* Account for keyboard panel height in terminal */
+        /* Push the terminal viewport up so its bottom doesn't sit behind
+           the keyboard panel (~75px tall). flex: 1 + margin-bottom in a
+           flex column shrinks the flex child by the margin amount. */
         .terminal-container {
-            padding-bottom: 100px;
+            margin-bottom: 85px;
         }
     }
     :global(.terminal) {
@@ -404,5 +407,10 @@
     }
     :global(.xterm-text) {
         line-height: 1.4 !important;
+    }
+    /* Touch-scroll the terminal viewport on mobile */
+    :global(.xterm-viewport) {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
     }
 </style>

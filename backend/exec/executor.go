@@ -1103,9 +1103,7 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 var wordRe = regexp.MustCompile(`\S+`)
 
 // buildMessagesFromDB reconstructs the conversation from the task's persisted messages.
-// Returns the messages slice, the index of the last summary message (for lastSummarizeIdx),
-// and the content of the last summary message.
-// Summary messages (role="summarization") are skipped during build but tracked.
+// Returns (messages, lastSummaryIdx, previousSummary).
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, int, string) {
 	promptPath := worktreePath
 	if sandboxEnabled {
@@ -1118,7 +1116,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 		systemPrompt = llama.BuildSystemPrompt(promptPath)
 	}
 
-	// Find the last summarization checkpoint to restore context across restarts.
+	// Restore summary checkpoint across restarts.
 	var lastSummaryMsg *types.TaskMessage
 	for i := len(taskMsgs) - 1; i >= 0; i-- {
 		if taskMsgs[i].Role == "summarization" {
@@ -1131,7 +1129,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	lastSummaryIdx := -1
 	var previousSummary string
 	if lastSummaryMsg != nil {
-		// Restore the summary as an assistant message so the LLM sees it as context
+		// Restore summary as assistant message
 		messages = append(messages, types.ChatMessage{
 			Role:    "assistant",
 			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
@@ -1141,7 +1139,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	}
 
 	for _, m := range taskMsgs {
-		// Skip messages before the last summary checkpoint
+		// Skip messages before summary checkpoint
 		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
 			continue
 		}
@@ -1278,7 +1276,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Persist summarization checkpoint message with stats
+	// Persist summary with stats
 	summaryMsgID := uuid.New().String()
 	_ = te.store.CreateTaskMessage(&types.TaskMessage{
 		ID:              summaryMsgID,
