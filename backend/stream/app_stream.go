@@ -57,6 +57,7 @@ type clientState struct {
 	conn       *websocket.Conn
 	projectSub map[string]int // projectID -> subscriber count (for multi-tab support)
 	taskSub    map[string]int // "projectID:taskID" -> subscriber count
+	writeMu    sync.Mutex     // serializes writes for this connection
 	bufMu      sync.Mutex
 	ringBuffer [][]byte // raw JSON frames for replay
 	bufSize    int
@@ -86,7 +87,6 @@ type branchSnapshot struct {
 type AppStreamManager struct {
 	mu          sync.RWMutex
 	clients     map[*websocket.Conn]*clientState
-	writeMu     sync.Mutex // serializes all writes to prevent concurrent Read/Write races
 	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 
@@ -108,8 +108,14 @@ type AppStreamManager struct {
 	// When a client subscribes to a task, it gets the buffered events so it can
 	// catch up on tokens/tool_calls that were streamed while it was disconnected.
 	taskBufMu   sync.Mutex
-	taskBuffers map[string][][]byte // task key ("projectID:taskID") -> ring buffer
+	taskBuffers map[string][]taskFrame // task key -> ring buffer
 	taskBufSize int
+}
+
+// taskFrame is a single entry in the per-task ring buffer.
+type taskFrame struct {
+	data   []byte
+	toolID string
 }
 
 // NewAppStreamManager creates a new AppStreamManager.
@@ -119,7 +125,7 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		store:         store,
 		worktreeMgr:   worktreeMgr,
 		branchPollers: make(map[string]context.CancelFunc),
-		taskBuffers:   make(map[string][][]byte),
+		taskBuffers:   make(map[string][]taskFrame),
 		taskBufSize:   DefaultBufferSize,
 	}
 	// Initialize the filesystem watcher for task worktrees
@@ -249,8 +255,8 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	buf := asm.getTaskBuffer(key)
 	if len(buf) > 0 {
 		go func() {
-			asm.writeMu.Lock()
-			defer asm.writeMu.Unlock()
+			client.writeMu.Lock()
+			defer client.writeMu.Unlock()
 			for _, frame := range buf {
 				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
 					return
@@ -317,10 +323,10 @@ func (asm *AppStreamManager) SendBoardEvent(projectID string, event types.Stream
 // The payload is JSON-marshaled and sent as the WebSocket frame.
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.mu.RLock()
-	targetConns := make([]*websocket.Conn, 0)
-	for conn, client := range asm.clients {
+	targets := make([]*clientState, 0)
+	for _, client := range asm.clients {
 		if count, ok := client.projectSub[projectID]; ok && count > 0 {
-			targetConns = append(targetConns, conn)
+			targets = append(targets, client)
 		}
 	}
 	asm.mu.RUnlock()
@@ -330,13 +336,13 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 		return
 	}
 
-	asm.writeMu.Lock()
-	for _, conn := range targetConns {
-		if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+	for _, client := range targets {
+		client.writeMu.Lock()
+		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
 			// Client disconnected, will be cleaned up
 		}
+		client.writeMu.Unlock()
 	}
-	asm.writeMu.Unlock()
 
 	// Buffer for reconnect sync
 	asm.bufferRaw(frame)
@@ -372,11 +378,11 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 // sendTaskPayload sends a payload to all clients subscribed to a task.
 func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
 	asm.mu.RLock()
-	targetConns := make([]*websocket.Conn, 0)
+	targets := make([]*clientState, 0)
 	key := projectID + ":" + taskID
-	for conn, client := range asm.clients {
+	for _, client := range asm.clients {
 		if count, ok := client.taskSub[key]; ok && count > 0 {
-			targetConns = append(targetConns, conn)
+			targets = append(targets, client)
 		}
 	}
 	asm.mu.RUnlock()
@@ -386,13 +392,13 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 		return
 	}
 
-	asm.writeMu.Lock()
-	for _, conn := range targetConns {
-		if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+	for _, client := range targets {
+		client.writeMu.Lock()
+		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
 			// Client disconnected
 		}
+		client.writeMu.Unlock()
 	}
-	asm.writeMu.Unlock()
 
 	// Buffer for reconnect sync (per-client and per-task)
 	asm.bufferRaw(frame)
@@ -402,19 +408,19 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 // BroadcastAll sends a raw message to ALL connected clients.
 func (asm *AppStreamManager) BroadcastAll(msg []byte) {
 	asm.mu.RLock()
-	allConns := make([]*websocket.Conn, 0, len(asm.clients))
-	for conn := range asm.clients {
-		allConns = append(allConns, conn)
+	allClients := make([]*clientState, 0, len(asm.clients))
+	for _, client := range asm.clients {
+		allClients = append(allClients, client)
 	}
 	asm.mu.RUnlock()
 
-	asm.writeMu.Lock()
-	for _, conn := range allConns {
-		if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+	for _, client := range allClients {
+		client.writeMu.Lock()
+		if err := client.conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
 			// Client disconnected
 		}
+		client.writeMu.Unlock()
 	}
-	asm.writeMu.Unlock()
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -578,19 +584,23 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 		return
 	}
 
+	// Pre-extract tool_id for O(1) dedup
+	var toolID string
+	if bytesContains(frame, toolCallMarker) {
+		toolID = extractToolID(frame)
+	}
+
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	buf, ok := asm.taskBuffers[taskKey]
 	if !ok {
-		buf = make([][]byte, 0, asm.taskBufSize)
+		buf = make([]taskFrame, 0, asm.taskBufSize)
 	}
 
 	// For tool_call events, replace any existing frame with the same tool_id
 	// so only the last delta is kept (avoids duplicate tool calls on replay).
-	if bytesContains(frame, toolCallMarker) {
-		if toolID := extractToolID(frame); toolID != "" {
-			buf = removeFrameWithToolID(buf, toolID)
-		}
+	if toolID != "" {
+		buf = removeFrameWithToolID(buf, toolID)
 	}
 
 	if len(buf) >= asm.taskBufSize {
@@ -599,7 +609,7 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	// Copy frame to avoid aliasing
 	frameCopy := make([]byte, len(frame))
 	copy(frameCopy, frame)
-	buf = append(buf, frameCopy)
+	buf = append(buf, taskFrame{data: frameCopy, toolID: toolID})
 	asm.taskBuffers[taskKey] = buf
 }
 
@@ -620,24 +630,16 @@ func extractToolID(frame []byte) string {
 	return data.ToolID
 }
 
-// removeFrameWithToolID removes any frame from buf that contains the given tool_id.
-func removeFrameWithToolID(buf [][]byte, toolID string) [][]byte {
-	filtered := make([][]byte, 0, len(buf))
+// removeFrameWithToolID removes any frame from buf that has the given tool_id.
+// Uses pre-extracted toolID for O(1) comparison.
+func removeFrameWithToolID(buf []taskFrame, toolID string) []taskFrame {
+	filtered := make([]taskFrame, 0, len(buf))
 	for _, f := range buf {
-		if !frameHasToolID(f, toolID) {
+		if f.toolID != toolID {
 			filtered = append(filtered, f)
 		}
 	}
 	return filtered
-}
-
-// frameHasToolID checks if a task_event frame contains a tool_call with the given tool_id.
-func frameHasToolID(frame []byte, toolID string) bool {
-	if toolID == "" {
-		return false
-	}
-	// Fast path: check if the tool_id appears in the raw JSON
-	return bytesContains(frame, []byte(`"tool_id":"`+toolID+`"`))
 }
 
 // getTaskBuffer returns the per-task ring buffer without clearing it.
@@ -647,9 +649,11 @@ func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	buf := asm.taskBuffers[taskKey]
-	// Copy so concurrent access is safe
+	// Extract raw data from frames
 	result := make([][]byte, len(buf))
-	copy(result, buf)
+	for i, f := range buf {
+		result[i] = f.data
+	}
 	return result
 }
 
@@ -779,9 +783,9 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 			case <-ticker.C:
 				// Per-ping timeout so Ping() itself can't hang forever
 				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-				asm.writeMu.Lock()
+				client.writeMu.Lock()
 				err := conn.Ping(pingCtx)
-				asm.writeMu.Unlock()
+				client.writeMu.Unlock()
 				pingCancel()
 				if err != nil {
 					cancel() // unblock Read() to tear down the connection
@@ -797,6 +801,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	if r.URL.Query().Get("sync") == "1" {
 		go func() {
 			buf := asm.getBuffer(conn)
+			client.writeMu.Lock()
 			for _, frame := range buf {
 				select {
 				case <-ctx.Done():
@@ -807,6 +812,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 					return
 				}
 			}
+			client.writeMu.Unlock()
 		}()
 	}
 
@@ -829,8 +835,8 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				asm.subscribeProject(conn, sub.ProjectID)
 				log.Printf("[app stream] subscribed to project=%s", sub.ProjectID)
 
-				// Send initial data for the project
-				asm.sendInitialProjectData(conn, sub.ProjectID)
+				// Send initial data for the project (background to not block the read loop)
+				go asm.sendInitialProjectData(ctx, client, conn, sub.ProjectID)
 			}
 
 		case "unsubscribe_project":
@@ -859,7 +865,8 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 }
 
 // sendInitialProjectData sends initial diffs and branch info for a project on subscription.
-func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projectID string) {
+// Runs in a background goroutine; ctx aborts on connection close.
+func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string) {
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
 	}
@@ -869,6 +876,11 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 		return
 	}
 	for _, task := range tasks {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		baseRef := asm.getDiffBaseline(task)
 		// Watch worktrees for tasks in active states
 		if task.Status == "in_progress" || task.Status == "review" {
@@ -890,9 +902,9 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 				"untracked_lines": untrackedLines,
 				"file_hashes":     diffResult.GetPerFileHashes(),
 			})
-			asm.writeMu.Lock()
-			conn.Write(context.Background(), websocket.MessageText, statsMsg)
-			asm.writeMu.Unlock()
+			client.writeMu.Lock()
+			conn.Write(ctx, websocket.MessageText, statsMsg)
+			client.writeMu.Unlock()
 
 		// Send manifest for detail view (per-file metadata, no diff content)
 		files := make(map[string]map[string]any)
@@ -923,9 +935,9 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			"files":      files,
 			"short_stat": diffResult.ShortStat,
 		})
-		asm.writeMu.Lock()
-		conn.Write(context.Background(), websocket.MessageText, msg)
-		asm.writeMu.Unlock()
+		client.writeMu.Lock()
+		conn.Write(ctx, websocket.MessageText, msg)
+		client.writeMu.Unlock()
 		}
 	}
 
@@ -936,9 +948,9 @@ func (asm *AppStreamManager) sendInitialProjectData(conn *websocket.Conn, projec
 			"type":   "project_branch",
 			"branch": branch,
 		})
-		asm.writeMu.Lock()
-		conn.Write(context.Background(), websocket.MessageText, msg)
-		asm.writeMu.Unlock()
+		client.writeMu.Lock()
+		conn.Write(ctx, websocket.MessageText, msg)
+		client.writeMu.Unlock()
 	}
 }
 

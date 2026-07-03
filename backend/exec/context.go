@@ -116,7 +116,13 @@ func formatChatHistory(messages []types.ChatMessage, lastSummarizeIdx int, skipS
 		}
 	}
 
-	var sb strings.Builder
+	// Pre-allocate builder capacity
+	var totalSize int
+	for _, m := range messages {
+		totalSize += len(m.Content) + len(m.ReasoningContent)
+	}
+	sb := strings.Builder{}
+	sb.Grow(totalSize + len(messages)*50)
 	for i := summarizeFrom; i < len(messages); i++ {
 		m := messages[i]
 		// Skip the previous summary message — it is passed as PreviousSummary
@@ -222,7 +228,8 @@ func isSandboxableTool(name string) bool {
 // Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
 // from the working tree — files stay visible in the filesystem.
 // Runs the LLM labeler in a goroutine so it does not block the main execution loop.
-func (te *TaskExecutor) createCheckpoint(projectID, taskID, worktreePath, threadID, assistantMsgID string, messages []types.ChatMessage, sandboxEnabled bool) {
+// ctx is used to cancel the background goroutine when the task is stopped.
+func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, messages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
 	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {
@@ -238,19 +245,31 @@ func (te *TaskExecutor) createCheckpoint(projectID, taskID, worktreePath, thread
 
 	// Run stash + LLM labeler in background (non-blocking)
 	go func() {
-		// Get diff stat for the LLM labeler
+		// Check for cancellation before expensive work
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		diffStat, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
 		if err != nil {
 			diffStat = "file changes"
 		}
 
-		// Generate commit label via LLM (include branch prefix for stash list filtering)
 		taskForLabel, _ := te.store.GetTaskByTaskID(taskID)
 		branchPrefix := ""
 		if taskForLabel != nil && taskForLabel.Branch != "" {
 			branchPrefix = "On " + taskForLabel.Branch + ": "
 		}
 		label := branchPrefix + te.GenerateCommitLabel(taskID, diffStat, turnText)
+
+		// Check for cancellation before git operations
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
 		// Serialize stash operations per project (stash is repo-wide)
 		task, _ := te.store.GetTaskByTaskID(taskID)

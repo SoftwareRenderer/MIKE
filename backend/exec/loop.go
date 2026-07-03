@@ -31,6 +31,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
+		// Close os.Root to release file descriptor (non-sandbox tasks)
+		te.taskMu.Lock()
+		if state, exists := te.tasks[task.ID]; exists && state.root != nil {
+			_ = state.root.Close()
+		}
+		te.taskMu.Unlock()
 		// Only remove from tasks map if we're still the active executor
 		// (prevents old executor from deleting a replacement during type switch)
 		te.taskMu.Lock()
@@ -153,6 +159,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Root creation failed: %v", err), "root_create_failed")
 			return
 		}
+		state.root = root
 		_, state.sandboxWrite = makeRootCallbacks(root, worktreePath)
 	}
 
@@ -412,7 +419,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 		_, err := te.gate.Acquire(ctx, serverURL, concurrency)
 		if err != nil {
-			close(queueDone)
+			close(queueDone) // cleanup polling goroutine
 			// Context cancelled while waiting for slot
 			task.ExecutionState = "stopped"
 			task.Output = "Stopped by user"
@@ -497,6 +504,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						return
 					case <-time.After(time.Duration(i+1) * 2 * time.Second):
 					}
+					// Reset builders so retry doesn't concatenate partial content
+					assistantContent.Reset()
+					reasoningContent.Reset()
+					pendingToolCalls = nil
 					usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
 						if choice.Delta.ReasoningContent != nil {
 							reasoningContent.WriteString(*choice.Delta.ReasoningContent)
@@ -858,7 +869,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			reasoningContent.Reset()
 
 			// Auto-commit file changes as a checkpoint
-			te.createCheckpoint(projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, messages, sandboxEnabled)
+			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, messages, sandboxEnabled)
 
 			// Broadcast updated diff stats to board viewers
 			thread, _ := te.store.GetThread(task.CurrentThreadID)

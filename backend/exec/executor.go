@@ -48,6 +48,8 @@ type executionState struct {
 	sandboxExec  execFunc
 	sandboxRead  readFunc
 	sandboxWrite writeFunc
+	// os.Root handle for non-sandbox write isolation.
+	root *os.Root
 }
 
 // modelConfig holds mutable model/provider settings for an executor.

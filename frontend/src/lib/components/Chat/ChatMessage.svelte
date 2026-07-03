@@ -593,12 +593,16 @@
                                     {#each interleavedLayout.reasoningSegments as seg}
                                         {#if seg.type === 'reasoning'}
                                             <div class="reasoning-content">{seg.text}</div>
-                                        {:else if seg.type === 'tool'}
-                                            <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={seg.tc.messageId} projectId={projectId} taskId={msgTaskId} />
                                         {/if}
                                     {/each}
                                 {/if}
                             {/if}
+                            <!-- Always show tool calls, even when reasoning is hidden -->
+                            {#each interleavedLayout.reasoningSegments as seg}
+                                {#if seg.type === 'tool'}
+                                    <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={seg.tc.messageId} projectId={projectId} taskId={msgTaskId} />
+                                {/if}
+                            {/each}
                         </div>
                     {/if}
                     {#if interleavedLayout.trailingContent}
