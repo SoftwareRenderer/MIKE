@@ -104,7 +104,7 @@
         },
     });
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
     let originalContent = $state('');
@@ -411,6 +411,10 @@
                 showConfirm = false;
                 return;
             }
+            if (mobileFullscreen && onToggleFullscreen) {
+                onToggleFullscreen();
+                return;
+            }
             requestClose();
             return;
         }
@@ -446,12 +450,22 @@
             </svg>
             <span class="file-path" title={filePath}>{displayPath}</span>
         </div>
-        <button
-            class="btn-save"
-            onclick={handleSave}
-            disabled={!hasChanges || saving || fileTooLarge}
-            title="Save (Ctrl+S)"
-        >
+        <div class="editor-actions">
+            {#if onToggleFullscreen}
+                <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
+                    {#if mobileFullscreen}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {/if}
+                </button>
+            {/if}
+            <button
+                class="btn-save"
+                onclick={handleSave}
+                disabled={!hasChanges || saving || fileTooLarge}
+                title="Save (Ctrl+S)"
+            >
             {#if saving}
                 <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <path d="M12 2a10 10 0 0 1 10 10"/>
@@ -460,7 +474,8 @@
             {:else}
                 Save
             {/if}
-        </button>
+            </button>
+        </div>
     </div>
 
     <!-- Body -->
@@ -607,6 +622,40 @@
     }
     .btn-back.unsaved:hover {
         color: var(--color-text-primary);
+    }
+
+    .editor-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .editor-icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+    }
+    .editor-icon-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    /* Fullscreen toggle: visible on mobile and tablets */
+    .editor-fullscreen-toggle {
+        display: none;
+    }
+    @media (max-width: 1024px) {
+        .editor-fullscreen-toggle {
+            display: flex;
+        }
     }
 
     .btn-save {

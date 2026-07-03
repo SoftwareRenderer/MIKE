@@ -686,11 +686,11 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
-    /* Fullscreen toggle: visible only on tablets (768–1024px) */
+    /* Fullscreen toggle: visible on mobile and tablets */
     .editor-fullscreen-toggle {
         display: none;
     }
-    @media (min-width: 768px) and (max-width: 1024px) {
+    @media (max-width: 1024px) {
         .editor-fullscreen-toggle {
             display: flex;
         }

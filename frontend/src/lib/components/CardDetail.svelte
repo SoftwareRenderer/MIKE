@@ -190,6 +190,11 @@
 
     // File editor overlay
     let editingFile = $state<{ path: string; lineNumber: number; displayPath: string } | null>(null);
+    let editorFullscreen = $state(false);
+
+    function toggleEditorFullscreen() {
+        editorFullscreen = !editorFullscreen;
+    }
 
     function resolveFilePath(relativePath: string): string | null {
         if (!task.id) return null;
@@ -209,6 +214,7 @@
     }
 
     function closeFileEditor(saved: boolean) {
+        editorFullscreen = false;
         editingFile = null;
     }
 
@@ -404,7 +410,7 @@
     $effect(() => {
         activeTab = activeTabProp;
     });
-    let isMobile = $derived(false);
+    let isMobile = $state(false);
 
 
     // Build children map for subtask hierarchy
@@ -1049,7 +1055,7 @@
 
 </script>
 
-    <div class="task-detail-page">
+    <div class="task-detail-page" class:fullscreen={isMobile && editorFullscreen}>
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -1148,6 +1154,9 @@
                                 projectId={task.project_id}
                                 taskId={task.id}
                                 onClose={closeFileEditor}
+                                onToggleFullscreen={toggleEditorFullscreen}
+                                mobileFullscreen={editorFullscreen}
+                                isMobile={isMobile}
                             />
                         {:else}
                             <div class="file-editor-loading">Loading editor...</div>
@@ -1338,5 +1347,32 @@
     @keyframes checkpoint-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
+    }
+
+    /* File editor fullscreen mode (mobile) */
+    .task-detail-page.fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        margin: 0;
+    }
+    .task-detail-page.fullscreen :global(.header),
+    .task-detail-page.fullscreen :global(.mobile-tab-bar) {
+        display: none !important;
+    }
+    .task-detail-page.fullscreen .columns {
+        height: 100%;
+    }
+    .task-detail-page.fullscreen .column-context,
+    .task-detail-page.fullscreen .column-chat {
+        display: none !important;
+    }
+    .task-detail-page.fullscreen .column-diff {
+        width: 100% !important;
+        flex: 1 !important;
+        min-width: 100% !important;
     }
 </style>

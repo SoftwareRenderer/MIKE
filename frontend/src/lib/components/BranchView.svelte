@@ -368,9 +368,9 @@
     function checkMobile() {
         const wasMobile = isMobile;
         isMobile = window.matchMedia('(max-width: 768px)').matches;
-        if (isMobile) {
+        if (isMobile && !wasMobile) {
             activeTab = 'files';
-            if (!wasMobile) splitRatio = 0.75;
+            splitRatio = 0.75;
         }
     }
 
