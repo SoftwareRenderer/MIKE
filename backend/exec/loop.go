@@ -1380,7 +1380,6 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 			switch event.Type {
 			case "agent_end":
-				agentEnded = true
 				stopReason = event.StopReason
 				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
 
@@ -1575,6 +1574,22 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					}
 				}
 
+				// Check for queued user messages before ending.
+				// If a follow-up was sent while Pi was processing, forward it
+				// with steer behavior to start the next turn.
+				select {
+				case um := <-userMsgChan:
+					log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
+					err := client.Prompt(ctx, um.Content, "steer")
+					if err != nil {
+						log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
+					}
+					// Don't set agentEnded — continue the event loop for the next turn
+				default:
+					// No queued messages — Pi is truly done
+					agentEnded = true
+				}
+
 			case "response":
 				if !event.Success && event.Error != "" && event.Command == "prompt" {
 					log.Printf("[pi] task=%s prompt response error: %s", task.ID, event.Error)
@@ -1583,9 +1598,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			}
 
 		case um := <-userMsgChan:
-			// Forward user message to Pi
+			// Forward user message to Pi with steer behavior.
+			// "steer" queues the message while the agent is running;
+			// it is delivered after the current turn's tool calls finish.
 			log.Printf("[pi] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
-			err := client.Prompt(ctx, um.Content)
+			err := client.Prompt(ctx, um.Content, "steer")
 			if err != nil {
 				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
 			}
@@ -1596,64 +1613,77 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	duration := time.Since(startTime)
 	log.Printf("[pi] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
 
-	if stopReason == "stop" || stopReason == "length" || stopReason == "process_exited" {
-		if task.AutoCommit {
-			// Commit changes
-			summary := task.ChangeSummary
-			if summary == "" {
-				summary = task.Title
+	// Determine task state based on stop reason.
+	// Pi stop reasons: "stop", "length", "toolUse", "error", "aborted"
+	// Empty stopReason means agent_end had no assistant messages (edge case).
+	isError := stopReason == "error"
+	if isError {
+		task.ExecutionState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Pi Coding Agent ended with error (stopReason=%s)", stopReason)
+	} else if stopReason == "aborted" {
+		task.ExecutionState = "stopped"
+		task.Status = "review"
+		task.Output = "Pi Coding Agent was aborted"
+	} else if task.AutoCommit {
+		// Commit changes
+		summary := task.ChangeSummary
+		if summary == "" {
+			summary = task.Title
+		}
+		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
+		te.gitRun(worktreePath, "add", "-A")
+		te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
+		// Merge into origin branch if auto_merge is enabled
+		if task.AutoMerge {
+			if err := te.mergeBranch(projectID, task.ID, task); err != nil {
+				log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
 			}
-			commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
-			te.gitRun(worktreePath, "add", "-A")
-			te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
-			// Merge into origin branch if auto_merge is enabled
-			if task.AutoMerge {
-				if err := te.mergeBranch(projectID, task.ID, task); err != nil {
-					log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
-				}
-			}
-			task.ExecutionState = "completed"
-			task.Status = "done"
-			if te.sandboxMgr != nil {
-				_ = te.sandboxMgr.Stop(task.ID)
-			}
-		} else {
-			task.ExecutionState = "awaiting_review"
-			task.Status = "review"
+		}
+		task.ExecutionState = "completed"
+		task.Status = "done"
+		if te.sandboxMgr != nil {
+			_ = te.sandboxMgr.Stop(task.ID)
 		}
 		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
-		te.store.UpdateTask(task)
+	} else {
+		task.ExecutionState = "awaiting_review"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+	}
+	te.store.UpdateTask(task)
 
-		// Broadcast complete event
-		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-			"state":            task.ExecutionState,
-			"summary":          "Pi Coding Agent finished",
-			"model_name":       client.ModelName(),
-			"prompt_tokens":    totalPromptTokens,
-			"predicted_tokens": totalPredictedTokens,
-			"cache_tokens":     0,
-			"prompt_ms":        0,
-			"predicted_ms":     0,
-			"duration":         duration.Milliseconds(),
-		}})
+	// Always broadcast complete event to clear streaming state on the frontend.
+	// The frontend's complete handler calls closeCurrentAssistant() which clears
+	// the isStreaming flag on the assistant entry (removes the blinking cursor).
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+		"state":            task.ExecutionState,
+		"summary":          "Pi Coding Agent finished",
+		"model_name":       client.ModelName(),
+		"prompt_tokens":    totalPromptTokens,
+		"predicted_tokens": totalPredictedTokens,
+		"cache_tokens":     0,
+		"prompt_ms":        0,
+		"predicted_ms":     0,
+		"duration":         duration.Milliseconds(),
+	}})
 
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
-		// Broadcast diff
-		baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-		if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-			hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-			fileHashes := diffResult.GetPerFileHashes()
-			untrackedLines := 0
-			for _, u := range diffResult.Untracked {
-				untrackedLines += len(u.Lines)
-			}
-			te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
+	// Broadcast diff
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
+	if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
+		hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+		fileHashes := diffResult.GetPerFileHashes()
+		untrackedLines := 0
+		for _, u := range diffResult.Untracked {
+			untrackedLines += len(u.Lines)
 		}
+		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
+	}
 
-		// Auto-start next sibling if subtask
-		if task.ParentTaskID != "" {
-			_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
-		}
+	// Auto-start next sibling if subtask
+	if task.ParentTaskID != "" {
+		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
 	}
 }

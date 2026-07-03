@@ -22,6 +22,13 @@
         duration?: number;
         isPending?: boolean;
         bytesWritten?: number;
+        // Position in the content stream when this tool call was added.
+        // Used to interleave tool calls with text during rendering.
+        // contentIndex = entry.content.length at time of tool call.
+        // reasoningIndex = entry.reasoningContent.length at time of tool call.
+        // When undefined (DB-loaded entries), tool calls render at the end.
+        contentIndex?: number;
+        reasoningIndex?: number;
     }
 
     interface Props {
@@ -72,6 +79,49 @@
     );
 
     let expandedArgs = $state<Set<string>>(new Set());
+
+    /** Build interleaved segments for reasoning-region (inside collapsible reasoning block).
+        Returns { reasoningSegments, trailingContent, trailingTools } or null if no interleaving needed. */
+    type Segment = { type: 'reasoning', text: string } | { type: 'tool', tc: ToolCallInfo };
+
+    // Helper to compute interleaved layout from current reactive values.
+    // Called inside $derived to establish reactive dependencies.
+    function _computeLayout(tcs: ToolCallInfo[] | undefined, reasoning: string | undefined, txt: string | undefined): { reasoningSegments: Segment[]; trailingContent: string; trailingTools: ToolCallInfo[] } | null {
+        if (!tcs || tcs.length === 0) return null;
+        const hasPositionData = tcs.some(tc => tc.contentIndex !== undefined && tc.reasoningIndex !== undefined);
+        if (!hasPositionData) return null;
+
+        const reasoningText = reasoning || '';
+        const contentText = txt || '';
+
+        const positioned = tcs.filter(tc => tc.contentIndex !== undefined && tc.reasoningIndex !== undefined);
+        const unpositioned = tcs.filter(tc => tc.contentIndex === undefined || tc.reasoningIndex === undefined);
+        const withinReasoning = positioned.filter(tc => reasoningText.length > 0 && (tc.reasoningIndex || 0) <= reasoningText.length).sort((a, b) => (a.reasoningIndex || 0) - (b.reasoningIndex || 0));
+        const afterReasoning = positioned.filter(tc => reasoningText.length === 0 || (tc.reasoningIndex || 0) > reasoningText.length).sort((a, b) => (a.contentIndex || 0) - (b.contentIndex || 0));
+
+        const reasoningSegments: Segment[] = [];
+        let lastIdx = 0;
+        for (const tc of withinReasoning) {
+            const rIdx = tc.reasoningIndex || 0;
+            if (rIdx > lastIdx) {
+                reasoningSegments.push({ type: 'reasoning', text: reasoningText.slice(lastIdx, rIdx) });
+            }
+            reasoningSegments.push({ type: 'tool', tc });
+            lastIdx = rIdx;
+        }
+        if (lastIdx < reasoningText.length) {
+            reasoningSegments.push({ type: 'reasoning', text: reasoningText.slice(lastIdx) });
+        }
+        if (withinReasoning.length === 0) return null;
+
+        return {
+            reasoningSegments,
+            trailingContent: contentText,
+            trailingTools: afterReasoning.concat(unpositioned)
+        };
+    }
+
+    let interleavedLayout = $derived(_computeLayout(toolCalls, effectiveReasoning, content));
 
     function toggleArgs(toolId: string) {
         const next = new Set(expandedArgs);
@@ -526,38 +576,81 @@
                     </div>
                 </div>
             {:else}
-                {#if showReasoningToggle}
-                <div class="reasoning-block" class:expanded={reasoningExpanded}>
-                    <button class="reasoning-toggle" onclick={() => handleReasoningToggle()} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
-                        </svg>
-                        {reasoningExpanded ? 'Hide' : 'Show'} reasoning
-                    </button>
-                    {#if reasoningExpanded}
-                        {#if reasoningLoading}
-                            <div class="reasoning-content reasoning-loading">Loading reasoning...</div>
-                        {:else if effectiveReasoning && effectiveReasoning !== '[HIDDEN]'}
-                            <div class="reasoning-content">{effectiveReasoning}</div>
-                        {/if}
+                {#if interleavedLayout}
+                    <!-- Interleaved rendering: reasoning (with tools) → content → trailing tools -->
+                    {#if showReasoningToggle}
+                        <div class="reasoning-block" class:expanded={reasoningExpanded}>
+                            <button class="reasoning-toggle" onclick={() => handleReasoningToggle()} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
+                                </svg>
+                                {reasoningExpanded ? 'Hide' : 'Show'} reasoning
+                            </button>
+                            {#if reasoningExpanded}
+                                {#if reasoningLoading}
+                                    <div class="reasoning-content reasoning-loading">Loading reasoning...</div>
+                                {:else}
+                                    {#each interleavedLayout.reasoningSegments as seg}
+                                        {#if seg.type === 'reasoning'}
+                                            <div class="reasoning-content">{seg.text}</div>
+                                        {:else if seg.type === 'tool'}
+                                            <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={seg.tc.messageId} projectId={projectId} taskId={msgTaskId} />
+                                        {/if}
+                                    {/each}
+                                {/if}
+                            {/if}
+                        </div>
                     {/if}
-                </div>
-            {/if}
-            {#if content}
-                <div class="message-bubble assistant-bubble">
-                    <div class="message-text" class:streaming={isStreaming}>
-                        {@html renderedHtml}
-                        {#if isStreaming}
-                            <span class="cursor-blink"></span>
+                    {#if interleavedLayout.trailingContent}
+                        <div class="message-bubble assistant-bubble">
+                            <div class="message-text" class:streaming={isStreaming}>
+                                {@html marked.parse(interleavedLayout.trailingContent, { async: false }) as string}
+                                {#if isStreaming}
+                                    <span class="cursor-blink"></span>
+                                {/if}
+                            </div>
+                        </div>
+                    {/if}
+                    {#if interleavedLayout.trailingTools && interleavedLayout.trailingTools.length > 0}
+                        {#each interleavedLayout.trailingTools as tc (tc.toolId)}
+                            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} projectId={projectId} taskId={msgTaskId} />
+                        {/each}
+                    {/if}
+                {:else}
+                    <!-- Standard rendering (no interleaving): reasoning → content → tool calls -->
+                    {#if showReasoningToggle}
+                    <div class="reasoning-block" class:expanded={reasoningExpanded}>
+                        <button class="reasoning-toggle" onclick={() => handleReasoningToggle()} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
+                            </svg>
+                            {reasoningExpanded ? 'Hide' : 'Show'} reasoning
+                        </button>
+                        {#if reasoningExpanded}
+                            {#if reasoningLoading}
+                                <div class="reasoning-content reasoning-loading">Loading reasoning...</div>
+                            {:else if effectiveReasoning && effectiveReasoning !== '[HIDDEN]'}
+                                <div class="reasoning-content">{effectiveReasoning}</div>
+                            {/if}
                         {/if}
                     </div>
-                </div>
-            {/if}
-            {#if toolCalls && toolCalls.length > 0}
-                {#each toolCalls as tc (tc.toolId)}
-                    <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} projectId={projectId} taskId={msgTaskId} />
-                {/each}
-            {/if}
+                {/if}
+                {#if content}
+                    <div class="message-bubble assistant-bubble">
+                        <div class="message-text" class:streaming={isStreaming}>
+                            {@html renderedHtml}
+                            {#if isStreaming}
+                                <span class="cursor-blink"></span>
+                            {/if}
+                        </div>
+                    </div>
+                {/if}
+                {#if toolCalls && toolCalls.length > 0}
+                    {#each toolCalls as tc (tc.toolId)}
+                        <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} projectId={projectId} taskId={msgTaskId} />
+                    {/each}
+                {/if}
+                {/if}
             {#if stats}
                 <div class="message-stats">
                     <span class="stats-model-name">{stats.model_name || 'model'}</span>

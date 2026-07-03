@@ -147,6 +147,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     let currentAssistantId: string | null = $state(null);
     let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
+    // Track ALL processed tool IDs (including completed ones) to prevent
+    // agent_end from creating duplicate tool calls in different entries.
+    // Use a plain variable (not $state) to avoid reactivity resetting the Set.
+    let processedToolIds = new Set<string>();
 
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
@@ -405,6 +409,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 if (!data.tool_id || data.tool_id === '') {
                     break;
                 }
+                // Skip if this tool was already processed (prevents agent_end from
+                // creating duplicates when currentAssistantId changed since streaming).
+                if (processedToolIds.has(data.tool_id)) {
+                    break;
+                }
+                // Mark as processed immediately (before entry lookup) so even if
+                // the tool is deduped within an entry, agent_end won't re-add it.
+                processedToolIds.add(data.tool_id);
                 // Attach tool call to the current assistant entry, or fall back to
                 // the last existing assistant entry (e.g., agent_end sends tool_call
                 // events after the streaming assistant was already closed).
@@ -439,8 +451,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     existing.raw_args = data.raw_args;
                     existing.sandbox = data.sandbox;
                     existing.path = data.path;
+                    // Don't re-enable isStreaming for deduped tool calls (e.g., from agent_end).
+                    // The entry may have already been closed by the tool_result handler.
                 } else {
-                    entry.toolCalls.push({
+                    const ci = entry.content.length;
+                    const ri = (entry.reasoningContent || '').length;
+                    // Create new array reference so $derived in ChatMessage recomputes.
+                    // Svelte 5 tracks array references, not in-place mutations.
+                    entry.toolCalls = [...(entry.toolCalls || []), {
                         toolId: data.tool_id,
                         toolName: data.tool_name,
                         displayName: data.tool_display_name,
@@ -448,11 +466,15 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                         raw_args: data.raw_args,
                         sandbox: data.sandbox,
                         path: data.path,
-                        isPending: true
-                    });
+                        isPending: true,
+                        contentIndex: ci,
+                        reasoningIndex: ri
+                    }];
+                    // Only set isStreaming for NEW tool calls (during active streaming).
+                    // Deduped tool calls from agent_end should not re-enable the cursor.
+                    entry.isStreaming = true;
+                    activeToolCalls.set(data.tool_id, { entryId: entry.id });
                 }
-                entry.isStreaming = true;
-                activeToolCalls.set(data.tool_id, { entryId: entry.id });
                 scroll();
                 break;
             }
@@ -568,6 +590,16 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     }
                 }
                 closeCurrentAssistant();
+                // Safety net: clear isStreaming on ALL assistant entries.
+                // For Pi, the tool_result handler may have already closed the current entry,
+                // leaving currentAssistantId=null. But a stale entry (e.g., from a split
+                // caused by closeCurrentAssistant during tool results) might still have
+                // isStreaming=true. Clear all to ensure the blinking cursor disappears.
+                for (const e of entries) {
+                    if (e.role === 'assistant' && e.isStreaming) {
+                        e.isStreaming = false;
+                    }
+                }
                 // Store total context (prompt + predicted) for context usage display.
                 // prompt_tokens = input sent to LLM, predicted_tokens = output generated.
                 // Total context consumed = both, since output becomes part of history for next turn.
@@ -643,8 +675,12 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                         }
                     }
                     activeToolCalls.clear();
-                    // Remove assistant entries with only pending tool calls (no text content)
-                    entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content));
+                    // Don't clear processedToolIds here — Pi can send multiple
+                    // status:running events (e.g., extension_ui_request) within a turn.
+                    // Clearing here would lose tool IDs and cause agent_end duplicates.
+                    // Remove assistant entries with only pending tool calls (no text AND no reasoning).
+                    // Entries with reasoning content should be kept even if they have no text content.
+                    entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
                     // Executor is actively running — no longer awaiting LLM
@@ -653,11 +689,18 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     // Response was cancelled by new user message — clear streaming state.
                     closeCurrentAssistant();
                     activeToolCalls.clear();
+                    processedToolIds.clear(); // Cancel means turn is over, safe to clear
                     entries = entries.filter(e => !e.isStreaming);
                     markNotStreaming();
                     awaitingResponse = false;
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
-                    // Executor finished — clear streaming state
+                    // Executor finished — clear streaming state.
+                    // Do NOT call closeCurrentAssistant() here — Pi sends status "idle"
+                    // BEFORE the tool_call/tool_result events from agent_end. Calling
+                    // closeCurrentAssistant() would clear currentAssistantId, causing
+                    // the subsequent tool_call events to create a new empty assistant
+                    // entry (with isStreaming=true / blue cursor) instead of merging
+                    // into the existing entry. Let the 'complete' event handle that.
                     markNotStreaming();
                     awaitingResponse = false;
                 }
@@ -716,6 +759,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     // Clear streaming state to prevent old thread's entries from leaking
                     closeCurrentAssistant();
                     activeToolCalls.clear();
+                    processedToolIds.clear();
                     entries = [];
                     currentAssistantId = null;
                     streamTokenCount = 0;
@@ -1129,6 +1173,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             // so old thread's streaming entries would leak into the new thread.
             closeCurrentAssistant();
             activeToolCalls.clear();
+                    processedToolIds.clear();
             entries = [];
             currentAssistantId = null;
             streamTokenCount = 0;
@@ -1156,6 +1201,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             // Clear streaming state before loading new thread's messages.
             closeCurrentAssistant();
             activeToolCalls.clear();
+                    processedToolIds.clear();
             entries = [];
             currentAssistantId = null;
             streamTokenCount = 0;
@@ -1240,6 +1286,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 currentAssistantId = null;
             }
             activeToolCalls.clear();
+                    processedToolIds.clear();
             markNotStreaming();
         }
         // If task is in Done, move it back to In Progress before sending
@@ -1428,6 +1475,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
         // Clear active tool calls (immediate UI update)
         activeToolCalls.clear();
+                    processedToolIds.clear();
         try {
             await stopTask(projectId, taskId);
         } catch (e) {
@@ -1555,6 +1603,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             // Clear streaming state before loading new thread's messages.
             closeCurrentAssistant();
             activeToolCalls.clear();
+                    processedToolIds.clear();
             entries = [];
             currentAssistantId = null;
             streamTokenCount = 0;

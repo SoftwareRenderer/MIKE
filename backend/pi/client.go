@@ -179,11 +179,18 @@ func (c *Client) PID() int {
 
 // Prompt sends a user prompt to Pi.
 // Returns immediately after the prompt is accepted. Events stream via EventChan().
-func (c *Client) Prompt(ctx context.Context, message string) error {
+// The optional streamingBehavior parameter controls delivery when the agent is already streaming:
+//   - "steer": Queue while agent is running; delivered after current turn's tool calls finish
+//   - "followUp": Wait until agent finishes; delivered only when agent stops
+//   - "" (default): Send normally (errors if agent is streaming, per Pi RPC protocol)
+func (c *Client) Prompt(ctx context.Context, message string, streamingBehavior ...string) error {
 	cmd := map[string]any{
 		"type":    "prompt",
 		"message": message,
 		"id":      fmt.Sprintf("prompt-%d", time.Now().UnixNano()),
+	}
+	if len(streamingBehavior) > 0 && streamingBehavior[0] != "" {
+		cmd["streamingBehavior"] = streamingBehavior[0]
 	}
 	data, err := json.Marshal(cmd)
 	if err != nil {
