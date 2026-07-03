@@ -3,6 +3,7 @@
     import { get } from 'svelte/store';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
+    import { WebglAddon } from '@xterm/addon-webgl';
     import { showTerminal, selectedProject, selectedTask } from '$lib/store';
     import { createTerminal, createProjectTerminal } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -160,6 +161,9 @@
             },
         });
 
+        let webglRef: WebglAddon | null = new WebglAddon();
+        webglRef.onContextLoss(() => { webglRef = null; });
+        term.loadAddon(webglRef);
         const fit = new FitAddon();
         term.loadAddon(fit);
         term.open(container);
@@ -178,10 +182,118 @@
             term.writeln('No project selected');
         }
 
+        let fitPending = false;
         const observer = new ResizeObserver(() => {
-            fit.fit();
+            if (!fitPending) {
+                fitPending = true;
+                requestAnimationFrame(() => { fit.fit(); fitPending = false; });
+            }
         });
         observer.observe(container);
+
+        // Enable inertial scrolling on mobile.
+        // Tracks per-frame deltas, preserves fractional line movements, and normalizes decay across refresh rates.
+        let touchStartY = 0;
+        let touchVelSamples: { y: number; t: number }[] = [];
+        let inertiaRaf: number | null = null;
+        let currentTouchY = 0;
+        let pixelBufferY = 0; // Remainder buffer to prevent quantization jank
+        let lastTickTime = 0;
+        let isDisposed = false;
+
+        const LINE_HEIGHT = 16; // Match your terminal's row height
+
+        const stopInertia = () => {
+            if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; }
+        };
+
+        const onTouchStart = (e: TouchEvent) => {
+            if (isDisposed) return;
+            stopInertia();
+            
+            touchStartY = e.touches[0].pageY;
+            currentTouchY = touchStartY;
+            pixelBufferY = 0; 
+            touchVelSamples = [{ y: touchStartY, t: performance.now() }];
+        };
+
+        const onTouchMove = (e: TouchEvent) => {
+            if (isDisposed) return;
+            
+            const now = performance.now();
+            currentTouchY = e.touches[0].pageY;
+            
+            // 1. Log sample for inertia velocity calculation
+            touchVelSamples.push({ y: currentTouchY, t: now });
+            while (touchVelSamples.length > 1 && touchVelSamples[0].t < now - 100) {
+                touchVelSamples.shift();
+            }
+            
+            // 2. Track precise delta instead of resetting to a strict grid
+            const deltaY = touchStartY - currentTouchY;
+            touchStartY = currentTouchY;
+            
+            pixelBufferY += deltaY;
+            
+            // 3. Only scroll when accumulated pixels cross a full line threshold
+            if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
+                const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
+                pixelBufferY -= lines * LINE_HEIGHT; // Save the fractional remainder!
+                try { term.scrollLines(lines); } catch {}
+            }
+        };
+
+        const onTouchEnd = () => {
+            if (isDisposed) return;
+            if (touchVelSamples.length < 3) return;
+            
+            let totalVel = 0, weights = 0;
+            for (let i = 1; i < touchVelSamples.length; i++) {
+                const dt = touchVelSamples[i].t - touchVelSamples[i-1].t || 1;
+                const vel = (touchVelSamples[i-1].y - touchVelSamples[i].y) / dt;
+                const w = i / touchVelSamples.length;
+                totalVel += vel * w;
+                weights += w;
+            }
+            
+            const velocity = totalVel / weights;
+            if (Math.abs(velocity) < 0.15) return;
+            
+            const speed = Math.abs(velocity);
+            const scaled = speed * Math.pow(speed / 0.3, 0.8);
+            let remaining = scaled * 8 * Math.sign(velocity);
+            
+            lastTickTime = performance.now();
+            
+            const tick = (now: number) => {
+                if (isDisposed) return;
+                
+                // Calculate dynamic decay based on elapsed time (targets 60Hz baseline)
+                const dt = now - lastTickTime;
+                lastTickTime = now;
+                const currentDecay = Math.pow(0.93, dt / 16.67);
+                
+                remaining *= currentDecay;
+                if (Math.abs(remaining) < 0.1) return;
+                
+                // Apply inertia into the exact same pixel buffer
+                pixelBufferY += remaining;
+                
+                if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
+                    const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
+                    pixelBufferY -= lines * LINE_HEIGHT;
+                    try { term.scrollLines(lines); } catch {}
+                }
+                
+                inertiaRaf = requestAnimationFrame(tick);
+            };
+            
+            inertiaRaf = requestAnimationFrame(tick);
+        };
+
+        term.element.addEventListener('touchstart', onTouchStart, { passive: true });
+        term.element.addEventListener('touchmove', onTouchMove, { passive: true });
+        term.element.addEventListener('touchend', onTouchEnd, { passive: true });
 
         function handleKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') close();
@@ -189,10 +301,16 @@
         window.addEventListener('keydown', handleKeyDown);
 
         return () => {
+            isDisposed = true;
+            fitPending = false;
+            stopInertia();
+            if (ws) ws.close();
+            ws = null;
             observer.disconnect();
             window.removeEventListener('keydown', handleKeyDown);
-            if (ws) ws.close();
-            term?.dispose();
+            webglRef = null;
+            try { term?.dispose(); } catch {}
+            term = null;
         };
     });
 </script>
@@ -303,23 +421,6 @@
         align-items: center;
         gap: 2px;
     }
-    .icon-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        border-radius: 4px;
-        flex-shrink: 0;
-    }
-    .icon-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
     .close-btn {
         background: none;
         border: none;
@@ -410,7 +511,7 @@
     }
     /* Touch-scroll the terminal viewport on mobile */
     :global(.xterm-viewport) {
+        touch-action: pan-y;
         -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
     }
 </style>
