@@ -276,6 +276,12 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
         handleEditSend(msgId, origContent, newContent, atts);
     }
+    async function handleMsgEdit(msgId: string, newContent: string) {
+        await updateTaskMessage(projectId, taskId, msgId, newContent);
+        // Update the entry in place
+        const entry = entries.find(e => e.id === msgId);
+        if (entry) entry.content = newContent;
+    }
     function handleMsgNavigateTask(targetTaskId: string) {
         const task = $boardStore?.tasks.find(t => t.id === targetTaskId);
         if (task) {
@@ -1855,6 +1861,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         onMsgDelete={handleMsgDelete}
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}
+        onMsgEdit={handleMsgEdit}
         onRegenerate={handleRegenerate}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}

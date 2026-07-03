@@ -40,6 +40,7 @@
         onDelete?: () => void;
         onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
         onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
+        onEdit?: (messageId: string, newContent: string) => void; // inline edit without fork
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
@@ -50,7 +51,7 @@
         taskId?: string;
     }
 
-    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
 
     // Resolved reasoning content — fetched on-demand when backend suppresses it
     let resolvedReasoningContent = $state<string | undefined>();
@@ -311,7 +312,9 @@
 
     function submitEdit() {
         if (editContent.trim() && messageId) {
-            if (isFirstUserMessage) {
+            if (onEdit) {
+                onEdit(messageId, editContent.trim());
+            } else if (isFirstUserMessage) {
                 onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
             } else if (isLastUserMessage && onSend) {
                 onSend(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
@@ -485,7 +488,28 @@
         </div>
     {:else if role === 'assistant'}
         <div class="message-wrapper assistant-wrapper">
-            {#if showReasoningToggle}
+            {#if isEditing}
+                <div class="edit-form">
+                    <textarea
+                        bind:this={textareaEl}
+                        bind:value={editContent}
+                        onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
+                        oninput={handleMentionInput}
+                        rows="5"
+                        aria-label="Edit message content"
+                    ></textarea>
+                    <div class="edit-actions">
+                        <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
+                        <button class="btn-edit-submit" onclick={submitEdit} title="Save changes">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                            Save
+                        </button>
+                    </div>
+                </div>
+            {:else}
+                {#if showReasoningToggle}
                 <div class="reasoning-block" class:expanded={reasoningExpanded}>
                     <button class="reasoning-toggle" onclick={() => handleReasoningToggle()} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -544,6 +568,14 @@
                             <span class="check">✓</span>
                         </button>
                     {/if}
+                    {#if onEdit && !isStreaming}
+                        <button class="action-btn" onclick={startEdit} aria-label="Edit message" title="Edit message">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                    {/if}
                     {#if onRegenerate && !isStreaming}
                         <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response" title="Regenerate response">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -563,6 +595,7 @@
                         </button>
                     {/if}
                 </div>
+            {/if}
             {/if}
         </div>
     {:else}

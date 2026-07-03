@@ -66,6 +66,7 @@
         onMsgDelete: (entry: ChatEntry) => void;
         onMsgFork: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => void;
         onMsgSend: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => void;
+        onMsgEdit: (msgId: string, newContent: string) => Promise<void>;
         onRegenerate: (entryId: string) => Promise<void>;
         onNavigateTask: (targetTaskId: string) => void;
         onViewChanges?: (commitHash: string) => void;
@@ -157,7 +158,7 @@
                         </div>
                         <div class="divider-line"></div>
                     </div>
-                    <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                    <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onEdit={(msgId, newContent) => onMsgEdit(msgId, newContent)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
                 </div>
             {:else if entry.role === 'merge_resolution'}
                 <div class="merge-resolution-entry">
