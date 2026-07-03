@@ -157,7 +157,7 @@
                         </div>
                         <div class="divider-line"></div>
                     </div>
-                    <div class="summarization-summary">{entry.content}</div>
+                    <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
                 </div>
             {:else if entry.role === 'merge_resolution'}
                 <div class="merge-resolution-entry">
@@ -378,17 +378,6 @@
         color: var(--color-accent);
         opacity: 0.8;
         white-space: nowrap;
-    }
-    .summarization-summary {
-        margin-top: 6px;
-        padding: 8px 12px;
-        background: color-mix(in srgb, var(--color-accent) 5%, transparent);
-        border-radius: var(--radius-md);
-        border-left: 3px solid var(--color-accent);
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        line-height: 1.5;
-        white-space: pre-wrap;
     }
     .merge-resolution-entry {
         padding: 8px 0;

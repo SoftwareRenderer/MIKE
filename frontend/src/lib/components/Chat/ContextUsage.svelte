@@ -2,9 +2,12 @@
     interface Props {
         used?: number;
         limit?: number;
+        onSummarize?: () => void;
     }
 
-    let { used = 0, limit = 0 }: Props = $props();
+    let { used = 0, limit = 0, onSummarize }: Props = $props();
+
+    let isSummarizing = $state(false);
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
     let isWarning = $derived(percentage >= 60 && percentage < 80);
@@ -22,23 +25,45 @@
         if (isWarning) return 'var(--color-status-amber, #f59e0b)';
         return 'var(--color-status-green, #3fb950)';
     }
+
+    async function handleClick() {
+        if (!onSummarize || isSummarizing) return;
+        isSummarizing = true;
+        try {
+            await onSummarize();
+        } finally {
+            isSummarizing = false;
+        }
+    }
 </script>
 
 {#if show}
-    <div class="context-usage" title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}">
-        {#if limit > 0}
+    <button
+        type="button"
+        class="context-usage"
+        class:clickable={!!onSummarize}
+        class:summarizing={isSummarizing}
+        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize ? '\nClick to summarize context' : ''}"
+        onclick={handleClick}
+        disabled={isSummarizing}
+    >
+        {#if isSummarizing}
+            <span class="spinner"></span>
+        {:else if limit > 0}
             <div class="usage-bar">
                 <div class="usage-fill" style="width:{percentage}%;background:{getBarColor()}"></div>
             </div>
         {/if}
         <span class="usage-text" class:warning={isWarning} class:danger={isDanger}>
-            {#if limit > 0}
+            {#if isSummarizing}
+                Summarizing...
+            {:else if limit > 0}
                 {formatTokens(used)} / {formatTokens(limit)} · {percentage}%
             {:else}
                 {formatTokens(used)} tokens
             {/if}
         </span>
-    </div>
+    </button>
 {/if}
 
 <style>
@@ -54,6 +79,18 @@
         color: var(--color-text-secondary);
         white-space: nowrap;
         flex-shrink: 0;
+        cursor: default;
+        transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .context-usage.clickable {
+        cursor: pointer;
+    }
+    .context-usage.clickable:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+    .context-usage.summarizing {
+        opacity: 0.7;
     }
     .usage-bar {
         width: 48px;
@@ -76,5 +113,17 @@
     }
     .usage-text.danger {
         color: var(--color-status-red);
+    }
+    .spinner {
+        width: 10px;
+        height: 10px;
+        border: 1.5px solid var(--color-border);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        flex-shrink: 0;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
 </style>

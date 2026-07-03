@@ -234,3 +234,10 @@ export async function resetWorktree(projectId: string, taskId: string, commitHas
     }
     return resetWorktreeRaw(projectId, taskId, commitHash);
 }
+
+/** Manually trigger context summarization for a task. */
+export async function summarizeTask(projectId: string, taskId: string): Promise<{ summary: string; old_count: number; new_count: number }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/summarize`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, 'Failed to summarize task');
+    return res.json();
+}

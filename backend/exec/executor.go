@@ -40,6 +40,7 @@ type executionState struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	userMsgChan  chan stream.UserMessage
+	summarizeCh  chan chan error // send a channel, receives result (ok/err) from the loop
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
@@ -276,14 +277,19 @@ func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn fu
 
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 // The caller passes messages and gets a result — queue management is fully transparent.
-func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage) (*types.ChatUsage, string, error) {
+// Optional maxTokens overrides the default (128); use 0 for server default.
+func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, maxTokens ...int) (*types.ChatUsage, string, error) {
+	tokens := 128
+	if len(maxTokens) > 0 {
+		tokens = maxTokens[0]
+	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, "off", apiKey)
 	var usage *types.ChatUsage
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error
-		usage, text, err = client.ChatCompletion(ctx, messages)
+		usage, text, err = client.ChatCompletion(ctx, messages, tokens)
 		return err
 	})
 	return usage, text, err
@@ -616,6 +622,7 @@ type taskExecSetup struct {
 	ctx                     context.Context
 	cancel                  context.CancelFunc
 	userMsgChan             chan stream.UserMessage
+	summarizeCh             chan chan error // channel for manual summarization requests
 	initialContent          string   // user message content for lazy-start (empty for normal start)
 	sandboxEnabled          bool
 	networkIsolation        bool
@@ -728,6 +735,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
+	summarizeCh := make(chan chan error, 16)
 
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -759,7 +767,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "pi"
 	}
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, projectName: project.Name, executorType: execType}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, executorType: execType}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -771,6 +779,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		ctx:                 ctx,
 		cancel:              cancel,
 		userMsgChan:         userMsgChan,
+		summarizeCh:         summarizeCh,
 		sandboxEnabled:      project.SandboxEnabled,
 		networkIsolation:    project.SandboxNetworkIsolation,
 		baseImage:           project.SandboxImage,
@@ -811,7 +820,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "")
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "")
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -951,7 +960,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content)
 }
 
 // mergeBranch merges the task's branch into the target branch.
@@ -1092,6 +1101,220 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 // -- Helper functions --
 
 var wordRe = regexp.MustCompile(`\S+`)
+
+// buildMessagesFromDB reconstructs the conversation from the task's persisted messages.
+// Returns the messages slice, the index of the last summary message (for lastSummarizeIdx),
+// and the content of the last summary message.
+// Summary messages (role="summarization") are skipped during build but tracked.
+func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, int, string) {
+	promptPath := worktreePath
+	if sandboxEnabled {
+		promptPath = "/sandbox/" + projectName
+	}
+	var systemPrompt string
+	if task.PlanMode {
+		systemPrompt = llama.BuildPlanModeSystemPrompt(promptPath)
+	} else {
+		systemPrompt = llama.BuildSystemPrompt(promptPath)
+	}
+
+	// Find the last summarization checkpoint to restore context across restarts.
+	var lastSummaryMsg *types.TaskMessage
+	for i := len(taskMsgs) - 1; i >= 0; i-- {
+		if taskMsgs[i].Role == "summarization" {
+			lastSummaryMsg = &taskMsgs[i]
+			break
+		}
+	}
+
+	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
+	lastSummaryIdx := -1
+	var previousSummary string
+	if lastSummaryMsg != nil {
+		// Restore the summary as an assistant message so the LLM sees it as context
+		messages = append(messages, types.ChatMessage{
+			Role:    "assistant",
+			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
+		})
+		lastSummaryIdx = 1
+		previousSummary = lastSummaryMsg.Content
+	}
+
+	for _, m := range taskMsgs {
+		// Skip messages before the last summary checkpoint
+		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
+			continue
+		}
+		switch m.Role {
+		case "summarization":
+			continue // already incorporated as the summary above
+		case "user":
+			if m.Attachments != "" {
+				var atts []struct {
+					MimeType string `json:"mimeType"`
+					Data     string `json:"data"`
+				}
+				if err := json.Unmarshal([]byte(m.Attachments), &atts); err == nil {
+					parts := []types.ContentPart{{Type: "text", Text: m.Content}}
+					for _, att := range atts {
+						if att.Data != "" {
+							mediaType := att.MimeType
+							if mediaType == "" {
+								mediaType = "image/png"
+							}
+							base64Data := att.Data
+							if idx := strings.Index(base64Data, ","); idx >= 0 {
+								base64Data = base64Data[idx+1:]
+							}
+							parts = append(parts, types.ContentPart{
+								Type: "image",
+								ImageSource: &struct {
+									Type      string `json:"type"`
+									MediaType string `json:"media_type"`
+									Data      string `json:"data"`
+								}{Type: "base64", MediaType: mediaType, Data: base64Data},
+							})
+						}
+					}
+					messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
+					continue
+				}
+			}
+			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
+		case "assistant":
+			content := m.Content
+			if m.ReasoningContent != "" {
+				content = m.ReasoningContent + "\n" + m.Content
+			}
+			messages = append(messages, types.ChatMessage{Role: m.Role, Content: content})
+		case "tool_call":
+			if m.ToolResult != "" {
+				var resultMap map[string]any
+				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
+					output, _ := resultMap["output"].(string)
+					toolID := ""
+					if m.ToolCalls != "" {
+						var tcMap map[string]any
+						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
+							toolID, _ = tcMap["tool_id"].(string)
+						}
+					}
+					messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
+				}
+			}
+		}
+	}
+
+	return messages, lastSummaryIdx, previousSummary
+}
+
+// HandleSummarize manually triggers context summarization for a task.
+// If the task is actively running, the request is sent to the execution loop.
+// If the task is idle/stopped, summarization is done directly from the DB.
+func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.LlamaServerURL == "" || task.ModelName == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "task has no LLM configured")
+		return
+	}
+
+	// If task is actively running, send request to the execution loop
+	te.taskMu.Lock()
+	state := te.tasks[taskID]
+	te.taskMu.Unlock()
+
+	if state != nil {
+		resultCh := make(chan error, 1)
+		select {
+		case state.summarizeCh <- resultCh:
+			// Request sent, wait for result
+			select {
+			case err := <-resultCh:
+				if err != nil {
+					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			case <-time.After(60 * time.Second):
+				httputil.JSONError(w, http.StatusInternalServerError, "summarization timed out")
+				return
+			}
+			// Result is sent via WebSocket, return minimal response
+			httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "summarizing"})
+			return
+		default:
+			// Channel full, fall through to DB-based approach
+		}
+	}
+
+	// Task is idle/stopped — summarize from DB
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+	project, _ := te.store.GetProject(projectID)
+	projectName := ""
+	if project != nil {
+		projectName = project.Name
+	}
+	worktreePath, _ := te.worktreeMgr.WorktreePath(taskID)
+
+	messages, lastSummaryIdx, previousSummary := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
+
+	// Build system prompt for summarizeContext (same as used in buildMessagesFromDB)
+	systemPrompt := messages[0].Content
+
+	sumResult, err := te.summarizeContext(messages, lastSummaryIdx, systemPrompt, task.LlamaServerURL, task.ModelName, previousSummary)
+	if err != nil {
+		log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Persist summarization checkpoint message with stats
+	summaryMsgID := uuid.New().String()
+	_ = te.store.CreateTaskMessage(&types.TaskMessage{
+		ID:              summaryMsgID,
+		TaskID:          task.ID,
+		ThreadID:        task.CurrentThreadID,
+		Role:            "summarization",
+		Content:         sumResult.summary,
+		ModelName:       task.ModelName,
+		PromptTokens:    sumResult.promptTokens,
+		PredictedTokens: sumResult.predictedTokens,
+		PromptMs:        int(sumResult.promptMs),
+		PredictedMs:     int(sumResult.predictedMs),
+		CreatedAt:       time.Now().UTC(),
+	})
+
+	// Notify frontend
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+		"id":               summaryMsgID,
+		"summary":          sumResult.summary,
+		"created_at":       time.Now().UTC().Format(time.RFC3339),
+		"prompt_tokens":    sumResult.promptTokens,
+		"predicted_tokens": sumResult.predictedTokens,
+		"prompt_ms":        sumResult.promptMs,
+		"predicted_ms":     sumResult.predictedMs,
+		"model_name":       task.ModelName,
+	}})
+
+	log.Printf("[summarize] task=%s manual summarization: %d messages -> %d messages", taskID, sumResult.oldLen, len(sumResult.newMessages))
+
+	// Return updated token estimate
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{
+		"summary":   sumResult.summary,
+		"old_count": sumResult.oldLen,
+		"new_count": len(sumResult.newMessages),
+	})
+}
 
 func estimateTokensFromText(text string) int {
 	words := wordRe.FindAllString(text, -1)

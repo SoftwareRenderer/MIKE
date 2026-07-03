@@ -227,19 +227,24 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
 // Used for simple queries like title generation where streaming is not needed.
-func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage) (*types.ChatUsage, string, error) {
+// Optional maxTokens overrides the default (128); use 0 for server default.
+func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, maxTokens ...int) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
 		return nil, "", fmt.Errorf("llama server URL not configured")
 	}
 
 	url := c.baseURL + "/chat/completions"
+	tokens := 128
+	if len(maxTokens) > 0 {
+		tokens = maxTokens[0]
+	}
 
 	reqBody := map[string]any{
 		"model":            c.modelName,
 		"messages":         toAPIMessages(messages),
 		"stream":           false,
 		"temperature":      0.3,
-		"max_tokens":       128,
+		"max_tokens":       tokens,
 		"tool_choice":      "none",
 		"reasoning_format": "auto",
 	}

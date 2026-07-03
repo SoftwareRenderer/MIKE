@@ -50,6 +50,7 @@ export {
     startSubtask,
     stopTask,
     resumeTask,
+    summarizeTask,
 } from './tasks';
 
 // -- Messages --

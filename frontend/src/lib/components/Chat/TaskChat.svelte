@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, showConfirm, selectedTask } from '$lib/store';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -730,14 +730,25 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 break;
             }
             case 'summarization': {
-                const data = event.data as { summary: string };
-                // Add a summarization checkpoint entry
+                const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
+                // Dedup: skip if this message ID already exists
+                if (data.id && entries.some(e => e.id === data.id)) {
+                    break;
+                }
                 entries = [...entries, {
-                    id: genId(),
+                    id: data.id || genId(),
                     role: 'summarization',
                     content: data.summary || 'Context was summarized to free space',
                     isStreaming: false,
-                    createdAt: new Date().toISOString(),
+                    createdAt: data.created_at || new Date().toISOString(),
+                    stats: data.model_name ? {
+                        model_name: data.model_name,
+                        prompt_tokens: data.prompt_tokens ?? 0,
+                        predicted_tokens: data.predicted_tokens ?? 0,
+                        prompt_ms: data.prompt_ms ?? 0,
+                        predicted_ms: data.predicted_ms ?? 0,
+                        duration: (data.prompt_ms ?? 0) + (data.predicted_ms ?? 0),
+                    } : undefined,
                 }];
                 break;
             }
@@ -1299,6 +1310,19 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         } catch (e) {
             console.error('Failed to update plan mode:', e);
             planMode = !newPlanMode; // revert on error
+        }
+    }
+
+    async function handleSummarize() {
+        try {
+            const result = await summarizeTask(projectId, taskId);
+            // Update context usage after summarization
+            // The WebSocket 'summarization' event will add the checkpoint entry
+            // and the next token event will refresh the usage count
+            console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
+        } catch (e: any) {
+            console.error('Failed to summarize:', e);
+            showToast(e?.message || 'Failed to summarize context', 'error');
         }
     }
 
@@ -1896,6 +1920,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             onStop={handleStop}
             onModelSelect={handleModelSelect}
             onPlanModeToggle={handlePlanModeToggle}
+            onSummarize={handleSummarize}
         />
         {/if}
         </div>

@@ -33,6 +33,7 @@
         onStop?: () => void;
         onModelSelect?: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
         onPlanModeToggle?: (planMode: boolean) => void;
+        onSummarize?: () => Promise<void>;
         onInput?: (value: string) => void;
     }
 
@@ -55,6 +56,7 @@
         onStop,
         onModelSelect,
         onPlanModeToggle,
+        onSummarize,
         onInput,
         onClearDraft,
     }: Props = $props();
@@ -295,7 +297,7 @@
                 onSelect={onModelSelect!}
             />
             {#if !isAgent}
-                <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} />
+                <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} onSummarize={onSummarize} />
             {/if}
             {#if onPlanModeToggle && !isAgent}
                 <button

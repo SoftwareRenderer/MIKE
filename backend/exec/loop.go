@@ -25,7 +25,7 @@ import (
 const PiSentinelURL = "pi://agent"
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -159,7 +159,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	// Check if this task uses Pi agent
 	if serverURL == PiSentinelURL {
 		log.Printf("[exec] task=%s detected Pi agent (url=%s), calling executeTaskWithPi", task.ID, serverURL)
-		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, userMsgChan, sandboxEnabled, initialContent)
+		te.executeTaskWithPi(ctx, task, projectID, projectName, worktreePath, userMsgChan, summarizeCh, sandboxEnabled, initialContent)
 		log.Printf("[exec] task=%s executeTaskWithPi returned", task.ID)
 		return
 	}
@@ -193,9 +193,38 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+
+	// Find the last summarization checkpoint to restore context across restarts.
+	// If a summary exists, only load messages after it and prepend the summary.
+	var lastSummaryMsg *types.TaskMessage
+	for i := len(taskMsgs) - 1; i >= 0; i-- {
+		if taskMsgs[i].Role == "summarization" {
+			lastSummaryMsg = &taskMsgs[i]
+			break
+		}
+	}
+
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
+	var lastSummarizeIdx int
+	if lastSummaryMsg != nil {
+		// Restore the summary as an assistant message so the LLM sees it as context
+		messages = append(messages, types.ChatMessage{
+			Role:    "assistant",
+			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
+		})
+		lastSummarizeIdx = 1 // points to the summary message
+	} else {
+		lastSummarizeIdx = -1
+	}
+
+	// Build messages from DB, skipping those before the last summary checkpoint
 	for _, m := range taskMsgs {
+		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
+			continue // skip messages before the summary checkpoint
+		}
 		switch m.Role {
+		case "summarization":
+			continue // already incorporated as the summary above
 		case "user":
 			// Check for image attachments and build multi-modal content
 			if m.Attachments != "" {
@@ -274,7 +303,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		te.configStore.SaveModelContextWindow(modelName, serverURL, *discovered)
 		log.Printf("[context] discovered context window for %s: %d", modelName, *discovered)
 	}
-	lastSummarizeIdx := -1 // index in messages slice up to which content was already summarized
+	// lastSummarizeIdx set above during messages build
 
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
@@ -957,22 +986,45 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Context summarization: check if we're approaching the context window limit
 		if contextWindow != nil && lastSummarizeIdx < len(messages)-1 {
 			if shouldSummarize(messages, *contextWindow) {
-				sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel)
+				// Extract previous summary from messages[1] (set after first summarization)
+				var prevSummary string
+				if len(messages) > 1 {
+					prev := messages[1].Content
+					if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
+						prevSummary = prev[len("[Context summary: ") : len(prev)-1]
+					}
+				}
+				sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel, prevSummary)
 				if err != nil {
 					log.Printf("[summarize] task=%s summarization failed: %v", task.ID, err)
 				} else {
 					messages = sumResult.newMessages
 					lastSummarizeIdx = sumResult.newLastSummarizeIdx
-					// Persist summarization checkpoint message
+					// Persist summarization checkpoint message with stats
+					summaryMsgID := uuid.New().String()
 					_ = te.store.CreateTaskMessage(&types.TaskMessage{
-						ID:        uuid.New().String(),
-						TaskID:    task.ID,
-						ThreadID:  task.CurrentThreadID,
-						Role:      "summarization",
-						Content:   sumResult.summary,
-						CreatedAt: time.Now().UTC(),
+						ID:             summaryMsgID,
+						TaskID:         task.ID,
+						ThreadID:       task.CurrentThreadID,
+						Role:           "summarization",
+						Content:        sumResult.summary,
+						ModelName:      activeModel,
+						PromptTokens:   sumResult.promptTokens,
+						PredictedTokens: sumResult.predictedTokens,
+						PromptMs:       int(sumResult.promptMs),
+						PredictedMs:    int(sumResult.predictedMs),
+						CreatedAt:      time.Now().UTC(),
 					})
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]string{"summary": sumResult.summary}})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+						"id":              summaryMsgID,
+						"summary":         sumResult.summary,
+						"created_at":      time.Now().UTC().Format(time.RFC3339),
+						"prompt_tokens":   sumResult.promptTokens,
+						"predicted_tokens": sumResult.predictedTokens,
+						"prompt_ms":       sumResult.promptMs,
+						"predicted_ms":    sumResult.predictedMs,
+						"model_name":      activeModel,
+					}})
 					log.Printf("[summarize] task=%s summarized context: %d messages -> %d messages", task.ID, sumResult.oldLen, len(messages))
 				}
 			}
@@ -991,6 +1043,53 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
+		case resultCh := <-summarizeCh:
+			// Manual summarization request from HandleSummarize
+			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
+			// Extract previous summary from messages[1]
+			var prevSummary string
+			if len(messages) > 1 {
+				prev := messages[1].Content
+				if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
+					prevSummary = prev[len("[Context summary: ") : len(prev)-1]
+				}
+			}
+			sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel, prevSummary)
+			if err != nil {
+				log.Printf("[summarize] task=%s manual summarization failed: %v", task.ID, err)
+				resultCh <- err
+				continue
+			}
+			messages = sumResult.newMessages
+			lastSummarizeIdx = sumResult.newLastSummarizeIdx
+			// Persist summarization checkpoint message with stats
+			summaryMsgID := uuid.New().String()
+			_ = te.store.CreateTaskMessage(&types.TaskMessage{
+				ID:              summaryMsgID,
+				TaskID:          task.ID,
+				ThreadID:        task.CurrentThreadID,
+				Role:            "summarization",
+				Content:         sumResult.summary,
+				ModelName:       activeModel,
+				PromptTokens:    sumResult.promptTokens,
+				PredictedTokens: sumResult.predictedTokens,
+				PromptMs:        int(sumResult.promptMs),
+				PredictedMs:     int(sumResult.predictedMs),
+				CreatedAt:       time.Now().UTC(),
+			})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+				"id":               summaryMsgID,
+				"summary":          sumResult.summary,
+				"created_at":       time.Now().UTC().Format(time.RFC3339),
+				"prompt_tokens":    sumResult.promptTokens,
+				"predicted_tokens": sumResult.predictedTokens,
+				"prompt_ms":        sumResult.promptMs,
+				"predicted_ms":     sumResult.predictedMs,
+				"model_name":       activeModel,
+			}})
+			log.Printf("[summarize] task=%s manual summarization: %d messages -> %d messages", task.ID, sumResult.oldLen, len(messages))
+			resultCh <- nil
+			continue
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
 			detector.reset()
@@ -1057,7 +1156,7 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 // executeTaskWithPi runs the task using Pi agent via RPC mode.
 // Pi handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)

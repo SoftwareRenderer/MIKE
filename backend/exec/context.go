@@ -18,6 +18,11 @@ type summarizeResult struct {
 	newLastSummarizeIdx int
 	summary             string
 	oldLen              int
+	// Stats from the summarization LLM call
+	promptTokens    int
+	predictedTokens int
+	promptMs        int64
+	predictedMs     int64
 }
 
 // shouldSummarize checks if the current context (estimated from messages) is approaching the context window limit.
@@ -33,17 +38,9 @@ func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 // summarizeContext summarizes the conversation history to reduce context size.
 // It sends a non-streaming chat completion with a summarization prompt,
 // then returns a new messages array: [system, summary] + last N recent messages.
-func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName string) (summarizeResult, error) {
+// previousSummary is the content of the last summarization checkpoint (empty if first summarization).
+func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName, previousSummary string) (summarizeResult, error) {
 	oldLen := len(messages)
-
-	// Extract previous summary if present (stored at index 1 as "[Context summary: ...]")
-	var previousSummary string
-	if len(messages) > 1 {
-		prev := messages[1].Content
-		if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
-			previousSummary = prev[len("[Context summary: ") : len(prev)-1]
-		}
-	}
 
 	chatHistory := formatChatHistory(messages, lastSummarizeIdx, previousSummary != "")
 	summarizePrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
@@ -61,7 +58,7 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSumma
 
 	// Send non-streaming summarization request (concurrency handled by ChatCompletion)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	_, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages)
+	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, 32768)
 	cancel()
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
@@ -89,8 +86,12 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSumma
 	return summarizeResult{
 		newMessages:         newMessages,
 		newLastSummarizeIdx: newLastSummarizeIdx,
-		summary:            summary,
-		oldLen:             oldLen,
+		summary:             summary,
+		oldLen:              oldLen,
+		promptTokens:        usage.PromptTokens,
+		predictedTokens:     usage.CompletionTokens,
+		promptMs:            usage.PromptMs,
+		predictedMs:         usage.PredictedMs,
 	}, nil
 }
 

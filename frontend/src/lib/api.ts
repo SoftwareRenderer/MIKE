@@ -55,6 +55,7 @@ export {
     startSubtask,
     stopTask,
     resumeTask,
+    summarizeTask,
     sendTaskMessage,
     getTaskMessages,
     getTaskMessageFull,
