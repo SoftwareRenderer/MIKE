@@ -102,6 +102,30 @@ func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
 	return buf.String(), nil
 }
 
+// SummarizeData holds the variables for the context summarization prompt.
+type SummarizeData struct {
+	ChatHistory     string // formatted conversation history
+	PreviousSummary string // summary from a prior summarization, empty if first
+}
+
+// RenderSummarizePrompt renders the context summarization system prompt from a template file.
+func RenderSummarizePrompt(data SummarizeData) (string, error) {
+	dir := promptDir()
+	path := filepath.Join(dir, "summarize.tmpl")
+
+	tmpl, err := template.ParseFiles(path)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
 // ValidateTemplates parses and dry-runs the templates to check for errors.
 // Returns the list of template file basenames and any error encountered.
 func ValidateTemplates() ([]string, error) {

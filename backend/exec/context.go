@@ -2,11 +2,13 @@ package exec
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
 
@@ -25,7 +27,7 @@ func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 		return false
 	}
 	estimatedTokens := estimatePromptTokens(messages)
-	return estimatedTokens >= contextWindow*8/10
+	return estimatedTokens >= contextWindow*9/10
 }
 
 // summarizeContext summarizes the conversation history to reduce context size.
@@ -34,19 +36,27 @@ func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName string) (summarizeResult, error) {
 	oldLen := len(messages)
 
-	// Build the summarization request: system prompt + all messages since last summarization
-	summarizeFrom := max(lastSummarizeIdx, 0)
-
-	summarizeMessages := []types.ChatMessage{
-		{Role: "system", Content: "Summarize the key events, decisions, and lessons learned in this conversation. " +
-			"Preserve technical details, file paths, code decisions, and any important context. " +
-			"This summary will be used to restore context in a truncated conversation. " +
-			"Be concise but thorough. Include: what was done, what files were changed, what commands were run, " +
-			"what errors were encountered, and what the current state of the task is."},
+	// Extract previous summary if present (stored at index 1 as "[Context summary: ...]")
+	var previousSummary string
+	if len(messages) > 1 {
+		prev := messages[1].Content
+		if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
+			previousSummary = prev[len("[Context summary: ") : len(prev)-1]
+		}
 	}
-	// Include messages from after last summarization (skip system prompt at index 0)
-	for i := summarizeFrom; i < len(messages); i++ {
-		summarizeMessages = append(summarizeMessages, messages[i])
+
+	chatHistory := formatChatHistory(messages, lastSummarizeIdx, previousSummary != "")
+	summarizePrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
+		ChatHistory:     chatHistory,
+		PreviousSummary: previousSummary,
+	})
+	if err != nil {
+		return summarizeResult{}, fmt.Errorf("load summarize prompt: %w", err)
+	}
+	// The formatted chat history is embedded in the system prompt,
+	// so we only need a single system message (no raw messages needed).
+	summarizeMessages := []types.ChatMessage{
+		{Role: "system", Content: summarizePrompt},
 	}
 
 	// Send non-streaming summarization request (concurrency handled by ChatCompletion)
@@ -82,6 +92,114 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSumma
 		summary:            summary,
 		oldLen:             oldLen,
 	}, nil
+}
+
+// formatChatHistory formats the conversation into a plain-text history for the summarization prompt.
+// Format:
+//
+//	User: <content>
+//	Assistant: <content>
+//	Assistant: (I used the [tool name] tool to [action], which was [successful/unsuccessful])
+//
+// System messages are skipped. Tool result messages are incorporated into the preceding
+// assistant tool call line. Only messages from summarizeFrom onwards are included.
+// When skipSummaryMsg is true, the [Context summary: ...] message at index 1 is skipped
+// because it is passed separately as PreviousSummary.
+func formatChatHistory(messages []types.ChatMessage, lastSummarizeIdx int, skipSummaryMsg bool) string {
+	summarizeFrom := max(lastSummarizeIdx, 0)
+
+	// Build a map of toolCallID -> output for quick lookup
+	toolResults := make(map[string]string)
+	for _, m := range messages {
+		if m.Role == "tool" && m.ToolCallID != "" {
+			toolResults[m.ToolCallID] = m.Content
+		}
+	}
+
+	var sb strings.Builder
+	for i := summarizeFrom; i < len(messages); i++ {
+		m := messages[i]
+		// Skip the previous summary message — it is passed as PreviousSummary
+		if skipSummaryMsg && i == 1 && strings.HasPrefix(m.Content, "[Context summary: ") {
+			continue
+		}
+		switch m.Role {
+		case "system":
+			continue
+		case "tool":
+			// Already incorporated into assistant line above
+			continue
+		case "user":
+			sb.WriteString("User: ")
+			sb.WriteString(m.Content)
+			sb.WriteString("\n")
+		case "assistant":
+			if len(m.ToolCalls) > 0 {
+				// Format each tool call as a descriptive line
+				for _, tc := range m.ToolCalls {
+					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
+					status := formatToolStatus(tc.ID, toolResults)
+					sb.WriteString(fmt.Sprintf("Assistant: (I used the %s tool to %s, which was %s)\n",
+						tc.Function.Name, action, status))
+				}
+			} else if m.Content != "" {
+				sb.WriteString("Assistant: ")
+				sb.WriteString(m.Content)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// formatToolAction extracts a human-readable action description from a tool call.
+func formatToolAction(name, arguments string) string {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "perform an action"
+	}
+
+	switch name {
+	case "read_file":
+		if path, ok := args["path"].(string); ok && path != "" {
+			return "read `" + path + "`"
+		}
+	case "write_file":
+		if path, ok := args["path"].(string); ok && path != "" {
+			return "write `" + path + "`"
+		}
+	case "edit_file":
+		if path, ok := args["path"].(string); ok && path != "" {
+			return "edit `" + path + "`"
+		}
+	case "bash":
+		if cmd, ok := args["command"].(string); ok && cmd != "" {
+			// Truncate long commands
+			cmd = strings.TrimSpace(cmd)
+			if len(cmd) > 77 {
+				cmd = cmd[:74] + "..."
+			}
+			return "execute `" + cmd + "`"
+		}
+	case "task_complete":
+		return "complete the task"
+	}
+	return "perform an action"
+}
+
+// formatToolStatus checks the tool result to determine success/failure.
+func formatToolStatus(toolCallID string, toolResults map[string]string) string {
+	output, ok := toolResults[toolCallID]
+	if !ok {
+		return "pending"
+	}
+	// Check for common error patterns
+	lower := strings.ToLower(output)
+	if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "failed") {
+		return "unsuccessful"
+	}
+	return "successful"
 }
 
 // shellQuote safely quotes a string for use in a shell command.
