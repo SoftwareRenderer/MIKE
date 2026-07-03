@@ -18,7 +18,6 @@ type summarizeResult struct {
 	newLastSummarizeIdx int
 	summary             string
 	oldLen              int
-	// Stats from the summarization LLM call
 	promptTokens    int
 	predictedTokens int
 	promptMs        int64

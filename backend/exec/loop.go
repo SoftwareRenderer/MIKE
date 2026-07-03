@@ -194,8 +194,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 
-	// Find the last summarization checkpoint to restore context across restarts.
-	// If a summary exists, only load messages after it and prepend the summary.
+	// Restore summary checkpoint across restarts.
 	var lastSummaryMsg *types.TaskMessage
 	for i := len(taskMsgs) - 1; i >= 0; i-- {
 		if taskMsgs[i].Role == "summarization" {
@@ -207,7 +206,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
 	var lastSummarizeIdx int
 	if lastSummaryMsg != nil {
-		// Restore the summary as an assistant message so the LLM sees it as context
+		// Restore summary as assistant message
 		messages = append(messages, types.ChatMessage{
 			Role:    "assistant",
 			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
@@ -217,7 +216,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		lastSummarizeIdx = -1
 	}
 
-	// Build messages from DB, skipping those before the last summary checkpoint
+	// Build messages, skipping those before summary checkpoint
 	for _, m := range taskMsgs {
 		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
 			continue // skip messages before the summary checkpoint
@@ -1000,7 +999,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				} else {
 					messages = sumResult.newMessages
 					lastSummarizeIdx = sumResult.newLastSummarizeIdx
-					// Persist summarization checkpoint message with stats
+					// Persist summary with stats
 					summaryMsgID := uuid.New().String()
 					_ = te.store.CreateTaskMessage(&types.TaskMessage{
 						ID:             summaryMsgID,
@@ -1062,7 +1061,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			messages = sumResult.newMessages
 			lastSummarizeIdx = sumResult.newLastSummarizeIdx
-			// Persist summarization checkpoint message with stats
+			// Persist summary with stats
 			summaryMsgID := uuid.New().String()
 			_ = te.store.CreateTaskMessage(&types.TaskMessage{
 				ID:              summaryMsgID,

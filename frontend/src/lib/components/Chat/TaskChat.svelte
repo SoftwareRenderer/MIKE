@@ -278,7 +278,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     }
     async function handleMsgEdit(msgId: string, newContent: string) {
         await updateTaskMessage(projectId, taskId, msgId, newContent);
-        // Update the entry in place
         const entry = entries.find(e => e.id === msgId);
         if (entry) entry.content = newContent;
     }

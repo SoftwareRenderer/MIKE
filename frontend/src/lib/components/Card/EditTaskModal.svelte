@@ -317,4 +317,25 @@
     button[type="button"]:hover {
         background: var(--color-surface-4);
     }
+
+    @media (max-width: 768px) {
+        .modal {
+            width: 100vw;
+            max-width: none;
+            max-height: 100dvh;
+            height: 100dvh;
+            border-radius: 0;
+            border: none;
+        }
+        .modal-header {
+            padding: 16px;
+        }
+        .modal-body {
+            padding: 16px;
+        }
+        button[type="button"],
+        .btn-primary {
+            min-height: 44px;
+        }
+    }
 </style>
