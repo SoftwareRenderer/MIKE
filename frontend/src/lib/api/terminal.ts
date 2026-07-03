@@ -5,13 +5,13 @@ import { API_BASE } from './helpers';
  * Creates WebSocket connections for task terminals and project-level shells.
  */
 
-export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term, onClosed);
+export function createTerminal(projectId: string, taskId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void, transformInput?: (data: string) => string): WebSocket {
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/tasks/${taskId}/terminal`, term, onClosed, transformInput);
 }
 
 // -- Project Terminal (shell in project root) --
-export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
-    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term, onClosed);
+export function createProjectTerminal(projectId: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void, transformInput?: (data: string) => string): WebSocket {
+    return createTerminalWS(`${window.location.origin}${API_BASE}/projects/${projectId}/terminal`, term, onClosed, transformInput);
 }
 
 // Filter xterm.js init queries that the PTY echoes back as visible garbage.
@@ -34,7 +34,7 @@ function isTerminalQuery(data: string): boolean {
 
 // Shared WebSocket setup for terminal connections
 // Returns the WebSocket and sets ws.onClose handler to call onClosed callback.
-function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void): WebSocket {
+function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void, transformInput?: (data: string) => string): WebSocket {
     // Show status immediately — backend will send its own messages when ready
     term.write('\x1b[2mConnecting...\x1b[0m');
     const ws = new WebSocket(url);
@@ -46,8 +46,9 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
         // Filter out xterm.js init queries that the PTY echoes back as garbage text.
         // These are terminal capability queries (DA1, OSC color/title, DCS) sent on mount.
         if (isTerminalQuery(data)) return;
+        const transformed = transformInput ? transformInput(data) : data;
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'input', data }));
+            ws.send(JSON.stringify({ type: 'input', data: transformed }));
         }
     });
     term.onResize(({ cols, rows }) => {
