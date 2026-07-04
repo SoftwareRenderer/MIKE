@@ -831,8 +831,14 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
 			_, bPath := extractDiffPaths(line)
-			current = &TrackedDiffFile{Path: bPath, Rows: nil}
-			files[bPath] = current
+			// If the file already exists (e.g. from a previous diff segment),
+			// merge the new hunks into the existing entry instead of overwriting.
+			if existing, ok := files[bPath]; ok {
+				current = existing
+			} else {
+				current = &TrackedDiffFile{Path: bPath, Rows: nil}
+				files[bPath] = current
+			}
 			inHunk = false
 			newLine = 0
 			rowIdx = 0
@@ -1104,14 +1110,15 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			target = baseRef
 		}
 
-		// Get tracked file diff, filtering out large/binary files
+		// Get tracked file diff.
+		// "git diff target" = working tree vs target (includes both staged and unstaged).
+		// If working tree is clean (all changes committed), fall back to committed changes.
 		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
-
-		// If working tree is clean, fall back to committed changes (HEAD vs target)
-		// This handles forked threads where changes are committed as snapshots
+		// If working tree is clean, fall back to committed changes (HEAD vs target).
+		// This handles forked threads where changes are committed as snapshots.
 		if len(strings.TrimSpace(diffOut)) == 0 {
 			diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", target))
 			if err != nil {
@@ -1214,6 +1221,7 @@ func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat strin
 	if baseRef != "" {
 		target = baseRef
 	}
+	// "git diff --shortstat target" = working tree vs target (staged + unstaged).
 	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
 	// If working tree is clean, fall back to committed changes
 	if shortStat == "" {

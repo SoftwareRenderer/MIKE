@@ -41,4 +41,6 @@ export interface DiffFile {
     origAdded?: number;
     /** Original removed count before truncation (for display in header). */
     origRemoved?: number;
+    /** True if this file is staged in the git index. */
+    staged?: boolean;
 }

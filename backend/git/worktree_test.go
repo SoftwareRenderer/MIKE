@@ -821,3 +821,162 @@ func TestComputeUntrackedHash_ContentChange(t *testing.T) {
 		t.Errorf("ComputeUntrackedHash produced same hash for different line count: %s", hash1)
 	}
 }
+
+func TestGetTaskDiff_StagedFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create and commit a file
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
+	runGit(t, repoDir, "add", "hello.txt")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Modify the file and stage it (git add) — don't commit
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
+	runGit(t, worktreePath, "add", "hello.txt")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Staged file should appear in Tracked map
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	file, ok := result.Tracked["hello.txt"]
+	if !ok {
+		t.Fatal("expected hello.txt in Tracked map")
+	}
+	if file.Added != 2 {
+		t.Errorf("expected 2 added lines for staged file, got %d", file.Added)
+	}
+	if file.Removed != 0 {
+		t.Errorf("expected 0 removed lines for staged file, got %d", file.Removed)
+	}
+}
+
+func TestGetTaskDiff_StagedNewFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create initial commit
+	writeFile(t, repoDir, "readme.md", "# README\n")
+	runGit(t, repoDir, "add", "readme.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Create a new file and stage it
+	writeFile(t, worktreePath, "new.txt", "new line 1\nnew line 2\nnew line 3\n")
+	runGit(t, worktreePath, "add", "new.txt")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Staged new file should appear in Tracked map (not untracked)
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	file, ok := result.Tracked["new.txt"]
+	if !ok {
+		// Check if it's in untracked instead (shouldn't be)
+		for _, u := range result.Untracked {
+			if u.Path == "new.txt" {
+				t.Fatal("staged new file should be in Tracked, not Untracked")
+			}
+		}
+		t.Fatal("expected new.txt in Tracked map")
+	}
+	if file.Added != 3 {
+		t.Errorf("expected 3 added lines for staged new file, got %d", file.Added)
+	}
+}
+
+func TestGetTaskDiff_MixedStagedAndUnstaged(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create and commit a file
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
+	runGit(t, repoDir, "add", "hello.txt")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Make staged changes: add line3
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\n")
+	runGit(t, worktreePath, "add", "hello.txt")
+	// Make additional unstaged changes: add line4
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	file, ok := result.Tracked["hello.txt"]
+	if !ok {
+		t.Fatal("expected hello.txt in Tracked map")
+	}
+	// Total changes: +2 (line3 staged, line4 unstaged)
+	if file.Added != 2 {
+		t.Errorf("expected 2 added lines (1 staged + 1 unstaged), got %d", file.Added)
+	}
+}
+
+func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create and commit a file on master
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
+	runGit(t, repoDir, "add", "hello.txt")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	// Create worktree on task branch
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Modify and stage the file
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\nline5\nline6\n")
+	runGit(t, worktreePath, "add", "hello.txt")
+
+	// Debug: print raw git output
+	unstaged, _ := wm.gitRunOutput(worktreePath, "diff")
+	staged, _ := wm.gitRunOutput(worktreePath, "diff", "--staged", "master")
+	t.Logf("unstaged diff:\n%s", unstaged)
+	t.Logf("staged diff:\n%s", staged)
+
+	// Use "master" as baseRef (like ResolveDiffBaseline returns)
+	result, err := wm.GetTaskDiff(taskID, "master", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	file, ok := result.Tracked["hello.txt"]
+	if !ok {
+		t.Fatal("expected hello.txt in Tracked map")
+	}
+	if file.Added != 4 {
+		t.Errorf("expected 4 added lines, got %d", file.Added)
+	}
+	if file.Removed != 0 {
+		t.Errorf("expected 0 removed lines, got %d", file.Removed)
+	}
+}

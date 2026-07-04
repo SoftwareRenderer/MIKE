@@ -73,6 +73,7 @@ export {
     getDiffFile,
     getUntrackedFileContent,
     resetWorktree,
+    stageFile,
 } from './api/git';
 
 export {

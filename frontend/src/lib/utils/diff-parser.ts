@@ -78,6 +78,23 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
         }
 
         // Large/binary file size annotation (injected by backend)
+        // Backend uses "# binary-file: N" and "# large-file: N" format
+        if (line.startsWith('# binary-file: ') || line.startsWith('# large-file: ')) {
+            const isBinary = line.startsWith('# binary-file: ');
+            const prefix = isBinary ? '# binary-file: ' : '# large-file: ';
+            const sizeStr = line.slice(prefix.length).trim();
+            if (currentFile) {
+                const size = Number.parseInt(sizeStr, 10);
+                if (!isNaN(size)) {
+                    currentFile.fileSize = size;
+                    if (isBinary) {
+                        currentFile.isBinary = true;
+                    }
+                }
+            }
+            continue;
+        }
+        // Legacy format (kept for backward compatibility)
         if (line.startsWith('# binary or large file: ')) {
             const match = line.match(/^# binary or large file: (\d+) bytes/);
             if (currentFile && match) {
@@ -132,11 +149,11 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
         }
     }
 
-    // Filter out files with no actual changes
+    // Filter out files with no actual changes (keep binary/large files with metadata)
     // Enrich rows with inline word-level diff segments
-    return files.filter(f => f.rows.length > 0).map(f => ({
+    return files.filter(f => f.rows.length > 0 || f.fileSize).map(f => ({
         ...f,
-        rows: enrichRowsWithInlineSegments(f.rows),
+        rows: enrichRowsWithInlineSegments(f.rows || []),
     }));
 }
 

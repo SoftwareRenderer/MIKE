@@ -5,7 +5,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, config as configStore, selectedTask, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
     import { getStreamingContext, getTaskDiffStatsContext, getTaskDiffContext, getExpandedTasksContext } from '$lib/context';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { loadCollapsedSections, saveCollapsedSections, loadAppSetting, saveAppSetting } from '$lib/storage';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -163,9 +163,11 @@
     // Diff state — per-file cache for incremental updates
     let diffFileCache = $state<Record<string, DiffFile>>({});       // tracked files: path → DiffFile
     let untrackedCache = $state<Record<string, { fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean }>>({}); // untracked: path → metadata
-    // Derived arrays for DiffViewer (sorted)
-    let diffFiles = $derived(Object.values(diffFileCache).filter(f => !untrackedCache[f.path]));
-    let untrackedFiles = $derived(Object.entries(untrackedCache).map(([path, meta]) => ({
+    // Derived arrays for DiffViewer (sorted, split by staged status)
+    let stagedFiles = $derived(Object.values(diffFileCache).filter(f => f.staged && !untrackedCache[f.path]));
+    let unstagedFiles = $derived(Object.values(diffFileCache).filter(f => !f.staged && !untrackedCache[f.path]));
+    let stagedUntracked = $derived([] as typeof untrackedFiles); // untracked files are never staged
+    let unstagedUntracked = $derived(Object.entries(untrackedCache).map(([path, meta]) => ({
         path,
         ...meta,
         file: diffFileCache[path] || { path, rows: [], added: 0, removed: 0 },
@@ -211,6 +213,37 @@
         if (!fullPath) return;
         loadFileEditor();
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
+    }
+
+    /** Stage or unstage a file, then reload the diff. */
+    async function handleStageFile(path: string, stage: boolean) {
+        if (!task) return;
+        try {
+            await stageFile(task.project_id, task.id, path, stage);
+            loadDiff();
+        } catch (e) {
+            showToast(String(e), 'error');
+        }
+    }
+
+    /** Stage all unstaged tracked and untracked files. */
+    async function handleStageAll() {
+        if (!task) return;
+        const paths = [...Object.keys(diffFileCache).filter(p => !diffFileCache[p].staged && !untrackedCache[p]), ...Object.keys(untrackedCache)];
+        for (const path of paths) {
+            try { await stageFile(task.project_id, task.id, path, true); } catch { /* skip */ }
+        }
+        loadDiff();
+    }
+
+    /** Unstage all staged files. */
+    async function handleUnstageAll() {
+        if (!task) return;
+        const paths = Object.keys(diffFileCache).filter(p => diffFileCache[p].staged);
+        for (const path of paths) {
+            try { await stageFile(task.project_id, task.id, path, false); } catch { /* skip */ }
+        }
+        loadDiff();
     }
 
     function closeFileEditor(saved: boolean) {
@@ -776,7 +809,7 @@
         }
     }
 
-    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean }> };
+    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }> };
 
     function updateDiff(data: DiffData, source: 'http' | 'http-force' | 'websocket' = 'http') {
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
@@ -800,6 +833,7 @@
                         truncated: !!entry.truncated,
                         origAdded: entry.origAdded,
                         origRemoved: entry.origRemoved,
+                        staged: entry.staged,
                     };
                 } else if (entry.type === 'untracked') {
                     const existing = diffFileCache[path];
@@ -809,6 +843,7 @@
                         rows: existing?.rows || [],
                         added: entry.line_count ?? 0,
                         removed: 0,
+                        staged: false,
                     };
                 }
             }
@@ -903,7 +938,7 @@
     }
 
     /** Fetch individual files from the manifest. Trusts the server — no client-side hash comparison. */
-    async function fetchChangedFiles(manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number }>) {
+    async function fetchChangedFiles(manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>) {
         if (!task) return;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, boolean> = {};
@@ -916,10 +951,16 @@
                 try {
                     const data = await getDiffFile(task.project_id, task.id, path);
                     if (data.rows) {
-                        updatedDiff[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved };
+                        updatedDiff[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
                         updatedUntracked[path] = true;
+                    } else if (data.isBinary || data.fileSize) {
+                        // Binary/large file — no rows but has metadata
+                        updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, staged: entry.staged };
+                        if (entry.type === 'untracked') {
+                            updatedUntracked[path] = true;
+                        }
                     }
                 } catch (e) {
                     // Silently fail for individual file fetches
@@ -958,13 +999,19 @@
             diffAbortControllers[path] = controller;
             fetches.push((async () => {
                 try {
+                    const existing = diffFileCache[path];
                     const data = await getDiffFile(task.project_id, task.id, path, { signal: controller.signal });
                     if (data.rows) {
-                        const existing = diffFileCache[path];
-                        updatedDiff[path] = { path, rows: data.rows, added: existing?.added ?? data.rows.filter((r: any) => r.variant === 'added').length, removed: existing?.removed ?? data.rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: existing?.origAdded ?? data.origAdded, origRemoved: existing?.origRemoved ?? data.origRemoved };
+                        updatedDiff[path] = { path, rows: data.rows, added: data.rows.filter((r: any) => r.variant === 'added').length, removed: data.rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: existing?.staged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
                         updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false };
+                    } else if (data.isBinary || data.fileSize) {
+                        // Binary/large file — no rows but has metadata
+                        updatedDiff[path] = { path, rows: [], added: existing?.added ?? 0, removed: existing?.removed ?? 0, fileSize: data.fileSize, isBinary: data.isBinary, truncated: false, staged: existing?.staged };
+                        if (untrackedCache[path]) {
+                            updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false, fileSize: data.fileSize };
+                        }
                     }
                 } catch (e) {
                     if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -1037,8 +1084,19 @@
                     truncated: !!data.truncated,
                     origAdded: data.origAdded,
                 }};
+            } else if (data.isBinary || data.fileSize) {
+                // Binary/large file — no lines but has metadata
+                diffFileCache = { ...diffFileCache, [path]: {
+                    path,
+                    rows: [],
+                    added: 0,
+                    removed: 0,
+                    fileSize: data.fileSize,
+                    isBinary: data.isBinary,
+                    truncated: false,
+                }};
             }
-            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false, truncated: !!data?.truncated } };
+            untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false, truncated: !!data?.truncated, fileSize: data.fileSize ?? meta?.fileSize } };
         } catch (e) {
             untrackedCache = { ...untrackedCache, [path]: { ...(untrackedCache[path] || {}), loading: false } };
         }
@@ -1171,7 +1229,7 @@
                                 <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
                             </div>
                         {/if}
-                        <DiffViewer files={diffFiles} untracked={untrackedFiles} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} />
+                        <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
 
                         <!-- Checkpoint diff overlay -->
                         {#if checkpointDiffOpen}
@@ -1196,7 +1254,7 @@
                                         </svg>
                                     </div>
                                 {:else}
-                                    <DiffViewer files={checkpointDiffFiles} untracked={checkpointDiffUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} onLineClick={handleDiffLineClick} />
+                                    <DiffViewer stagedFiles={[]} unstagedFiles={checkpointDiffFiles} stagedUntracked={[]} unstagedUntracked={checkpointDiffUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={handleExpandDiff} onLineClick={handleDiffLineClick} />
                                 {/if}
                             </div>
                         {/if}

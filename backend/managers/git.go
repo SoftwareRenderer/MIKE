@@ -549,7 +549,10 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	// For default working tree diff, return a manifest (per-file metadata only).
 	// Custom ref comparisons and explicit full=1 requests return full content.
 	if headRef == "" && customBase == "" && !fullDiff {
-		manifest := buildDiffManifest(taskDiff)
+		// Discover which files are staged (in the index but differ from target).
+		stagedPaths := getStagedPaths(h.worktreeMgr, taskID, baseRef)
+		log.Printf("[debug] stagedPaths=%v", stagedPaths)
+		manifest := buildDiffManifest(taskDiff, stagedPaths)
 		httputil.JSONResponse(w, http.StatusOK, manifest)
 		return
 	}
@@ -577,16 +580,17 @@ func stripUntrackedLines(d *git.TaskDiff) *git.TaskDiff {
 
 // diffManifestFile is a single file entry in the diff manifest.
 type diffManifestFile struct {
-	Hash      string `json:"hash"`
-	Type      string `json:"type"` // "tracked" or "untracked"
-	Added     int    `json:"added,omitempty"`
-	Removed   int    `json:"removed,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
-	OrigAdded int    `json:"origAdded,omitempty"`
-	OrigRemoved int  `json:"origRemoved,omitempty"`
-	LineCount int    `json:"line_count,omitempty"` // for untracked files
-	FileSize  int64  `json:"file_size,omitempty"`  // for binary/large files
-	IsBinary  bool   `json:"is_binary,omitempty"`  // true for binary files
+	Hash        string `json:"hash"`
+	Type        string `json:"type"` // "tracked" or "untracked"
+	Added       int    `json:"added,omitempty"`
+	Removed     int    `json:"removed,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	OrigAdded   int    `json:"origAdded,omitempty"`
+	OrigRemoved int    `json:"origRemoved,omitempty"`
+	LineCount   int    `json:"line_count,omitempty"` // for untracked files
+	FileSize    int64  `json:"file_size,omitempty"`  // for binary/large files
+	IsBinary    bool   `json:"is_binary,omitempty"`  // true for binary files
+	Staged      bool   `json:"staged,omitempty"`     // true if file is staged in the index
 }
 
 // diffManifest is the lightweight manifest returned by GET /diff.
@@ -596,13 +600,46 @@ type diffManifest struct {
 	ShortStat string                      `json:"short_stat"`
 }
 
+// getStagedPaths returns a set of file paths that are staged in the index.
+// Uses "git diff --staged target --name-only" to list staged files.
+func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]struct{} {
+	if wm == nil {
+		return nil
+	}
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return nil
+	}
+	target := "HEAD"
+	if baseRef != "" {
+		target = baseRef
+	}
+	cmd := exec.Command("git", "-C", worktreePath, "diff", "--staged", "--name-only", target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	paths := make(map[string]struct{})
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		p := strings.TrimSpace(line)
+		if p != "" {
+			paths[p] = struct{}{}
+		}
+	}
+	return paths
+}
+
 // buildDiffManifest creates a manifest from a TaskDiff with per-file hashes.
-func buildDiffManifest(d *git.TaskDiff) diffManifest {
+// stagedPaths is a set of file paths that are currently staged in the index.
+func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}) diffManifest {
 	manifest := diffManifest{
 		Files:     make(map[string]diffManifestFile),
 		ShortStat: d.ShortStat,
 	}
 	for path, f := range d.Tracked {
+		_, ok := stagedPaths[path]
+		staged := stagedPaths != nil && ok
+		log.Printf("[debug] path=%q ok=%v", path, ok)
 		entry := diffManifestFile{
 			Hash:        git.ComputeFileHash(f),
 			Type:        "tracked",
@@ -611,6 +648,7 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 			Truncated:   f.Truncated,
 			OrigAdded:   f.OrigAdded,
 			OrigRemoved: f.OrigRemoved,
+			Staged:      staged,
 		}
 		if f.FileSize != nil {
 			entry.FileSize = *f.FileSize
@@ -619,6 +657,7 @@ func buildDiffManifest(d *git.TaskDiff) diffManifest {
 		manifest.Files[path] = entry
 	}
 	for _, u := range d.Untracked {
+		// Untracked files are never staged (they're not in the index).
 		manifest.Files[u.Path] = diffManifestFile{
 			Hash:        git.ComputeUntrackedHash(u),
 			Type:        "untracked",
@@ -668,12 +707,23 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
-		httputil.JSONResponse(w, http.StatusOK, map[string]any{
-			"rows":        f.Rows,
-			"truncated":   f.Truncated,
-			"origAdded":   f.OrigAdded,
-			"origRemoved": f.OrigRemoved,
-		})
+		resp := map[string]any{
+			"rows":      f.Rows,
+			"truncated": f.Truncated,
+		}
+		if f.OrigAdded > 0 {
+			resp["origAdded"] = f.OrigAdded
+		}
+		if f.OrigRemoved > 0 {
+			resp["origRemoved"] = f.OrigRemoved
+		}
+		if f.IsBinary {
+			resp["isBinary"] = true
+		}
+		if f.FileSize != nil {
+			resp["fileSize"] = *f.FileSize
+		}
+		httputil.JSONResponse(w, http.StatusOK, resp)
 		return
 	}
 	// Then check untracked files
@@ -691,12 +741,19 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 					}
 				}
 			}
-			httputil.JSONResponse(w, http.StatusOK, map[string]any{
+			resp := map[string]any{
 				"lines":      lines,
 				"line_count": len(lines),
 				"truncated":  false,
 				"origAdded":  len(lines),
-			})
+			}
+			if u.IsBinary {
+				resp["isBinary"] = true
+			}
+			if u.FileSize != 0 {
+				resp["fileSize"] = u.FileSize
+			}
+			httputil.JSONResponse(w, http.StatusOK, resp)
 			return
 		}
 	}
@@ -775,4 +832,75 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "reset"})
+}
+
+// HandleStageFile stages or unstages a single file in the task's worktree.
+// POST /api/projects/{projectID}/tasks/{taskID}/diff/stage
+// Body: {"path": "file.c", "stage": true}
+func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Path  string `json:"path"`
+		Stage bool   `json:"stage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path required")
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
+	}
+	if task.Status == "backlog" || task.Status == "done" {
+		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
+		return
+	}
+	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "worktree not found")
+		return
+	}
+	fullPath := filepath.Join(worktreePath, req.Path)
+
+	if req.Stage {
+		// Stage the file: git add <path>
+		// For deleted files, git add records the deletion.
+		cmd := exec.Command("git", "-C", worktreePath, "add", req.Path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", string(out)))
+			return
+		}
+	} else {
+		// Unstage the file: git reset HEAD <path>
+		// This restores the working tree to match the index (restores deleted content too).
+		cmd := exec.Command("git", "-C", worktreePath, "reset", "HEAD", "--", req.Path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git reset failed: %s", string(out)))
+			return
+		}
+		// If the file was newly added (not previously tracked), remove it from the index.
+		// git reset HEAD on a new file doesn't delete it from disk, which is correct.
+		// But we also need to handle the case where the file was deleted and staged.
+		// git checkout -- <path> restores the working tree from the index.
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			// File was deleted — restore from index (HEAD)
+			cmd = exec.Command("git", "-C", worktreePath, "checkout", "HEAD", "--", req.Path)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				// File might not exist in HEAD (new file that was staged then deleted).
+				// In that case, just recreate it empty or skip.
+				_ = out
+			}
+		}
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": map[bool]string{true: "staged", false: "unstaged"}[req.Stage]})
 }

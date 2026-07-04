@@ -69,7 +69,7 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
 }
 
 /** Fetch the content of a single file (tracked or untracked) from the cached diff. */
-export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number }> {
+export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number; isBinary?: boolean; fileSize?: number }> {
     const params = new URLSearchParams({ path });
     if (options?.full) params.set('full', '1');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?${params}`, { signal: options?.signal });
@@ -90,4 +90,16 @@ export async function resetWorktree(projectId: string, taskId: string, commitHas
         return { status: 'queued' };
     }
     return resetWorktreeRaw(projectId, taskId, commitHash);
+}
+
+/** Stage or unstage a single file in the task's worktree. */
+export async function stageFile(projectId: string, taskId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ path, stage }),
+    });
+    if (!res.ok) throw await apiError(res, stage ? 'Failed to stage file' : 'Failed to unstage file');
+    return res.json();
 }
