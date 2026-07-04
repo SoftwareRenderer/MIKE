@@ -245,7 +245,7 @@ import { slide } from 'svelte/transition';
         <!-- Staged section -->
         {#if stagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!collapsedSections.has('staged')} onclick={() => toggleSection('staged')} title={collapsedSections.has('staged') ? 'Expand staged changes' : 'Collapse staged changes'}>
+            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!collapsedSections.has('staged')} onclick={() => toggleSection('staged')} title={collapsedSections.has('staged') ? 'Show staged changes' : 'Hide staged changes'}>
                 <svg class="diff-section-chevron" class:expanded={!collapsedSections.has('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
