@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"kanban/backend/types"
@@ -23,6 +25,10 @@ import (
 // execFunc runs a shell command. Provided by the sandbox in container mode.
 type execFunc func(ctx context.Context, command string, timeout int64) (string, error)
 
+// execStreamFunc runs a shell command with streaming output.
+// outputCallback is called for each chunk of output as it arrives.
+type execStreamFunc func(ctx context.Context, command string, timeout int64, outputCallback func(text string)) (string, error)
+
 // readFunc reads a file. Provided by the sandbox in container mode.
 type readFunc func(path string) ([]byte, error)
 
@@ -31,7 +37,7 @@ type writeFunc func(path, content string) error
 
 // makeSandboxCallbacks creates exec/read/write callbacks that route through
 // the sandbox agent client inside a container.
-func makeSandboxCallbacks(client *sandbox.Client) (execFunc, readFunc, writeFunc) {
+func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, readFunc, writeFunc) {
 	execCb := func(ctx context.Context, command string, timeout int64) (string, error) {
 		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
@@ -39,6 +45,25 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, readFunc, writeFunc
 		}
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(holder.Output())
+		exitCode := <-holder.ExitCode()
+		if exitCode != 0 {
+			return buf.String(), fmt.Errorf("exit code %d", exitCode)
+		}
+		return buf.String(), nil
+	}
+	execStreamCb := func(ctx context.Context, command string, timeout int64, outputCallback func(text string)) (string, error) {
+		holder, err := client.Bash(ctx, command, timeout)
+		if err != nil {
+			return "", fmt.Errorf("bash: %w", err)
+		}
+		var buf bytes.Buffer
+		streamReader := holder.Output()
+		scanner := bufio.NewScanner(streamReader)
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			buf.WriteString(line)
+			outputCallback(line)
+		}
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
 			return buf.String(), fmt.Errorf("exit code %d", exitCode)
@@ -59,7 +84,7 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, readFunc, writeFunc
 		}
 		return nil
 	}
-	return execCb, readCb, writeCb
+	return execCb, execStreamCb, readCb, writeCb
 }
 
 // makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
@@ -100,8 +125,10 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 // Sandbox callbacks are read from state.
 // When nil, os.Root provides folder isolation on the host.
 // ctx is used to cancel long-running operations (e.g., bash) when the task is stopped.
-func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState) (string, bool) {
+// outputCallback, if non-nil, is called with incremental output for streaming tools (e.g., bash).
+func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
 	sandboxExec := state.sandboxExec
+	sandboxExecStream := state.sandboxExecStream
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
 	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
@@ -307,16 +334,50 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 
 		var out string
 		var err error
-		if sandboxExec != nil {
-			// Use sandbox execution — ctx propagates task cancellation
+		if sandboxExecStream != nil && outputCallback != nil {
+			// Use streaming sandbox execution — output is streamed line by line
+			out, err = sandboxExecStream(ctx, cmd, timeout, func(text string) {
+				outputCallback(task.ID, text)
+			})
+		} else if sandboxExec != nil {
+			// Use sandbox execution (non-streaming fallback) — ctx propagates task cancellation
 			out, err = sandboxExec(ctx, cmd, timeout)
 		} else {
-			// Direct execution (no sandbox) — ctx propagates task cancellation
+			// Direct execution (no sandbox) with streaming output.
 			c := exec.CommandContext(ctx, "bash", "-c", cmd)
 			c.Dir = worktreePath
-			rawOut, cmdErr := c.CombinedOutput()
-			out = string(rawOut)
-			err = cmdErr
+			stdout, err := c.StdoutPipe()
+			if err != nil {
+				return fmt.Sprintf("Failed: %v", err), false
+			}
+			stderr, err := c.StderrPipe()
+			if err != nil {
+				return fmt.Sprintf("Failed: %v", err), false
+			}
+			if err := c.Start(); err != nil {
+				return fmt.Sprintf("Failed: %v", err), false
+			}
+			// Read stdout and stderr concurrently, stream output line by line.
+			var buf bytes.Buffer
+			var wg sync.WaitGroup
+			stream := outputCallback != nil
+			readStream := func(r io.Reader) {
+				defer wg.Done()
+				scanner := bufio.NewScanner(r)
+				for scanner.Scan() {
+					line := scanner.Text() + "\n"
+					buf.WriteString(line)
+					if stream {
+						outputCallback(task.ID, line)
+					}
+				}
+			}
+			wg.Add(2)
+			go readStream(stdout)
+			go readStream(stderr)
+			err = c.Wait()
+			wg.Wait()
+			out = buf.String()
 		}
 
 		if err != nil {

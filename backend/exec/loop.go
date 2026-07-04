@@ -112,6 +112,7 @@ type loopContext struct {
 	assistantContent strings.Builder
 	reasoningContent strings.Builder
 	pendingToolCalls []types.ChatToolCall
+	prevArgLens      map[string]int // tool_id -> arg length, for detecting streaming updates
 	detector         *loopDetector
 	tracker          failureTracker
 	mc               *modelConfig
@@ -246,7 +247,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Agent connection failed: %v", err), "agent_connection_failed")
 			return
 		}
-		state.sandboxExec, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
+		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
 		// Read uses plain os.ReadFile (no isolation).
@@ -309,6 +310,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	lc := &loopContext{
 		messages:         messages,
 		pendingToolCalls: nil,
+		prevArgLens:      make(map[string]int),
 		detector:         newLoopDetector(),
 		mc:               mc,
 		client:           client,
@@ -429,16 +431,23 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if len(choice.Delta.ToolCalls) > 0 {
 					priorLen := len(lc.pendingToolCalls)
 					lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
-					// Send tool_call event as soon as a new tool call appears in the stream
-					// so the frontend shows a spinner during LLM token generation
-					for i := priorLen; i < len(lc.pendingToolCalls); i++ {
+					// Send tool_call events for new tool calls and updates when args change.
+					// This lets the frontend show the command text as it streams in.
+					for i := 0; i < len(lc.pendingToolCalls); i++ {
 						tc := lc.pendingToolCalls[i]
-						if tc.ID != "" && tc.Function.Name != "" {
-							path := extractPathFromArgs(tc.Function.Arguments)
-							// During streaming, args may be partial JSON (e.g. just "{").
-							// Send raw_args and let the frontend parse when complete.
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+						if tc.ID == "" || tc.Function.Name == "" {
+							continue
 						}
+						argLen := len(tc.Function.Arguments)
+						prevLen := lc.prevArgLens[tc.ID]
+						isNew := i >= priorLen
+						isUpdated := !isNew && argLen != prevLen
+						if !isNew && !isUpdated {
+							continue
+						}
+						lc.prevArgLens[tc.ID] = argLen
+						path := extractPathFromArgs(tc.Function.Arguments)
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
 					}
 				}
 				// Throttled progress updates for write_file (1 per 2 seconds)
@@ -626,7 +635,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.taskMu.Lock()
 				state := te.tasks[task.ID]
 				te.taskMu.Unlock()
-				result, success := te.executeTool(ctx, tc.Function.Name, args, worktreePath, task, state)
+				result, success := te.executeTool(ctx, tc.Function.Name, args, worktreePath, task, state, func(toolID string, text string) {
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
+				})
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})

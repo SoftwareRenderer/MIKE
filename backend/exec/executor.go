@@ -45,9 +45,10 @@ type executionState struct {
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
-	sandboxExec  execFunc
-	sandboxRead  readFunc
-	sandboxWrite writeFunc
+	sandboxExec     execFunc
+	sandboxExecStream execStreamFunc
+	sandboxRead     readFunc
+	sandboxWrite    writeFunc
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 }

@@ -11,6 +11,7 @@ const (
 	WSTypeReasoningEnd       WSMessageType = "reasoning_end"
 	WSTypeToolCall           WSMessageType = "tool_call"
 	WSTypeToolProgress       WSMessageType = "tool_progress"
+	WSTypeToolOutput         WSMessageType = "tool_output"
 	WSTypeToolResult         WSMessageType = "tool_result"
 	WSTypeStatus             WSMessageType = "status"
 	WSTypeQueue              WSMessageType = "queue"

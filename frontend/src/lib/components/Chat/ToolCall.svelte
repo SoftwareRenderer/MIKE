@@ -15,6 +15,7 @@
             toolName: string;
             displayName?: string;
             args: Record<string, unknown>;
+            raw_args?: string;
             path?: string;
             result?: string;
             success?: boolean;
@@ -36,6 +37,15 @@
 
     let { toolCall: tc, expandedArgs, onToggleArgs, onNavigateTask, projectId, taskId }: Props = $props();
 
+    // For bash: distinguish streaming (command being generated) from executing (command running).
+    // Streaming: raw_args is partial JSON. Executing: raw_args is complete JSON (or args.command set).
+    let isBashExecuting = $derived(
+        tc.toolName === 'bash' && tc.isPending && (
+            !!tc.args.command ||
+            (tc.raw_args && (() => { try { JSON.parse(tc.raw_args); return true; } catch { return false; } })())
+        )
+    );
+
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
         return { text: display.slice(0, ARGS_MAX_LEN) + '…', truncated: true };
@@ -48,7 +58,7 @@
     }
 
     let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));
-    let argsDisplay = $derived(formatToolArgs(tc.toolName, tc.args));
+    let argsDisplay = $derived(formatToolArgs(tc.toolName, tc.args, tc.raw_args));
     let truncated = $derived(truncateArgs(argsDisplay));
 
     // Bash result truncation: max 10 lines AND max 1KB (whichever is smaller)
@@ -192,7 +202,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{tc.toolName === 'task_complete' ? 'Writing Summary' : 'Writing'}{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'task_complete'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}

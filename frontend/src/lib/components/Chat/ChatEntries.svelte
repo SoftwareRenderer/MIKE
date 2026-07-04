@@ -19,7 +19,6 @@
         threads,
         awaitingResponse,
         connected,
-        isLoading,
         queuePosition,
         queueEstimatedWait,
         showHeader,
@@ -49,7 +48,6 @@
         threads: Thread[];
         awaitingResponse: boolean;
         connected: boolean;
-        isLoading: boolean;
         queuePosition: number;
         queueEstimatedWait: number;
         showHeader: boolean;
@@ -192,7 +190,7 @@
             {/if}
         {/each}
     {/if}
-    {#if awaitingResponse && connected && isLoading}
+    {#if awaitingResponse && connected}
         <div class="awaiting-llm">
             <span class="spinner"></span>
             <span>{queuePosition > 0 ? `Awaiting LLM provider — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : 'Awaiting LLM provider...'}</span>

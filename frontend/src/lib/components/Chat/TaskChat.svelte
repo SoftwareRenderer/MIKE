@@ -409,14 +409,9 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 if (!data.tool_id || data.tool_id === '') {
                     break;
                 }
-                // Skip if this tool was already processed (prevents agent_end from
-                // creating duplicates when currentAssistantId changed since streaming).
-                if (processedToolIds.has(data.tool_id)) {
-                    break;
-                }
-                // Mark as processed immediately (before entry lookup) so even if
-                // the tool is deduped within an entry, agent_end won't re-add it.
-                processedToolIds.add(data.tool_id);
+                // Note: we do NOT block on processedToolIds here — streaming updates
+                // for the same tool_id must pass through so raw_args can grow.
+                // processedToolIds is only checked when creating a NEW tool call below.
                 // Attach tool call to the current assistant entry, or fall back to
                 // the last existing assistant entry (e.g., agent_end sends tool_call
                 // events after the streaming assistant was already closed).
@@ -442,18 +437,33 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 }
                 if (!entry.toolCalls) entry.toolCalls = [];
                 // Dedup: if a tool_call with this tool_id already exists (from buffer replay
-                // of an earlier streaming delta), update it in-place instead of pushing a duplicate.
+                // of an earlier streaming delta), replace it with a new object so the
+                // keyed $each in ChatMessage detects the change and re-renders ToolCall.
                 const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
                 if (existing) {
-                    existing.toolName = data.tool_name;
-                    existing.displayName = data.tool_display_name;
-                    existing.args = data.args || {};
-                    existing.raw_args = data.raw_args;
-                    existing.sandbox = data.sandbox;
-                    existing.path = data.path;
+                    // Skip updates for completed tool calls (agent_end duplicates after tool_result).
+                    if (!existing.isPending && existing.result !== undefined) {
+                        break;
+                    }
+                    const updated = { ...existing,
+                        toolName: data.tool_name,
+                        displayName: data.tool_display_name,
+                        args: data.args || {},
+                        raw_args: data.raw_args,
+                        sandbox: data.sandbox,
+                        path: data.path,
+                    };
                     // Don't re-enable isStreaming for deduped tool calls (e.g., from agent_end).
                     // The entry may have already been closed by the tool_result handler.
+                    entry.toolCalls = entry.toolCalls.map(tc =>
+                        tc.toolId === data.tool_id ? updated : tc
+                    );
+                } else if (processedToolIds.has(data.tool_id)) {
+                    // Tool ID was already processed (agent_end duplicate) — skip.
+                    break;
                 } else {
+                    // Mark as processed so agent_end duplicates are caught above.
+                    processedToolIds.add(data.tool_id);
                     const ci = entry.content.length;
                     const ri = (entry.reasoningContent || '').length;
                     // Create new array reference so $derived in ChatMessage recomputes.
@@ -547,6 +557,22 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 }
                 break;
             }
+            case 'tool_output': {
+                // Streaming output from a running tool (e.g., bash stdout/stderr).
+                // Append to the pending tool call's result so the UI updates in real-time.
+                const data = event.data as { tool_id: string; text: string };
+                for (const entry of entries) {
+                    if (entry.toolCalls) {
+                        for (const tc of entry.toolCalls) {
+                            if (tc.isPending && tc.toolId === data.tool_id) {
+                                tc.result = (tc.result || '') + data.text;
+                            }
+                        }
+                    }
+                }
+                scroll();
+                break;
+            }
             case 'user_message': {
                 const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
                 // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
@@ -577,6 +603,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             }
             case 'complete': {
                 markNotStreaming();
+                awaitingResponse = false;
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
                 // Update streaming assistant entry ID with the real backend ID (for checkpoint hash matching)
                 // Must happen BEFORE closeCurrentAssistant() which clears currentAssistantId
@@ -1892,7 +1919,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         {threads}
         {awaitingResponse}
         {connected}
-        {isLoading}
         {queuePosition}
         {queueEstimatedWait}
         {showHeader}

@@ -1,10 +1,22 @@
 /** Shared tool args formatting for chat messages */
 
-export function formatToolArgs(toolName: string, args: Record<string, unknown> | null): string {
+export function formatToolArgs(toolName: string, args: Record<string, unknown> | null, rawArgs?: string): string {
     if (!args) return '';
     switch (toolName) {
         case 'bash': {
-            const cmd = args.command as string;
+            let cmd = args.command as string;
+            // During streaming, args may be empty but rawArgs has the JSON.
+            // Try full parse first, then regex fallback for partial JSON.
+            if (!cmd && rawArgs) {
+                try {
+                    const parsed = JSON.parse(rawArgs);
+                    cmd = parsed.command as string;
+                } catch {
+                    // Partial JSON (e.g. "{\"command\":\"apt ge") — extract via regex
+                    const m = rawArgs.match(/"command"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                    if (m) cmd = m[1].replace(/\\"/g, '"');
+                }
+            }
             return cmd ? `$ ${cmd}` : '$ (building command...)';
         }
         case 'read_file': {
