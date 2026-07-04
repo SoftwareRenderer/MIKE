@@ -781,7 +781,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(27 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {

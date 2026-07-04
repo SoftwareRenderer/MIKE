@@ -428,9 +428,30 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		session.mu.Unlock()
 	}()
 
-	rctx := r.Context()
+	// Ping/pong keepalive
+	ctxRead, cancelRead := context.WithCancel(context.Background())
+	defer cancelRead()
+	go func() {
+		ticker := time.NewTicker(27 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(ctxRead, 10*time.Second)
+				err := conn.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					cancelRead()
+					return
+				}
+			case <-ctxRead.Done():
+				return
+			}
+		}
+	}()
+
 	for {
-		msgType, data, err := conn.Read(rctx)
+		msgType, data, err := conn.Read(ctxRead)
 		if err != nil {
 			return
 		}
@@ -486,9 +507,30 @@ func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Reque
 		conn.Close(websocket.StatusNormalClosure, "closed")
 	}()
 
-	rctx := r.Context()
+	// Ping/pong keepalive
+	ctxRead, cancelRead := context.WithCancel(context.Background())
+	defer cancelRead()
+	go func() {
+		ticker := time.NewTicker(27 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(ctxRead, 10*time.Second)
+				err := conn.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					cancelRead()
+					return
+				}
+			case <-ctxRead.Done():
+				return
+			}
+		}
+	}()
+
 	for {
-		msgType, data, err := conn.Read(rctx)
+		msgType, data, err := conn.Read(ctxRead)
 		if err != nil {
 			return
 		}
