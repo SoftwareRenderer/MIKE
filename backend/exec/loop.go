@@ -24,6 +24,87 @@ import (
 // PiSentinelURL is the sentinel value for llama_server_url when a task uses Pi.
 const PiSentinelURL = "pi://agent"
 
+// imageExts is the set of file extensions considered image files (allowed in staging).
+var imageExts = map[string]struct{}{
+	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".webp": {}, ".bmp": {},
+	".svg": {}, ".ico": {}, ".tiff": {}, ".tif": {}, ".avif": {}, ".apng": {},
+}
+
+// isImageFile returns true if the file path has a known image extension.
+func isImageFile(path string) bool {
+	lower := strings.ToLower(filepath.Ext(path))
+	_, ok := imageExts[lower]
+	return ok
+}
+
+// unstageNewBinaryFiles unstages newly staged binary files that are not images.
+// Uses `git diff --staged --numstat --diff-filter=A` to find new files,
+// checks if git considers them binary (numstat shows "-"), and unstages
+// non-image binary files with `git reset HEAD -- <path>`.
+func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
+	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--numstat", "--diff-filter=A")
+	if err != nil || len(strings.TrimSpace(out)) == 0 {
+		return
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// numstat format: added<TAB>removed<TAB>path
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		added := strings.TrimSpace(parts[0])
+		path := parts[2]
+		// Binary files show "-" in numstat
+		if added != "-" {
+			continue
+		}
+		if isImageFile(path) {
+			continue
+		}
+		_ = wm.GitRunInWorktree(taskID, append([]string{"reset", "HEAD", "--", path}, git.GitAuthorFlags()...)...)
+	}
+}
+
+// unstageNewBinaryFilesInDir is like unstageNewBinaryFiles but uses a plain directory path.
+func unstageNewBinaryFilesInDir(dir string) {
+	out, err := runGitCommand(dir, "diff", "--staged", "--numstat", "--diff-filter=A")
+	if err != nil || len(strings.TrimSpace(out)) == 0 {
+		return
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// numstat format: added<TAB>removed<TAB>path
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		added := strings.TrimSpace(parts[0])
+		path := parts[2]
+		if added != "-" {
+			continue
+		}
+		if isImageFile(path) {
+			continue
+		}
+		_, _ = runGitCommand(dir, "reset", "HEAD", "--", path)
+	}
+}
+
+// runGitCommand runs a git command in the given directory and returns its output.
+func runGitCommand(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // executeTask runs the AI conversation loop.
 func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
 	defer func() {
@@ -758,6 +839,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 						commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 						te.gitRun(worktreePath, "add", "-A")
+						unstageNewBinaryFilesInDir(worktreePath)
 						te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
 						// Merge into origin branch if auto_merge is enabled
 						if task.AutoMerge {
@@ -1644,6 +1726,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		}
 		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
 		te.gitRun(worktreePath, "add", "-A")
+		unstageNewBinaryFilesInDir(worktreePath)
 		te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
 		// Merge into origin branch if auto_merge is enabled
 		if task.AutoMerge {

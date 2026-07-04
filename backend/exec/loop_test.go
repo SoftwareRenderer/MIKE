@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1077,4 +1079,96 @@ func TestModelConfig_ConcurrentAccess(t *testing.T) {
 
 	// If we got here without data race, the test passes
 	_, _ = mc.get()
+}
+
+// --- Unstage New Binary Files Tests ---
+
+func TestIsImageFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"photo.png", true},
+		{"image.JPG", true},
+		{"icon.jpg", true},
+		{"logo.jpeg", true},
+		{"anim.gif", true},
+		{"pic.webp", true},
+		{"sprite.bmp", true},
+		{"icon.svg", true},
+		{"favicon.ico", true},
+		{"scan.tiff", true},
+		{"scan.tif", true},
+		{"photo.avif", true},
+		{"anim.apng", true},
+		{"subdir/image.PNG", true},
+		{"data.bin", false},
+		{"file.exe", false},
+		{"font.woff2", false},
+		{"archive.zip", false},
+		{"readme.md", false},
+		{"script.js", false},
+		{"unknown.xyz", false},
+		{"noext", false},
+	}
+
+	for _, tt := range tests {
+		got := isImageFile(tt.path)
+		if got != tt.want {
+			t.Errorf("isImageFile(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestUnstageNewBinaryFilesInDir(t *testing.T) {
+	dir := t.TempDir()
+	_, _ = runGitCommand(dir, "init", "-b", "main")
+	_, _ = runGitCommand(dir, "config", "user.email", "test@test.com")
+	_, _ = runGitCommand(dir, "config", "user.name", "Test")
+
+	// Create initial commit so we have a HEAD
+	_ = os.WriteFile(filepath.Join(dir, "initial.txt"), []byte("initial\n"), 0644)
+	_, _ = runGitCommand(dir, "add", "initial.txt")
+	_, _ = runGitCommand(dir, "commit", "-m", "initial")
+
+	// Create new files: text, image, and binary
+	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hello\n"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "photo.png"), []byte("\x89PNG\r\n\x1a\nfake png"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "data.bin"), []byte("\x00\x01\x02\x03binary"), 0644)
+
+	// Stage all
+	_, _ = runGitCommand(dir, "add", "-A")
+
+	// Verify all are staged
+	out, _ := runGitCommand(dir, "diff", "--staged", "--name-only", "--diff-filter=A")
+	staged := strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' })
+	if len(staged) != 3 {
+		t.Fatalf("expected 3 staged files, got %d: %v", len(staged), staged)
+	}
+
+	// Unstage binary non-image files
+	unstageNewBinaryFilesInDir(dir)
+
+	// Check what remains staged
+	out, _ = runGitCommand(dir, "diff", "--staged", "--name-only", "--diff-filter=A")
+	staged = strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' })
+
+	// Should have readme.txt and photo.png, but NOT data.bin
+	got := make(map[string]bool)
+	for _, f := range staged {
+		got[f] = true
+	}
+
+	if len(got) != 2 {
+		t.Errorf("expected 2 staged files, got %d: %v", len(got), staged)
+	}
+	if !got["readme.txt"] {
+		t.Error("readme.txt should still be staged")
+	}
+	if !got["photo.png"] {
+		t.Error("photo.png should still be staged (image)")
+	}
+	if got["data.bin"] {
+		t.Error("data.bin should be unstaged (binary, not image)")
+	}
 }
