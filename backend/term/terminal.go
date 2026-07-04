@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	sandboxDockerfilePath := ""
 	memoryLimit := 0
 	projectName := ""
+	projectPath := ""
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -93,6 +95,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		sandboxDockerfilePath = proj.SandboxDockerfilePath
 		memoryLimit = proj.SandboxMemoryLimit
 		projectName = proj.Name
+		projectPath = proj.Path
 	}
 
 	var sess *taskTerminal
@@ -126,7 +129,12 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		// Both project and task terminals create the container on demand if it doesn't exist.
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir)
+		// Only mount .git/ for task-level containers (not project-level terminals)
+		shellProjectPath := ""
+		if !strings.HasPrefix(taskID, "proj:") {
+			shellProjectPath = projectPath
+		}
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, networkIsolation, memoryLimit, piAgentDir)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

@@ -126,7 +126,7 @@ type loopContext struct {
 }
 
 // executeTask runs the AI conversation loop.
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -220,7 +220,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if needPiConfig && hasExistingContainer {
 				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
 			}
-			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
+			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, networkIsolation, memoryLimit, piAgentDir); err != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)

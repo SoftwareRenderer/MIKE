@@ -159,12 +159,14 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 
 // Create creates a gVisor sandbox container for a task.
 // The worktree is bind-mounted read-write at /sandbox/<projectName> inside the container.
+// If projectPath is non-empty, the .git/ directory is also mounted read-only
+// at the same absolute path (so git can resolve refs, objects, worktree metadata, etc.).
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
 // (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath string, networkIsolation bool, memoryLimit int, piAgentDir string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -245,6 +247,18 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName st
 	if memoryLimit > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
 	}
+	// Mount .git/ read-only at the same absolute path.
+	// This lets git inside the container resolve refs, objects, worktree metadata, etc.
+	if projectPath != "" {
+		gitDir := filepath.Join(projectPath, ".git")
+		if _, err := os.Stat(gitDir); err == nil {
+			createArgs = append(createArgs,
+				"-v", gitDir+":"+gitDir+":rprivate,ro",
+			)
+			log.Printf("[sandbox] task=%s mounting .git read-only: %s", taskID, gitDir)
+		}
+	}
+
 	// Pi agent config mount (only for Pi tasks)
 	// Mounted at /root/.pi/agent so Pi finds it at its default config location
 	if piAgentDir != "" {
@@ -398,7 +412,7 @@ type ShellProcess struct {
 // with the PTY master file descriptor for I/O relay.
 // The caller is responsible for calling Close() when done.
 func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
-	return sm.startShell(taskID, false, "", "", "", false, 0, "")
+	return sm.startShell(taskID, false, "", "", "", "", false, 0, "")
 }
 
 // StartShellWithCreate starts an interactive shell, creating the sandbox container
@@ -409,8 +423,9 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If piAgentDir is non-empty, the Pi config directory is bind-mounted.
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
-	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, networkIsolation, memoryLimit, piAgentDir)
+// If projectPath is non-empty, the .git/ directory is mounted read-only.
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
+	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, projectPath, networkIsolation, memoryLimit, piAgentDir)
 }
 
 // ExecProject runs a command inside the project's sandbox container,
@@ -423,7 +438,7 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, projectPath, BaseImage, projectName, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, projectPath, BaseImage, projectName, "", false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -439,7 +454,7 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectNa
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, projectPath, BaseImage, projectName, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, projectPath, BaseImage, projectName, "", false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -449,12 +464,12 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectNa
 // ExecTask runs a command inside a task's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for task-level filesystem operations (read, write, etc.) in the diff view editor.
-func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, command string) (string, error) {
+func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPath, command string) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -463,19 +478,19 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, command st
 
 // ExecTaskWithInput runs a command inside a task's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, command string, stdin []byte) (string, error) {
+func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, projectPath string, stdin []byte, command string) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, false, 0, ""); err != nil {
+		if err := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, false, 0, ""); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName, projectPath string, networkIsolation bool, memoryLimit int, piAgentDir string) (*ShellProcess, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -486,7 +501,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 			return nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err := sm.Create(taskID, worktreePath, baseImage, projectName, networkIsolation, memoryLimit, piAgentDir); err != nil {
+		if err := sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, networkIsolation, memoryLimit, piAgentDir); err != nil {
 			return nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()
