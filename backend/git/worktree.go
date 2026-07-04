@@ -215,6 +215,10 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		sourceRef = sourceBranch
 	}
 
+	// Remove stale git worktree registration (prune skips locked entries).
+	staleRegPath := filepath.Join(project.Path, ".git", "worktrees", taskID)
+	_ = os.RemoveAll(staleRegPath)
+
 	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
 	cmd.Dir = project.Path
 	if out, err := cmd.CombinedOutput(); err != nil {
