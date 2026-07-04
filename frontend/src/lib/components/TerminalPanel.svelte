@@ -27,6 +27,7 @@
     let modCtrl = $state(false);
     let modAlt = $state(false);
 
+
     /** Escape sequences sent by xterm.js for each key. */
     const KEY_SEQ: Record<string, string> = {
         Escape: '\x1b',
@@ -191,62 +192,439 @@
         });
         observer.observe(container);
 
-        // Enable inertial scrolling on mobile.
-        // Tracks per-frame deltas, preserves fractional line movements, and normalizes decay across refresh rates.
+        // Mobile touch selection: long-press → word select → draggable handles + copy/paste.
         let touchStartY = 0;
         let touchVelSamples: { y: number; t: number }[] = [];
         let inertiaRaf: number | null = null;
         let currentTouchY = 0;
-        let pixelBufferY = 0; // Remainder buffer to prevent quantization jank
+        let pixelBufferY = 0;
         let lastTickTime = 0;
         let isDisposed = false;
+        let touchStartTime = 0;
+        let longPressTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const LINE_HEIGHT = 16; // Match your terminal's row height
+        // Selection UI state.
+        let selMode = false;
+        let selStartRow = 0;
+        let selEndRow = 0;
+        let selStartCol = 0;
+        let selEndCol = 0;
+        let draggingHandle: 'start' | 'end' | null = null;
+        let docTouchMoveHandler: ((e: TouchEvent) => void) | null = null;
+        let docTouchEndHandler: (() => void) | null = null;
+        let dragRefY = 0;
+        let dragRefRow = 0;
+        let dragRefCol = 0;
+        let overlayEl: HTMLElement | null = null;
+        let startHandleEl: HTMLElement | null = null;
+        let endHandleEl: HTMLElement | null = null;
+        let btnBarEl: HTMLElement | null = null;
+        let copyBtnEl: HTMLButtonElement | null = null;
+        let pasteBtnEl: HTMLButtonElement | null = null;
+
+        const LINE_HEIGHT = 16;
+        const LONG_PRESS_MS = 500;
 
         const stopInertia = () => {
             if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; }
         };
 
+        const getTermBounds = () => term.element.getBoundingClientRect();
+
+        /** Measure actual text area offset and cell dimensions. */
+        let _cellW: number | null = null;
+        let _cellH: number | null = null;
+        let _textOffX = 0;
+        let _textOffY = 0;
+
+        const measureCells = () => {
+            if (_cellW && _cellH) return;
+            const termB = term.element.getBoundingClientRect();
+            const canvas = term.element.querySelector('canvas') as HTMLCanvasElement | null;
+            if (canvas) {
+                const cB = canvas.getBoundingClientRect();
+                _textOffX = cB.left - termB.left;
+                _textOffY = cB.top - termB.top;
+                _cellW = cB.width / term.cols;
+                _cellH = cB.height / term.rows;
+            } else {
+                _textOffX = 0;
+                _textOffY = 0;
+                _cellW = termB.width / term.cols;
+                _cellH = termB.height / term.rows;
+            }
+        };
+
+        /** Convert page coordinates to viewport row/col. */
+        const pageToChar = (pageX: number, pageY: number): { row: number; col: number } => {
+            measureCells();
+            const b = getTermBounds();
+            const relX = pageX - b.left - _textOffX;
+            const relY = pageY - b.top - _textOffY;
+            return {
+                col: Math.max(0, Math.min(term.cols - 1, Math.floor(relX / _cellW!))),
+                row: Math.max(0, Math.min(term.rows - 1, Math.floor(relY / _cellH!))),
+            };
+        };
+
+        /** Find word boundaries on a buffer row. Returns { start, end } inclusive, or null. */
+        const getScrollOffset = (): number => {
+            return (term.buffer.active as any).ydisp ?? term.buffer.active.baseY ?? 0;
+        };
+
+        const findWordAt = (viewportRow: number, col: number): { start: number; end: number } | null => {
+            const buffer = term.buffer.active;
+            const absRow = getScrollOffset() + viewportRow;
+            const line = buffer.getLine(absRow);
+            if (!line) return null;
+            const text = line.translateToString(true);
+            if (!text.length || col >= text.length) return null;
+            if (text[col] === ' ' || !text[col]) return null;
+            let s = col;
+            while (s > 0 && text[s - 1] !== ' ') s--;
+            let e = col;
+            while (e < text.length - 1 && text[e + 1] !== ' ') e++;
+            return { start: s, end: e };
+        };
+
+        const triggerWordSelect = (pageX: number, pageY: number): { startCol: number; endCol: number; row: number } | null => {
+            const { row, col } = pageToChar(pageX, pageY);
+            const word = findWordAt(row, col);
+            if (!word) return null;
+            return { startCol: word.start, endCol: word.end, row };
+        };
+
+        const applySelection = () => {
+            let sr = selStartRow, er = selEndRow, sc = selStartCol, ec = selEndCol;
+            if (sr > er || (sr === er && sc > ec)) {
+                [sr, er] = [er, sr];
+                [sc, ec] = [ec, sc];
+            }
+            // Skip if no range.
+            if (sr === er && sc === ec) {
+                positionHandles();
+                return;
+            }
+            // Viewport → absolute rows for term.select().
+            const ydisp = getScrollOffset();
+            const absStart = ydisp + sr;
+            const absEnd = ydisp + er;
+            if (absStart === absEnd) {
+                const len = ec - sc + 1;
+                try { term.select(sc, absStart, len); } catch {}
+            } else {
+                const total = (term.cols - sc) + (absEnd - absStart - 1) * term.cols + (ec + 1);
+                try { term.select(sc, absStart, total); } catch {}
+            }
+            positionHandles();
+        };
+
+        const removeSelectionOverlay = () => {
+            selMode = false;
+            draggingHandle = null;
+            try { term.clearSelection(); } catch {}
+            if (overlayEl) { overlayEl.remove(); overlayEl = null; }
+            if (startHandleEl) { startHandleEl.remove(); startHandleEl = null; }
+            if (endHandleEl) { endHandleEl.remove(); endHandleEl = null; }
+            if (btnBarEl) { btnBarEl.remove(); btnBarEl = null; }
+            copyBtnEl = null;
+            pasteBtnEl = null;
+            if (docTouchMoveHandler) {
+                document.removeEventListener('touchmove', docTouchMoveHandler);
+                docTouchMoveHandler = null;
+            }
+            if (docTouchEndHandler) {
+                document.removeEventListener('touchend', docTouchEndHandler);
+                docTouchEndHandler = null;
+            }
+        };
+
+        const getRowTop = (row: number): number => {
+            measureCells();
+            const b = getTermBounds();
+            return b.top + _textOffY + row * _cellH!;
+        };
+
+        const getColLeft = (col: number): number => {
+            measureCells();
+            const b = getTermBounds();
+            return b.left + _textOffX + col * _cellW!;
+        };
+
+        const positionHandles = () => {
+            if (!startHandleEl || !endHandleEl) return;
+            let sr = selStartRow, er = selEndRow, sc = selStartCol, ec = selEndCol;
+            if (sr > er || (sr === er && sc > ec)) {
+                [sr, er] = [er, sr];
+                [sc, ec] = [ec, sc];
+            }
+            // Hide handles when no range.
+            if (sr === er && sc === ec) {
+                startHandleEl.style.display = 'none';
+                endHandleEl.style.display = 'none';
+                return;
+            }
+            startHandleEl.style.display = 'block';
+            endHandleEl.style.display = 'block';
+            const startX = getColLeft(sc);
+            const endX = getColLeft(ec + 1);
+            const startBottom = getRowTop(sr + 1);
+            const endBottom = getRowTop(er + 1);
+            const handleW = 28;
+            // Clamp to viewport.
+            const sLeft = Math.max(0, startX - handleW);
+            const eLeft = Math.max(0, Math.min(endX, window.innerWidth - handleW));
+            startHandleEl.style.left = `${sLeft}px`;
+            startHandleEl.style.top = `${startBottom}px`;
+            endHandleEl.style.left = `${eLeft}px`;
+            endHandleEl.style.top = `${endBottom}px`;
+        };
+
+        const createSelectionOverlay = (x: number, y: number) => {
+            selMode = true;
+            const word = triggerWordSelect(x, y);
+            if (word) {
+                selStartRow = word.row;
+                selEndRow = word.row;
+                selStartCol = word.startCol;
+                selEndCol = word.endCol;
+            } else {
+                // No word: use touch position.
+                const { row, col } = pageToChar(x, y);
+                selStartRow = row;
+                selEndRow = row;
+                selStartCol = col;
+                selEndCol = col;
+            }
+
+            overlayEl = document.createElement('div');
+            overlayEl.style.cssText = 'position:fixed;inset:0;z-index:9997;background:transparent;pointer-events:none;';
+
+            startHandleEl = document.createElement('div');
+            startHandleEl.style.cssText = 'position:fixed;z-index:10000;width:28px;height:28px;cursor:grab;touch-action:none;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.3));';
+            const sSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            sSvg.setAttribute('width', '28');
+            sSvg.setAttribute('height', '28');
+            sSvg.setAttribute('viewBox', '0 0 28 28');
+            sSvg.innerHTML = '<path d="M28,0 L14,0 A14,14 0 0,0 14,28 A14,14 0 0,0 28,14 L28,0 Z" fill="#0084FF"/>';
+            startHandleEl.appendChild(sSvg);
+
+            endHandleEl = document.createElement('div');
+            endHandleEl.style.cssText = startHandleEl.style.cssText;
+            const eSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            eSvg.setAttribute('width', '28');
+            eSvg.setAttribute('height', '28');
+            eSvg.setAttribute('viewBox', '0 0 28 28');
+            eSvg.innerHTML = '<path d="M0,0 L14,0 A14,14 0 0,1 14,28 A14,14 0 0,1 0,14 L0,0 Z" fill="#0084FF"/>';
+            endHandleEl.appendChild(eSvg);
+
+            // Pill container.
+            btnBarEl = document.createElement('div');
+            btnBarEl.style.cssText = 'position:fixed;z-index:10001;display:flex;align-items:center;background:#0084FF;border-radius:18px;box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;';
+
+            copyBtnEl = document.createElement('button');
+            copyBtnEl.textContent = 'Copy';
+            copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+
+            const divider = document.createElement('div');
+            divider.style.cssText = 'width:1px;height:20px;background:rgba(255,255,255,0.3);';
+
+            pasteBtnEl = document.createElement('button');
+            pasteBtnEl.textContent = 'Paste';
+            pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            pasteBtnEl.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Hidden textarea + execCommand.
+                const ta = document.createElement('textarea');
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.focus();
+                try {
+                    document.execCommand('paste');
+                    // Read after async execCommand.
+                    setTimeout(() => {
+                        const text = ta.value;
+                        ta.remove();
+                        try { term.clearSelection(); } catch {}
+                        if (text) {
+                            term.focus();
+                            term.paste(text);
+                        }
+                        removeSelectionOverlay();
+                    }, 50);
+                } catch {
+                    ta.remove();
+                    term.focus();
+                    removeSelectionOverlay();
+                }
+            });
+            const doCopy = () => {
+                const text = term.getSelection();
+                if (!text) { removeSelectionOverlay(); return; }
+                // execCommand for mobile.
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch {}
+                ta.remove();
+                removeSelectionOverlay();
+            };
+            copyBtnEl.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); doCopy(); });
+
+            document.body.appendChild(overlayEl);
+            document.body.appendChild(startHandleEl);
+            document.body.appendChild(endHandleEl);
+
+            // Assemble pill.
+            const hasSelection = !(selStartRow === selEndRow && selStartCol === selEndCol);
+            if (hasSelection) {
+                btnBarEl.appendChild(copyBtnEl);
+                btnBarEl.appendChild(divider);
+            }
+            btnBarEl.appendChild(pasteBtnEl);
+            document.body.appendChild(btnBarEl);
+
+            applySelection();
+            positionBtnBar(btnBarEl);
+            setupDragListeners();
+        };
+
+        const positionBtnBar = (bar: HTMLElement) => {
+            let sr = selStartRow, er = selEndRow, sc = selStartCol, ec = selEndCol;
+            if (sr > er || (sr === er && sc > ec)) {
+                [sr, er] = [er, sr];
+                [sc, ec] = [ec, sc];
+            }
+            const hasSelection = !(sr === er && sc === ec);
+            let centerX: number;
+            if (hasSelection) {
+                centerX = (getColLeft(sc) + getColLeft(ec + 1)) / 2;
+            } else {
+                centerX = getColLeft(sc) + (_cellW || 7) / 2;
+            }
+            const selTop = getRowTop(sr);
+            const barW = bar.offsetWidth || 120;
+            let left = centerX - barW / 2;
+            left = Math.max(4, Math.min(left, window.innerWidth - barW - 4));
+            bar.style.left = `${left}px`;
+            bar.style.top = `${selTop - 36}px`;
+        };
+
+        const setupDragListeners = () => {
+            const handleTouchStart = (which: 'start' | 'end') => (e: TouchEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                draggingHandle = which;
+            };
+            startHandleEl.addEventListener('touchstart', handleTouchStart('start'));
+            endHandleEl.addEventListener('touchstart', handleTouchStart('end'));
+
+            docTouchMoveHandler = (e: TouchEvent) => {
+                if (!draggingHandle) return;
+                e.preventDefault();
+                const t = e.touches[0];
+                const { row, col } = pageToChar(t.pageX, t.pageY);
+                // Offset up 2 rows so selection visible above finger.
+                const offsetRow = Math.max(0, row - 2);
+                if (draggingHandle === 'start') {
+                    selStartRow = offsetRow;
+                    selStartCol = col;
+                } else {
+                    selEndRow = offsetRow;
+                    selEndCol = col;
+                }
+                applySelection();
+                positionHandles();
+                if (btnBarEl) positionBtnBar(btnBarEl);
+            };
+            docTouchEndHandler = () => {
+                if (draggingHandle) draggingHandle = null;
+            };
+            document.addEventListener('touchmove', docTouchMoveHandler, { passive: false });
+            document.addEventListener('touchend', docTouchEndHandler);
+        };
+
         const onTouchStart = (e: TouchEvent) => {
             if (isDisposed) return;
             stopInertia();
-            
-            touchStartY = e.touches[0].pageY;
+            if (selMode) {
+                // Tap terminal to dismiss.
+                if (!draggingHandle) removeSelectionOverlay();
+                return;
+            }
+
+            const t = e.touches[0];
+            touchStartY = t.pageY;
             currentTouchY = touchStartY;
-            pixelBufferY = 0; 
-            touchVelSamples = [{ y: touchStartY, t: performance.now() }];
+            pixelBufferY = 0;
+            touchStartTime = performance.now();
+            touchVelSamples = [{ y: touchStartY, t: touchStartTime }];
+
+            longPressTimer = setTimeout(() => {
+                longPressTimer = null;
+                createSelectionOverlay(t.pageX, t.pageY);
+                if (navigator.vibrate) navigator.vibrate(30);
+            }, LONG_PRESS_MS);
         };
 
         const onTouchMove = (e: TouchEvent) => {
             if (isDisposed) return;
-            
+
+            if (selMode && draggingHandle) {
+                e.preventDefault();
+                const t = e.touches[0];
+                const { row, col } = pageToChar(t.pageX, t.pageY);
+                const offsetRow = Math.max(0, row - 2);
+                if (draggingHandle === 'start') {
+                    selStartRow = offsetRow;
+                    selStartCol = col;
+                } else {
+                    selEndRow = offsetRow;
+                    selEndCol = col;
+                }
+                applySelection();
+                positionHandles();
+                if (btnBarEl) positionBtnBar(btnBarEl);
+                return;
+            }
+
+            if (selMode) return;
+
+            if (longPressTimer) {
+                const t = e.touches[0];
+                if (Math.abs(t.pageY - touchStartY) > 30) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            }
+
             const now = performance.now();
             currentTouchY = e.touches[0].pageY;
-            
-            // 1. Log sample for inertia velocity calculation
             touchVelSamples.push({ y: currentTouchY, t: now });
             while (touchVelSamples.length > 1 && touchVelSamples[0].t < now - 100) {
                 touchVelSamples.shift();
             }
-            
-            // 2. Track precise delta instead of resetting to a strict grid
             const deltaY = touchStartY - currentTouchY;
             touchStartY = currentTouchY;
-            
             pixelBufferY += deltaY;
-            
-            // 3. Only scroll when accumulated pixels cross a full line threshold
             if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
                 const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
-                pixelBufferY -= lines * LINE_HEIGHT; // Save the fractional remainder!
+                pixelBufferY -= lines * LINE_HEIGHT;
                 try { term.scrollLines(lines); } catch {}
             }
         };
 
         const onTouchEnd = () => {
             if (isDisposed) return;
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            if (selMode) { draggingHandle = null; return; }
+
             if (touchVelSamples.length < 3) return;
-            
             let totalVel = 0, weights = 0;
             for (let i = 1; i < touchVelSamples.length; i++) {
                 const dt = touchVelSamples[i].t - touchVelSamples[i-1].t || 1;
@@ -255,45 +633,42 @@
                 totalVel += vel * w;
                 weights += w;
             }
-            
             const velocity = totalVel / weights;
             if (Math.abs(velocity) < 0.15) return;
-            
             const speed = Math.abs(velocity);
             const scaled = speed * Math.pow(speed / 0.3, 0.8);
             let remaining = scaled * 8 * Math.sign(velocity);
-            
             lastTickTime = performance.now();
-            
             const tick = (now: number) => {
                 if (isDisposed) return;
-                
-                // Calculate dynamic decay based on elapsed time (targets 60Hz baseline)
                 const dt = now - lastTickTime;
                 lastTickTime = now;
-                const currentDecay = Math.pow(0.93, dt / 16.67);
-                
-                remaining *= currentDecay;
+                remaining *= Math.pow(0.93, dt / 16.67);
                 if (Math.abs(remaining) < 0.1) return;
-                
-                // Apply inertia into the exact same pixel buffer
                 pixelBufferY += remaining;
-                
                 if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
                     const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
                     pixelBufferY -= lines * LINE_HEIGHT;
                     try { term.scrollLines(lines); } catch {}
                 }
-                
                 inertiaRaf = requestAnimationFrame(tick);
             };
-            
             inertiaRaf = requestAnimationFrame(tick);
         };
 
         term.element.addEventListener('touchstart', onTouchStart, { passive: true });
         term.element.addEventListener('touchmove', onTouchMove, { passive: true });
         term.element.addEventListener('touchend', onTouchEnd, { passive: true });
+
+        // Handle paste: send clipboard text to terminal.
+        const handlePaste = (e: ClipboardEvent) => {
+            const text = e.clipboardData?.getData('text');
+            if (text && term) {
+                e.preventDefault();
+                term.write(text);
+            }
+        };
+        term.element.addEventListener('paste', handlePaste, { capture: true });
 
         function handleKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') close();
@@ -304,9 +679,12 @@
             isDisposed = true;
             fitPending = false;
             stopInertia();
+            removeSelectionOverlay();
+            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
             if (ws) ws.close();
             ws = null;
             observer.disconnect();
+            term.element.removeEventListener('paste', handlePaste, { capture: true });
             window.removeEventListener('keydown', handleKeyDown);
             webglRef = null;
             try { term?.dispose(); } catch {}
@@ -429,6 +807,18 @@
         cursor: pointer;
         padding: 2px 6px;
     }
+    .copy-btn {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 2px 4px;
+        display: flex;
+        align-items: center;
+    }
+    .close-btn:hover {
+        color: var(--color-text-primary);
+    }
     .terminal-container {
         flex: 1;
         padding: 4px;
@@ -501,6 +891,7 @@
            flex column shrinks the flex child by the margin amount. */
         .terminal-container {
             margin-bottom: 85px;
+            padding: 4px;
         }
     }
     :global(.terminal) {
@@ -509,9 +900,7 @@
     :global(.xterm-text) {
         line-height: 1.4 !important;
     }
-    /* Touch-scroll the terminal viewport on mobile */
     :global(.xterm-viewport) {
-        touch-action: pan-y;
         -webkit-overflow-scrolling: touch;
     }
 </style>
