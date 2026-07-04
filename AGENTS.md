@@ -352,6 +352,34 @@ All functions are **async** (return `Promise`).
 - **`context deadline exceeded`**: Increase test timeout or optimize slow operations
 - **Sandbox tests fail**: Ensure gVisor is installed (`runsc --version`)
 
+### Diagnostic Tests (Standalone Playwright Scripts)
+For ad-hoc investigation (e.g., tracking API request patterns, debugging race conditions), write standalone Playwright scripts in `frontend/tests/` as `.mjs` files. These run against a live dev server, bypassing the e2e test harness.
+
+**Pattern:**
+```javascript
+import { chromium } from 'playwright';
+
+const requests = [];
+const t0 = Date.now();
+
+// Intercept specific endpoints
+await page.route('**/api/projects/*/tasks/*/diff/file*', async (route) => {
+    const url = new URL(route.request().url());
+    const response = await route.fetch();
+    const body = await response.json().catch(() => ({}));
+    requests.push({ time: Date.now() - t0, path: url.searchParams.get('path'), keys: Object.keys(body) });
+    await route.fulfill({ response, status: response.status(), headers: response.headers(), body: await response.body() });
+});
+```
+
+**Key points:**
+- Start server with `KANBAN_PASSWORD=test setsid ./kanban &` + `disown` to keep it alive after the script runs
+- Use `page.evaluate()` with CSRF token from `/api/auth/session` for API calls (POST/PUT/DELETE)
+- Use `route.fulfill()` (not `route.respond()`) — the old API was removed in newer Playwright
+- Track timing with `Date.now() - t0` offsets to correlate requests with server events
+- Use `page.screenshot({ path: '/tmp/debug.png' })` for visual inspection
+- Run: `node frontend/tests/debug-script.mjs`
+
 ### Crash Debugging (Flight Recorder)
 - Go flight recorder runs **always-on** (~1% overhead), writing to `data/kanban.trace`
 - Trace is rotated every 30s — on crash, the file contains ~30s of pre-crash data

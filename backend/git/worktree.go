@@ -597,6 +597,8 @@ type TaskDiff struct {
 	ShortStat         string                      `json:"short_stat"`
 	TruncatedFiles    []string                    `json:"truncated_files,omitempty"`
 	OriginalFileStats map[string]FileChangeStats  `json:"original_file_stats,omitempty"`
+	StagedHash        string                      `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
+	StagedPaths       []string                    `json:"-"` // paths currently staged in the index
 }
 
 // FileChangeStats holds the original added/removed line counts for a file.
@@ -620,13 +622,16 @@ func ComputeUntrackedHash(u UntrackedFile) string {
 }
 
 // GetPerFileHashes returns a map of file path → hash for all tracked and untracked files.
+// Tracked entries take priority — untracked files already in the tracked section are skipped.
 func (d *TaskDiff) GetPerFileHashes() map[string]string {
 	hashes := make(map[string]string)
 	for path, f := range d.Tracked {
 		hashes[path] = ComputeFileHash(f)
 	}
 	for _, u := range d.Untracked {
-		hashes[u.Path] = ComputeUntrackedHash(u)
+		if _, exists := hashes[u.Path]; !exists {
+			hashes[u.Path] = ComputeUntrackedHash(u)
+		}
 	}
 	return hashes
 }
@@ -1196,13 +1201,49 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		}
 	}
 
+	// Compute staged hash so the diff hash changes on git add/reset.
+	var stagedHash string
+	var stagedPaths map[string]struct{}
+	if headRef == "" {
+		target := "HEAD"
+		if baseRef != "" {
+			target = baseRef
+		}
+		if stagedOut, err := wm.gitRunOutput(worktreePath, "diff", "--cached", target); err == nil {
+			stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
+		}
+		// Get set of staged file paths to mark Staged on tracked entries.
+		if stagedNames, err := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", target); err == nil {
+			stagedPaths = make(map[string]struct{})
+			for line := range strings.SplitSeq(stagedNames, "\n") {
+				p := strings.TrimSpace(line)
+				if p != "" {
+					stagedPaths[p] = struct{}{}
+				}
+			}
+		}
+	}
+
+	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
+
+	// Convert to sorted slice for deterministic WebSocket broadcast.
+	var stagedPathsList []string
+	if stagedPaths != nil {
+		stagedPathsList = make([]string, 0, len(stagedPaths))
+		for p := range stagedPaths {
+			stagedPathsList = append(stagedPathsList, p)
+		}
+	}
+
 	return &TaskDiff{
 		Diff:              diffOut,
-		Tracked:           parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations),
+		Tracked:           tracked,
 		Untracked:         untracked,
 		ShortStat:         shortStat,
 		TruncatedFiles:    truncatedFiles,
 		OriginalFileStats: originalStats,
+		StagedHash:        stagedHash,
+		StagedPaths:       stagedPathsList,
 	}, nil
 }
 

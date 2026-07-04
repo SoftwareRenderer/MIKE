@@ -485,7 +485,8 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 // Used by the card UI to show file counts and the commit button.
 // The hash lets the frontend detect content changes without receiving the full diff.
 // fileHashes is a per-file hash map for incremental updates.
-func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string) {
+// stagedPaths lists paths currently staged in the index.
+func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":            "task_diff_stats",
 		"task_id":         taskID,
@@ -495,16 +496,20 @@ func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, sho
 		"untracked_lines": untrackedLines,
 		"file_hashes":     changedHashes,
 		"removed_files":   removedFiles,
+		"staged_paths":    stagedPaths,
 	})
 }
 
-// ComputeDiffHash computes a SHA-256 hash of the tracked diff + untracked file contents.
-// Matches the algorithm used by the worktree watcher for consistent change detection.
-func ComputeDiffHash(diff string, untracked []git.UntrackedFile) string {
+// ComputeDiffHash computes a SHA-256 hash of the tracked diff + untracked files + staged state.
+// Pass empty stagedHash when index state is irrelevant (e.g., worktree file watcher).
+func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash string) string {
 	var hashInput strings.Builder
 	hashInput.WriteString(diff)
 	for _, u := range untracked {
 		hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
+	}
+	if stagedHash != "" {
+		hashInput.WriteString("\x00staged:" + stagedHash)
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
 }
@@ -887,7 +892,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 			// Send compact stats for card UI
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {
@@ -927,6 +932,10 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			files[path] = entry
 		}
 		for _, u := range diffResult.Untracked {
+			// Skip untracked files already in the tracked section
+			if _, exists := files[u.Path]; exists {
+				continue
+			}
 			entry := map[string]any{
 				"hash":       git.ComputeUntrackedHash(u),
 				"type":       "untracked",

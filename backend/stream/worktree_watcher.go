@@ -17,7 +17,8 @@ import (
 // diffBroadcastFn is a callback to broadcast diff stats to clients.
 // changedHashes contains only files that are new or modified (path -> hash).
 // removedFiles lists paths that were deleted.
-type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string)
+// stagedPaths lists file paths currently staged in the index.
+type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string)
 
 // diffCacheUpdateFn is a callback to update the GitHandler's diff cache.
 type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
@@ -248,7 +249,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	untrackedN := len(diffResult.Untracked)
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
-		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, "")
 		newHashes := diffResult.GetPerFileHashes()
 
 		// Compute delta against previous state
@@ -257,11 +258,11 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		if ww.updateCache != nil {
 			ww.updateCache(taskID, diffResult)
 		}
-		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, changedHashes, removedFiles)
+		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, changedHashes, removedFiles, diffResult.StagedPaths)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else {
 		// No changes — broadcast empty hash to clear
-		ww.broadcast(projectID, taskID, "", "", 0, 0, nil, nil)
+		ww.broadcast(projectID, taskID, "", "", 0, 0, nil, nil, nil)
 	}
 }
 

@@ -81,13 +81,13 @@ func (te *TaskExecutor) broadcastDiffStats(projectID, taskID string, task *types
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
-	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 	fileHashes := diffResult.GetPerFileHashes()
 	untrackedLines := 0
 	for _, u := range diffResult.Untracked {
 		untrackedLines += len(u.Lines)
 	}
-	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
+	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
 }
 
 // extractPrevSummary extracts the previous summary text from messages[1] if it exists

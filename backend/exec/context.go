@@ -335,14 +335,14 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			}
 			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(taskForBroadcast.ID, taskForBroadcast.BaseRef, taskForBroadcast.Branch, forkBranch)
 			if diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 				untrackedLines := 0
 				for _, u := range diffResult.Untracked {
 					untrackedLines += len(u.Lines)
 				}
-				// Send nil for changedHashes so the frontend does a full manifest reload
-				// (staged/unstaged status may have changed even if file content hashes are the same)
-				te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, nil, nil)
+				// Send staged_paths so the frontend updates in-cache staged status
+				// with zero HTTP requests. nil fileHashes avoids redundant re-fetches.
+				te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, nil, nil, diffResult.StagedPaths)
 			}
 		}
 

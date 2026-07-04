@@ -89,6 +89,10 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
+	// Wire stage/unstage → WebSocket broadcast so frontend updates in-cache staged status
+	s.gitHandler.SetStageChangeHandler(func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, stagedPaths []string) {
+		s.appStreamMgr.BroadcastDiffStats(projectID, taskID, diffHash, shortStat, untrackedN, untrackedLines, nil, nil, stagedPaths)
+	})
 
 	// Run garbage collector on startup
 	dryRun := os.Getenv("KANBAN_GC_DRY_RUN") == "1"
