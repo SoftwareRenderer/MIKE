@@ -21,6 +21,7 @@
         connected,
         queuePosition,
         queueEstimatedWait,
+        isAgentSelected,
         showHeader,
         stickyUserMessage,
         taskStatus,
@@ -50,6 +51,7 @@
         connected: boolean;
         queuePosition: number;
         queueEstimatedWait: number;
+        isAgentSelected: boolean;
         showHeader: boolean;
         stickyUserMessage: string;
         taskStatus: string;
@@ -193,7 +195,7 @@
     {#if awaitingResponse && connected}
         <div class="awaiting-llm">
             <span class="spinner"></span>
-            <span>{queuePosition > 0 ? `Awaiting LLM provider — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : 'Awaiting LLM provider...'}</span>
+            <span>{queuePosition > 0 ? `Awaiting ${isAgentSelected ? 'agent' : 'LLM provider'} — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : `Awaiting ${isAgentSelected ? 'agent' : 'LLM provider'}...`}</span>
         </div>
     {/if}
     </div>

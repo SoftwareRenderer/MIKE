@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
+    import { PI_SENTINEL_URL } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, showConfirm, selectedTask } from '$lib/store';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
@@ -141,6 +142,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let modelUpdatePending = $state(false);
     let isAgentSelected = $derived(() => {
         if (!selectedUrl) return false;
+        if (selectedUrl === PI_SENTINEL_URL) return true;
         const p = providers.find(p => p.url === selectedUrl);
         return p ? p.kind !== 'llm' : false;
     });
@@ -710,8 +712,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
-                    // Executor is actively running — no longer awaiting LLM
-                    awaitingResponse = false;
+                    // Agents: keep awaitingResponse until first token/tool_call.
+                    if (!isAgentSelected()) awaitingResponse = false;
                 } else if (data.state === 'cancelled') {
                     // Response was cancelled by new user message — clear streaming state.
                     closeCurrentAssistant();
@@ -1921,6 +1923,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         {connected}
         {queuePosition}
         {queueEstimatedWait}
+        {isAgentSelected}
         {showHeader}
         {stickyUserMessage}
         {taskStatus}
