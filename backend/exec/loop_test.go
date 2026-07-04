@@ -1172,3 +1172,124 @@ func TestUnstageNewBinaryFilesInDir(t *testing.T) {
 		t.Error("data.bin should be unstaged (binary, not image)")
 	}
 }
+
+// --- Helper Function Tests ---
+
+func TestUserMessageToChatMessage_PlainText(t *testing.T) {
+	um := stream.UserMessage{Content: "hello world"}
+	msg := userMessageToChatMessage(um)
+
+	if msg.Role != "user" {
+		t.Errorf("expected role 'user', got %q", msg.Role)
+	}
+	if msg.Content != "hello world" {
+		t.Errorf("expected content 'hello world', got %q", msg.Content)
+	}
+	if len(msg.ContentParts) > 0 {
+		t.Error("expected no ContentParts for plain text message")
+	}
+}
+
+func TestUserMessageToChatMessage_WithAttachments(t *testing.T) {
+	atts, _ := json.Marshal([]struct {
+		MimeType string `json:"mimeType"`
+		Data     string `json:"data"`
+	}{
+		{MimeType: "image/png", Data: "iVBORw0KGgo="},
+	})
+	um := stream.UserMessage{Content: "check this image", Attachments: string(atts)}
+	msg := userMessageToChatMessage(um)
+
+	if msg.Role != "user" {
+		t.Errorf("expected role 'user', got %q", msg.Role)
+	}
+	if len(msg.ContentParts) != 2 {
+		t.Fatalf("expected 2 ContentParts (text + image), got %d", len(msg.ContentParts))
+	}
+	if msg.ContentParts[0].Type != "text" {
+		t.Errorf("expected first part to be text, got %q", msg.ContentParts[0].Type)
+	}
+	if msg.ContentParts[0].Text != "check this image" {
+		t.Errorf("expected text 'check this image', got %q", msg.ContentParts[0].Text)
+	}
+	if msg.ContentParts[1].Type != "image" {
+		t.Errorf("expected second part to be image, got %q", msg.ContentParts[1].Type)
+	}
+}
+
+func TestUserMessageToChatMessage_StripsDataPrefix(t *testing.T) {
+	atts, _ := json.Marshal([]struct {
+		MimeType string `json:"mimeType"`
+		Data     string `json:"data"`
+	}{
+		{MimeType: "image/png", Data: "data:image/png;base64,abc123"},
+	})
+	um := stream.UserMessage{Content: "test", Attachments: string(atts)}
+	msg := userMessageToChatMessage(um)
+
+	if msg.ContentParts[1].ImageSource == nil {
+		t.Fatal("expected ImageSource to be set")
+	}
+	if msg.ContentParts[1].ImageSource.Data != "abc123" {
+		t.Errorf("expected data prefix stripped, got %q", msg.ContentParts[1].ImageSource.Data)
+	}
+}
+
+func TestUserMessageToChatMessage_DefaultMimeType(t *testing.T) {
+	atts, _ := json.Marshal([]struct {
+		MimeType string `json:"mimeType"`
+		Data     string `json:"data"`
+	}{
+		{MimeType: "", Data: "base64data"},
+	})
+	um := stream.UserMessage{Content: "test", Attachments: string(atts)}
+	msg := userMessageToChatMessage(um)
+
+	if msg.ContentParts[1].ImageSource.MediaType != "image/png" {
+		t.Errorf("expected default mimeType 'image/png', got %q", msg.ContentParts[1].ImageSource.MediaType)
+	}
+}
+
+func TestUserMessageToChatMessage_InvalidJSON(t *testing.T) {
+	um := stream.UserMessage{Content: "test", Attachments: "not-json"}
+	msg := userMessageToChatMessage(um)
+
+	// Should fall back to plain text message
+	if msg.Content != "test" {
+		t.Errorf("expected fallback to plain text, got %q", msg.Content)
+	}
+	if len(msg.ContentParts) > 0 {
+		t.Error("expected no ContentParts for invalid JSON attachments")
+	}
+}
+
+func TestExtractPrevSummary_NoSummary(t *testing.T) {
+	messages := []types.ChatMessage{{Role: "system", Content: "you are a helper"}}
+	got := extractPrevSummary(messages)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestExtractPrevSummary_WithSummary(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "you are a helper"},
+		{Role: "assistant", Content: "[Context summary: The user asked about Go generics]"},
+		{Role: "user", Content: "tell me more"},
+	}
+	got := extractPrevSummary(messages)
+	if got != "The user asked about Go generics" {
+		t.Errorf("expected 'The user asked about Go generics', got %q", got)
+	}
+}
+
+func TestExtractPrevSummary_MalformedSummary(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "you are a helper"},
+		{Role: "assistant", Content: "not a summary format"},
+	}
+	got := extractPrevSummary(messages)
+	if got != "" {
+		t.Errorf("expected empty string for malformed summary, got %q", got)
+	}
+}

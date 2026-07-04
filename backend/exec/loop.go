@@ -13,7 +13,6 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/llama"
-	"kanban/backend/pi"
 	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -103,6 +102,27 @@ func runGitCommand(dir string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// loopContext holds all mutable state for the AI conversation loop.
+// Consolidating into a single struct makes adding new state a one-line change
+// and keeps the main loop readable as a sequence of named phases.
+type loopContext struct {
+	messages         []types.ChatMessage
+	assistantContent strings.Builder
+	reasoningContent strings.Builder
+	pendingToolCalls []types.ChatToolCall
+	detector         *loopDetector
+	tracker          failureTracker
+	mc               *modelConfig
+	client           *llama.LlamaClient
+	providerName     string
+	contextWindow    *int
+	lastSummarizeIdx int
+	systemPrompt     string
+	sandboxEnabled   bool
+	startTime        time.Time
+	usage            *types.ChatUsage
 }
 
 // executeTask runs the AI conversation loop.
@@ -267,119 +287,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	} else {
 		tools = llama.GetToolDefinitions()
 	}
-	// In sandbox mode, use the container mount path so the LLM sees
-	// the actual working directory inside the sandbox.
-	promptPath := worktreePath
-	if sandboxEnabled {
-		promptPath = "/sandbox/" + projectName
-	}
-	var systemPrompt string
-	if task.PlanMode {
-		systemPrompt = llama.BuildPlanModeSystemPrompt(promptPath)
-	} else {
-		systemPrompt = llama.BuildSystemPrompt(promptPath)
-	}
-
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-
-	// Restore summary checkpoint across restarts.
-	var lastSummaryMsg *types.TaskMessage
-	for i := len(taskMsgs) - 1; i >= 0; i-- {
-		if taskMsgs[i].Role == "summarization" {
-			lastSummaryMsg = &taskMsgs[i]
-			break
-		}
-	}
-
-	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
-	var lastSummarizeIdx int
-	if lastSummaryMsg != nil {
-		// Restore summary as assistant message
-		messages = append(messages, types.ChatMessage{
-			Role:    "assistant",
-			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
-		})
-		lastSummarizeIdx = 1 // points to the summary message
-	} else {
-		lastSummarizeIdx = -1
-	}
-
-	// Build messages, skipping those before summary checkpoint
-	for _, m := range taskMsgs {
-		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
-			continue // skip messages before the summary checkpoint
-		}
-		switch m.Role {
-		case "summarization":
-			continue // already incorporated as the summary above
-		case "user":
-			// Check for image attachments and build multi-modal content
-			if m.Attachments != "" {
-				var atts []struct {
-					MimeType string `json:"mimeType"`
-					Data     string `json:"data"`
-				}
-				if err := json.Unmarshal([]byte(m.Attachments), &atts); err == nil {
-					parts := []types.ContentPart{{Type: "text", Text: m.Content}}
-					for _, att := range atts {
-						if att.Data != "" {
-							mediaType := att.MimeType
-							if mediaType == "" {
-								mediaType = "image/png"
-							}
-							base64Data := att.Data
-							// Strip data: prefix if present
-							if idx := strings.Index(base64Data, ","); idx >= 0 {
-								base64Data = base64Data[idx+1:]
-							}
-							parts = append(parts, types.ContentPart{
-								Type: "image",
-								ImageSource: &struct {
-									Type      string `json:"type"`
-									MediaType string `json:"media_type"`
-									Data      string `json:"data"`
-								}{Type: "base64", MediaType: mediaType, Data: base64Data},
-							})
-						}
-					}
-					messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
-					continue
-				}
-			}
-			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
-		case "assistant":
-			// Merge reasoning_content into content so all models see the full assistant message
-			// (reasoning_content field in requests is undefined behavior - works for Qwen, not gemma)
-			content := m.Content
-			if m.ReasoningContent != "" {
-				content = m.ReasoningContent + "\n" + m.Content
-			}
-			messages = append(messages, types.ChatMessage{Role: m.Role, Content: content})
-		case "tool_call":
-			if m.ToolResult != "" {
-				var resultMap map[string]any
-				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
-					output := resultMap["output"].(string)
-					toolID := ""
-					if m.ToolCalls != "" {
-						var tcMap map[string]any
-						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
-							if tid, ok := tcMap["tool_id"].(string); ok {
-								toolID = tid
-							}
-						}
-					}
-					messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
-				}
-			}
-		}
-	}
-
-	var tracker failureTracker
-	maxFailures := task.MaxConsecutiveFailedTurns
-	if maxFailures == 0 {
-		maxFailures = 3
-	}
+	messages, lastSummarizeIdx, _ := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
 
 	// Context tracking: load context window from provider config, discover if unknown
 	var contextWindow *int
@@ -390,24 +299,31 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		te.configStore.SaveModelContextWindow(modelName, serverURL, *discovered)
 		log.Printf("[context] discovered context window for %s: %d", modelName, *discovered)
 	}
-	// lastSummarizeIdx set above during messages build
 
-	var assistantContent strings.Builder
-	var reasoningContent strings.Builder
-	var pendingToolCalls []types.ChatToolCall
-	detector := newLoopDetector()
-	startTime := time.Now()
+	maxFailures := task.MaxConsecutiveFailedTurns
+	if maxFailures == 0 {
+		maxFailures = 3
+	}
+
+	// Consolidate all mutable loop state into a single struct.
+	lc := &loopContext{
+		messages:         messages,
+		pendingToolCalls: nil,
+		detector:         newLoopDetector(),
+		mc:               mc,
+		client:           client,
+		providerName:     providerName,
+		contextWindow:    contextWindow,
+		lastSummarizeIdx: lastSummarizeIdx,
+		systemPrompt:     messages[0].Content,
+		sandboxEnabled:   sandboxEnabled,
+		startTime:        time.Now(),
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			task.ExecutionState = "stopped"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
+			te.handleStopped(task, projectID, task.ID, "Stopped by user", "stopped", true)
 			return
 		default:
 		}
@@ -416,7 +332,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		if updatedTask, err := te.store.GetTaskByTaskID(task.ID); err == nil {
 			newURL := updatedTask.LlamaServerURL
 			newModel := updatedTask.ModelName
-			curURL, curModel := mc.get()
+			curURL, curModel := lc.mc.get()
 			if newURL != "" && newURL != curURL || newModel != "" && newModel != curModel {
 				// Skip model switch if target is Pi agent — requires different executor
 				if newURL == PiSentinelURL {
@@ -428,22 +344,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if newModel == "" {
 						newModel = curModel
 					}
-						mc.set(newURL, newModel)
-					newReasoningEffort := updatedTask.ReasoningEffort
-					if newReasoningEffort == "" {
-						newReasoningEffort = te.configStore.GetModelReasoningEffort(newModel)
+					switched := te.applyModelSwitch(lc.mc, task, newURL, newModel, false, true)
+					lc.client = switched.client
+					lc.providerName = switched.providerName
+					if switched.contextWindow != nil {
+						lc.contextWindow = switched.contextWindow
 					}
-					newAPIKey := te.configStore.GetProviderAPIKey(newURL)
-					client = llama.NewLlamaClient(newURL, newModel, newReasoningEffort, newAPIKey)
-					providerName = te.configStore.GetProviderNameByURL(newURL)
-					contextWindow = te.configStore.GetModelContextWindow(newModel, newURL)
-					if contextWindow == nil {
-						if discovered := te.configStore.DiscoverContextWindow(newModel, newURL); discovered != nil {
-							contextWindow = discovered
-							te.configStore.SaveModelContextWindow(newModel, newURL, *discovered)
-						}
-					}
-					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, contextWindow)
+					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, lc.contextWindow)
 				}
 			}
 		}
@@ -452,28 +359,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		select {
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message before LLM call", task.ID)
-			detector.reset() // user input breaks any loop pattern
-			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+			lc.detector.reset() // user input breaks any loop pattern
+			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
-				mc.set(um.ServerURL, um.ModelName)
-				newReasoningEffort := um.ReasoningEffort
-				if newReasoningEffort == "" {
-					newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
-				}
-				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
-				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
-				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
-				// Persist model override to DB so the DB sync check doesn't revert it
-				task.LlamaServerURL = um.ServerURL
-				task.ModelName = um.ModelName
-				task.ReasoningEffort = newReasoningEffort
-				_ = te.store.UpdateTask(task)
+				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
+				lc.client = switched.client
+				lc.providerName = switched.providerName
 			}
 		default:
 		}
 
 		// Acquire concurrency gate slot before LLM call.
-		serverURL, activeModel := mc.get()
+		serverURL, activeModel := lc.mc.get()
 		concurrency := te.configStore.GetProviderConcurrency(serverURL)
 
 		// Queue status polling — runs while waiting for a gate slot.
@@ -501,13 +398,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		_, err := te.gate.Acquire(ctx, serverURL, concurrency)
 		if err != nil {
 			close(queueDone) // cleanup polling goroutine
-			// Context cancelled while waiting for slot
-			task.ExecutionState = "stopped"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Task stopped while waiting for LLM slot", "stopped")
+			te.handleStopped(task, projectID, task.ID, "Stopped by user", "stopped", true)
 			return
 		}
 		close(queueDone)
@@ -516,44 +407,43 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		callCtx, callCancel := context.WithCancel(ctx)
 
 		streamDone := make(chan struct{})
-		var usage *types.ChatUsage
 		var streamErr error
 		var lastProgressSend time.Time // throttle progress updates to ~1/2s
 		var lastPredictedN int         // track predicted tokens for real-time stats events
 
 		go func() {
-			usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
+			lc.usage, streamErr = lc.client.ChatStream(callCtx, lc.messages, tools, func(choice types.ChatChoice) {
 				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-					reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+					lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
 				}
 				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-					assistantContent.WriteString(*choice.Delta.Content)
+					lc.assistantContent.WriteString(*choice.Delta.Content)
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 					// Real-time phrase repetition detection
-					if loopType := detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
+					if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
 						log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
 						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
 					}
 				}
 				if len(choice.Delta.ToolCalls) > 0 {
-					priorLen := len(pendingToolCalls)
-					pendingToolCalls = llama.MergeToolCalls(pendingToolCalls, choice.Delta.ToolCalls)
+					priorLen := len(lc.pendingToolCalls)
+					lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
 					// Send tool_call event as soon as a new tool call appears in the stream
 					// so the frontend shows a spinner during LLM token generation
-					for i := priorLen; i < len(pendingToolCalls); i++ {
-						tc := pendingToolCalls[i]
+					for i := priorLen; i < len(lc.pendingToolCalls); i++ {
+						tc := lc.pendingToolCalls[i]
 						if tc.ID != "" && tc.Function.Name != "" {
 							path := extractPathFromArgs(tc.Function.Arguments)
 							// During streaming, args may be partial JSON (e.g. just "{").
 							// Send raw_args and let the frontend parse when complete.
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
 						}
 					}
 				}
 				// Throttled progress updates for write_file (1 per 2 seconds)
 				if time.Since(lastProgressSend) > 2*time.Second {
-					for _, tc := range pendingToolCalls {
+					for _, tc := range lc.pendingToolCalls {
 						if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
 							lastProgressSend = time.Now()
@@ -562,15 +452,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 				// Send stats event when predicted token count changes.
 				// LLM client accumulates usage/timings from each SSE frame.
-				if usage != nil {
-					predictedN := usage.CompletionTokens
+				if lc.usage != nil {
+					predictedN := lc.usage.CompletionTokens
 					if predictedN != lastPredictedN {
 						lastPredictedN = predictedN
 						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
 							"model_name":     activeModel,
-							"prompt_tokens":  usage.PromptTokens,
+							"prompt_tokens":  lc.usage.PromptTokens,
 							"predicted_tokens": predictedN,
-							"predicted_ms":   usage.PredictedMs,
+							"predicted_ms":   lc.usage.PredictedMs,
 						}})
 					}
 				}
@@ -586,27 +476,27 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					case <-time.After(time.Duration(i+1) * 2 * time.Second):
 					}
 					// Reset builders so retry doesn't concatenate partial content
-					assistantContent.Reset()
-					reasoningContent.Reset()
-					pendingToolCalls = nil
-					usage, streamErr = client.ChatStream(callCtx, messages, tools, func(choice types.ChatChoice) {
+					lc.assistantContent.Reset()
+					lc.reasoningContent.Reset()
+					lc.pendingToolCalls = nil
+					lc.usage, streamErr = lc.client.ChatStream(callCtx, lc.messages, tools, func(choice types.ChatChoice) {
 						if choice.Delta.ReasoningContent != nil {
-							reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+							lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
 						}
 						if choice.Delta.Content != nil {
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
 						}
 						// Send stats event when predicted token count changes (retry path)
-						if usage != nil {
-							predictedN := usage.CompletionTokens
+						if lc.usage != nil {
+							predictedN := lc.usage.CompletionTokens
 							if predictedN != lastPredictedN {
 								lastPredictedN = predictedN
 								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
 									"model_name":     activeModel,
-									"prompt_tokens":  usage.PromptTokens,
+									"prompt_tokens":  lc.usage.PromptTokens,
 									"predicted_tokens": predictedN,
-									"predicted_ms":   usage.PredictedMs,
+									"predicted_ms":   lc.usage.PredictedMs,
 								}})
 							}
 						}
@@ -626,19 +516,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			callCancel()
 			te.gate.Release(serverURL) // Release gate immediately so other tasks can proceed
 			<-streamDone               // Then wait for goroutine to finish
-			task.ExecutionState = "stopped"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.handleStopped(task, projectID, task.ID, "Stopped by user", "stopped", false)
 			return
 		case <-streamDone:
 			// Stream completed normally (or all retries exhausted)
 		case um := <-userMsgChan:
 			// New user message — cancel current LLM call.
 			log.Printf("[cancel] task=%s user message received during streaming, cancelling", task.ID)
-			detector.reset() // user input breaks any loop pattern
+			lc.detector.reset() // user input breaks any loop pattern
 			callCancel()
 			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
 			select {
@@ -662,59 +547,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		drainDone:
 
 			// Clear partial assistant state.
-			assistantContent.Reset()
-			reasoningContent.Reset()
-			pendingToolCalls = nil
+			lc.assistantContent.Reset()
+			lc.reasoningContent.Reset()
+			lc.pendingToolCalls = nil
 
 			// Add queued messages to conversation history.
 			for _, qm := range queuedMsgs {
-				// Check for image attachments
-				if qm.Attachments != "" {
-					var atts []struct {
-						MimeType string `json:"mimeType"`
-						Data     string `json:"data"`
-					}
-					if err := json.Unmarshal([]byte(qm.Attachments), &atts); err == nil {
-						parts := []types.ContentPart{{Type: "text", Text: qm.Content}}
-						for _, att := range atts {
-							if att.Data != "" {
-								mediaType := att.MimeType
-								if mediaType == "" {
-									mediaType = "image/png"
-								}
-								base64Data := att.Data
-								if idx := strings.Index(base64Data, ","); idx >= 0 {
-									base64Data = base64Data[idx+1:]
-								}
-								parts = append(parts, types.ContentPart{
-									Type: "image",
-									ImageSource: &struct {
-										Type      string `json:"type"`
-										MediaType string `json:"media_type"`
-										Data      string `json:"data"`
-									}{Type: "base64", MediaType: mediaType, Data: base64Data},
-								})
-							}
-						}
-						messages = append(messages, types.ChatMessage{Role: "user", ContentParts: parts})
-						continue
-					}
-				}
-				messages = append(messages, types.ChatMessage{Role: "user", Content: qm.Content})
+				lc.messages = append(lc.messages, userMessageToChatMessage(qm))
 				if qm.ModelName != "" {
-					mc.set(qm.ServerURL, qm.ModelName)
-					newReasoningEffort := qm.ReasoningEffort
-					if newReasoningEffort == "" {
-						newReasoningEffort = te.configStore.GetModelReasoningEffort(qm.ModelName)
-					}
-					newAPIKey := te.configStore.GetProviderAPIKey(qm.ServerURL)
-					client = llama.NewLlamaClient(qm.ServerURL, qm.ModelName, newReasoningEffort, newAPIKey)
-					providerName = te.configStore.GetProviderNameByURL(qm.ServerURL)
-					// Persist model override to DB so the DB sync check doesn't revert it
-					task.LlamaServerURL = qm.ServerURL
-					task.ModelName = qm.ModelName
-					task.ReasoningEffort = newReasoningEffort
-					_ = te.store.UpdateTask(task)
+					switched := te.applyModelSwitch(lc.mc, task, qm.ServerURL, qm.ModelName, true, false)
+					lc.client = switched.client
+					lc.providerName = switched.providerName
 				}
 			}
 
@@ -735,7 +578,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Release gate slot after LLM call (before tool execution).
 		te.gate.Release(serverURL)
 
-		assistantText := assistantContent.String()
+		assistantText := lc.assistantContent.String()
 
 		type toolResult struct {
 			toolCallID string
@@ -744,22 +587,22 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		var toolResults []toolResult
 		var turnFailures []turnResult
 
-		if len(pendingToolCalls) > 0 {
+		if len(lc.pendingToolCalls) > 0 {
 			// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
-			msgCountBefore := len(messages)
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:msgCountBefore], assistantText, reasoningContent.String(), startTime)
+			msgCountBefore := len(lc.messages)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:msgCountBefore], assistantText, lc.reasoningContent.String(), lc.startTime)
 			assistantCreatedAt := time.Now().UTC()
 			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: assistantMsgID, TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
-				Content: assistantText, ReasoningContent: reasoningContent.String(),
-				ModelName: activeModel, ProviderName: providerName,
+				Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
+				ModelName: activeModel, ProviderName: lc.providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
-				Duration: time.Since(startTime).Milliseconds(), CreatedAt: assistantCreatedAt,
+				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: assistantCreatedAt,
 			})
 
-			for _, tc := range pendingToolCalls {
+			for _, tc := range lc.pendingToolCalls {
 				if tc.ID == "" || tc.Function.Name == "" {
 					log.Printf("[tool] skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
 					continue
@@ -785,7 +628,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.taskMu.Unlock()
 				result, success := te.executeTool(ctx, tc.Function.Name, args, worktreePath, task, state)
 				toolDuration := time.Since(toolStart).Milliseconds()
-				isSandboxed := sandboxEnabled && isSandboxableTool(tc.Function.Name)
+				isSandboxed := lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
@@ -795,7 +638,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
 					"args":              args,
 					"raw_args":          tc.Function.Arguments,
-					"sandbox":           sandboxEnabled && isSandboxableTool(tc.Function.Name),
+					"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
 				})
 				resultJSON, _ := json.Marshal(map[string]any{
 					"output":   result,
@@ -835,7 +678,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							if err != nil {
 								diffStat = "no diff available"
 							}
-							summary = te.GenerateCommitLabel(task.ID, diffStat, FormatConversationTurns(ExtractLastTurns(messages, 3)))
+							summary = te.GenerateCommitLabel(task.ID, diffStat, FormatConversationTurns(ExtractLastTurns(lc.messages, 3)))
 						}
 						commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 						te.gitRun(worktreePath, "add", "-A")
@@ -863,20 +706,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
 						"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-						"model_name": activeModel, "duration": time.Since(startTime).Milliseconds(),
+						"model_name": activeModel, "duration": time.Since(lc.startTime).Milliseconds(),
 					}})
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 					// Broadcast diff so the frontend updates the diff panel
-					baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-					if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-						hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-						fileHashes := diffResult.GetPerFileHashes()
-						untrackedLines := 0
-						for _, u := range diffResult.Untracked {
-							untrackedLines += len(u.Lines)
-						}
-						te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
-					}
+					te.broadcastDiffStats(projectID, task.ID, task, "")
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
 						_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
@@ -885,7 +719,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 			// Check consecutive identical tool call failures (turn-level).
-			if count := tracker.recordTurn(turnFailures); count >= maxFailures {
+			if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
 				task.ExecutionState = "failed"
 				task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 				te.store.UpdateTask(task)
@@ -898,11 +732,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Including tool_calls in the message history is critical for models like gemma
 			// to understand what tool was called and match it to the result.
 			assistantContentFull := assistantText
-			if reasoningContent.Len() > 0 {
-				assistantContentFull = reasoningContent.String() + "\n" + assistantText
+			if lc.reasoningContent.Len() > 0 {
+				assistantContentFull = lc.reasoningContent.String() + "\n" + assistantText
 			}
 			var assistantToolCalls []types.ToolCallMsg
-			for _, tc := range pendingToolCalls {
+			for _, tc := range lc.pendingToolCalls {
 				if tc.ID != "" && tc.Function.Name != "" {
 					assistantToolCalls = append(assistantToolCalls, types.ToolCallMsg{
 						ID:   tc.ID,
@@ -912,46 +746,33 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					assistantToolCalls[len(assistantToolCalls)-1].Function.Arguments = tc.Function.Arguments
 				}
 			}
-			messages = append(messages, types.ChatMessage{
+			lc.messages = append(lc.messages, types.ChatMessage{
 				Role:      "assistant",
 				Content:   assistantContentFull,
 				ToolCalls: assistantToolCalls,
 			})
 			for _, tr := range toolResults {
-				messages = append(messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
+				lc.messages = append(lc.messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
 
 			// Loop detection: record this turn and check for repetition
-			loopType := detector.recordTurn(pendingToolCalls, assistantText)
+			loopType := lc.detector.recordTurn(lc.pendingToolCalls, assistantText)
 			if loopType != LoopNone {
-				if detector.hintCount >= maxLoopHints {
-					task.ExecutionState = "failed"
-					task.Output = "Model stuck in loop (max hints exhausted)"
-					te.store.UpdateTask(task)
-					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+				target := ""
+				if loopType == LoopTool && len(lc.pendingToolCalls) > 0 && lc.pendingToolCalls[0].Function.Name != "" {
+					target = extractTarget(lc.pendingToolCalls[0].Function.Name, lc.pendingToolCalls[0].Function.Arguments)
+				}
+				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, target, &lc.messages) {
 					return
 				}
-				// Extract target for hint message
-				target := ""
-				if loopType == LoopTool && len(pendingToolCalls) > 0 && pendingToolCalls[0].Function.Name != "" {
-					target = extractTarget(pendingToolCalls[0].Function.Name, pendingToolCalls[0].Function.Arguments)
-				}
-				hint := buildHint(loopType, target)
-				log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d), target=%s", task.ID, loopType, detector.hintCount+1, maxLoopHints, target)
-				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
-				detector.hintCount++
-				detector.reset()
-				// Notify frontend
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 			}
 
-			pendingToolCalls = nil
-			assistantContent.Reset()
-			reasoningContent.Reset()
+			lc.pendingToolCalls = nil
+			lc.assistantContent.Reset()
+			lc.reasoningContent.Reset()
 
 			// Auto-commit file changes as a checkpoint
-			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, messages, sandboxEnabled)
+			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, lc.messages, lc.sandboxEnabled)
 
 			// Broadcast updated diff stats to board viewers
 			thread, _ := te.store.GetThread(task.CurrentThreadID)
@@ -959,65 +780,44 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if thread != nil {
 				forkBranch = thread.GitBranch
 			}
-			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
-			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-				fileHashes := diffResult.GetPerFileHashes()
-				untrackedLines := 0
-				for _, u := range diffResult.Untracked {
-					untrackedLines += len(u.Lines)
-				}
-				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
-			}
+			te.broadcastDiffStats(projectID, task.ID, task, forkBranch)
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
 		} else if assistantText != "" {
 			// Text-only response resets the failure tracker
-			tracker.reset()
+			lc.tracker.reset()
 
 			// Merge reasoning into content so the model sees its own thinking
 			assistantContentFull := assistantText
-			if reasoningContent.Len() > 0 {
-				assistantContentFull = reasoningContent.String() + "\n" + assistantText
+			if lc.reasoningContent.Len() > 0 {
+				assistantContentFull = lc.reasoningContent.String() + "\n" + assistantText
 			}
-			messages = append(messages, types.ChatMessage{Role: "assistant", Content: assistantContentFull})
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(usage, messages[:len(messages)-1], assistantText, reasoningContent.String(), startTime)
-			duration := time.Since(startTime).Milliseconds()
+			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: assistantContentFull})
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String(), lc.startTime)
+			duration := time.Since(lc.startTime).Milliseconds()
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
-				Content: assistantText, ReasoningContent: reasoningContent.String(),
-				ModelName: activeModel, ProviderName: providerName,
+				Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
+				ModelName: activeModel, ProviderName: lc.providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
 				Duration: duration, CreatedAt: time.Now().UTC(),
 			})
-			assistantContent.Reset()
-			reasoningContent.Reset()
+			lc.assistantContent.Reset()
+			lc.reasoningContent.Reset()
 
 			// Loop detection for text-only responses
-			loopType := detector.recordTurn(nil, assistantText)
+			loopType := lc.detector.recordTurn(nil, assistantText)
 			// Also check for phrase repetition detected during streaming
-			if loopType == LoopNone && detector.phraseDetected() {
+			if loopType == LoopNone && lc.detector.phraseDetected() {
 				loopType = LoopPhrase
 			}
 			if loopType != LoopNone {
-				if detector.hintCount >= maxLoopHints {
-					task.ExecutionState = "failed"
-					task.Status = "review"
-					task.Output = "Model stuck in loop (max hints exhausted)"
-					te.store.UpdateTask(task)
-					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(task.ID, "Model stuck in loop (max hints exhausted)", "loop_detected")
+				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, "", &lc.messages) {
 					return
 				}
-				hint := buildHint(loopType, "")
-				log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d)", task.ID, loopType, detector.hintCount+1, maxLoopHints)
-				messages = append(messages, types.ChatMessage{Role: "system", Content: hint})
-				detector.hintCount++
-				detector.reset()
 				task.ExecutionState = "running"
 				te.store.UpdateTask(task)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 				continue
 			}
 
@@ -1025,21 +825,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			select {
 			case um := <-userMsgChan:
 				log.Printf("[user-msg] task=%s received message after response, continuing", task.ID)
-				detector.reset() // user input breaks any loop pattern
-				messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+				lc.detector.reset() // user input breaks any loop pattern
+				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				if um.ModelName != "" {
-					mc.set(um.ServerURL, um.ModelName)
-					newReasoningEffort := um.ReasoningEffort
-					if newReasoningEffort == "" {
-						newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
-					}
-					newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
-					client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
-					providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
-					// Persist model override to DB so the DB sync check doesn't revert it
-					task.LlamaServerURL = um.ServerURL
-					task.ModelName = um.ModelName
-					task.ReasoningEffort = newReasoningEffort
+					switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
+					lc.client = switched.client
+					lc.providerName = switched.providerName
 				}
 				task.ExecutionState = "running"
 				te.store.UpdateTask(task)
@@ -1052,16 +843,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.store.UpdateTask(task)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			// Broadcast diff so the frontend updates the diff panel
-			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-			if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-				fileHashes := diffResult.GetPerFileHashes()
-				untrackedLines := 0
-				for _, u := range diffResult.Untracked {
-					untrackedLines += len(u.Lines)
-				}
-				te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
-			}
+			te.broadcastDiffStats(projectID, task.ID, task, "")
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
@@ -1076,49 +858,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 
 		// Context summarization: check if we're approaching the context window limit
-		if contextWindow != nil && lastSummarizeIdx < len(messages)-1 {
-			if shouldSummarize(messages, *contextWindow) {
-				// Extract previous summary from messages[1] (set after first summarization)
-				var prevSummary string
-				if len(messages) > 1 {
-					prev := messages[1].Content
-					if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
-						prevSummary = prev[len("[Context summary: ") : len(prev)-1]
-					}
-				}
-				sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel, prevSummary)
-				if err != nil {
-					log.Printf("[summarize] task=%s summarization failed: %v", task.ID, err)
-				} else {
-					messages = sumResult.newMessages
-					lastSummarizeIdx = sumResult.newLastSummarizeIdx
-					// Persist summary with stats
-					summaryMsgID := uuid.New().String()
-					_ = te.store.CreateTaskMessage(&types.TaskMessage{
-						ID:             summaryMsgID,
-						TaskID:         task.ID,
-						ThreadID:       task.CurrentThreadID,
-						Role:           "summarization",
-						Content:        sumResult.summary,
-						ModelName:      activeModel,
-						PromptTokens:   sumResult.promptTokens,
-						PredictedTokens: sumResult.predictedTokens,
-						PromptMs:       int(sumResult.promptMs),
-						PredictedMs:    int(sumResult.predictedMs),
-						CreatedAt:      time.Now().UTC(),
-					})
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
-						"id":              summaryMsgID,
-						"summary":         sumResult.summary,
-						"created_at":      time.Now().UTC().Format(time.RFC3339),
-						"prompt_tokens":   sumResult.promptTokens,
-						"predicted_tokens": sumResult.predictedTokens,
-						"prompt_ms":       sumResult.promptMs,
-						"predicted_ms":    sumResult.predictedMs,
-						"model_name":      activeModel,
-					}})
-					log.Printf("[summarize] task=%s summarized context: %d messages -> %d messages", task.ID, sumResult.oldLen, len(messages))
-				}
+		if lc.contextWindow != nil && lc.lastSummarizeIdx < len(lc.messages)-1 {
+			if shouldSummarize(lc.messages, *lc.contextWindow) {
+				lc.messages, lc.lastSummarizeIdx = te.applySummarization(task, projectID, task.ID, lc.messages, lc.lastSummarizeIdx, lc.systemPrompt, serverURL, activeModel, nil)
 			}
 		}
 
@@ -1127,78 +869,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// with the same conversation (text-only response already added to history).
 		select {
 		case <-ctx.Done():
-			task.ExecutionState = "stopped"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
+			te.handleStopped(task, projectID, task.ID, "Stopped by user", "stopped", true)
 			return
 		case resultCh := <-summarizeCh:
 			// Manual summarization request from HandleSummarize
 			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
-			// Extract previous summary from messages[1]
-			var prevSummary string
-			if len(messages) > 1 {
-				prev := messages[1].Content
-				if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
-					prevSummary = prev[len("[Context summary: ") : len(prev)-1]
-				}
-			}
-			sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, activeModel, prevSummary)
-			if err != nil {
-				log.Printf("[summarize] task=%s manual summarization failed: %v", task.ID, err)
-				resultCh <- err
-				continue
-			}
-			messages = sumResult.newMessages
-			lastSummarizeIdx = sumResult.newLastSummarizeIdx
-			// Persist summary with stats
-			summaryMsgID := uuid.New().String()
-			_ = te.store.CreateTaskMessage(&types.TaskMessage{
-				ID:              summaryMsgID,
-				TaskID:          task.ID,
-				ThreadID:        task.CurrentThreadID,
-				Role:            "summarization",
-				Content:         sumResult.summary,
-				ModelName:       activeModel,
-				PromptTokens:    sumResult.promptTokens,
-				PredictedTokens: sumResult.predictedTokens,
-				PromptMs:        int(sumResult.promptMs),
-				PredictedMs:     int(sumResult.predictedMs),
-				CreatedAt:       time.Now().UTC(),
-			})
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
-				"id":               summaryMsgID,
-				"summary":          sumResult.summary,
-				"created_at":       time.Now().UTC().Format(time.RFC3339),
-				"prompt_tokens":    sumResult.promptTokens,
-				"predicted_tokens": sumResult.predictedTokens,
-				"prompt_ms":        sumResult.promptMs,
-				"predicted_ms":     sumResult.predictedMs,
-				"model_name":       activeModel,
-			}})
-			log.Printf("[summarize] task=%s manual summarization: %d messages -> %d messages", task.ID, sumResult.oldLen, len(messages))
-			resultCh <- nil
+			lc.messages, lc.lastSummarizeIdx = te.applySummarization(task, projectID, task.ID, lc.messages, lc.lastSummarizeIdx, lc.systemPrompt, serverURL, activeModel, resultCh)
 			continue
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
-			detector.reset()
-			messages = append(messages, types.ChatMessage{Role: "user", Content: um.Content})
+			lc.detector.reset()
+			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
-				mc.set(um.ServerURL, um.ModelName)
-				newReasoningEffort := um.ReasoningEffort
-				if newReasoningEffort == "" {
-					newReasoningEffort = te.configStore.GetModelReasoningEffort(um.ModelName)
-				}
-				newAPIKey := te.configStore.GetProviderAPIKey(um.ServerURL)
-				client = llama.NewLlamaClient(um.ServerURL, um.ModelName, newReasoningEffort, newAPIKey)
-				providerName = te.configStore.GetProviderNameByURL(um.ServerURL)
-				// Persist model override to DB so the DB sync check doesn't revert it
-				task.LlamaServerURL = um.ServerURL
-				task.ModelName = um.ModelName
-				task.ReasoningEffort = newReasoningEffort
+				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
+				lc.client = switched.client
+				lc.providerName = switched.providerName
 			}
 			task.ExecutionState = "running"
 			te.store.UpdateTask(task)
@@ -1243,541 +928,4 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
 }
 
-// -- Pi Agent Execution --
 
-// executeTaskWithPi runs the task using Pi agent via RPC mode.
-// Pi handles its own LLM calls, tool execution, loop detection, and compaction.
-// Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, initialContent string) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
-			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
-		}
-		// Only remove from tasks map if we're still the active executor
-		// (prevents old executor from deleting a replacement during type switch)
-		te.taskMu.Lock()
-		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
-			delete(te.tasks, task.ID)
-		}
-		te.taskMu.Unlock()
-	}()
-
-	sessionName := fmt.Sprintf("kanban-%s", task.ID)
-
-	var client *pi.Client
-	var err error
-
-	if sandboxEnabled {
-		// Pre-flight: check if pi binary exists in the container
-		if !te.sandboxMgr.PiAvailable(task.ID) {
-			task.ExecutionState = "failed"
-			task.Status = "review"
-			task.Output = "Pi Coding Agent binary not found in sandbox container. Ensure the container image includes the `pi` binary."
-			te.store.UpdateTask(task)
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "pi binary not found in container", "pi_not_available")
-			return
-		}
-
-		log.Printf("[pi] task=%s creating client in container (session=%s)", task.ID, sessionName)
-		client, err = pi.NewClientInContainer(te.sandboxMgr, task.ID, sessionName)
-	} else {
-		// Pi runs on the host — point it at its config directory
-		cwd := worktreePath
-		var env []string
-		agentDir := te.configStore.GetAgentConfigDir()
-		if agentDir == "" {
-			if homeDir, err := os.UserHomeDir(); err == nil {
-				agentDir = filepath.Join(homeDir, ".pi", "agent")
-			}
-		}
-		if agentDir != "" {
-			env = append(env, "PI_CODING_AGENT_DIR="+agentDir)
-		}
-		log.Printf("[pi] task=%s creating client (cwd=%s, session=%s)", task.ID, cwd, sessionName)
-		client, err = pi.NewClient(cwd, sessionName, env)
-	}
-
-	if err != nil {
-		task.ExecutionState = "failed"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Failed to start Pi Coding Agent: %v", err)
-		te.store.UpdateTask(task)
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
-		return
-	}
-	defer client.Close()
-
-	log.Printf("[pi] task=%s client started (pid=%d)", task.ID, client.PID())
-
-	// Discover the active model
-	modelCtx, modelCancel := context.WithTimeout(ctx, 5*time.Second)
-	modelName := client.QueryModel(modelCtx)
-	modelCancel()
-	log.Printf("[pi] task=%s model=%s", task.ID, modelName)
-
-	// Get existing messages
-	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-
-	// If no messages exist yet, create the initial user message from the task prompt
-	if len(taskMsgs) == 0 {
-		te.store.CreateTaskMessage(&types.TaskMessage{
-			ID:        uuid.New().String(),
-			TaskID:    task.ID,
-			ThreadID:  task.CurrentThreadID,
-			Role:      "user",
-			Content:   task.Prompt,
-			CreatedAt: time.Now().UTC(),
-		})
-	}
-
-	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
-
-	// Send initial prompt to Pi.
-	// For lazy-start (executor switch), use the user's message. For normal start, use task prompt.
-	initialPrompt := task.Prompt
-	if initialContent != "" {
-		initialPrompt = initialContent
-		log.Printf("[pi] task=%s lazy-start: sending user message as initial prompt", task.ID)
-	}
-	err = client.Prompt(ctx, initialPrompt)
-	if err != nil {
-		task.ExecutionState = "failed"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Failed to send prompt to Pi: %v", err)
-		te.store.UpdateTask(task)
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
-		return
-	}
-
-	// Validate Pi startup: wait for agent_start event within a timeout.
-	// The prompt "response" event only confirms Pi accepted the prompt.
-	// agent_start confirms Pi actually began processing (connected to LLM, etc.).
-	// Without this, a hung Pi process would leave the UI stuck on "Awaiting LLM..." forever.
-	startupTimeout := 30 * time.Second
-	startupDeadline := time.Now().Add(startupTimeout)
-	startupValidated := false
-	for !startupValidated {
-		// Check if timeout has elapsed
-		if time.Now().After(startupDeadline) {
-			log.Printf("[pi] task=%s startup timeout (no agent_start within %v)", task.ID, startupTimeout)
-			client.Abort(ctx)
-			task.ExecutionState = "failed"
-			task.Status = "review"
-			task.Output = "Pi Coding Agent failed to start (timeout waiting for agent)"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Pi failed to start within 30s", "pi_startup_timeout")
-			return
-		}
-
-		remaining := startupDeadline.Sub(time.Now())
-		timer := time.NewTimer(remaining)
-
-		select {
-		case event, ok := <-client.EventChan():
-			timer.Stop()
-			if !ok {
-				// Channel closed — Pi process exited
-				log.Printf("[pi] task=%s event channel closed during startup", task.ID)
-				client.Abort(ctx)
-				task.ExecutionState = "failed"
-				task.Status = "review"
-				task.Output = "Pi Coding Agent process exited unexpectedly"
-				te.store.UpdateTask(task)
-				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(task.ID, "Pi process exited", "pi_process_exited")
-				return
-			}
-			log.Printf("[pi] task=%s startup event: %s", task.ID, event.Type)
-			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
-			}
-			switch event.Type {
-			case "agent_start":
-				// Pi has started processing — startup validated
-				startupValidated = true
-			case "agent_end":
-				// Pi ended immediately after prompt — treat as failure
-				task.ExecutionState = "failed"
-				task.Status = "review"
-				task.Output = "Pi Coding Agent ended immediately after starting"
-				te.store.UpdateTask(task)
-				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(task.ID, "Pi ended immediately", "pi_ended_immediately")
-				return
-			case "response":
-				if !event.Success && event.Error != "" && event.Command == "prompt" {
-					// Prompt was rejected by Pi
-					task.ExecutionState = "failed"
-					task.Status = "review"
-					task.Output = fmt.Sprintf("Pi rejected prompt: %s", event.Error)
-					te.store.UpdateTask(task)
-					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-					te.sendAndPersistError(task.ID, event.Error, "pi_prompt_rejected")
-					return
-				}
-				// Prompt accepted (response success) — keep waiting for agent_start
-			default:
-				// Other events (turn_start, message_start, etc.) — keep waiting
-			}
-		case <-ctx.Done():
-			timer.Stop()
-			task.ExecutionState = "stopped"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			return
-		case <-timer.C:
-			// Timeout — handled by the check at the top of the loop
-		}
-	}
-
-	// Event loop
-	startTime := time.Now()
-	agentEnded := false
-	var stopReason string
-	var totalPromptTokens, totalPredictedTokens int // accumulated across all assistant messages
-
-	for !agentEnded {
-		select {
-		case <-ctx.Done():
-			log.Printf("[pi] task=%s context cancelled", task.ID)
-			client.Abort(ctx)
-			task.ExecutionState = "stopped"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
-			return
-
-		case event, ok := <-client.EventChan():
-			if !ok {
-				// Channel closed — process exited
-				agentEnded = true
-				stopReason = "process_exited"
-				break
-			}
-
-			// Stream the event to frontend
-			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
-			}
-
-			switch event.Type {
-			case "agent_end":
-				stopReason = event.StopReason
-				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
-
-				// Persist assistant messages and tool calls from agent_end.
-				// Order must match LLM path: assistant(text+reasoning) then tool_call entries,
-				// so the frontend's mergeToolCallsIntoAssistant can merge them correctly.
-				// Pi message format:
-				//   - Assistant content blocks: {type:"text", text}, {type:"thinking", thinking},
-				//     {type:"toolCall", id, name, arguments}
-				//   - Tool results: separate messages with role="toolResult", toolCallId, content, isError
-				if len(event.Messages) > 0 {
-					// Build a map of toolCallId -> tool_result from toolResult messages
-					toolResults := make(map[string]map[string]any)
-					for _, msg := range event.Messages {
-						role, _ := msg["role"].(string)
-						if role != "toolResult" {
-							continue
-						}
-						toolCallID, _ := msg["toolCallId"].(string)
-						if toolCallID == "" {
-							continue
-						}
-						// Extract content as string
-						var resultText string
-						if contentVal, ok := msg["content"].(string); ok {
-							resultText = contentVal
-						} else if contentArr, ok := msg["content"].([]any); ok {
-							var parts []string
-							for _, item := range contentArr {
-								if itemMap, ok := item.(map[string]any); ok {
-									if itemMap["type"] == "text" {
-										if t, ok := itemMap["text"].(string); ok {
-											parts = append(parts, t)
-										}
-									}
-								}
-							}
-							resultText = strings.Join(parts, "\n")
-						}
-						isError, _ := msg["isError"].(bool)
-						toolResults[toolCallID] = map[string]any{
-							"output":  resultText,
-							"success": !isError,
-						}
-					}
-
-					for _, msg := range event.Messages {
-						role, _ := msg["role"].(string)
-						if role != "assistant" {
-							continue
-						}
-
-						// Extract text, reasoning, and toolCall from content blocks
-						var assistantText, reasoningText string
-						var toolCalls []map[string]any
-						if content, ok := msg["content"].([]any); ok {
-							var texts []string
-							for _, c := range content {
-								if cm, ok := c.(map[string]any); ok {
-									switch cm["type"] {
-									case "text":
-										if t, ok := cm["text"].(string); ok {
-											texts = append(texts, t)
-										}
-									case "thinking":
-										if t, ok := cm["thinking"].(string); ok {
-											reasoningText = t
-										}
-									case "toolCall":
-										toolCalls = append(toolCalls, cm)
-									}
-								}
-							}
-							assistantText = strings.Join(texts, "\n")
-						}
-
-						// Extract usage data if available
-						var promptTokens, predictedTokens int
-						if usage, ok := msg["usage"].(map[string]any); ok {
-							if input, ok := usage["input"].(float64); ok {
-								promptTokens = int(input)
-							}
-							if output, ok := usage["output"].(float64); ok {
-								predictedTokens = int(output)
-							}
-						}
-						totalPromptTokens += promptTokens
-						totalPredictedTokens += predictedTokens
-
-						// Persist assistant message first (even if empty — acts as anchor for tool call merge)
-						te.store.CreateTaskMessage(&types.TaskMessage{
-							ID:               uuid.New().String(),
-							TaskID:           task.ID,
-							ThreadID:         task.CurrentThreadID,
-							Role:             "assistant",
-							Content:          assistantText,
-							ReasoningContent: reasoningText,
-							ModelName:        "pi",
-							ProviderName:     "Pi Coding Agent",
-							PromptTokens:     promptTokens,
-							PredictedTokens:  predictedTokens,
-							Duration:         time.Since(startTime).Milliseconds(),
-							CreatedAt:        time.Now().UTC(),
-						})
-
-						// Persist tool calls after the assistant message
-						// so mergeToolCallsIntoAssistant merges them into the preceding assistant entry.
-						for _, tc := range toolCalls {
-							toolCallID, _ := tc["id"].(string)
-							toolName, _ := tc["name"].(string)
-							toolArgs, _ := tc["arguments"].(map[string]any)
-							if toolCallID == "" {
-								continue
-							}
-
-							// Map Pi tool names to Kanban tool names
-							kanbanToolName := pi.MapPiToolName(toolName)
-
-							// Build raw_args for display
-							rawArgs, _ := json.Marshal(toolArgs)
-
-							// Get matching tool result
-							result, hasResult := toolResults[toolCallID]
-
-							// Build tool_call JSON (same format as LLM path)
-							tcJSON, _ := json.Marshal(map[string]any{
-								"tool_id":           toolCallID,
-								"tool_name":         kanbanToolName,
-								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
-								"args":              toolArgs,
-								"raw_args":          string(rawArgs),
-								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
-							})
-
-							var resultJSON []byte
-							if hasResult {
-								resultJSON, _ = json.Marshal(result)
-							} else {
-								resultJSON, _ = json.Marshal(map[string]any{
-									"output":  "",
-									"success": true,
-								})
-							}
-
-							te.store.CreateTaskMessage(&types.TaskMessage{
-								ID:         uuid.New().String(),
-								TaskID:     task.ID,
-								ThreadID:   task.CurrentThreadID,
-								Role:       "tool_call",
-								Content:    "",
-								ToolCalls:  string(tcJSON),
-								ToolResult: string(resultJSON),
-								CreatedAt:  time.Now().UTC(),
-							})
-
-							// Send tool_call WS event so the frontend creates the tool call entry.
-							// Pi may not send streaming tool_execution_start events, so the frontend
-							// might not have a pending entry to update. The frontend's dedup logic
-							// (by tool_id) will skip duplicates if streaming already created it.
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{
-								"tool_id":           toolCallID,
-								"tool_name":         kanbanToolName,
-								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
-								"args":              toolArgs,
-								"raw_args":          string(rawArgs),
-								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
-							}})
-
-							// Send tool_result WS event to finalize the tool call on the frontend.
-							// If the streaming tool_execution_end was missing/late the frontend
-							// would otherwise leave isPending=true forever (stuck spinner).
-							resultOutput := ""
-							resultSuccess := true
-							if hasResult {
-								if out, ok := result["output"].(string); ok {
-									resultOutput = out
-								}
-								if suc, ok := result["success"].(bool); ok {
-									resultSuccess = suc
-								}
-							}
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{
-								"tool_id":  toolCallID,
-								"success":  resultSuccess,
-								"output":   resultOutput,
-								"args":     toolArgs,
-								"raw_args": string(rawArgs),
-								"path":     extractPathFromArgs(string(rawArgs)),
-								"sandbox":  sandboxEnabled && isSandboxableTool(kanbanToolName),
-							}})
-						}
-					}
-				}
-
-				// Check for queued user messages before ending.
-				// If a follow-up was sent while Pi was processing, forward it
-				// with steer behavior to start the next turn.
-				select {
-				case um := <-userMsgChan:
-					log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
-					err := client.Prompt(ctx, um.Content, "steer")
-					if err != nil {
-						log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
-					}
-					// Don't set agentEnded — continue the event loop for the next turn
-				default:
-					// No queued messages — Pi is truly done
-					agentEnded = true
-				}
-
-			case "response":
-				if !event.Success && event.Error != "" && event.Command == "prompt" {
-					log.Printf("[pi] task=%s prompt response error: %s", task.ID, event.Error)
-					te.sendAndPersistError(task.ID, event.Error, "pi_rpc_error")
-				}
-			}
-
-		case um := <-userMsgChan:
-			// Forward user message to Pi with steer behavior.
-			// "steer" queues the message while the agent is running;
-			// it is delivered after the current turn's tool calls finish.
-			log.Printf("[pi] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
-			err := client.Prompt(ctx, um.Content, "steer")
-			if err != nil {
-				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
-			}
-		}
-	}
-
-	// Task completion
-	duration := time.Since(startTime)
-	log.Printf("[pi] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
-
-	// Determine task state based on stop reason.
-	// Pi stop reasons: "stop", "length", "toolUse", "error", "aborted"
-	// Empty stopReason means agent_end had no assistant messages (edge case).
-	isError := stopReason == "error"
-	if isError {
-		task.ExecutionState = "failed"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Pi Coding Agent ended with error (stopReason=%s)", stopReason)
-	} else if stopReason == "aborted" {
-		task.ExecutionState = "stopped"
-		task.Status = "review"
-		task.Output = "Pi Coding Agent was aborted"
-	} else if task.AutoCommit {
-		// Commit changes
-		summary := task.ChangeSummary
-		if summary == "" {
-			summary = task.Title
-		}
-		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
-		te.gitRun(worktreePath, "add", "-A")
-		unstageNewBinaryFilesInDir(worktreePath)
-		te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
-		// Merge into origin branch if auto_merge is enabled
-		if task.AutoMerge {
-			if err := te.mergeBranch(projectID, task.ID, task); err != nil {
-				log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
-			}
-		}
-		task.ExecutionState = "completed"
-		task.Status = "done"
-		if te.sandboxMgr != nil {
-			_ = te.sandboxMgr.Stop(task.ID)
-		}
-		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
-	} else {
-		task.ExecutionState = "awaiting_review"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
-	}
-	te.store.UpdateTask(task)
-
-	// Always broadcast complete event to clear streaming state on the frontend.
-	// The frontend's complete handler calls closeCurrentAssistant() which clears
-	// the isStreaming flag on the assistant entry (removes the blinking cursor).
-	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-		"state":            task.ExecutionState,
-		"summary":          "Pi Coding Agent finished",
-		"model_name":       client.ModelName(),
-		"prompt_tokens":    totalPromptTokens,
-		"predicted_tokens": totalPredictedTokens,
-		"cache_tokens":     0,
-		"prompt_ms":        0,
-		"predicted_ms":     0,
-		"duration":         duration.Milliseconds(),
-	}})
-
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-
-	// Broadcast diff
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-	if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-		hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
-		fileHashes := diffResult.GetPerFileHashes()
-		untrackedLines := 0
-		for _, u := range diffResult.Untracked {
-			untrackedLines += len(u.Lines)
-		}
-		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
-	}
-
-	// Auto-start next sibling if subtask
-	if task.ParentTaskID != "" {
-		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
-	}
-}

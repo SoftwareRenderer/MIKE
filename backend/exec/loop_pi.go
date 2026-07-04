@@ -1,0 +1,557 @@
+package exec
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"kanban/backend/git"
+	"kanban/backend/llama"
+	"kanban/backend/pi"
+	"kanban/backend/stream"
+	"kanban/backend/types"
+
+	"github.com/google/uuid"
+)
+
+// executeTaskWithPi runs the task using Pi agent via RPC mode.
+// Pi handles its own LLM calls, tool execution, loop detection, and compaction.
+// Kanban only manages the subprocess lifecycle and streams events to the frontend.
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, initialContent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
+			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+		}
+		// Only remove from tasks map if we're still the active executor
+		// (prevents old executor from deleting a replacement during type switch)
+		te.taskMu.Lock()
+		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
+			delete(te.tasks, task.ID)
+		}
+		te.taskMu.Unlock()
+	}()
+
+	sessionName := fmt.Sprintf("kanban-%s", task.ID)
+
+	var client *pi.Client
+	var err error
+
+	if sandboxEnabled {
+		// Pre-flight: check if pi binary exists in the container
+		if !te.sandboxMgr.PiAvailable(task.ID) {
+			task.ExecutionState = "failed"
+			task.Status = "review"
+			task.Output = "Pi Coding Agent binary not found in sandbox container. Ensure the container image includes the `pi` binary."
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "pi binary not found in container", "pi_not_available")
+			return
+		}
+
+		log.Printf("[pi] task=%s creating client in container (session=%s)", task.ID, sessionName)
+		client, err = pi.NewClientInContainer(te.sandboxMgr, task.ID, sessionName)
+	} else {
+		// Pi runs on the host — point it at its config directory
+		cwd := worktreePath
+		var env []string
+		agentDir := te.configStore.GetAgentConfigDir()
+		if agentDir == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				agentDir = filepath.Join(homeDir, ".pi", "agent")
+			}
+		}
+		if agentDir != "" {
+			env = append(env, "PI_CODING_AGENT_DIR="+agentDir)
+		}
+		log.Printf("[pi] task=%s creating client (cwd=%s, session=%s)", task.ID, cwd, sessionName)
+		client, err = pi.NewClient(cwd, sessionName, env)
+	}
+
+	if err != nil {
+		task.ExecutionState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Failed to start Pi Coding Agent: %v", err)
+		te.store.UpdateTask(task)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi start failed: %v", err), "pi_start_failed")
+		return
+	}
+	defer client.Close()
+
+	log.Printf("[pi] task=%s client started (pid=%d)", task.ID, client.PID())
+
+	// Discover the active model
+	modelCtx, modelCancel := context.WithTimeout(ctx, 5*time.Second)
+	modelName := client.QueryModel(modelCtx)
+	modelCancel()
+	log.Printf("[pi] task=%s model=%s", task.ID, modelName)
+
+	// Get existing messages
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+
+	// If no messages exist yet, create the initial user message from the task prompt
+	if len(taskMsgs) == 0 {
+		te.store.CreateTaskMessage(&types.TaskMessage{
+			ID:        uuid.New().String(),
+			TaskID:    task.ID,
+			ThreadID:  task.CurrentThreadID,
+			Role:      "user",
+			Content:   task.Prompt,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Pi Coding Agent started"}})
+
+	// Send initial prompt to Pi.
+	// For lazy-start (executor switch), use the user's message. For normal start, use task prompt.
+	initialPrompt := task.Prompt
+	if initialContent != "" {
+		initialPrompt = initialContent
+		log.Printf("[pi] task=%s lazy-start: sending user message as initial prompt", task.ID)
+	}
+	err = client.Prompt(ctx, initialPrompt)
+	if err != nil {
+		task.ExecutionState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Failed to send prompt to Pi: %v", err)
+		te.store.UpdateTask(task)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		te.sendAndPersistError(task.ID, fmt.Sprintf("Pi prompt failed: %v", err), "pi_prompt_failed")
+		return
+	}
+
+	// Validate Pi startup: wait for agent_start event within a timeout.
+	// The prompt "response" event only confirms Pi accepted the prompt.
+	// agent_start confirms Pi actually began processing (connected to LLM, etc.).
+	// Without this, a hung Pi process would leave the UI stuck on "Awaiting LLM..." forever.
+	startupTimeout := 30 * time.Second
+	startupDeadline := time.Now().Add(startupTimeout)
+	startupValidated := false
+	for !startupValidated {
+		// Check if timeout has elapsed
+		if time.Now().After(startupDeadline) {
+			log.Printf("[pi] task=%s startup timeout (no agent_start within %v)", task.ID, startupTimeout)
+			client.Abort(ctx)
+			task.ExecutionState = "failed"
+			task.Status = "review"
+			task.Output = "Pi Coding Agent failed to start (timeout waiting for agent)"
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Pi failed to start within 30s", "pi_startup_timeout")
+			return
+		}
+
+		remaining := startupDeadline.Sub(time.Now())
+		timer := time.NewTimer(remaining)
+
+		select {
+		case event, ok := <-client.EventChan():
+			timer.Stop()
+			if !ok {
+				// Channel closed — Pi process exited
+				log.Printf("[pi] task=%s event channel closed during startup", task.ID)
+				client.Abort(ctx)
+				task.ExecutionState = "failed"
+				task.Status = "review"
+				task.Output = "Pi Coding Agent process exited unexpectedly"
+				te.store.UpdateTask(task)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, "Pi process exited", "pi_process_exited")
+				return
+			}
+			log.Printf("[pi] task=%s startup event: %s", task.ID, event.Type)
+			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
+			}
+			switch event.Type {
+			case "agent_start":
+				// Pi has started processing — startup validated
+				startupValidated = true
+			case "agent_end":
+				// Pi ended immediately after prompt — treat as failure
+				task.ExecutionState = "failed"
+				task.Status = "review"
+				task.Output = "Pi Coding Agent ended immediately after starting"
+				te.store.UpdateTask(task)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.sendAndPersistError(task.ID, "Pi ended immediately", "pi_ended_immediately")
+				return
+			case "response":
+				if !event.Success && event.Error != "" && event.Command == "prompt" {
+					// Prompt was rejected by Pi
+					task.ExecutionState = "failed"
+					task.Status = "review"
+					task.Output = fmt.Sprintf("Pi rejected prompt: %s", event.Error)
+					te.store.UpdateTask(task)
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.sendAndPersistError(task.ID, event.Error, "pi_prompt_rejected")
+					return
+				}
+				// Prompt accepted (response success) — keep waiting for agent_start
+			default:
+				// Other events (turn_start, message_start, etc.) — keep waiting
+			}
+		case <-ctx.Done():
+			timer.Stop()
+			task.ExecutionState = "stopped"
+			task.Status = "review"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			return
+		case <-timer.C:
+			// Timeout — handled by the check at the top of the loop
+		}
+	}
+
+	// Event loop
+	startTime := time.Now()
+	agentEnded := false
+	var stopReason string
+	var totalPromptTokens, totalPredictedTokens int // accumulated across all assistant messages
+
+	for !agentEnded {
+		select {
+		case <-ctx.Done():
+			log.Printf("[pi] task=%s context cancelled", task.ID)
+			client.Abort(ctx)
+			task.ExecutionState = "stopped"
+			task.Status = "review"
+			task.Output = "Stopped by user"
+			te.store.UpdateTask(task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
+			return
+
+		case event, ok := <-client.EventChan():
+			if !ok {
+				// Channel closed — process exited
+				agentEnded = true
+				stopReason = "process_exited"
+				break
+			}
+
+			// Stream the event to frontend
+			if streamEvent := pi.ToStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
+			}
+
+			switch event.Type {
+			case "agent_end":
+				stopReason = event.StopReason
+				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
+
+				// Persist assistant messages and tool calls from agent_end.
+				// Order must match LLM path: assistant(text+reasoning) then tool_call entries,
+				// so the frontend's mergeToolCallsIntoAssistant can merge them correctly.
+				// Pi message format:
+				//   - Assistant content blocks: {type:"text", text}, {type:"thinking", thinking},
+				//     {type:"toolCall", id, name, arguments}
+				//   - Tool results: separate messages with role="toolResult", toolCallId, content, isError
+				if len(event.Messages) > 0 {
+					// Build a map of toolCallId -> tool_result from toolResult messages
+					toolResults := make(map[string]map[string]any)
+					for _, msg := range event.Messages {
+						role, _ := msg["role"].(string)
+						if role != "toolResult" {
+							continue
+						}
+						toolCallID, _ := msg["toolCallId"].(string)
+						if toolCallID == "" {
+							continue
+						}
+						// Extract content as string
+						var resultText string
+						if contentVal, ok := msg["content"].(string); ok {
+							resultText = contentVal
+						} else if contentArr, ok := msg["content"].([]any); ok {
+							var parts []string
+							for _, item := range contentArr {
+								if itemMap, ok := item.(map[string]any); ok {
+									if itemMap["type"] == "text" {
+										if t, ok := itemMap["text"].(string); ok {
+											parts = append(parts, t)
+										}
+									}
+								}
+							}
+							resultText = strings.Join(parts, "\n")
+						}
+						isError, _ := msg["isError"].(bool)
+						toolResults[toolCallID] = map[string]any{
+							"output":  resultText,
+							"success": !isError,
+						}
+					}
+
+					for _, msg := range event.Messages {
+						role, _ := msg["role"].(string)
+						if role != "assistant" {
+							continue
+						}
+
+						// Extract text, reasoning, and toolCall from content blocks
+						var assistantText, reasoningText string
+						var toolCalls []map[string]any
+						if content, ok := msg["content"].([]any); ok {
+							var texts []string
+							for _, c := range content {
+								if cm, ok := c.(map[string]any); ok {
+									switch cm["type"] {
+									case "text":
+										if t, ok := cm["text"].(string); ok {
+											texts = append(texts, t)
+										}
+									case "thinking":
+										if t, ok := cm["thinking"].(string); ok {
+											reasoningText = t
+										}
+									case "toolCall":
+										toolCalls = append(toolCalls, cm)
+									}
+								}
+							}
+							assistantText = strings.Join(texts, "\n")
+						}
+
+						// Extract usage data if available
+						var promptTokens, predictedTokens int
+						if usage, ok := msg["usage"].(map[string]any); ok {
+							if input, ok := usage["input"].(float64); ok {
+								promptTokens = int(input)
+							}
+							if output, ok := usage["output"].(float64); ok {
+								predictedTokens = int(output)
+							}
+						}
+						totalPromptTokens += promptTokens
+						totalPredictedTokens += predictedTokens
+
+						// Persist assistant message first (even if empty — acts as anchor for tool call merge)
+						te.store.CreateTaskMessage(&types.TaskMessage{
+							ID:               uuid.New().String(),
+							TaskID:           task.ID,
+							ThreadID:         task.CurrentThreadID,
+							Role:             "assistant",
+							Content:          assistantText,
+							ReasoningContent: reasoningText,
+							ModelName:        "pi",
+							ProviderName:     "Pi Coding Agent",
+							PromptTokens:     promptTokens,
+							PredictedTokens:  predictedTokens,
+							Duration:         time.Since(startTime).Milliseconds(),
+							CreatedAt:        time.Now().UTC(),
+						})
+
+						// Persist tool calls after the assistant message
+						// so mergeToolCallsIntoAssistant merges them into the preceding assistant entry.
+						for _, tc := range toolCalls {
+							toolCallID, _ := tc["id"].(string)
+							toolName, _ := tc["name"].(string)
+							toolArgs, _ := tc["arguments"].(map[string]any)
+							if toolCallID == "" {
+								continue
+							}
+
+							// Map Pi tool names to Kanban tool names
+							kanbanToolName := pi.MapPiToolName(toolName)
+
+							// Build raw_args for display
+							rawArgs, _ := json.Marshal(toolArgs)
+
+							// Get matching tool result
+							result, hasResult := toolResults[toolCallID]
+
+							// Build tool_call JSON (same format as LLM path)
+							tcJSON, _ := json.Marshal(map[string]any{
+								"tool_id":           toolCallID,
+								"tool_name":         kanbanToolName,
+								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
+								"args":              toolArgs,
+								"raw_args":          string(rawArgs),
+								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
+							})
+
+							var resultJSON []byte
+							if hasResult {
+								resultJSON, _ = json.Marshal(result)
+							} else {
+								resultJSON, _ = json.Marshal(map[string]any{
+									"output":  "",
+									"success": true,
+								})
+							}
+
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID:         uuid.New().String(),
+								TaskID:     task.ID,
+								ThreadID:   task.CurrentThreadID,
+								Role:       "tool_call",
+								Content:    "",
+								ToolCalls:  string(tcJSON),
+								ToolResult: string(resultJSON),
+								CreatedAt:  time.Now().UTC(),
+							})
+
+							// Send tool_call WS event so the frontend creates the tool call entry.
+							// Pi may not send streaming tool_execution_start events, so the frontend
+							// might not have a pending entry to update. The frontend's dedup logic
+							// (by tool_id) will skip duplicates if streaming already created it.
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{
+								"tool_id":           toolCallID,
+								"tool_name":         kanbanToolName,
+								"tool_display_name": llama.GetToolDisplayName(kanbanToolName),
+								"args":              toolArgs,
+								"raw_args":          string(rawArgs),
+								"sandbox":           sandboxEnabled && isSandboxableTool(kanbanToolName),
+							}})
+
+							// Send tool_result WS event to finalize the tool call on the frontend.
+							// If the streaming tool_execution_end was missing/late the frontend
+							// would otherwise leave isPending=true forever (stuck spinner).
+							resultOutput := ""
+							resultSuccess := true
+							if hasResult {
+								if out, ok := result["output"].(string); ok {
+									resultOutput = out
+								}
+								if suc, ok := result["success"].(bool); ok {
+									resultSuccess = suc
+								}
+							}
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{
+								"tool_id":  toolCallID,
+								"success":  resultSuccess,
+								"output":   resultOutput,
+								"args":     toolArgs,
+								"raw_args": string(rawArgs),
+								"path":     extractPathFromArgs(string(rawArgs)),
+								"sandbox":  sandboxEnabled && isSandboxableTool(kanbanToolName),
+							}})
+						}
+					}
+				}
+
+				// Check for queued user messages before ending.
+				// If a follow-up was sent while Pi was processing, forward it
+				// with steer behavior to start the next turn.
+				select {
+				case um := <-userMsgChan:
+					log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
+					err := client.Prompt(ctx, um.Content, "steer")
+					if err != nil {
+						log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
+					}
+					// Don't set agentEnded — continue the event loop for the next turn
+				default:
+					// No queued messages — Pi is truly done
+					agentEnded = true
+				}
+
+			case "response":
+				if !event.Success && event.Error != "" && event.Command == "prompt" {
+					log.Printf("[pi] task=%s prompt response error: %s", task.ID, event.Error)
+					te.sendAndPersistError(task.ID, event.Error, "pi_rpc_error")
+				}
+			}
+
+		case um := <-userMsgChan:
+			// Forward user message to Pi with steer behavior.
+			// "steer" queues the message while the agent is running;
+			// it is delivered after the current turn's tool calls finish.
+			log.Printf("[pi] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
+			err := client.Prompt(ctx, um.Content, "steer")
+			if err != nil {
+				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
+			}
+		}
+	}
+
+	// Task completion
+	duration := time.Since(startTime)
+	log.Printf("[pi] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
+
+	// Determine task state based on stop reason.
+	// Pi stop reasons: "stop", "length", "toolUse", "error", "aborted"
+	// Empty stopReason means agent_end had no assistant messages (edge case).
+	isError := stopReason == "error"
+	if isError {
+		task.ExecutionState = "failed"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Pi Coding Agent ended with error (stopReason=%s)", stopReason)
+	} else if stopReason == "aborted" {
+		task.ExecutionState = "stopped"
+		task.Status = "review"
+		task.Output = "Pi Coding Agent was aborted"
+	} else if task.AutoCommit {
+		// Commit changes
+		summary := task.ChangeSummary
+		if summary == "" {
+			summary = task.Title
+		}
+		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
+		te.gitRun(worktreePath, "add", "-A")
+		unstageNewBinaryFilesInDir(worktreePath)
+		te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
+		// Merge into origin branch if auto_merge is enabled
+		if task.AutoMerge {
+			if err := te.mergeBranch(projectID, task.ID, task); err != nil {
+				log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
+			}
+		}
+		task.ExecutionState = "completed"
+		task.Status = "done"
+		if te.sandboxMgr != nil {
+			_ = te.sandboxMgr.Stop(task.ID)
+		}
+		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+	} else {
+		task.ExecutionState = "awaiting_review"
+		task.Status = "review"
+		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+	}
+	te.store.UpdateTask(task)
+
+	// Always broadcast complete event to clear streaming state on the frontend.
+	// The frontend's complete handler calls closeCurrentAssistant() which clears
+	// the isStreaming flag on the assistant entry (removes the blinking cursor).
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+		"state":            task.ExecutionState,
+		"summary":          "Pi Coding Agent finished",
+		"model_name":       client.ModelName(),
+		"prompt_tokens":    totalPromptTokens,
+		"predicted_tokens": totalPredictedTokens,
+		"cache_tokens":     0,
+		"prompt_ms":        0,
+		"predicted_ms":     0,
+		"duration":         duration.Milliseconds(),
+	}})
+
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+
+	// Broadcast diff
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
+	if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
+		hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked)
+		fileHashes := diffResult.GetPerFileHashes()
+		untrackedLines := 0
+		for _, u := range diffResult.Untracked {
+			untrackedLines += len(u.Lines)
+		}
+		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil)
+	}
+
+	// Auto-start next sibling if subtask
+	if task.ParentTaskID != "" {
+		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
+	}
+}
