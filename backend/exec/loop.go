@@ -831,6 +831,43 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if task.ParentTaskID != "" {
 				_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
 			}
+		} else if lc.reasoningContent.Len() > 0 {
+			// Reasoning-only response: no visible content, no tool calls.
+			// Persist the reasoning, inject a hint, and retry.
+			reasoningText := lc.reasoningContent.String()
+
+			// Persist the reasoning-only assistant message
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages, "", reasoningText, lc.startTime)
+			te.store.CreateTaskMessage(&types.TaskMessage{
+				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
+				Content: "", ReasoningContent: reasoningText,
+				ModelName: activeModel, ProviderName: lc.providerName,
+				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
+				PromptMs: promptMs, PredictedMs: predictedMs,
+				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
+			})
+
+			// Append reasoning to conversation history so the LLM sees its own thinking
+			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: reasoningText})
+
+			// Generate and persist the hint as a visible system message
+			hint := buildHint(LoopReasoningOnly, "")
+			te.store.CreateTaskMessage(&types.TaskMessage{
+				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "system",
+				Content: hint, CreatedAt: time.Now().UTC(),
+			})
+			lc.messages = append(lc.messages, types.ChatMessage{Role: "system", Content: hint})
+
+			// Advance loop detector and check max hints
+			lc.detector.recordTurn(nil, "")
+			if handleLoopDetected(te, task, projectID, task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages) {
+				return
+			}
+
+			lc.assistantContent.Reset()
+			lc.reasoningContent.Reset()
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
+			continue
 		}
 
 		// Context summarization: check if we're approaching the context window limit

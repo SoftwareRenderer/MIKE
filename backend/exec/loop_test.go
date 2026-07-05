@@ -376,6 +376,27 @@ func TestBuildHint_None(t *testing.T) {
 	}
 }
 
+func TestBuildHint_ReasoningOnly(t *testing.T) {
+	hint := buildHint(LoopReasoningOnly, "")
+	if hint == "" {
+		t.Fatal("LoopReasoningOnly should have a hint message")
+	}
+	// Verify it mentions reasoning
+	if !strings.Contains(hint, "reasoning") {
+		t.Error("hint should mention reasoning")
+	}
+	// Verify it lists available tools
+	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "task_complete", "create_task"} {
+		if !strings.Contains(hint, tool) {
+			t.Errorf("hint should mention tool %q, got: %s", tool, hint)
+		}
+	}
+	// Verify it mentions function calling format
+	if !strings.Contains(hint, "function calling") {
+		t.Error("hint should mention function calling format")
+	}
+}
+
 // --- Text Analysis Helper Tests ---
 
 func TestNormalizePhrase(t *testing.T) {
@@ -1291,5 +1312,68 @@ func TestExtractPrevSummary_MalformedSummary(t *testing.T) {
 	got := extractPrevSummary(messages)
 	if got != "" {
 		t.Errorf("expected empty string for malformed summary, got %q", got)
+	}
+}
+
+// --- Reasoning-Only Loop Detection Tests ---
+
+func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
+	te := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	// Create project and task
+	proj := &types.Project{ID: "proj-reasoning", Name: "Reasoning Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{
+		ID: "task-reasoning", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
+		Status: "in_progress", ExecutionState: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := te.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	detector := newLoopDetector()
+	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
+
+	// First call — should NOT terminate (hint 1/3)
+	terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	if terminated {
+		t.Fatal("first hint should not terminate")
+	}
+	if detector.hintCount != 1 {
+		t.Errorf("expected hintCount=1, got %d", detector.hintCount)
+	}
+
+	// Second call — should NOT terminate (hint 2/3)
+	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	if terminated {
+		t.Fatal("second hint should not terminate")
+	}
+	if detector.hintCount != 2 {
+		t.Errorf("expected hintCount=2, got %d", detector.hintCount)
+	}
+
+	// Third call — should NOT terminate (hint 3/3)
+	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	if terminated {
+		t.Fatal("third hint should not terminate")
+	}
+	if detector.hintCount != 3 {
+		t.Errorf("expected hintCount=3, got %d", detector.hintCount)
+	}
+
+	// Fourth call — SHOULD terminate (max hints exhausted)
+	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	if !terminated {
+		t.Fatal("fourth hint should terminate (max hints exhausted)")
+	}
+
+	// Verify task was marked as failed
+	taskAfter, _ := te.store.GetTaskByTaskID(task.ID)
+	if taskAfter.ExecutionState != "failed" {
+		t.Errorf("expected execution_state='failed', got %q", taskAfter.ExecutionState)
 	}
 }

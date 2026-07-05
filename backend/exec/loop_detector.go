@@ -47,10 +47,11 @@ func extractPathFromArgs(args string) string {
 type LoopType int
 
 const (
-	LoopNone   LoopType = iota
-	LoopTool            // repeated read of same target
-	LoopText            // repeated similar text-only responses
-	LoopPhrase          // exact phrase repetition within a response
+	LoopNone          LoopType = iota
+	LoopTool                  // repeated read of same target
+	LoopText                  // repeated similar text-only responses
+	LoopPhrase                // exact phrase repetition within a response
+	LoopReasoningOnly         // reasoning-only response with no content or tool calls
 )
 
 const maxLoopHints = 3
@@ -419,6 +420,8 @@ func buildHint(loopType LoopType, target string) string {
 		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `task_complete` if the task is done."
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
+	case LoopReasoningOnly:
+		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, task_complete, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
 	default:
 		return ""
 	}
