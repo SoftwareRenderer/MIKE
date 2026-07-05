@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { showConfirm } from '$lib/store';
@@ -373,6 +374,7 @@
             </div>
 
             {#if portsExpanded}
+            <div class="ports-content" transition:slide={{ duration: 200 }}>
             <!-- Existing port forwards list -->
             {#if forwardPorts.length > 0}
             <div class="port-list">
@@ -415,6 +417,7 @@
             {#if portError}
             <div class="port-error">{portError}</div>
             {/if}
+            </div>
             {/if}
             {/if}
 
@@ -1178,7 +1181,9 @@
     }
 
     .port-input {
-        width: 120px;
+        flex: 1;
+        min-width: 120px;
+        max-width: 200px;
         padding: 4px 8px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--color-border);
