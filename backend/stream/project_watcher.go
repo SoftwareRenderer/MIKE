@@ -161,6 +161,12 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
+	// Skip kanban.trace files (flight recorder)
+	if filepath.Base(event.Name) == "kanban.trace" {
+		pw.mu.Unlock()
+		return
+	}
+
 	// Debounce per project to batch rapid events
 	if timer, exists := pw.debounces[projectID]; exists {
 		timer.Stop()

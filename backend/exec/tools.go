@@ -194,20 +194,8 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
-		// Truncate large files to prevent excessive memory usage in WebSocket frames.
-		// The LLM doesn't need the full content of huge files; the truncation notice
-		// informs it that more content exists beyond what was returned.
-		const maxReadSize = 50 * 1024 // 50KB
-		truncated := false
-		if len(data) > maxReadSize {
-			data = data[:maxReadSize]
-			truncated = true
-		}
 		content := string(data)
-		if truncated {
-			content += "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
-		}
-		// Apply offset/limit if provided
+		// Apply offset/limit first so the LLM can read any region of large files.
 		if offset, ok := args["offset"].(float64); ok && int(offset) > 0 {
 			lines := strings.Split(content, "\n")
 			offsetIdx := int(offset) - 1 // 1-indexed to 0-indexed
@@ -226,6 +214,13 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 				lines = lines[:int(limit)]
 			}
 			content = strings.Join(lines, "\n")
+		}
+		// Truncate result to prevent excessive memory usage in WebSocket frames.
+		// The LLM doesn't need the full content of huge files; the truncation notice
+		// informs it that more content exists beyond what was returned.
+		const maxReadSize = 50 * 1024 // 50KB
+		if len(content) > maxReadSize {
+			content = content[:maxReadSize] + "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
 		}
 		return content, true
 	case "write_file":
