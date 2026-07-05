@@ -210,6 +210,11 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	hint := buildHint(loopType, target)
 	log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d), target=%s", taskID, loopType, detector.hintCount+1, maxLoopHints, target)
 	*messages = append(*messages, types.ChatMessage{Role: "system", Content: hint})
+	// Persist the hint as a visible system message so it appears in the chat UI
+	te.store.CreateTaskMessage(&types.TaskMessage{
+		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
+		Content: hint, CreatedAt: time.Now().UTC(),
+	})
 	detector.hintCount++
 	detector.reset()
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})

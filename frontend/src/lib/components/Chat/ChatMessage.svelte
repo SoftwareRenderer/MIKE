@@ -821,7 +821,7 @@
         padding-left: 12px;
     }
     .system-text {
-        color: var(--color-text-tertiary);
+        color: var(--color-status-red);
         font-style: italic;
         font-size: 0.8125rem;
         line-height: 1.5rem;
