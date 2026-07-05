@@ -69,7 +69,7 @@ import { slide } from 'svelte/transition';
     interface ProviderDraft {
         name: string;
         display_name: string;
-        kind: 'llm' | 'pi';
+        kind: 'llm' | 'agent';
         url: string;
         api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
         agent_config_dir?: string;
@@ -130,10 +130,10 @@ import { slide } from 'svelte/transition';
         const oldGlobalDefault = '';
         return (cfg?.providers || []).map(p => {
             // Detect Pi provider by kind field OR sentinel URL
-            const isAgent = p.kind === 'pi' || p.url === PI_SENTINEL_URL;
+            const isAgent = p.kind === 'agent' || p.url === PI_SENTINEL_URL;
             const draft: ProviderDraft = {
                 ...p,
-                kind: isAgent ? 'pi' : (p.kind || 'llm'),
+                kind: isAgent ? 'agent' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
                 concurrency: p.concurrency || 1,
                 default_model: p.default_model || '',
@@ -205,7 +205,7 @@ import { slide } from 'svelte/transition';
         p.testingConnection = true;
         p.testResult = null;
         try {
-            if (p.kind === 'pi') {
+            if (p.kind === 'agent') {
                 // Test Pi connection (runs `pi --version`)
                 const result = await testPiConnectionApi();
                 p.testResult = {
@@ -257,7 +257,7 @@ import { slide } from 'svelte/transition';
 
     function toggleAgentMenu(e: MouseEvent) {
         e.stopPropagation();
-        if (providers.some(p => p.kind === 'pi')) return;
+        if (providers.some(p => p.kind === 'agent')) return;
         if (agentMenuOpen) {
             agentMenuOpen = false;
             agentMenuRect = null;
@@ -272,7 +272,7 @@ import { slide } from 'svelte/transition';
 
     function addAgent() {
         // Only one Pi agent allowed
-        if (providers.some(p => p.kind === 'pi')) {
+        if (providers.some(p => p.kind === 'agent')) {
             return;
         }
         agentMenuOpen = false;
@@ -280,7 +280,7 @@ import { slide } from 'svelte/transition';
         providers.push({
             name: 'pi',
             display_name: 'Pi Coding Agent',
-            kind: 'pi',
+            kind: 'agent',
             url: PI_SENTINEL_URL,
             agent_config_dir: '~/.pi/agent',
             api_key: '',
@@ -463,9 +463,9 @@ import { slide } from 'svelte/transition';
         error = '';
         try {
             const savedProviders: Provider[] = providers
-                .filter(p => p.kind === 'pi' || p.url.trim())
+                .filter(p => p.kind === 'agent' || p.url.trim())
                 .map(p => {
-                    if (p.kind !== 'pi') syncProviderMeta(p);
+                    if (p.kind !== 'agent') syncProviderMeta(p);
                     const trimmedKey = p.api_key?.trim() || '';
                     // Masked keys are all bullets — don't send them. Only send real values.
                     const isMasked = trimmedKey && trimmedKey.replace(/•/g, '').length === 0;
@@ -485,7 +485,7 @@ import { slide } from 'svelte/transition';
                         cache_read_price: p.cache_read_price,
                         cache_write_price: p.cache_write_price,
                     };
-                    if (!isMasked && p.kind !== 'pi') {
+                    if (!isMasked && p.kind !== 'agent') {
                         base.api_key = trimmedKey;
                     }
                     return base;
@@ -546,7 +546,7 @@ import { slide } from 'svelte/transition';
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
                     <div class="section-actions">
-                        {#if !providers.some(p => p.kind === 'pi')}
+                        {#if !providers.some(p => p.kind === 'agent')}
                             <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
                                 + Add Agent
                                 <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -588,7 +588,7 @@ import { slide } from 'svelte/transition';
                                 </div>
                                 <div class="provider-title-section">
                                     <div class="provider-title-main">
-                                        {#if p.kind === 'pi'}
+                                        {#if p.kind === 'agent'}
                                             <span class="pi-icon" title="Pi coding agent">
                                                 <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                                                     <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
@@ -605,7 +605,7 @@ import { slide } from 'svelte/transition';
                                     </div>
                                 </div>
                                 <div class="provider-actions">
-                                    {#if p.kind !== 'pi'}
+                                    {#if p.kind !== 'agent'}
                                         <span class="model-count-badge">{p.models.filter(m => m.name.trim()).length} model{p.models.filter(m => m.name.trim()).length !== 1 ? 's' : ''}</span>
                                     {/if}
                                     {#if p.default_model}
@@ -629,7 +629,7 @@ import { slide } from 'svelte/transition';
                             <!-- Expanded details -->
                             {#if p.expanded}
                                 <div class="provider-details" transition:slide={{ duration: 200 }}>
-                                    {#if p.kind === 'pi'}
+                                    {#if p.kind === 'agent'}
                                         <!-- Pi Coding Agent Info -->
                                         <div class="pi-info-section">
                                             <div class="pi-info-header">
@@ -682,7 +682,7 @@ import { slide } from 'svelte/transition';
                                             </div>
                                         {/if}
                                     {/if}
-                                    {#if p.kind !== 'pi'}
+                                    {#if p.kind !== 'agent'}
                                     <div class="details-actions">
                                         <button type="button" class="btn-fetch" onclick={() => fetchModelsForProvider(idx)} disabled={p.fetchingModels || !p.url.trim()} title="Fetch available models from this provider">
                                             {#if p.fetchingModels}

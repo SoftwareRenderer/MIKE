@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Task, Provider } from '$lib/types';
-    import { PI_SENTINEL_URL } from '$lib/types';
+    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { get } from 'svelte/store';
     import { selectedTask, showCardDetail, board as boardStore, config as configStore, showConfirm, showToast, selectedProject, commitDialog as commitDialogStore } from '$lib/store';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
@@ -352,7 +352,7 @@
                 if (!url) return false;
                 if (url === PI_SENTINEL_URL) return true;
                 const p = providers.find(p => p.url === url);
-                return p ? p.kind !== 'llm' : false;
+                return p ? isAgentProvider(p) : false;
             },
         });
         showEditTask.set(true);

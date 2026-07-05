@@ -88,6 +88,16 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	return c
 }
 
+// IsAlive returns true if the readLoop is still running.
+func (c *Client) IsAlive() bool {
+	select {
+	case <-c.readDone:
+		return false
+	default:
+		return true
+	}
+}
+
 // nextMsgID returns the next unique message ID.
 func (c *Client) nextMsgID() uint32 {
 	return c.nextID.Add(1) - 1

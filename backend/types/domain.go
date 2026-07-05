@@ -74,17 +74,17 @@ type ModelConfig struct {
 	ContextWindow   *int   `json:"context_window,omitempty"` // nil if not reported by LLM
 }
 
-// ProviderKind distinguishes between standard LLM providers and Pi agents.
+// ProviderKind distinguishes between standard LLM providers and coding agents.
 const (
-	ProviderKindLLM = "llm"
-	ProviderKindPi  = "pi"
+	ProviderKindLLM   = "llm"
+	ProviderKindAgent = "agent"
 )
 
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
 	Name            string        `json:"name"`
 	DisplayName     string        `json:"display_name"`
-	Kind            string        `json:"kind"` // "llm" (default) or "pi"
+	Kind            string        `json:"kind"` // "llm" (default) or "agent"
 	URL             string        `json:"url"`
 	APIKey          *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
 	Models          []ModelConfig `json:"models"`
@@ -105,7 +105,7 @@ func (p *Provider) IsAgent() bool {
 
 // IsPi returns true if this provider is a Pi coding agent.
 func (p *Provider) IsPi() bool {
-	return p.Kind == ProviderKindPi || p.URL == "pi://agent"
+	return p.Kind == ProviderKindAgent || p.URL == "pi://agent"
 }
 
 // EffectiveKind returns the provider kind, defaulting to "llm" for backward compatibility.

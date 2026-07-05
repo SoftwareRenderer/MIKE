@@ -58,7 +58,7 @@
     );
 
     let hasPiProvider = $derived(
-        providers.some(p => p.kind === 'pi' || p.url === PI_SENTINEL_URL)
+        providers.some(p => p.kind === 'agent' || p.url === PI_SENTINEL_URL)
     );
 
     // Total selectable options: LLM providers with models + Pi agent

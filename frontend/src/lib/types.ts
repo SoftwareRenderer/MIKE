@@ -115,7 +115,7 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tok
 export interface Provider {
     name: string;
     display_name: string;
-    kind?: 'llm' | 'pi';       // "llm" (default) or "pi"
+    kind?: 'llm' | 'agent';    // "llm" (default) or "agent"
     url: string;
     api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
     models: ProviderModel[];
@@ -132,7 +132,7 @@ export const PI_SENTINEL_URL = 'pi://agent';
 
 /** Check if a provider is a Pi agent. */
 export function isAgentProvider(p: Provider): boolean {
-    return p.kind !== 'llm';
+    return p.kind === 'agent';
 }
 
 export interface TaskMessage {

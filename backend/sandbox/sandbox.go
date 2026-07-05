@@ -165,8 +165,11 @@ func agentBinaryPath() (string, error) {
 func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 	sm.mu.Lock()
 	if c, ok := sm.clients[taskID]; ok {
-		sm.mu.Unlock()
-		return c, nil
+		if c.IsAlive() {
+			sm.mu.Unlock()
+			return c, nil
+		}
+		delete(sm.clients, taskID)
 	}
 	ac, ok := sm.agents[taskID]
 	sm.mu.Unlock()

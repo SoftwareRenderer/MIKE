@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Config, Provider, Task } from '$lib/types';
-    import { PI_SENTINEL_URL } from '$lib/types';
+    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
     import { config as configStore, showCreateTask, board as boardStore, selectedProject } from '$lib/store';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -153,7 +153,7 @@
         if (!selectedUrl) return false;
         if (selectedUrl === PI_SENTINEL_URL) return true;
         const p = providers.find(p => p.url === selectedUrl);
-        return p ? p.kind !== 'llm' : false;
+        return p ? isAgentProvider(p) : false;
     });
 
     // Subscribe to config store to pick up providers (may load after modal opens)

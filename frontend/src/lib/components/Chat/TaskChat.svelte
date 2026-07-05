@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
-    import { PI_SENTINEL_URL } from '$lib/types';
+    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, getCommitPreview, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, showConfirm, commitDialog as commitDialogStore, selectedTask } from '$lib/store';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
@@ -144,7 +144,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (!selectedUrl) return false;
         if (selectedUrl === PI_SENTINEL_URL) return true;
         const p = providers.find(p => p.url === selectedUrl);
-        return p ? p.kind !== 'llm' : false;
+        return p ? isAgentProvider(p) : false;
     });
 
     let currentAssistantId: string | null = $state(null);

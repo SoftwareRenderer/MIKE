@@ -23,9 +23,11 @@ func (p *Provider) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Normalize kind: empty string defaults to "llm" for backward compatibility
+	// Normalize kind: empty → "llm", legacy "pi" → "agent".
 	if p.Kind == "" {
 		p.Kind = ProviderKindLLM
+	} else if p.Kind == "pi" {
+		p.Kind = ProviderKindAgent
 	}
 
 	// Try new format: []ModelConfig
