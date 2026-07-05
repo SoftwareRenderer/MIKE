@@ -300,11 +300,17 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// Block sandbox setting changes while tasks are running in the project.
+		// Modifying sandbox settings during execution would kill bridge processes
+		// mid-tool-call, causing "broken pipe" errors.
+		hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
+			req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
+			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil
+		if hasSandboxChange && h.executor != nil && h.executor.HasRunningTasks(id) {
+			httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
+			return
+		}
 		if req.SandboxEnabled != nil {
-			// Stop any actively running executors so they don't hold stale sandbox connections
-			if h.executor != nil {
-				h.executor.StopProjectTasks(id)
-			}
 			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return

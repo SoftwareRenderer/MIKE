@@ -212,6 +212,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			return
 		}
 		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
+		state.sandboxClient = agentClient
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
 		// Read uses plain os.ReadFile (no isolation).

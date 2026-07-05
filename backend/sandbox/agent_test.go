@@ -32,7 +32,7 @@ func TestAgentClient(t *testing.T) {
 	defer client.Close()
 
 	// Write a file
-	n, err := client.WriteFile("hello.txt", "world")
+	n, err := client.WriteFile(context.Background(), "hello.txt", "world")
 	if err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestAgentClient(t *testing.T) {
 	}
 
 	// Read it back
-	content, size, err := client.ReadFile("hello.txt")
+	content, size, err := client.ReadFile(context.Background(), "hello.txt")
 	if err != nil {
 		t.Fatalf("read file: %v", err)
 	}

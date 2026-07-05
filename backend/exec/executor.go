@@ -14,10 +14,12 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
-	"kanban/backend/sandbox"
+	sandboxmgr "kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+
+	sandbox "kanban/pkg/bridge"
 
 	"github.com/google/uuid"
 )
@@ -28,7 +30,7 @@ type TaskExecutor struct {
 	configStore  *config.ConfigStore
 	appStreamMgr *stream.AppStreamManager
 	worktreeMgr  *git.WorktreeManager
-	sandboxMgr   *sandbox.SandboxManager
+	sandboxMgr   *sandboxmgr.SandboxManager
 	gate         *ConcurrencyGate
 	taskMu       sync.Mutex
 	tasks        map[string]*executionState
@@ -43,10 +45,12 @@ type executionState struct {
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
-	sandboxExec     execFunc
+	sandboxExec       execFunc
 	sandboxExecStream execStreamFunc
-	sandboxRead     readFunc
-	sandboxWrite    writeFunc
+	sandboxRead       readFunc
+	sandboxWrite      writeFunc
+	// Sandbox client reference for liveness checks (nil when sandbox is disabled).
+	sandboxClient *sandbox.Client
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 }
@@ -72,7 +76,7 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager) *TaskExecutor {
 	te := &TaskExecutor{
 		store:        store,
 		configStore:  configStore,
@@ -694,6 +698,23 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 		}
 	}
 	return stopped
+}
+
+// HasRunningTasks returns true if any task in the given project has an active executor.
+func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
+	tasks, err := te.store.GetTasksByProject(projectID)
+	if err != nil {
+		return false
+	}
+	for _, task := range tasks {
+		te.taskMu.Lock()
+		_, ok := te.tasks[task.ID]
+		te.taskMu.Unlock()
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 // forwardUserMessage forwards a user message to the running executor or lazy-starts one.

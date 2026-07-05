@@ -292,7 +292,32 @@ func TestProjectToggleSandboxWithTasks(t *testing.T) {
 	}
 }
 
+// Test: sandbox setting change is blocked when tasks are actively running
+func TestProjectSandboxChangeBlockedWhenTasksRunning(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
 
+	// Create a task with LLM config so the executor can start
+	taskID := createTestTaskWithLLM(t, s, projID, "Running task")
+
+	// Start the task via the move endpoint (triggers executor)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
+		"status": "in_progress",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("move to in_progress: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Try to change sandbox setting while task is running — should be blocked
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_enabled": true,
+	})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict when tasks running, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
 
 func TestProjectDelete(t *testing.T) {
 	s := testServer(t)

@@ -92,7 +92,7 @@ func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
 	te := &TaskExecutor{}
 
 	// Simulate sandbox read callback
-	sandboxRead := func(path string) ([]byte, error) {
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
 		// In real sandbox, path is relative to worktree
 		return os.ReadFile(filepath.Join(dir, path))
 	}
@@ -145,7 +145,7 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 	var writtenPath, writtenContent string
 
 	// Simulate sandbox write callback
-	sandboxWrite := func(path, content string) error {
+	sandboxWrite := func(_ context.Context, path, content string) error {
 		writtenPath = path
 		writtenContent = content
 		fullPath := filepath.Join(dir, path)
@@ -226,7 +226,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 	dir := t.TempDir()
 	te := &TaskExecutor{}
 
-	sandboxWrite := func(path, content string) error {
+	sandboxWrite := func(_ context.Context, path, content string) error {
 		fullPath := filepath.Join(dir, path)
 		os.MkdirAll(filepath.Dir(fullPath), 0755)
 		return os.WriteFile(fullPath, []byte(content), 0644)
@@ -274,7 +274,7 @@ func TestExecuteTool_UnknownTool(t *testing.T) {
 func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
 	te := &TaskExecutor{}
 
-	sandboxRead := func(path string) ([]byte, error) {
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("file not found in sandbox")
 	}
 
@@ -585,10 +585,10 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 	te := &TaskExecutor{}
 	var writtenPath, writtenContent string
 
-	sandboxRead := func(path string) ([]byte, error) {
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(dir, path))
 	}
-	sandboxWrite := func(path, c string) error {
+	sandboxWrite := func(_ context.Context, path, c string) error {
 		writtenPath = path
 		writtenContent = c
 		fullPath := filepath.Join(dir, path)
@@ -663,7 +663,7 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 	te := &TaskExecutor{}
 
-	sandboxWrite := func(path, content string) error {
+	sandboxWrite := func(_ context.Context, path, content string) error {
 		return fmt.Errorf("permission denied")
 	}
 

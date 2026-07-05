@@ -184,6 +184,10 @@ func (c *Client) readLoop() {
 // waitFor sends a request and waits for the final Result/Error frame.
 // Returns the final frame and any chunks received.
 func (c *Client) waitFor(frame *protocol.Frame, timeout time.Duration) (*protocol.Frame, []*protocol.Frame, error) {
+	return c.waitForCtx(context.Background(), frame, timeout)
+}
+
+func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout time.Duration) (*protocol.Frame, []*protocol.Frame, error) {
 	msgID := frame.MsgID
 
 	p := &pendingReq{
@@ -231,6 +235,9 @@ func (c *Client) waitFor(frame *protocol.Frame, timeout time.Duration) (*protoco
 			case <-timer.C:
 				c.cleanup(msgID)
 				return nil, chunks, fmt.Errorf("timeout waiting for result")
+			case <-ctx.Done():
+				c.cleanup(msgID)
+				return nil, chunks, ctx.Err()
 			}
 		} else {
 			select {
@@ -242,6 +249,9 @@ func (c *Client) waitFor(frame *protocol.Frame, timeout time.Duration) (*protoco
 			case final := <-p.done:
 				c.cleanup(msgID)
 				return final, chunks, nil
+			case <-ctx.Done():
+				c.cleanup(msgID)
+				return nil, chunks, ctx.Err()
 			}
 		}
 	}
@@ -256,11 +266,19 @@ waitDone:
 		case <-timer.C:
 			c.cleanup(msgID)
 			return nil, chunks, fmt.Errorf("timeout waiting for result")
+		case <-ctx.Done():
+			c.cleanup(msgID)
+			return nil, nil, ctx.Err()
 		}
 	} else {
-		final := <-p.done
-		c.cleanup(msgID)
-		return final, chunks, nil
+		select {
+		case final := <-p.done:
+			c.cleanup(msgID)
+			return final, chunks, nil
+		case <-ctx.Done():
+			c.cleanup(msgID)
+			return nil, nil, ctx.Err()
+		}
 	}
 }
 
@@ -276,11 +294,11 @@ func (c *Client) cleanup(msgID uint32) {
 
 // ReadFile reads a file from the sandbox.
 // Returns the content as a string and the total size.
-func (c *Client) ReadFile(path string) (string, int64, error) {
+func (c *Client) ReadFile(ctx context.Context, path string) (string, int64, error) {
 	params, _ := json.Marshal(protocol.ReadParams{Path: path})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodRead, params)
 
-	final, chunks, err := c.waitFor(frame, 0)
+	final, chunks, err := c.waitForCtx(ctx, frame, 0)
 	if err != nil {
 		return "", 0, err
 	}
@@ -305,11 +323,11 @@ func (c *Client) ReadFile(path string) (string, int64, error) {
 
 // WriteFile writes content to a file in the sandbox.
 // Returns the number of bytes written.
-func (c *Client) WriteFile(path, content string) (int64, error) {
+func (c *Client) WriteFile(ctx context.Context, path, content string) (int64, error) {
 	params, _ := json.Marshal(protocol.WriteParams{Path: path, Content: content})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodWrite, params)
 
-	final, _, err := c.waitFor(frame, 0)
+	final, _, err := c.waitForCtx(ctx, frame, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -326,11 +344,11 @@ func (c *Client) WriteFile(path, content string) (int64, error) {
 
 // EditFile applies text replacements to a file in the sandbox.
 // Returns the number of bytes written.
-func (c *Client) EditFile(path string, edits []protocol.Edit) (int64, error) {
+func (c *Client) EditFile(ctx context.Context, path string, edits []protocol.Edit) (int64, error) {
 	params, _ := json.Marshal(protocol.EditParams{Path: path, Edits: edits})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodEdit, params)
 
-	final, _, err := c.waitFor(frame, 0)
+	final, _, err := c.waitForCtx(ctx, frame, 0)
 	if err != nil {
 		return 0, err
 	}

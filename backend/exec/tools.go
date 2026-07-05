@@ -30,10 +30,10 @@ type execFunc func(ctx context.Context, command string, timeout int64) (string, 
 type execStreamFunc func(ctx context.Context, command string, timeout int64, outputCallback func(text string)) (string, error)
 
 // readFunc reads a file. Provided by the sandbox in container mode.
-type readFunc func(path string) ([]byte, error)
+type readFunc func(ctx context.Context, path string) ([]byte, error)
 
 // writeFunc writes a file. Provided by the sandbox in container mode.
-type writeFunc func(path, content string) error
+type writeFunc func(ctx context.Context, path, content string) error
 
 // makeSandboxCallbacks creates exec/read/write callbacks that route through
 // the sandbox agent client inside a container.
@@ -70,15 +70,15 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, rea
 		}
 		return buf.String(), nil
 	}
-	readCb := func(path string) ([]byte, error) {
-		content, _, err := client.ReadFile(path)
+	readCb := func(ctx context.Context, path string) ([]byte, error) {
+		content, _, err := client.ReadFile(ctx, path)
 		if err != nil {
 			return nil, fmt.Errorf("read: %w", err)
 		}
 		return []byte(content), nil
 	}
-	writeCb := func(path, content string) error {
-		_, err := client.WriteFile(path, content)
+	writeCb := func(ctx context.Context, path, content string) error {
+		_, err := client.WriteFile(ctx, path, content)
 		if err != nil {
 			return fmt.Errorf("write: %w", err)
 		}
@@ -89,7 +89,7 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, rea
 
 // makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
 func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc) {
-	readCb := func(path string) ([]byte, error) {
+	readCb := func(_ context.Context, path string) ([]byte, error) {
 		f, err := root.Open(path)
 		if err != nil {
 			return nil, err
@@ -97,7 +97,7 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 		defer f.Close()
 		return io.ReadAll(f)
 	}
-	writeCb := func(path, content string) error {
+	writeCb := func(_ context.Context, path, content string) error {
 		dir := filepath.Dir(filepath.Join(worktreePath, path))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -131,11 +131,12 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	sandboxExecStream := state.sandboxExecStream
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
+	sandboxClient := state.sandboxClient
 	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
 	// In production, loop.go always provides sandboxWrite via os.Root.
 	// Read uses plain os.ReadFile (no isolation) when sandbox is disabled.
 	makeRead := func() readFunc {
-		return func(p string) ([]byte, error) {
+		return func(_ context.Context, p string) ([]byte, error) {
 			norm := normalizePath(worktreePath, state.projectName, p)
 			if !filepath.IsAbs(norm) {
 				norm = filepath.Join(worktreePath, norm)
@@ -153,13 +154,13 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			r, err := os.OpenRoot(worktreePath)
 			if err != nil {
 				te.taskMu.Unlock()
-				return func(p, c string) error { return fmt.Errorf("open root: %w", err) }
+				return func(_ context.Context, p, c string) error { return fmt.Errorf("open root: %w", err) }
 			}
 			state.root = r
 			root = r
 		}
 		te.taskMu.Unlock()
-		return func(p, c string) error {
+		return func(_ context.Context, p, c string) error {
 			norm := normalizePath(worktreePath, state.projectName, p)
 			dir := filepath.Dir(filepath.Join(worktreePath, norm))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -190,7 +191,11 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if read == nil {
 			read = makeRead()
 		}
-		data, err := read(path)
+		// Check sandbox bridge liveness before I/O
+		if sandboxClient != nil && !sandboxClient.IsAlive() {
+			return "Error: sandbox bridge is not responding", false
+		}
+		data, err := read(ctx, path)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -230,7 +235,11 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if write == nil {
 			write = makeWrite()
 		}
-		err := write(path, content)
+		// Check sandbox bridge liveness before I/O
+		if sandboxClient != nil && !sandboxClient.IsAlive() {
+			return "Error: sandbox bridge is not responding", false
+		}
+		err := write(ctx, path, content)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -244,6 +253,10 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 		if write == nil {
 			write = makeWrite()
+		}
+		// Check sandbox bridge liveness before I/O
+		if sandboxClient != nil && !sandboxClient.IsAlive() {
+			return "Error: sandbox bridge is not responding", false
 		}
 		editsRaw, ok := args["edits"].(json.RawMessage)
 		if !ok {
@@ -262,7 +275,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 
 		// Read current file content
-		data, err := read(path)
+		data, err := read(ctx, path)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -313,7 +326,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 
 		// Write the result
-		if err := write(path, result); err != nil {
+		if err := write(ctx, path, result); err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true

@@ -14,9 +14,9 @@ func TestClientCompiles(t *testing.T) {
 	// These would not compile if the methods don't exist
 	var c *Client
 	_ = func() {
-		_, _, _ = c.ReadFile("path")
-		_, _ = c.WriteFile("path", "content")
-		_, _ = c.EditFile("path", []protocol.Edit{})
+		_, _, _ = c.ReadFile(context.Background(), "path")
+		_, _ = c.WriteFile(context.Background(), "path", "content")
+		_, _ = c.EditFile(context.Background(), "path", []protocol.Edit{})
 		_, _ = c.Bash(context.Background(), "cmd", 5)
 		_, _ = c.ShellOpen("bash", 40, 120)
 		_ = c.ShellIO(1, []byte("ls\n"))
