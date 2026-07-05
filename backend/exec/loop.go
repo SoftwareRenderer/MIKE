@@ -653,7 +653,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							if err != nil {
 								diffStat = "no diff available"
 							}
-							summary = te.GenerateCommitLabel(task.ID, diffStat, FormatConversationTurns(ExtractLastTurns(lc.messages, 3)))
+							summary = te.GenerateCommitMessage(task.ID, diffStat, FormatConversationTurns(ExtractLastTurns(lc.messages, 3)))
 						}
 						commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 						te.gitRun(worktreePath, "add", "-A")

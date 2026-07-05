@@ -514,7 +514,7 @@ func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) str
 			}
 			conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
 		}
-		summary = h.executor.GenerateCommitLabel(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
+		summary = h.executor.GenerateCommitMessage(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
 	}
 	return fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 }

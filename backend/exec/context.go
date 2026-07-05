@@ -19,10 +19,10 @@ type summarizeResult struct {
 	newLastSummarizeIdx int
 	summary             string
 	oldLen              int
-	promptTokens    int
-	predictedTokens int
-	promptMs        int64
-	predictedMs     int64
+	promptTokens        int
+	predictedTokens     int
+	promptMs            int64
+	predictedMs         int64
 }
 
 // shouldSummarize checks if the current context (estimated from messages) is approaching the context window limit.
@@ -263,7 +263,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		if taskForLabel != nil && taskForLabel.Branch != "" {
 			branchPrefix = "On " + taskForLabel.Branch + ": "
 		}
-		label := branchPrefix + te.GenerateCommitLabel(taskID, diffStat, turnText)
+		label := branchPrefix + te.GenerateCommitMessage(taskID, diffStat, turnText)
 
 		// Check for cancellation before git operations
 		select {
@@ -355,11 +355,11 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	}()
 }
 
-// GenerateCommitLabel uses the LLM to generate a descriptive commit label from git diff stat
+// GenerateCommitMessage uses the LLM to generate a descriptive commit label from git diff stat
 // and pre-formatted conversation turn text. Falls back to "{title}\n\nCo-authored-by: {model}" on any error.
 // turnText is the pre-formatted conversation text (caller extracts last N turns to avoid
 // passing the full conversation slice into a background goroutine).
-func (te *TaskExecutor) GenerateCommitLabel(taskID, diffStat, turnText string) string {
+func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
 		return "file changes"
@@ -367,13 +367,13 @@ func (te *TaskExecutor) GenerateCommitLabel(taskID, diffStat, turnText string) s
 	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, task.ModelName)
 
 	labelMessages := []types.ChatMessage{
-		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a short, descriptive commit label (one line, max 80 characters, imperative mood, no period at end). Return only the label, nothing else."},
+		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a very concise commit message body. Explain key decisions ONLY IF changes include complex logic."},
 		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages)
+	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, 512)
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return fallback
