@@ -39,6 +39,8 @@ test.describe.serial('Sandbox Forward Ports', () => {
     // Section starts collapsed when no ports are set — click to expand
     await page.click('.config-row-subsection');
     await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
+    // Description explains auto-assignment
+    await expect(page.locator('.config-row-subsection .config-desc')).toContainText('auto-assigned');
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
@@ -112,18 +114,15 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await page.click('.config-row-subsection');
     await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
 
-    // Add port forward 8080 -> 80
-    const hostInput = page.locator('.port-input[aria-label="Host port"]');
+    // Add port forward (container port only, host port is auto-assigned)
     const containerInput = page.locator('.port-input[aria-label="Container port"]');
     const addButton = page.locator('.btn-add-port');
 
-    await hostInput.fill('8080');
     await containerInput.fill('80');
     await addButton.click();
 
-    // Verify port appears in list
+    // Verify port appears in list (only container port shown)
     await expect(page.locator('.port-item')).toHaveCount(1);
-    await expect(page.locator('.port-host')).toContainText('8080');
     await expect(page.locator('.port-container')).toContainText('80');
 
     // Remove port forward
@@ -135,39 +134,6 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should reject duplicate host ports', async ({ page }) => {
-    // Open sandbox config modal
-    await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
-
-    // Expand Forward Ports subsection
-    await page.click('.config-row-subsection');
-    await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
-
-    const hostInput = page.locator('.port-input[aria-label="Host port"]');
-    const containerInput = page.locator('.port-input[aria-label="Container port"]');
-    const addButton = page.locator('.btn-add-port');
-
-    // Add first port
-    await hostInput.fill('8080');
-    await containerInput.fill('80');
-    await addButton.click();
-    await expect(page.locator('.port-item')).toHaveCount(1);
-
-    // Try to add duplicate host port
-    await hostInput.fill('8080');
-    await containerInput.fill('443');
-    await addButton.click();
-
-    // Error should appear
-    await expect(page.locator('.port-error')).toContainText('already added');
-    // Still only one port
-    await expect(page.locator('.port-item')).toHaveCount(1);
-
-    // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-  });
-
   test('should reject invalid port numbers', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
@@ -177,18 +143,16 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await page.click('.config-row-subsection');
     await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
 
-    const hostInput = page.locator('.port-input[aria-label="Host port"]');
     const containerInput = page.locator('.port-input[aria-label="Container port"]');
     const addButton = page.locator('.btn-add-port');
 
     // Try port 0 (invalid)
-    await hostInput.fill('0');
-    await containerInput.fill('80');
+    await containerInput.fill('0');
     await addButton.click();
     await expect(page.locator('.port-error')).toContainText('between 1 and 65535');
 
     // Try port 70000 (invalid)
-    await hostInput.fill('70000');
+    await containerInput.fill('70000');
     await addButton.click();
     await expect(page.locator('.port-error')).toContainText('between 1 and 65535');
 
@@ -199,10 +163,10 @@ test.describe.serial('Sandbox Forward Ports', () => {
   test('should save port forwards via API', async ({ page }) => {
     const projectId = await getProjectId(page);
 
-    // Update via API directly
+    // Update via API directly (container port only)
     const result = await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
-      body: { sandbox_forward_ports: [{ host_port: 19876, container_port: 8080 }] },
+      body: { sandbox_forward_ports: [{ container_port: 8080 }] },
     });
     expect(result.ok).toBe(true);
 
@@ -213,7 +177,6 @@ test.describe.serial('Sandbox Forward Ports', () => {
     }, projectId);
     expect(saved.forward_ports).toBeDefined();
     expect(saved.forward_ports.length).toBe(1);
-    expect(saved.forward_ports[0].host_port).toBe(19876);
     expect(saved.forward_ports[0].container_port).toBe(8080);
 
     // Clean up

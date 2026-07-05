@@ -44,13 +44,12 @@ type agentConn struct {
 
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
-	mu              sync.Mutex
-	active          map[string]string    // taskID -> containerName
-	mountPaths      map[string]string    // taskID -> mount path inside container
-	agents          map[string]*agentConn // taskID -> agent pipes + process
-	clients         map[string]*sandbox.Client // taskID -> agent client (cached)
-	available       bool
-	onPortConflict  func(projectID string, conflictedPorts []int) // callback when host ports are in use
+	mu         sync.Mutex
+	active     map[string]string    // taskID -> containerName
+	mountPaths map[string]string    // taskID -> mount path inside container
+	agents     map[string]*agentConn // taskID -> agent pipes + process
+	clients    map[string]*sandbox.Client // taskID -> agent client (cached)
+	available  bool
 }
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
@@ -73,15 +72,6 @@ func NewSandboxManager() *SandboxManager {
 // IsAvailable returns true if gVisor (runsc) is installed and podman can use it.
 func (sm *SandboxManager) IsAvailable() bool {
 	return sm.available
-}
-
-// SetOnPortConflict sets a callback invoked when host ports are already in use
-// during container creation. The callback receives the project ID and list of
-// conflicted host ports.
-func (sm *SandboxManager) SetOnPortConflict(fn func(projectID string, conflictedPorts []int)) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.onPortConflict = fn
 }
 
 // checkAvailable verifies that runsc is installed and podman can use it.
@@ -176,13 +166,12 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If baseImage is empty, the default BaseImage constant is used.
 // If networkIsolation is true, the container is created with --network none.
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
-// If forwardPorts is non-empty, host ports are mapped to container ports via -p flags.
-//   - Ports that are already in use are skipped (container still created) and returned in conflictedPorts.
-//   - The onPortConflict callback is invoked with the list of conflicted host ports.
+// If forwardPorts is non-empty, host ports are auto-assigned via net.Listen(":0")
+// and mapped to container ports via -p flags. Assigned ports are returned.
 // If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
 // (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
-// Returns (error, conflictedPorts) where conflictedPorts lists host ports that could not be mapped.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (error, []int) {
+// Returns (error, assignedPorts) where assignedPorts lists the host→container mappings.
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (error, []types.AssignedPort) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -260,24 +249,24 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	if networkIsolation {
 		createArgs = append(createArgs, "--network", "none")
 	}
-	// Port forwarding: check each host port is available, add -p flags for available ones.
-	// Ports that are in use are skipped and returned as conflicts.
-	var conflictedPorts []int
+	// Port forwarding: auto-assign an ephemeral host port for each container port.
+	var assignedPorts []types.AssignedPort
 	for _, pf := range forwardPorts {
-		if pf.HostPort < 1 || pf.HostPort > 65535 || pf.ContainerPort < 1 || pf.ContainerPort > 65535 {
-			log.Printf("[sandbox] task=%s skipping invalid port forward: host=%d container=%d", taskID, pf.HostPort, pf.ContainerPort)
+		if pf.ContainerPort < 1 || pf.ContainerPort > 65535 {
+			log.Printf("[sandbox] task=%s skipping invalid container port: %d", taskID, pf.ContainerPort)
 			continue
 		}
-		// Check if host port is available
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", pf.HostPort))
+		// Auto-assign an available ephemeral host port
+		ln, err := net.Listen("tcp", ":0")
 		if err != nil {
-			conflictedPorts = append(conflictedPorts, pf.HostPort)
-			log.Printf("[sandbox] task=%s port %d already in use, skipping forward", taskID, pf.HostPort)
+			log.Printf("[sandbox] task=%s failed to assign host port for container port %d: %v", taskID, pf.ContainerPort, err)
 			continue
 		}
+		hostPort := ln.Addr().(*net.TCPAddr).Port
 		_ = ln.Close()
-		createArgs = append(createArgs, "-p", fmt.Sprintf("%d:%d", pf.HostPort, pf.ContainerPort))
-		log.Printf("[sandbox] task=%s forwarding port %d -> %d", taskID, pf.HostPort, pf.ContainerPort)
+		createArgs = append(createArgs, "-p", fmt.Sprintf("%d:%d", hostPort, pf.ContainerPort))
+		assignedPorts = append(assignedPorts, types.AssignedPort{HostPort: hostPort, ContainerPort: pf.ContainerPort})
+		log.Printf("[sandbox] task=%s forwarding port %d -> %d", taskID, hostPort, pf.ContainerPort)
 	}
 	if memoryLimit > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
@@ -299,7 +288,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	if piAgentDir != "" {
 		absPiDir, err := filepath.Abs(piAgentDir)
 		if err != nil {
-			return fmt.Errorf("resolve pi agent dir path: %w", err), conflictedPorts
+			return fmt.Errorf("resolve pi agent dir path: %w", err), assignedPorts
 		}
 		createArgs = append(createArgs,
 			"-v", absPiDir+":"+PiConfigMount+":rprivate,rw",
@@ -315,14 +304,14 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
-		return fmt.Errorf("create container: %w (%s)", err, out), conflictedPorts
+		return fmt.Errorf("create container: %w (%s)", err, out), assignedPorts
 	}
 
 	// Copy agent binary into container (before start)
 	cpOut, cpErr := sm.podmanExec("cp", agentPath, containerName+":"+"/sandbox-bridge")
 	if cpErr != nil {
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut), conflictedPorts
+		return fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut), assignedPorts
 	}
 
 	// Start the container (needed for exec sessions)
@@ -331,7 +320,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	if err != nil {
 		// Clean up on start failure
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("start container: %w (%s)", err, startOut), conflictedPorts
+		return fmt.Errorf("start container: %w (%s)", err, startOut), assignedPorts
 	}
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
@@ -346,13 +335,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	stdin, err := agentCmd.StdinPipe()
 	if err != nil {
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("create stdin pipe: %w", err), conflictedPorts
+		return fmt.Errorf("create stdin pipe: %w", err), assignedPorts
 	}
 	stdout, err := agentCmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("create stdout pipe: %w", err), conflictedPorts
+		return fmt.Errorf("create stdout pipe: %w", err), assignedPorts
 	}
 	agentCmd.Stderr = nil // agent logs go to container stderr
 
@@ -360,20 +349,15 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 		stdin.Close()
 		stdout.Close()
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("start agent: %w", err), conflictedPorts
+		return fmt.Errorf("start agent: %w", err), assignedPorts
 	}
 
 	sm.active[taskID] = containerName
 	sm.mountPaths[taskID] = mountPath
 	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
 
-	// Notify caller of port conflicts (even if container was created successfully)
-	if len(conflictedPorts) > 0 && sm.onPortConflict != nil {
-		sm.onPortConflict(projectID, conflictedPorts)
-	}
-
 	log.Printf("[sandbox] task=%s agent ready", taskID)
-	return nil, conflictedPorts
+	return nil, assignedPorts
 }
 
 // Exec runs a command inside the task's sandbox container.
@@ -451,7 +435,8 @@ type ShellProcess struct {
 // The container must already exist (created by Create). Returns a ShellProcess
 // with the PTY master file descriptor for I/O relay.
 // The caller is responsible for calling Close() when done.
-func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
+// Returns (*ShellProcess, assignedPorts, error).
+func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, []types.AssignedPort, error) {
 	return sm.startShell(taskID, false, "", "", "", "", "", false, 0, nil, "")
 }
 
@@ -465,7 +450,8 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, error) {
 // If forwardPorts is non-empty, host ports are mapped to container ports.
 // If piAgentDir is non-empty, the Pi config directory is bind-mounted.
 // If projectPath is non-empty, the .git/ directory is mounted read-only.
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*ShellProcess, error) {
+// Returns (*ShellProcess, assignedPorts, error).
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*ShellProcess, []types.AssignedPort, error) {
 	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir)
 }
 
@@ -531,19 +517,22 @@ func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, p
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*ShellProcess, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*ShellProcess, []types.AssignedPort, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
 	sm.mu.Unlock()
 
+	var assignedPorts []types.AssignedPort
 	if !ok {
 		if !createIfMissing || worktreePath == "" {
-			return nil, fmt.Errorf("no sandbox container for %s", taskID)
+			return nil, nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand (for project terminals)
-		if err, _ := sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir); err != nil {
-			return nil, fmt.Errorf("create sandbox container: %w", err)
+		var err error
+		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}
 		sm.mu.Lock()
 		containerName = sm.active[taskID]
@@ -571,7 +560,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	// Start with PTY
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
-		return nil, fmt.Errorf("start shell: %w", err)
+		return nil, nil, fmt.Errorf("start shell: %w", err)
 	}
 
 	// Set non-blocking mode on the PTY
@@ -583,7 +572,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 	}
 
 	log.Printf("[sandbox] task=%s started shell in container %s", taskID, containerName)
-	return sp, nil
+	return sp, assignedPorts, nil
 }
 
 // Close terminates the process handle and cleans up pipes.

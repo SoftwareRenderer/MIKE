@@ -17,6 +17,7 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/term"
+	"kanban/backend/types"
 )
 
 // Server is the main HTTP server.
@@ -79,11 +80,19 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore)
 	s.sandboxMgr = sandbox.NewSandboxManager()
-	// Wire port conflict callback → WebSocket broadcast
-	s.sandboxMgr.SetOnPortConflict(func(projectID string, conflictedPorts []int) {
-		s.appStreamMgr.BroadcastPortConflict(projectID, conflictedPorts)
-	})
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
+	// Wire port assignment callback → store + WebSocket broadcast
+	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
+		task, err := store.GetTaskByTaskID(taskID)
+		if err != nil {
+			log.Printf("[terminal] failed to get task %s for port assignment: %v", taskID, err)
+			return
+		}
+		task.AssignedPorts = ports
+		_ = store.UpdateTask(task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: taskID, Ports: ports}})
+	})
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, exec.NewCommitQueue())

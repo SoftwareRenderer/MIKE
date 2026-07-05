@@ -30,7 +30,8 @@ type Task struct {
 	ChangeSummary             string    `json:"change_summary,omitempty"` // LLM-generated summary of changes
 	WorktreeExists            bool      `json:"worktree_exists"`
 	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	AssignedPorts             []AssignedPort `json:"assigned_ports,omitempty"`
 }
 
 // Board represents the collection of tasks for a project.
@@ -123,8 +124,13 @@ func (p *Provider) APIKeyValue() string {
 	return *p.APIKey
 }
 
-// PortForward maps a host port to a container port for network exposure.
+// PortForward specifies a container port to forward. Host port is auto-assigned at runtime.
 type PortForward struct {
+	ContainerPort int `json:"container_port"`
+}
+
+// AssignedPort is a runtime host→container port mapping assigned during sandbox creation.
+type AssignedPort struct {
 	HostPort      int `json:"host_port"`
 	ContainerPort int `json:"container_port"`
 }
@@ -141,6 +147,7 @@ type Project struct {
 	SandboxDockerfilePath   string        `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
 	ForwardPorts            []PortForward `json:"forward_ports,omitempty"`
+	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	CreatedAt               time.Time     `json:"created_at"`
 	UpdatedAt               time.Time     `json:"updated_at"`
 }

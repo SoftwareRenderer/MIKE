@@ -30,6 +30,7 @@ export {
 } from './api/queue';
 
 export {
+    getProject,
     getProjects,
     getProjectCounts,
     getProjectStats,

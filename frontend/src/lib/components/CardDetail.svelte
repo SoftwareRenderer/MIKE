@@ -1214,6 +1214,7 @@
             {sandboxEnabled}
             {badge}
             {worktreeExists}
+            {task}
             {onClose}
             onOpenTerminal={() => showTerminal.set(true)}
             onDelete={handleDelete}

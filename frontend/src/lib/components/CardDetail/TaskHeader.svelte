@@ -2,6 +2,8 @@
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import { getWorktreeDisplayPath } from '$lib/utils/path';
+    import SandboxPanel from '../SandboxPanel.svelte';
+    import type { Task } from '$lib/types';
 
     let {
         workspaceDir,
@@ -12,6 +14,7 @@
         onClose,
         onOpenTerminal,
         onDelete,
+        task,
     }: {
         workspaceDir: string | undefined;
         taskId: string;
@@ -21,7 +24,10 @@
         onClose: () => void;
         onOpenTerminal: () => void;
         onDelete: () => Promise<void>;
+        task: Task;
     } = $props();
+
+    let showSandboxPanel = $state(false);
 </script>
 
 <div class="header">
@@ -33,9 +39,9 @@
         </button>
         <div class="header-main">
             {#if sandboxEnabled !== undefined}
-                <span class="sandbox-badge" class:sandbox-badge-off={!sandboxEnabled} title={sandboxEnabled ? 'Sandbox enabled (gVisor)' : 'Sandbox disabled'}>
+                <button class="icon-btn" class:sandbox-badge-off={!sandboxEnabled} onclick={() => { showSandboxPanel = true; }} title={sandboxEnabled ? 'Sandbox enabled (click for details)' : 'Sandbox disabled'}>
                     <img src={sandboxEnabled ? shieldIcon : shieldOffIcon} width="14" height="14" alt="" />
-                </span>
+                </button>
             {/if}
             <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', taskId)}>{getWorktreeDisplayPath(workspaceDir || '', taskId)}</span>
             <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
@@ -58,6 +64,10 @@
         </button>
     </div>
 </div>
+
+{#if showSandboxPanel}
+    <SandboxPanel {task} onClose={() => { showSandboxPanel = false; }} />
+{/if}
 
 <style>
     .header {
@@ -116,13 +126,6 @@
         border: 1px solid;
         text-transform: uppercase;
         letter-spacing: 0.3px;
-    }
-    .sandbox-badge {
-        flex-shrink: 0;
-        color: var(--color-primary);
-        display: flex;
-        align-items: center;
-        height: 1em;
     }
     .sandbox-badge-off {
         color: var(--color-status-red, #f85149);

@@ -76,7 +76,7 @@ type loopContext struct {
 	usage            *types.ChatUsage
 }
 
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, forwardPorts []types.PortForward) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -95,6 +95,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			delete(te.tasks, task.ID)
 		}
 		te.taskMu.Unlock()
+		// Clear assigned ports when task execution ends
+		if len(task.AssignedPorts) > 0 {
+			task.AssignedPorts = nil
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		}
 		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
 		// It's removed only when the task is deleted (via RemoveStream in cleanupTask).
 		// Sandbox container is also kept alive until task deletion.
@@ -170,16 +176,25 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if needPiConfig && hasExistingContainer {
 				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
 			}
-			if err, _ := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, nil, piAgentDir); err != nil {
+			var assignedPorts []types.AssignedPort
+			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir)
+			if createErr != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"
-				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)
+				task.Output = fmt.Sprintf("Failed to create sandbox: %v", createErr)
 				te.store.UpdateTask(task)
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", err), "sandbox_create_failed")
+				te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox creation failed: %v", createErr), "sandbox_create_failed")
 				return
 			}
 			log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+			// Store and broadcast assigned ports
+			if len(assignedPorts) > 0 {
+				task.AssignedPorts = assignedPorts
+				te.store.UpdateTask(task)
+				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: task.ID, Ports: assignedPorts}})
+			}
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
 		} else {
 			log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)

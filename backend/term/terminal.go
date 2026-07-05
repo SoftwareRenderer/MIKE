@@ -42,21 +42,36 @@ type taskTerminal struct {
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
-	mu         sync.RWMutex
-	sessions   map[string]*taskTerminal
-	store      *store.Store
-	cfgStore   *config.ConfigStore
-	sandboxMgr *sandbox.SandboxManager
+	mu             sync.RWMutex
+	sessions       map[string]*taskTerminal
+	store          *store.Store
+	cfgStore       *config.ConfigStore
+	sandboxMgr     *sandbox.SandboxManager
+	onPortsAssigned func(taskID, projectID string, ports []types.AssignedPort) // callback when ports are assigned
+	projectPorts   map[string][]types.AssignedPort // projectID -> assigned ports from project-level terminal
 }
 
 // NewTerminalManager creates a new TerminalManager.
 func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr *sandbox.SandboxManager) *TerminalManager {
 	return &TerminalManager{
-		sessions:   make(map[string]*taskTerminal),
-		store:      store,
-		cfgStore:   cfgStore,
-		sandboxMgr: sandboxMgr,
+		sessions:     make(map[string]*taskTerminal),
+		store:        store,
+		cfgStore:     cfgStore,
+		sandboxMgr:   sandboxMgr,
+		projectPorts: make(map[string][]types.AssignedPort),
 	}
+}
+
+// SetOnPortsAssigned sets a callback invoked when sandbox ports are assigned during terminal shell creation.
+func (tm *TerminalManager) SetOnPortsAssigned(fn func(taskID, projectID string, ports []types.AssignedPort)) {
+	tm.onPortsAssigned = fn
+}
+
+// GetProjectPorts returns the assigned ports for a project-level terminal, if active.
+func (tm *TerminalManager) GetProjectPorts(projectID string) []types.AssignedPort {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.projectPorts[projectID]
 }
 
 // getOrCreate returns an existing session or creates a new one for the task.
@@ -84,6 +99,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	memoryLimit := 0
 	projectName := ""
 	projectPath := ""
+	var forwardPorts []types.PortForward
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -96,6 +112,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		memoryLimit = proj.SandboxMemoryLimit
 		projectName = proj.Name
 		projectPath = proj.Path
+		forwardPorts = proj.ForwardPorts
 	}
 
 	var sess *taskTerminal
@@ -134,10 +151,20 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !strings.HasPrefix(taskID, "proj:") {
 			shellProjectPath = projectPath
 		}
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, nil, piAgentDir)
+		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)
+		}
+		// Notify caller of assigned ports
+		if len(assignedPorts) > 0 {
+			if strings.HasPrefix(taskID, "proj:") {
+				// Project-level terminal: store ports in memory
+				tm.projectPorts[projectID] = assignedPorts
+			} else if tm.onPortsAssigned != nil {
+				// Task-level terminal: broadcast via callback
+				tm.onPortsAssigned(taskID, projectID, assignedPorts)
+			}
 		}
 		sess = &taskTerminal{
 			cmd:        shell.Cmd,
@@ -194,6 +221,13 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	if ok {
 		session.close()
 		log.Printf("terminal: removed session for task %s", taskID)
+	}
+	// Clear project-level terminal ports when its session is removed
+	if strings.HasPrefix(taskID, "proj:") {
+		projectID := strings.TrimPrefix(taskID, "proj:")
+		tm.mu.Lock()
+		delete(tm.projectPorts, projectID)
+		tm.mu.Unlock()
 	}
 }
 

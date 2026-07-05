@@ -263,6 +263,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN change_summary TEXT DEFAULT NULL`)
 	// Rename status_state -> execution_state
 	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN status_state TO execution_state`)
+	// Runtime port mappings (ephemeral, cleared when task ends)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN assigned_ports TEXT DEFAULT NULL`)
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
@@ -485,11 +487,11 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoMerge, subtasksAutoMerge, planMode, titleGenerating int
 	var createdAt, updatedAt string
-	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary sql.NullString
+	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary, assignedPortsJSON sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.ExecutionState,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt, &assignedPortsJSON)
 	if err != nil {
 		return err
 	}
@@ -506,6 +508,9 @@ func scanTask(s scanner, t *types.Task) error {
 	t.ChangeSummary = changeSummary.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
+	if assignedPortsJSON.Valid && assignedPortsJSON.String != "" {
+		_ = json.Unmarshal([]byte(assignedPortsJSON.String), &t.AssignedPorts)
+	}
 	return nil
 }
 

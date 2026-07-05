@@ -16,6 +16,10 @@ export function getToolDisplayName(displayName: string | undefined, toolName: st
 }
 
 export interface PortForward {
+    container_port: number;
+}
+
+export interface AssignedPort {
     host_port: number;
     container_port: number;
 }
@@ -31,6 +35,7 @@ export interface Project {
     sandbox_dockerfile_path?: string;
     sandbox_memory_limit?: number;
     forward_ports?: PortForward[];
+    active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;
 }
@@ -59,6 +64,7 @@ export interface Task {
     current_thread_id?: string;
     created_at: string;
     updated_at: string;
+    assigned_ports?: AssignedPort[];
 }
 
 export interface Thread {

@@ -3,7 +3,6 @@ package managers
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -272,47 +271,6 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	flusher.Flush()
 }
 
-// validatePortsRequest is the request body for port validation.
-type validatePortsRequest struct {
-	Ports []types.PortForward `json:"ports"`
-}
-
-// validatePortsResponse is the response body for port validation.
-type validatePortsResponse struct {
-	Conflicts []int `json:"conflicts"`
-}
-
-// HandleValidatePorts checks if the given host ports are available.
-// Returns a list of host ports that are already in use.
-func (h *ProjectHandler) HandleValidatePorts(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var req validatePortsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	var conflicts []int
-	for _, pf := range req.Ports {
-		if pf.HostPort < 1 || pf.HostPort > 65535 {
-			conflicts = append(conflicts, pf.HostPort)
-			continue
-		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", pf.HostPort))
-		if err != nil {
-			conflicts = append(conflicts, pf.HostPort)
-			continue
-		}
-		_ = ln.Close()
-	}
-
-	httputil.JSONResponse(w, http.StatusOK, validatePortsResponse{Conflicts: conflicts})
-}
-
 // HandleByID handles GET, PUT, DELETE for a single project.
 func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
@@ -322,6 +280,10 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			httputil.JSONError(w, http.StatusNotFound, "project not found")
 			return
+		}
+		// Add active terminal ports from project-level terminal
+		if h.terminalMgr != nil {
+			p.ActiveTerminalPorts = h.terminalMgr.GetProjectPorts(id)
 		}
 		httputil.JSONResponse(w, http.StatusOK, p)
 

@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import type { Project } from '$lib/types';
-    import { updateProject, buildSandboxImageStream, validateForwardPorts } from '$lib/api';
+    import type { Project, Task } from '$lib/types';
+    import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { showConfirm } from '$lib/store';
-    import type { PortForward } from '$lib/types';
+    import type { PortForward, AssignedPort } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -22,10 +22,14 @@
     let sandboxImage = $state(project.sandbox_image ?? '');
     let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
     let forwardPorts = $state<PortForward[]>(project.forward_ports ?? []);
-    let newHostPort = $state('');
     let newContainerPort = $state('');
     let portError = $state('');
     let portsExpanded = $state(project.forward_ports && project.forward_ports.length > 0);
+    // Active host ports from running tasks (container_port → host_port map)
+    let activeHostPorts = $state<Map<number, number>>(new Map());
+    let hasActivePorts = $derived(activeHostPorts.size > 0);
+    // Active terminal ports from project-level terminal
+    let terminalPorts = $state<AssignedPort[]>([]);
     let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
     let dockerfileChanged = $derived(sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? ''));
     let showDockerfilePicker = $state(false);
@@ -69,13 +73,43 @@
         prevSandboxEnabled = sandboxEnabled;
     });
 
-    onMount(() => {
+    onMount(async () => {
         window.addEventListener('keydown', handleKeydown);
+        // Fetch project to get active terminal ports
+        try {
+            const proj = await getProject(project.id);
+            terminalPorts = proj.active_terminal_ports || [];
+        } catch {
+            // Ignore fetch errors
+        }
+        await refreshActivePorts();
     });
 
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
     });
+
+    async function refreshActivePorts() {
+        try {
+            const board = await getBoard(project.id);
+            const map = new Map<number, number>();
+            // Include project-level terminal ports
+            for (const ap of terminalPorts) {
+                map.set(ap.container_port, ap.host_port);
+            }
+            // Include task-level ports from running tasks
+            for (const task of board.tasks) {
+                if (task.execution_state === 'running' && task.assigned_ports) {
+                    for (const ap of task.assigned_ports) {
+                        map.set(ap.container_port, ap.host_port);
+                    }
+                }
+            }
+            activeHostPorts = map;
+        } catch {
+            // Ignore fetch errors
+        }
+    }
 
     function handleOverlayClick(e: MouseEvent) {
         if (e.target === e.currentTarget) {
@@ -111,23 +145,12 @@
     // Port forwarding helpers
     function addPortForward() {
         portError = '';
-        const host = parseInt(newHostPort, 10);
         const container = parseInt(newContainerPort, 10);
-        if (isNaN(host) || host < 1 || host > 65535) {
-            portError = 'Host port must be between 1 and 65535';
-            return;
-        }
         if (isNaN(container) || container < 1 || container > 65535) {
-            portError = 'Container port must be between 1 and 65535';
+            portError = 'Port must be between 1 and 65535';
             return;
         }
-        // Check for duplicates
-        if (forwardPorts.some(p => p.host_port === host)) {
-            portError = `Host port ${host} is already added`;
-            return;
-        }
-        forwardPorts = [...forwardPorts, { host_port: host, container_port: container }];
-        newHostPort = '';
+        forwardPorts = [...forwardPorts, { container_port: container }];
         newContainerPort = '';
     }
 
@@ -213,7 +236,7 @@
         // Port forwarding changes
         const originalPorts = project.forward_ports ?? [];
         const portsChanged = forwardPorts.length !== originalPorts.length ||
-            forwardPorts.some((p, i) => p.host_port !== originalPorts[i]?.host_port || p.container_port !== originalPorts[i]?.container_port);
+            forwardPorts.some((p, i) => p.container_port !== originalPorts[i]?.container_port);
         if (portsChanged) {
             changes.sandbox_forward_ports = forwardPorts;
         }
@@ -223,16 +246,6 @@
             error = 'Please select a Dockerfile before saving.';
             saving = false;
             return;
-        }
-
-        // Validate port forwards (check host port availability)
-        if (portsChanged && forwardPorts.length > 0) {
-            const conflicts = await validateForwardPorts(project.id, forwardPorts);
-            if (conflicts.length > 0) {
-                error = `Port${conflicts.length > 1 ? 's' : ''} ${conflicts.join(', ')} already in use. Choose different host port${conflicts.length > 1 ? 's' : ''}.`;
-                saving = false;
-                return;
-            }
         }
 
         // No changes made
@@ -350,7 +363,7 @@
                     <div class="config-text">
                         <span class="config-label" class:collapsed={!portsExpanded}>Forward Ports</span>
                         {#if portsExpanded}
-                        <span class="config-desc">Map host ports to container ports</span>
+                        <span class="config-desc">Host ports are auto-assigned when tasks run, and visible in the task's Sandbox Info panel.</span>
                         {/if}
                     </div>
                 </div>
@@ -366,10 +379,12 @@
                 {#each forwardPorts as port, i}
                 <div class="port-item">
                     <span class="port-mapping">
-                        <span class="port-host" title="Host port">{port.host_port}</span>
+                        {#if activeHostPorts.has(port.container_port)}
+                        <span class="port-host" title="Host port">{activeHostPorts.get(port.container_port)}</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
+                        {/if}
                         <span class="port-container" title="Container port">{port.container_port}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={() => removePortForward(i)} disabled={isLocked} title="Remove">
@@ -382,13 +397,14 @@
             </div>
             {/if}
 
+            <!-- No active host ports notice -->
+            {#if forwardPorts.length > 0 && !hasActivePorts}
+            <div class="port-no-active">Host ports assigned when tasks run</div>
+            {/if}
+
             <!-- Add new port forward -->
             <div class="port-add-row">
-                <input type="number" class="port-input" bind:value={newHostPort} placeholder="Host" min="1" max="65535" disabled={isLocked} aria-label="Host port" />
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="port-arrow">
-                    <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
+                <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container port" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
                 <button type="button" class="btn-add-port" onclick={addPortForward} disabled={isLocked} title="Add port forward">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                         <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -1125,7 +1141,8 @@
     }
 
     .port-container {
-        color: var(--color-text-secondary);
+        font-weight: 600;
+        color: var(--color-accent);
     }
 
     .btn-remove-port {
@@ -1161,7 +1178,7 @@
     }
 
     .port-input {
-        width: 90px;
+        width: 120px;
         padding: 4px 8px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--color-border);
@@ -1227,5 +1244,13 @@
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
+    }
+
+    .port-no-active {
+        padding: 4px 8px;
+        padding-left: 36px;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+        font-style: italic;
     }
 </style>
