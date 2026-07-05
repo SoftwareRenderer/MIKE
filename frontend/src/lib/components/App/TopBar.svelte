@@ -14,6 +14,7 @@
         onOpenTerminal,
         onShowStats,
         onShowConfig,
+        hasPortConflict = false,
     }: {
         currentProject: Project;
         currentBranch: string;
@@ -24,6 +25,7 @@
         onOpenTerminal: () => void;
         onShowStats: () => void;
         onShowConfig: () => void;
+        hasPortConflict?: boolean;
     } = $props();
 
     let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
@@ -39,7 +41,7 @@
             </svg>
         </button>
     {/if}
-    <button class="icon-btn sandbox-config-btn" onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
+    <button class="icon-btn sandbox-config-btn" class:port-conflict={hasPortConflict} onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
             <img src={shieldIcon} width="14" height="14" alt="" />
         {:else}
@@ -173,6 +175,11 @@
     }
     .icon-btn.sandbox-config-btn img {
         filter: saturate(0.8);
+    }
+    .icon-btn.sandbox-config-btn.port-conflict {
+        outline: 2px solid var(--color-status-yellow, #d29922);
+        outline-offset: 1px;
+        border-radius: var(--radius-sm);
     }
     .hamburger {
         display: flex;

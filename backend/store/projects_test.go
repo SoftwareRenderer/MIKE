@@ -684,3 +684,80 @@ func TestProjectSandboxMemoryLimit(t *testing.T) {
 		t.Fatal("expected to find proj-mem in list")
 	}
 }
+
+func TestProjectSandboxForwardPorts(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with forward ports
+	proj := newProject("proj-ports", "port-test", "/tmp/repo-ports")
+	proj.ForwardPorts = []types.PortForward{
+		{HostPort: 8080, ContainerPort: 80},
+		{HostPort: 3000, ContainerPort: 3000},
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-ports")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if len(got.ForwardPorts) != 2 {
+		t.Fatalf("expected 2 forward ports, got %d", len(got.ForwardPorts))
+	}
+	if got.ForwardPorts[0].HostPort != 8080 || got.ForwardPorts[0].ContainerPort != 80 {
+		t.Fatalf("expected 8080->80, got %d->%d", got.ForwardPorts[0].HostPort, got.ForwardPorts[0].ContainerPort)
+	}
+	if got.ForwardPorts[1].HostPort != 3000 || got.ForwardPorts[1].ContainerPort != 3000 {
+		t.Fatalf("expected 3000->3000, got %d->%d", got.ForwardPorts[1].HostPort, got.ForwardPorts[1].ContainerPort)
+	}
+
+	// Update forward ports
+	newPorts := []types.PortForward{
+		{HostPort: 9090, ContainerPort: 8080},
+	}
+	if err := s.UpdateProjectSandboxForwardPorts("proj-ports", newPorts); err != nil {
+		t.Fatalf("update forward ports: %v", err)
+	}
+	got, err = s.GetProject("proj-ports")
+	if err != nil {
+		t.Fatalf("get project after update: %v", err)
+	}
+	if len(got.ForwardPorts) != 1 {
+		t.Fatalf("expected 1 forward port, got %d", len(got.ForwardPorts))
+	}
+	if got.ForwardPorts[0].HostPort != 9090 || got.ForwardPorts[0].ContainerPort != 8080 {
+		t.Fatalf("expected 9090->8080, got %d->%d", got.ForwardPorts[0].HostPort, got.ForwardPorts[0].ContainerPort)
+	}
+
+	// Clear forward ports
+	if err := s.UpdateProjectSandboxForwardPorts("proj-ports", nil); err != nil {
+		t.Fatalf("clear forward ports: %v", err)
+	}
+	got, err = s.GetProject("proj-ports")
+	if err != nil {
+		t.Fatalf("get project after clear: %v", err)
+	}
+	if len(got.ForwardPorts) != 0 {
+		t.Fatalf("expected 0 forward ports, got %d", len(got.ForwardPorts))
+	}
+
+	// Verify in list
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-ports" {
+			found = true
+			if len(p.ForwardPorts) != 0 {
+				t.Fatalf("expected 0 forward ports in list, got %d", len(p.ForwardPorts))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-ports in list")
+	}
+}

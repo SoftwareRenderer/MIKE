@@ -49,6 +49,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/board/reorder", s.boardHandler.HandleReorder)
 	s.mux.HandleFunc("/api/projects/{projectID}/stats", s.projectHandler.HandleStats)
 	s.mux.HandleFunc("/api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/validate-ports", s.projectHandler.HandleValidatePorts)
 	s.mux.HandleFunc("/api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
 
 	// Tasks

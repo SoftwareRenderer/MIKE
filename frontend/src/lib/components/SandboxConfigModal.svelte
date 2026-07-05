@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Project } from '$lib/types';
-    import { updateProject, buildSandboxImageStream } from '$lib/api';
+    import { updateProject, buildSandboxImageStream, validateForwardPorts } from '$lib/api';
     import { showConfirm } from '$lib/store';
+    import type { PortForward } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -20,6 +21,11 @@
     let sandboxMemoryLimit = $state(project.sandbox_memory_limit ?? 1024);
     let sandboxImage = $state(project.sandbox_image ?? '');
     let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
+    let forwardPorts = $state<PortForward[]>(project.forward_ports ?? []);
+    let newHostPort = $state('');
+    let newContainerPort = $state('');
+    let portError = $state('');
+    let portsExpanded = $state(project.forward_ports && project.forward_ports.length > 0);
     let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
     let dockerfileChanged = $derived(sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? ''));
     let showDockerfilePicker = $state(false);
@@ -102,6 +108,33 @@
         showDockerfilePicker = false;
     }
 
+    // Port forwarding helpers
+    function addPortForward() {
+        portError = '';
+        const host = parseInt(newHostPort, 10);
+        const container = parseInt(newContainerPort, 10);
+        if (isNaN(host) || host < 1 || host > 65535) {
+            portError = 'Host port must be between 1 and 65535';
+            return;
+        }
+        if (isNaN(container) || container < 1 || container > 65535) {
+            portError = 'Container port must be between 1 and 65535';
+            return;
+        }
+        // Check for duplicates
+        if (forwardPorts.some(p => p.host_port === host)) {
+            portError = `Host port ${host} is already added`;
+            return;
+        }
+        forwardPorts = [...forwardPorts, { host_port: host, container_port: container }];
+        newHostPort = '';
+        newContainerPort = '';
+    }
+
+    function removePortForward(index: number) {
+        forwardPorts = forwardPorts.filter((_, i) => i !== index);
+    }
+
     function getDockerfileName(path: string): string {
         return path.split('/').pop() || path;
     }
@@ -139,6 +172,7 @@
             sandbox_image?: string;
             sandbox_dockerfile_path?: string;
             sandbox_memory_limit?: number;
+            sandbox_forward_ports?: PortForward[];
         } = {};
         let needsConfirmation = false;
 
@@ -176,11 +210,29 @@
             }
         }
 
+        // Port forwarding changes
+        const originalPorts = project.forward_ports ?? [];
+        const portsChanged = forwardPorts.length !== originalPorts.length ||
+            forwardPorts.some((p, i) => p.host_port !== originalPorts[i]?.host_port || p.container_port !== originalPorts[i]?.container_port);
+        if (portsChanged) {
+            changes.sandbox_forward_ports = forwardPorts;
+        }
+
         // Validate: dockerfile mode requires a path
         if (imageSource === 'dockerfile' && !sandboxDockerfilePath) {
             error = 'Please select a Dockerfile before saving.';
             saving = false;
             return;
+        }
+
+        // Validate port forwards (check host port availability)
+        if (portsChanged && forwardPorts.length > 0) {
+            const conflicts = await validateForwardPorts(project.id, forwardPorts);
+            if (conflicts.length > 0) {
+                error = `Port${conflicts.length > 1 ? 's' : ''} ${conflicts.join(', ')} already in use. Choose different host port${conflicts.length > 1 ? 's' : ''}.`;
+                saving = false;
+                return;
+            }
         }
 
         // No changes made
@@ -283,6 +335,72 @@
                 </div>
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
             </div>
+
+            <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
+            {#if !networkIsolation}
+            <div class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }}>
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M4 7H16M4 13H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <path d="M12 4.5L16 7L12 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M8 10.5L4 13L8 15.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label" class:collapsed={!portsExpanded}>Forward Ports</span>
+                        {#if portsExpanded}
+                        <span class="config-desc">Map host ports to container ports</span>
+                        {/if}
+                    </div>
+                </div>
+                <svg class="chevron" class:chevron-open={portsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+
+            {#if portsExpanded}
+            <!-- Existing port forwards list -->
+            {#if forwardPorts.length > 0}
+            <div class="port-list">
+                {#each forwardPorts as port, i}
+                <div class="port-item">
+                    <span class="port-mapping">
+                        <span class="port-host" title="Host port">{port.host_port}</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="port-container" title="Container port">{port.container_port}</span>
+                    </span>
+                    <button type="button" class="btn-remove-port" onclick={() => removePortForward(i)} disabled={isLocked} title="Remove">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {/each}
+            </div>
+            {/if}
+
+            <!-- Add new port forward -->
+            <div class="port-add-row">
+                <input type="number" class="port-input" bind:value={newHostPort} placeholder="Host" min="1" max="65535" disabled={isLocked} aria-label="Host port" />
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="port-arrow">
+                    <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
+                <button type="button" class="btn-add-port" onclick={addPortForward} disabled={isLocked} title="Add port forward">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+
+            {#if portError}
+            <div class="port-error">{portError}</div>
+            {/if}
+            {/if}
+            {/if}
 
             <!-- Memory limit input -->
             <div class="config-row config-row-input">
@@ -542,6 +660,42 @@
 
     .config-row-input {
         gap: 12px;
+    }
+
+    .config-row-subsection {
+        padding-left: 36px;
+    }
+
+    .config-row-subsection .config-icon {
+        color: var(--color-text-secondary);
+    }
+
+    .config-row-subsection .config-label {
+        font-weight: 400;
+    }
+
+    .config-row-subsection .config-label.collapsed {
+        font-size: 0.75rem;
+    }
+
+    .config-row-subsection {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .config-row-subsection:hover {
+        background: var(--color-surface-3);
+        border-radius: var(--radius-sm);
+    }
+
+    .chevron {
+        flex-shrink: 0;
+        color: var(--color-text-secondary);
+        transition: transform 0.15s ease;
+    }
+
+    .chevron-open {
+        transform: rotate(180deg);
     }
 
     .image-input {
@@ -935,5 +1089,143 @@
 
     .spin {
         animation: spin 1s linear infinite;
+    }
+
+    /* Port forwarding subsection */
+    .port-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-left: 36px;
+        margin-top: 4px;
+    }
+
+    .port-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+    }
+
+    .port-mapping {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-primary);
+    }
+
+    .port-host {
+        font-weight: 600;
+        color: var(--color-accent);
+    }
+
+    .port-container {
+        color: var(--color-text-secondary);
+    }
+
+    .btn-remove-port {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-remove-port:hover:not(:disabled) {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--color-status-red);
+    }
+
+    .btn-remove-port:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .port-add-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 36px;
+    }
+
+    .port-input {
+        width: 90px;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+
+    .port-input::-webkit-outer-spin-button,
+    .port-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .port-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .port-input:disabled {
+        opacity: 0.5;
+    }
+
+    .port-arrow {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .btn-add-port {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, border-color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-add-port:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-add-port:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .port-error {
+        padding: 4px 8px;
+        padding-left: 36px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-sm);
+        color: var(--color-status-red);
+        font-size: 0.75rem;
     }
 </style>

@@ -17,6 +17,7 @@ export interface AppStreamCallbacks {
     onTaskDeleted?: (task_id: string) => void;
     onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void;
     onTaskEvent?: (task_id: string, event: StreamEvent) => void; // task-scoped events (tokens, tool calls, etc.)
+    onPortConflict?: (project_id: string, conflicted_ports: number[]) => void; // host ports already in use
     onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
 }
 
@@ -118,6 +119,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             }
             if (msg.type === 'commit_status' && callbacks.onCommitStatus) {
                 callbacks.onCommitStatus(msg.task_id, msg.status);
+            }
+            if (msg.type === 'port_conflict' && callbacks.onPortConflict) {
+                callbacks.onPortConflict(msg.data.project_id, msg.data.conflicted_ports);
             }
         };
 

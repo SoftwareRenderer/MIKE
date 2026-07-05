@@ -38,6 +38,7 @@ export {
     updateProject,
     buildSandboxImage,
     buildSandboxImageStream,
+    validateForwardPorts,
     deleteProject,
     getBoard,
     reorderTasks,

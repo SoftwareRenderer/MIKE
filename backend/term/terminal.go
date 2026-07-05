@@ -134,7 +134,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !strings.HasPrefix(taskID, "proj:") {
 			shellProjectPath = projectPath
 		}
-		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, networkIsolation, memoryLimit, piAgentDir)
+		shell, err = tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, nil, piAgentDir)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

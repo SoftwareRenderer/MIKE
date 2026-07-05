@@ -210,7 +210,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			sandboxPath = filepath.Join(mountPath, relPath)
 		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath)
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath, nil)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
@@ -515,7 +515,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		sandboxPath := filepath.Join(mountPath, relPath)
 
 		// Check if already a git repo
-		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null")
+		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null", nil)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
@@ -531,7 +531,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
 			"git -C "+sandboxPath+" add README.md && " +
 			"git -C "+sandboxPath+" -c user.email="+git.GitAuthorEmail+" -c user.name="+git.GitAuthorName+" commit -m 'Initial commit'",
-			[]byte(encoded+"\n"))
+			[]byte(encoded+"\n"), nil)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
 			return
@@ -620,7 +620,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name,
 			"if [ ! -d "+sandboxParent+" ]; then echo 'PARENT_MISSING'; " +
 			"elif [ -e "+sandboxPath+" ]; then echo 'ALREADY_EXISTS'; " +
-			"else mkdir "+sandboxPath+" && echo 'OK'; fi")
+			"else mkdir "+sandboxPath+" && echo 'OK'; fi", nil)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
 			return

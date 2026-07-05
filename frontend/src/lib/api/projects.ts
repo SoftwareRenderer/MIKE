@@ -55,7 +55,7 @@ export async function createProject(path: string, sandboxEnabled = false): Promi
 }
 
 /** Update project metadata (name, sandbox settings). Queued when offline. */
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
+export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number; sandbox_forward_ports?: { host_port: number; container_port: number }[] }): Promise<Project> {
     if (getOfflineStatus()) {
         return await queueWrite('updateProject', { id, updates }, { id, ...updates } as Project);
     }
@@ -72,6 +72,18 @@ export async function buildSandboxImage(id: string): Promise<{ status: string; i
 
 /** Trigger a sandbox image build with live progress streaming. */
 export { buildSandboxImageStream } from './queue';
+
+/** Check if host ports are available for forwarding. Returns list of conflicted ports. */
+export async function validateForwardPorts(projectId: string, ports: { host_port: number; container_port: number }[]): Promise<number[]> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/sandbox/validate-ports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ports }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to validate ports');
+    const data = await res.json();
+    return data.conflicts || [];
+}
 
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {

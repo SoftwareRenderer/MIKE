@@ -79,6 +79,10 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore)
 	s.sandboxMgr = sandbox.NewSandboxManager()
+	// Wire port conflict callback → WebSocket broadcast
+	s.sandboxMgr.SetOnPortConflict(func(projectID string, conflictedPorts []int) {
+		s.appStreamMgr.BroadcastPortConflict(projectID, conflictedPorts)
+	})
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)

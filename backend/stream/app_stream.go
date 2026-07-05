@@ -436,6 +436,22 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 	asm.BroadcastAll(msg)
 }
 
+// BroadcastPortConflict sends a port_conflict event to all clients,
+// notifying them that some host ports are already in use.
+func (asm *AppStreamManager) BroadcastPortConflict(projectID string, conflictedPorts []int) {
+	if conflictedPorts == nil {
+		return
+	}
+	msg, _ := json.Marshal(map[string]any{
+		"type": "port_conflict",
+		"data": map[string]any{
+			"project_id":    projectID,
+			"conflicted_ports": conflictedPorts,
+		},
+	})
+	asm.BroadcastAll(msg)
+}
+
 // -- BoardStreamManager compatibility methods --
 
 // Broadcast sends a board_refresh event to all clients of a project,

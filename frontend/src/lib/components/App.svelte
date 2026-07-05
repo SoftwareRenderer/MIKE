@@ -123,6 +123,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
+    let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
     let currentBranch = $state('');
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let selectedTaskVal: Task | null = $state(null);
@@ -272,6 +273,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             const projs = await getProjects();
             projects = projs || [];
             projectsStore.set(projects);
+            portConflict = null; // Clear stale port conflict on reload
             if (projects.length > 0) {
                 // Check URL for project param to restore previous project
                 const urlParams = new URLSearchParams(location.search);
@@ -407,6 +409,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     onConnected: (connected) => {
                         wsConnected = connected;
                         setOfflineStatus(!connected);
+                    },
+                    onPortConflict: (project_id, conflicted_ports) => {
+                        portConflict = { project_id, ports: conflicted_ports };
                     },
                 });
                 // Expose appStream so TaskChat can subscribe after handler setup
@@ -644,11 +649,14 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
             return;
         }
+        // Clear port conflict when opening modal (user will see/fix it in modal)
+        portConflict = null;
         showSandboxConfigVal = true;
     }
 
     async function handleSandboxSaved() {
         showSandboxConfigVal = false;
+        portConflict = null; // Clear port conflict on successful save
         // Refresh projects list to pick up changes
         try {
             const projs = await getProjects();
@@ -720,6 +728,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 currentProject={currentProject}
                 {currentBranch}
                 {isMobile}
+                hasPortConflict={portConflict?.project_id === currentProject?.id}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
                 onOpenBranchView={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}

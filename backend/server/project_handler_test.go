@@ -503,3 +503,108 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 		t.Fatalf("expected sandbox_memory_limit 0, got %v", result["sandbox_memory_limit"])
 	}
 }
+
+func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
+	s := testServer(t)
+
+	// Create project
+	projID := createTestProject(t, s)
+
+	// Update forward ports
+	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_forward_ports": []map[string]any{
+			{"host_port": 8080, "container_port": 80},
+			{"host_port": 3000, "container_port": 3000},
+		},
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	ports, ok := result["forward_ports"].([]any)
+	if !ok {
+		t.Fatalf("expected forward_ports to be array, got %T", result["forward_ports"])
+	}
+	if len(ports) != 2 {
+		t.Fatalf("expected 2 forward ports, got %d", len(ports))
+	}
+
+	// Verify first port
+	p0 := ports[0].(map[string]any)
+	if p0["host_port"].(float64) != 8080 || p0["container_port"].(float64) != 80 {
+		t.Fatalf("expected 8080->80, got %v->%v", p0["host_port"], p0["container_port"])
+	}
+
+	// Update to single port
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_forward_ports": []map[string]any{
+			{"host_port": 9090, "container_port": 8080},
+		},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	ports = result["forward_ports"].([]any)
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 forward port, got %d", len(ports))
+	}
+
+	// Clear forward ports
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_forward_ports": []map[string]any{},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	// forward_ports is omitted when empty (omitempty)
+	if result["forward_ports"] != nil {
+		ports := result["forward_ports"].([]any)
+		if len(ports) != 0 {
+			t.Fatalf("expected 0 forward ports, got %d", len(ports))
+		}
+	}
+}
+
+func TestProjectValidatePorts(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Validate ports that are not in use
+	req := testRequest("POST", "/api/projects/"+projID+"/sandbox/validate-ports", map[string]any{
+		"ports": []map[string]any{
+			{"host_port": 19876, "container_port": 80},
+			{"host_port": 19877, "container_port": 443},
+		},
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	var conflictsAny any
+	// conflicts is omitted when empty (omitempty)
+	conflictsAny = result["conflicts"]
+	if conflictsAny != nil {
+		conflicts := conflictsAny.([]any)
+		if len(conflicts) != 0 {
+			t.Fatalf("expected 0 conflicts, got %d: %v", len(conflicts), conflicts)
+		}
+	}
+
+	// Validate with out-of-range port
+	req = testRequest("POST", "/api/projects/"+projID+"/sandbox/validate-ports", map[string]any{
+		"ports": []map[string]any{
+			{"host_port": 0, "container_port": 80},
+			{"host_port": 70000, "container_port": 80},
+		},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	conflictsAny = result["conflicts"]
+	if conflictsAny == nil {
+		t.Fatal("expected conflicts array, got nil")
+	}
+	conflicts := conflictsAny.([]any)
+	if len(conflicts) != 2 {
+		t.Fatalf("expected 2 conflicts for invalid ports, got %d: %v", len(conflicts), conflicts)
+	}
+}

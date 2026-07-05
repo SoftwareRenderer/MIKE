@@ -170,7 +170,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if needPiConfig && hasExistingContainer {
 				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
 			}
-			if err := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, networkIsolation, memoryLimit, piAgentDir); err != nil {
+			if err, _ := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, nil, piAgentDir); err != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"
 				task.Output = fmt.Sprintf("Failed to create sandbox: %v", err)

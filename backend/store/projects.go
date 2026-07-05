@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,9 +17,15 @@ func (s *Store) CreateProject(p *types.Project) error {
 	if memoryLimit == 0 {
 		memoryLimit = 1024 // default 1 GB
 	}
+	forwardPortsJSON := ""
+	if len(p.ForwardPorts) > 0 {
+		if b, err := json.Marshal(p.ForwardPorts); err == nil {
+			forwardPortsJSON = string(b)
+		}
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), b2i(p.SandboxEnabled), b2i(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), b2i(p.SandboxEnabled), b2i(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -32,11 +39,11 @@ func (s *Store) GetProject(id string) (*types.Project, error) {
 
 func (s *Store) queryProject(id string) (*types.Project, error) {
 	var p types.Project
-	var originBranch, sandboxImage, sandboxDockerfilePath sql.NullString
+	var originBranch, sandboxImage, sandboxDockerfilePath, forwardPortsJSON sql.NullString
 	var sandboxEnabled, sandboxNetworkIsolation int
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &createdAt, &updatedAt)
+	err := s.db.QueryRow(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, created_at, updated_at FROM projects WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("project not found")
@@ -48,6 +55,9 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 	p.SandboxNetworkIsolation = i2b(sandboxNetworkIsolation)
 	p.SandboxImage = sandboxImage.String
 	p.SandboxDockerfilePath = sandboxDockerfilePath.String
+	if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
+		_ = json.Unmarshal([]byte(forwardPortsJSON.String), &p.ForwardPorts)
+	}
 	p.CreatedAt = scanTime(createdAt)
 	p.UpdatedAt = scanTime(updatedAt)
 	return &p, nil
@@ -57,7 +67,7 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 func (s *Store) ListProjects() ([]types.Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, created_at, updated_at FROM projects ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, created_at, updated_at FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -65,10 +75,10 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 	projects := []types.Project{}
 	for rows.Next() {
 		var p types.Project
-		var originBranch, sandboxImage, sandboxDockerfilePath sql.NullString
+		var originBranch, sandboxImage, sandboxDockerfilePath, forwardPortsJSON sql.NullString
 		var sandboxEnabled, sandboxNetworkIsolation int
 		var createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		p.OriginBranch = originBranch.String
@@ -76,6 +86,9 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 		p.SandboxNetworkIsolation = i2b(sandboxNetworkIsolation)
 		p.SandboxImage = sandboxImage.String
 		p.SandboxDockerfilePath = sandboxDockerfilePath.String
+		if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
+			_ = json.Unmarshal([]byte(forwardPortsJSON.String), &p.ForwardPorts)
+		}
 		p.CreatedAt = scanTime(createdAt)
 		p.UpdatedAt = scanTime(updatedAt)
 		projects = append(projects, p)
@@ -147,6 +160,21 @@ func (s *Store) UpdateProjectSandboxMemoryLimit(id string, limit int) error {
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`UPDATE projects SET sandbox_memory_limit = ?, updated_at = ? WHERE id = ?`, limit, now.Format(time.RFC3339), id)
+	return err
+}
+
+// UpdateProjectSandboxForwardPorts updates the sandbox_forward_ports for a project.
+func (s *Store) UpdateProjectSandboxForwardPorts(id string, ports []types.PortForward) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	portsJSON := ""
+	if len(ports) > 0 {
+		if b, err := json.Marshal(ports); err == nil {
+			portsJSON = string(b)
+		}
+	}
+	_, err := s.db.Exec(`UPDATE projects SET sandbox_forward_ports = ?, updated_at = ? WHERE id = ?`, portsJSON, now.Format(time.RFC3339), id)
 	return err
 }
 

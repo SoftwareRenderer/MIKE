@@ -15,6 +15,11 @@ export function getToolDisplayName(displayName: string | undefined, toolName: st
     return TOOL_DISPLAY_NAMES[toolName] || toolName;
 }
 
+export interface PortForward {
+    host_port: number;
+    container_port: number;
+}
+
 export interface Project {
     id: string;
     name: string;
@@ -25,6 +30,7 @@ export interface Project {
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
     sandbox_memory_limit?: number;
+    forward_ports?: PortForward[];
     created_at: string;
     updated_at: string;
 }
@@ -230,7 +236,8 @@ export type StreamEventType =
     | 'git_checkpoint_complete'
     | 'merge_resolution'
     | 'diff_changed'
-    | 'build_progress';
+    | 'build_progress'
+    | 'port_conflict';
 
 export interface StreamEvent {
     type: StreamEventType;

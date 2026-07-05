@@ -123,19 +123,26 @@ func (p *Provider) APIKeyValue() string {
 	return *p.APIKey
 }
 
+// PortForward maps a host port to a container port for network exposure.
+type PortForward struct {
+	HostPort      int `json:"host_port"`
+	ContainerPort int `json:"container_port"`
+}
+
 // Project represents a workspace project.
 type Project struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	Path                    string    `json:"path"`
-	OriginBranch            string    `json:"origin_branch,omitempty"`
-	SandboxEnabled          bool      `json:"sandbox_enabled"`
-	SandboxNetworkIsolation bool      `json:"sandbox_network_isolation"`
-	SandboxImage            string    `json:"sandbox_image,omitempty"`
-	SandboxDockerfilePath   string    `json:"sandbox_dockerfile_path,omitempty"`
-	SandboxMemoryLimit      int       `json:"sandbox_memory_limit"`
-	CreatedAt               time.Time `json:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at"`
+	ID                      string        `json:"id"`
+	Name                    string        `json:"name"`
+	Path                    string        `json:"path"`
+	OriginBranch            string        `json:"origin_branch,omitempty"`
+	SandboxEnabled          bool          `json:"sandbox_enabled"`
+	SandboxNetworkIsolation bool          `json:"sandbox_network_isolation"`
+	SandboxImage            string        `json:"sandbox_image,omitempty"`
+	SandboxDockerfilePath   string        `json:"sandbox_dockerfile_path,omitempty"`
+	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
+	ForwardPorts            []PortForward `json:"forward_ports,omitempty"`
+	CreatedAt               time.Time     `json:"created_at"`
+	UpdatedAt               time.Time     `json:"updated_at"`
 }
 
 // ProjectCounts holds task counts per status for a project.
