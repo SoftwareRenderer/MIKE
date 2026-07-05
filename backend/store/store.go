@@ -249,6 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`)   // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_commit_hash TEXT NULL`)  // best-effort
+	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN worktree_stash_hash TEXT NULL`)     // best-effort
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
@@ -509,9 +510,9 @@ func scanTask(s scanner, t *types.Task) error {
 
 // scanTaskThread scans a row into a TaskThread.
 func scanTaskThread(s scanner, th *types.TaskThread) error {
-	var parentThreadID, gitBranch, checkpointMsgID, checkpointMsgTime, checkpointCommitHash sql.NullString
+	var parentThreadID, gitBranch, checkpointMsgID, checkpointMsgTime, checkpointCommitHash, worktreeStashHash sql.NullString
 	var createdAt string
-	err := s.Scan(&th.ID, &th.TaskID, &parentThreadID, &th.Name, &th.IsActive, &gitBranch, &checkpointMsgID, &checkpointMsgTime, &checkpointCommitHash, &createdAt)
+	err := s.Scan(&th.ID, &th.TaskID, &parentThreadID, &th.Name, &th.IsActive, &gitBranch, &checkpointMsgID, &checkpointMsgTime, &checkpointCommitHash, &worktreeStashHash, &createdAt)
 	if err != nil {
 		return err
 	}
@@ -523,6 +524,7 @@ func scanTaskThread(s scanner, th *types.TaskThread) error {
 		th.CheckpointMessageTime = &t
 	}
 	th.CheckpointCommitHash = checkpointCommitHash.String
+	th.WorktreeStashHash = worktreeStashHash.String
 	th.CreatedAt = scanTime(createdAt)
 	return nil
 }

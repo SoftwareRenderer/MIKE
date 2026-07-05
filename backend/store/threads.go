@@ -14,8 +14,8 @@ func (s *Store) CreateThread(th *types.TaskThread) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(th.CheckpointMessageTime), ptrStr(th.CheckpointCommitHash), th.CreatedAt.Format(time.RFC3339),
+		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, b2i(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(th.CheckpointMessageTime), ptrStr(th.CheckpointCommitHash), ptrStr(th.WorktreeStashHash), th.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -25,7 +25,7 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, created_at FROM task_threads WHERE task_id = ? ORDER BY created_at ASC`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE task_id = ? ORDER BY created_at ASC`,
 		taskID,
 	)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *Store) GetThread(threadID string) (*types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, created_at FROM task_threads WHERE id = ?`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE id = ?`,
 		threadID,
 	)
 	var th types.TaskThread
@@ -84,7 +84,7 @@ func (s *Store) GetThreadsByCheckpointMessageID(messageID string) ([]types.TaskT
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, created_at FROM task_threads WHERE checkpoint_message_id = ?`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE checkpoint_message_id = ?`,
 		messageID,
 	)
 	if err != nil {
@@ -110,13 +110,21 @@ func (s *Store) DeleteThread(threadID string) error {
 	return err
 }
 
+// UpdateThreadWorktreeStashHash saves the worktree stash hash for a thread.
+func (s *Store) UpdateThreadWorktreeStashHash(threadID, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE task_threads SET worktree_stash_hash = ? WHERE id = ?`, hash, threadID)
+	return err
+}
+
 // GetThreadsByCheckpointMessageTime returns all threads whose checkpoint message time matches the given time.
 // This is used for cleanup when a copied checkpoint message (with a new ID but same created_at) is deleted.
 func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, created_at FROM task_threads WHERE checkpoint_message_time = ?`,
+		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE checkpoint_message_time = ?`,
 		messageTime,
 	)
 	if err != nil {

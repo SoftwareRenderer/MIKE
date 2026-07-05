@@ -128,8 +128,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
 	}
-	// Stash current worktree state before switching threads.
-	// Uses stash (not commit) to avoid polluting the git log.
+	// Save worktree state and switch to target thread's branch.
+	// Uses git stash push + rev-parse to save worktree as a commit hash per-thread,
+	// avoiding ambiguous stash list lookups.
 	if task.Branch != "" {
 		oldThreadID := task.CurrentThreadID
 		if oldThreadID != "" && oldThreadID != req.ThreadID {
@@ -140,6 +141,12 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("switch-%s", taskID))
+			stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
+			stashHash = strings.TrimSpace(stashHash)
+			if stashHash != "" {
+				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
+				_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
+			}
 		}
 		// Checkout target thread's branch (or task's original branch if none)
 		targetBranch := thread.GitBranch
@@ -148,26 +155,10 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
 		task.Branch = targetBranch
-		// Reset worktree to the target thread's last checkpoint (stash entry).
-		// Checkpoints are stored as git stash entries, not branch commits.
-		// The stash label includes the branch name: "On <branch>: <description>"
-		stashList, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "stash", "list")
-		targetPrefix := "On " + targetBranch + ":"
-		foundCheckpoint := false
-		for line := range strings.SplitSeq(stashList, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.Contains(line, targetPrefix) {
-				// Found the latest stash for this branch — extract the stash ref
-				// Format: "stash@{0}: On thread/jade-honor: Create count_to_3.txt"
-				stashRef := strings.Split(line, ":")[0] // "stash@{0}"
-				s.executor.WorktreeMgr().ResetWorktreeTo(taskID, strings.TrimSpace(stashRef))
-				foundCheckpoint = true
-				break
-			}
-		}
-		if !foundCheckpoint {
-			// No checkpoint for this thread — reset to base ref (clean initial state).
-			// Do NOT use HEAD — branch history may be corrupted by old stash operations.
+		// Restore worktree from target thread's saved stash hash.
+		if thread.WorktreeStashHash != "" {
+			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash)
+		} else {
 			baseRef := task.BaseRef
 			if baseRef == "" {
 				baseRef = "master"
@@ -241,21 +232,23 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if branchPoint == "" {
 		branchPoint = task.BaseRef
 	}
-	// Save current worktree state before forking, so uncommitted changes
-	// aren't lost when we switch back to the old thread. Uses stash (not commit)
-	// to avoid polluting the git log with internal snapshot commits.
-	// The fork branch starts clean from the checkpoint commit — do NOT pop
-	// the stash, or old thread's uncommitted files would leak into the fork.
+	// Save current worktree state before forking. Uses git stash push + rev-parse
+	// to capture worktree as a commit hash saved to source thread metadata.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
+		// Stash worktree, extract commit hash, drop stash entry.
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("fork-%s", taskID))
+		stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
+		stashHash = strings.TrimSpace(stashHash)
+		if stashHash != "" {
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
+			_ = s.store.UpdateThreadWorktreeStashHash(req.FromThreadID, stashHash)
+		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)
 		// Update task.Branch to track the currently checked-out branch
 		task.Branch = newBranchName
-		// Reset worktree to the checkpoint state.
-		// branchPoint is a stash hash (from git stash create) or a branch ref.
-		// ResetWorktreeTo handles both cases.
+		// Reset worktree to checkpoint state.
 		if branchPoint != "" {
 			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, branchPoint)
 		} else {

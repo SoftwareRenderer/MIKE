@@ -980,3 +980,72 @@ func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 		t.Errorf("expected 0 removed lines, got %d", file.Removed)
 	}
 }
+
+func TestResetWorktreeTo_StashHash(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create worktree.
+	branchName := "task/" + taskID
+	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	t.Cleanup(func() { _ = wm.RemoveWorktree("test-project", taskID, branchName) })
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+
+	// Write a file.
+	writeFile(t, worktreePath, "hello.c", "// hello\nint main() { return 0; }\n")
+
+	// Stash worktree, extract hash, drop stash (simulates fork handler).
+	out := runGitOutput(t, worktreePath, "stash", "push", "-u", "-m", "test-fork")
+	t.Log("stash push output:", out)
+
+	hash := runGitOutput(t, worktreePath, "rev-parse", "stash@{0}")
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		t.Fatal("expected non-empty stash hash")
+	}
+
+	runGit(t, worktreePath, "stash", "drop", "stash@{0}")
+
+	if _, err := os.Stat(filepath.Join(worktreePath, "hello.c")); !os.IsNotExist(err) {
+		t.Log("note: hello.c still exists after stash (expected if not git add -A'd)")
+	}
+
+	// Write a different file (simulates fork branch).
+	writeFile(t, worktreePath, "goodbye.c", "// goodbye\nint main() { return 1; }\n")
+
+	// Reset worktree to saved stash hash (simulates switch back to main).
+	if err := wm.ResetWorktreeTo(taskID, hash); err != nil {
+		t.Fatalf("ResetWorktreeTo: %v", err)
+	}
+
+	// Verify: hello.c restored, goodbye.c gone.
+	helloPath := filepath.Join(worktreePath, "hello.c")
+	goodbyePath := filepath.Join(worktreePath, "goodbye.c")
+
+	if _, err := os.Stat(helloPath); os.IsNotExist(err) {
+		t.Error("hello.c should exist after ResetWorktreeTo (was in stash)")
+	} else {
+		content, _ := os.ReadFile(helloPath)
+		if !strings.Contains(string(content), "hello") {
+			t.Errorf("hello.c has wrong content: %s", string(content))
+		}
+	}
+
+	if _, err := os.Stat(goodbyePath); !os.IsNotExist(err) {
+		t.Error("goodbye.c should NOT exist after ResetWorktreeTo (was not in stash)")
+	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %s: %v", args, string(out), err)
+	}
+	return string(out)
+}

@@ -49,6 +49,7 @@ type TaskThread struct {
 	CheckpointMessageID   string     `json:"checkpoint_message_id,omitempty"`
 	CheckpointMessageTime *time.Time `json:"checkpoint_message_time,omitempty"`
 	CheckpointCommitHash  string     `json:"checkpoint_commit_hash,omitempty"` // git commit at fork point
+	WorktreeStashHash     string     `json:"worktree_stash_hash,omitempty"`    // git stash create hash for worktree restoration
 	CreatedAt             time.Time  `json:"created_at"`
 }
 

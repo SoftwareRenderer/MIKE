@@ -1703,29 +1703,24 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 	return strings.TrimSpace(mb), nil
 }
 
-// ResetWorktreeTo resets the worktree to a specific commit or stash hash.
-// For branch commits, uses git reset --hard.
-// For stash hashes, cleans the working tree and applies the stash patch.
+// ResetWorktreeTo resets the worktree to a commit or stash hash.
+// For stash hashes (from `git stash push`), applies the stash patch to restore
+// tracked and untracked files. Falls back to `git reset --hard` for regular commits.
 func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return err
 	}
 
-	// Try regular reset first (works for branch commits)
-	if err := wm.gitRun(worktreePath, "reset", "--hard", hash); err == nil {
-		return nil
-	}
-
-	// Fall back to stash approach: clean working tree + apply stash patch
-	// Clean the working tree
+	// Clean working tree.
 	_ = wm.gitRun(worktreePath, "checkout", "-f", "HEAD")
 	_ = wm.gitRun(worktreePath, "clean", "-fd")
 
-	// Apply the stash patch
-	stashPatch, err := wm.gitRunOutput(worktreePath, "stash", "show", "-p", hash)
+	// Apply stash patch (--include-untracked for files captured by `git stash push -u`).
+	stashPatch, err := wm.gitRunOutput(worktreePath, "stash", "show", "-p", "--include-untracked", hash)
 	if err != nil {
-		return fmt.Errorf("stash show failed: %w", err)
+		// stash show failed — try regular reset.
+		return wm.gitRun(worktreePath, "reset", "--hard", hash)
 	}
 	if len(strings.TrimSpace(stashPatch)) == 0 {
 		return nil // empty stash, nothing to apply
@@ -1737,7 +1732,8 @@ func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	cmd.Stdin = strings.NewReader(stashPatch)
 	_, err = cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git apply stash failed: %w", err)
+		// apply failed — try regular reset.
+		return wm.gitRun(worktreePath, "reset", "--hard", hash)
 	}
 	return nil
 }
