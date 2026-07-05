@@ -1129,6 +1129,134 @@ func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
 	}
 }
 
+func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Create orphaned task branches (task IDs that don't exist in DB)
+	runGit(t, repoDir, "branch", "task/orphan-one-branch")
+	runGit(t, repoDir, "branch", "task/orphan-two-branch")
+	// Also create a branch that matches the active task (should be kept)
+	runGit(t, repoDir, "branch", "task/"+taskID)
+
+	// Verify branches exist
+	branches := getBranches(t, repoDir)
+	if !contains(branches, "task/orphan-one-branch") {
+		t.Fatal("orphan-one-branch should exist before prune")
+	}
+	if !contains(branches, "task/orphan-two-branch") {
+		t.Fatal("orphan-two-branch should exist before prune")
+	}
+	if !contains(branches, "task/"+taskID) {
+		t.Fatal("active task branch should exist before prune")
+	}
+
+	// Get project ID
+	proj, err := s.GetProject("test-project")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	// Run prune
+	removed := wm.PruneOrphanedBranches(proj.ID)
+	if removed != 2 {
+		t.Fatalf("expected 2 branches removed, got %d", removed)
+	}
+
+	// Verify orphaned branches are gone, active branch remains
+	branches = getBranches(t, repoDir)
+	if contains(branches, "task/orphan-one-branch") {
+		t.Error("orphan-one-branch should be pruned")
+	}
+	if contains(branches, "task/orphan-two-branch") {
+		t.Error("orphan-two-branch should be pruned")
+	}
+	if !contains(branches, "task/"+taskID) {
+		t.Error("active task branch should be kept")
+	}
+}
+
+func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Create orphaned thread branches (thread IDs that don't exist in DB)
+	runGit(t, repoDir, "branch", "thread/orphan-thread-1")
+	runGit(t, repoDir, "branch", "thread/orphan-thread-2")
+
+	// Create an active thread in DB with a branch
+	activeThreadID := "active-thread-xyz"
+	thread := &types.TaskThread{
+		ID:        activeThreadID,
+		TaskID:    taskID,
+		Name:      "Active Fork",
+		IsActive:  true,
+		GitBranch: "thread/" + activeThreadID,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	runGit(t, repoDir, "branch", "thread/"+activeThreadID)
+
+	// Verify branches exist
+	branches := getBranches(t, repoDir)
+	if !contains(branches, "thread/orphan-thread-1") {
+		t.Fatal("orphan thread should exist before prune")
+	}
+	if !contains(branches, "thread/"+activeThreadID) {
+		t.Fatal("active thread branch should exist before prune")
+	}
+
+	// Get project ID
+	proj, err := s.GetProject("test-project")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	// Run prune
+	removed := wm.PruneOrphanedBranches(proj.ID)
+	if removed != 2 {
+		t.Fatalf("expected 2 branches removed, got %d", removed)
+	}
+
+	// Verify orphaned branches are gone, active branch remains
+	branches = getBranches(t, repoDir)
+	if contains(branches, "thread/orphan-thread-1") {
+		t.Error("orphan thread branch should be pruned")
+	}
+	if contains(branches, "thread/orphan-thread-2") {
+		t.Error("orphan thread branch should be pruned")
+	}
+	if !contains(branches, "thread/"+activeThreadID) {
+		t.Error("active thread branch should be kept")
+	}
+}
+
+func TestPruneOrphanedBranches_RemovesBothTaskAndThreadBranches(t *testing.T) {
+	repoDir, _, s, _, wm := setupTestRepo(t)
+
+	// Create both orphaned task and thread branches
+	runGit(t, repoDir, "branch", "task/orphan-task")
+	runGit(t, repoDir, "branch", "thread/orphan-thread")
+
+	proj, err := s.GetProject("test-project")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	removed := wm.PruneOrphanedBranches(proj.ID)
+	if removed != 2 {
+		t.Fatalf("expected 2 branches removed, got %d", removed)
+	}
+
+	branches := getBranches(t, repoDir)
+	if contains(branches, "task/orphan-task") {
+		t.Error("orphan task branch should be pruned")
+	}
+	if contains(branches, "thread/orphan-thread") {
+		t.Error("orphan thread branch should be pruned")
+	}
+}
+
 func getBranches(t *testing.T, dir string) []string {
 	t.Helper()
 	out := runGitOutput(t, dir, "branch")

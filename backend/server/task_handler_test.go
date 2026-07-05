@@ -1173,3 +1173,106 @@ func TestTaskDeleteCleansThreadBranches(t *testing.T) {
 		t.Errorf("thread branch should be deleted after task delete, but still exists: %s", string(out))
 	}
 }
+
+// Test: task delete prunes orphaned task/* branches that are not tracked by task.Branch
+func TestTaskDeletePrunesOrphanedTaskBranches(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "orphan-branch-cleanup")
+
+	// Get project path
+	proj, err := s.store.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	// Create orphaned task branches that don't match any task in the DB.
+	// These simulate branches left behind by crashed/deleted tasks.
+	orphanBranch := "task/orphan-abc-def-ghi"
+	cmd := exec.Command("git", "-C", proj.Path, "branch", orphanBranch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %s: %v", string(out), err)
+	}
+
+	// Also create a branch that matches the task we'll delete
+	taskBranch := "task/" + taskID
+	cmd = exec.Command("git", "-C", proj.Path, "branch", taskBranch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %s: %v", string(out), err)
+	}
+
+	// Verify branches exist
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", orphanBranch)
+	out, err := cmd.Output()
+	if err != nil || !strings.Contains(string(out), orphanBranch) {
+		t.Fatal("orphan branch should exist before task delete")
+	}
+
+	// Delete the task — this should prune ALL orphaned task/* branches
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify the orphaned branch is gone (no task in DB matches it)
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", orphanBranch)
+	out, _ = cmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("orphaned task branch should be pruned after task delete, but still exists: %s", string(out))
+	}
+
+	// Verify the task's own branch is also gone (task was deleted, so no match)
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", taskBranch)
+	out, _ = cmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("task branch should be pruned after task delete, but still exists: %s", string(out))
+	}
+}
+
+// Test: task delete keeps branches for other active tasks in the same project
+func TestTaskDeleteKeepsActiveTaskBranches(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskToDelete := createTestTask(t, s, projID, "task-to-delete")
+	taskToKeep := createTestTask(t, s, projID, "task-to-keep")
+
+	proj, err := s.store.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	// Create branches for both tasks
+	branchToDelete := "task/" + taskToDelete
+	branchToKeep := "task/" + taskToKeep
+
+	cmd := exec.Command("git", "-C", proj.Path, "branch", branchToDelete)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %s: %v", string(out), err)
+	}
+	cmd = exec.Command("git", "-C", proj.Path, "branch", branchToKeep)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %s: %v", string(out), err)
+	}
+
+	// Delete only one task
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskToDelete, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify the deleted task's branch is gone
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", branchToDelete)
+	out, _ := cmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("deleted task branch should be pruned: %s", string(out))
+	}
+
+	// Verify the other task's branch is still there
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", branchToKeep)
+	out, _ = cmd.Output()
+	if strings.TrimSpace(string(out)) == "" {
+		t.Error("active task branch should be kept after other task is deleted")
+	}
+}

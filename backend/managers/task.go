@@ -647,13 +647,22 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	}
 	h.terminalMgr.RemoveSession(taskID)
 	// Delete from database - find project first
+	var projectID string
 	if taskErr == nil {
+		projectID = task.ProjectID
 		_ = h.store.DeleteTask(task.ProjectID, taskID)
 	} else {
 		task, taskErr = h.store.GetTaskByTaskID(taskID)
 		if taskErr == nil {
+			projectID = task.ProjectID
 			_ = h.store.DeleteTask(task.ProjectID, taskID)
 		}
+	}
+	// Prune any orphaned git branches (task/*, thread/*) that no longer have
+	// matching entries in the database after the task and its CASCADE-deleted
+	// threads/messages are removed.
+	if h.worktreeMgr != nil && projectID != "" {
+		h.worktreeMgr.PruneOrphanedBranches(projectID)
 	}
 }
 

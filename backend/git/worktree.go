@@ -419,6 +419,81 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
+// PruneOrphanedBranches removes task/* and thread/* branches from a single project
+// that no longer have matching entries in the database. This is a targeted version of
+// the branch cleanup logic in GarbageCollect, suitable for calling after task deletion.
+// Returns the number of branches removed.
+func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		log.Printf("[prune] error getting project %s: %v", projectID, err)
+		return 0
+	}
+
+	// Get all active task IDs
+	activeTaskIDs, err := wm.store.GetAllTaskIDs()
+	if err != nil {
+		log.Printf("[prune] error getting task IDs: %v", err)
+		return 0
+	}
+	activeTaskSet := make(map[string]bool, len(activeTaskIDs))
+	for _, id := range activeTaskIDs {
+		activeTaskSet[id] = true
+	}
+
+	// Get all active thread IDs
+	activeThreadIDs, err := wm.store.GetAllThreadIDs()
+	if err != nil {
+		log.Printf("[prune] error getting thread IDs: %v", err)
+	}
+	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
+	for _, id := range activeThreadIDs {
+		activeThreadSet[id] = true
+	}
+
+	removed := 0
+
+	// Prune orphaned task branches (task/<id> with no matching task in DB)
+	branchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "task/*")
+	if err == nil {
+		for line := range strings.SplitSeq(branchesOut, "\n") {
+			branch := strings.TrimSpace(line)
+			if branch == "" || !strings.HasPrefix(branch, "task/") {
+				continue
+			}
+			taskID := strings.TrimPrefix(branch, "task/")
+			if !activeTaskSet[taskID] {
+				log.Printf("[prune] deleting orphaned branch %s in project %s", branch, project.Name)
+				wm.gitRun(project.Path, "branch", "-D", branch)
+				removed++
+			}
+		}
+	}
+
+	// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
+	threadBranchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "thread/*")
+	if err == nil {
+		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
+			branch := strings.TrimSpace(line)
+			if branch == "" || !strings.HasPrefix(branch, "thread/") {
+				continue
+			}
+			threadID := strings.TrimPrefix(branch, "thread/")
+			if !activeThreadSet[threadID] {
+				log.Printf("[prune] deleting orphaned thread branch %s in project %s", branch, project.Name)
+				wm.gitRun(project.Path, "branch", "-D", branch)
+				removed++
+			}
+		}
+	}
+
+	if removed > 0 {
+		log.Printf("[prune] project %s: removed %d orphaned branches", project.Name, removed)
+	}
+
+	return removed
+}
+
 // GitDiffRaw returns a snapshot of the worktree's change state for polling.
 // Uses git diff --raw which outputs per-file blob hashes — any content change
 // (even same-line same-character-count edits) produces a new hash.
