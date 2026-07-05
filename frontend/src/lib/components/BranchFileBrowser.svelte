@@ -317,7 +317,8 @@
         {#if entries.length === 0 && !loading}
             <div class="file-browser-empty">Empty directory</div>
         {:else}
-            <VirtualList items={entries} itemHeight={28} minThreshold={50} role="tree" aria-label="File tree" let:item={entry}>
+            <div class="file-browser-list">
+                <VirtualList items={entries} itemHeight={28} minThreshold={50} role="tree" aria-label="File tree" let:item={entry}>
                 <button
                     class="file-browser-item"
                     class:dir={entry.isDir}
@@ -341,6 +342,7 @@
                     {/if}
                 </button>
             </VirtualList>
+            </div>
         {/if}
     {/if}
 </div>
