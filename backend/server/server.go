@@ -78,8 +78,8 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
-	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore)
 	s.sandboxMgr = sandbox.NewSandboxManager()
+	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
 	// Wire port assignment callback → store + WebSocket broadcast
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
@@ -95,7 +95,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	})
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
-	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, exec.NewCommitQueue())
+	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, exec.NewCommitQueue(), s.sandboxMgr)
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())

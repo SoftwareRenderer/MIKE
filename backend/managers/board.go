@@ -16,11 +16,17 @@ type BoardHandler struct {
 	store          *store.Store
 	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
+	sandboxMgr     sandboxOps
+}
+
+// sandboxOps is the subset of sandbox.SandboxManager methods used for port refresh.
+type sandboxOps interface {
+	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
 // NewBoardHandler creates a new BoardHandler.
-func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore) *BoardHandler {
-	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore}
+func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, sandboxMgr sandboxOps) *BoardHandler {
+	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, sandboxMgr: sandboxMgr}
 }
 
 // HandleGetBoard returns the board (all tasks) for a project.
@@ -45,6 +51,16 @@ func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request) {
 	if h.configStore != nil {
 		if cfg, err := h.configStore.GetConfig(); err == nil {
 			EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
+		}
+	}
+
+	// Refresh assigned ports from live sandbox containers
+	if h.sandboxMgr != nil {
+		for i := range tasks {
+			ports, err := h.sandboxMgr.GetContainerPorts(tasks[i].ID)
+			if err == nil && ports != nil {
+				tasks[i].AssignedPorts = ports
+			}
 		}
 	}
 

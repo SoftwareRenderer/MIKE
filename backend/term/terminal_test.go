@@ -92,6 +92,8 @@ func (m *mockSandbox) Stop(taskID string) error {
 
 func (m *mockSandbox) StopProjectContainers(string, []string) {}
 
+func (m *mockSandbox) GetContainerPorts(string) ([]types.AssignedPort, error) { return nil, nil }
+
 func (m *mockSandbox) wasStopped(taskID string) bool {
 	m.stopMu.Lock()
 	defer m.stopMu.Unlock()

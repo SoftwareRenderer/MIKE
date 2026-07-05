@@ -34,6 +34,12 @@ type TaskHandler struct {
 	executor       *exec.TaskExecutor
 	worktreeMgr    *git.WorktreeManager
 	commitQueue    *exec.CommitQueue
+	sandboxMgr     taskSandboxOps
+}
+
+// taskSandboxOps is the subset of sandbox.SandboxManager methods used for port refresh.
+type taskSandboxOps interface {
+	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
 // hasField checks if a key exists in a map[string]any.
@@ -43,8 +49,19 @@ func hasField(m map[string]any, key string) bool {
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *exec.CommitQueue) *TaskHandler {
-	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
+func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *exec.CommitQueue, sandboxMgr taskSandboxOps) *TaskHandler {
+	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue, sandboxMgr: sandboxMgr}
+}
+
+// refreshTaskPorts updates AssignedPorts from the live sandbox container.
+func (h *TaskHandler) refreshTaskPorts(task *types.Task) {
+	if h.sandboxMgr == nil {
+		return
+	}
+	ports, err := h.sandboxMgr.GetContainerPorts(task.ID)
+	if err == nil && ports != nil {
+		task.AssignedPorts = ports
+	}
 }
 
 // EnrichWorktreeExists sets the WorktreeExists field on tasks based on filesystem state.
@@ -78,6 +95,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
 				EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
 			}
+		}
+		// Refresh assigned ports from live sandbox containers
+		for i := range tasks {
+			h.refreshTaskPorts(&tasks[i])
 		}
 		httputil.JSONResponse(w, http.StatusOK, tasks)
 	case http.MethodPost:
@@ -227,6 +248,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				enrichTaskWorktree(task, cfg.WorkspaceDir)
 			}
 		}
+		h.refreshTaskPorts(task)
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodPut:
 		task, err := h.store.GetTask(projectID, taskID)
@@ -252,6 +274,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				enrichTaskWorktree(task, cfg.WorkspaceDir)
 			}
 		}
+		h.refreshTaskPorts(task)
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodDelete:
@@ -375,6 +398,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, req.Status)
 	}
 
+	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
@@ -565,6 +589,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, "done")
 	}
 
+	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
@@ -747,6 +772,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 				return
 			}
 			task, _ = h.store.GetTask(projectID, taskID)
+			h.refreshTaskPorts(task)
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			httputil.JSONResponse(w, http.StatusOK, task)
 			return
@@ -759,6 +785,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 		}
 		startedTask, _ := h.store.GetTask(projectID, selectedID)
 		if startedTask != nil {
+			h.refreshTaskPorts(startedTask)
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
 		}
 		httputil.JSONResponse(w, http.StatusOK, startedTask)
@@ -777,6 +804,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 	log.Printf("[start] task=%s started", taskID)
 	task, _ = h.store.GetTask(projectID, taskID)
+	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
@@ -808,6 +836,7 @@ func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Reque
 	}
 
 	task, _ := h.store.GetTask(projectID, taskID)
+	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
@@ -838,6 +867,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	task, _ = h.store.GetTask(projectID, taskID)
+	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }

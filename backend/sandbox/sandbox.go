@@ -723,6 +723,44 @@ func (sm *SandboxManager) ContainerRunning(taskID string) bool {
 	return ok
 }
 
+// GetContainerPorts queries podman for the live port mappings of a container.
+// Returns an empty slice if the container is not tracked or has no port mappings.
+func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort, error) {
+	sm.mu.Lock()
+	containerName, ok := sm.active[taskID]
+	sm.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	out, err := sm.podmanExec("port", containerName)
+	if err != nil {
+		return nil, fmt.Errorf("podman port: %w", err)
+	}
+	var ports []types.AssignedPort
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "8080/tcp -> 0.0.0.0:12345"
+	parts := strings.Split(line, " -> ")
+		if len(parts) != 2 {
+			continue
+		}
+		containerPart := strings.Split(parts[0], "/")[0] // "8080/tcp" -> "8080"
+		hostPart := strings.Split(parts[1], ":")[1]      // "0.0.0.0:12345" -> "12345"
+		var containerPort, hostPort int
+		if _, err := fmt.Sscanf(containerPart, "%d", &containerPort); err != nil {
+			continue
+		}
+		if _, err := fmt.Sscanf(hostPart, "%d", &hostPort); err != nil {
+			continue
+		}
+		ports = append(ports, types.AssignedPort{HostPort: hostPort, ContainerPort: containerPort})
+	}
+	return ports, nil
+}
+
 // ImageReady checks if a container image is available locally.
 func (sm *SandboxManager) ImageReady(image string) bool {
 	if image == "" {
