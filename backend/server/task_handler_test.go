@@ -846,6 +846,65 @@ func TestCommitAndDone(t *testing.T) {
 	}
 }
 
+// Test: commit-preview endpoint returns a commit message
+func TestCommitPreview(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "preview-test")
+
+	// Move task to review (required for commit operations)
+	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{"status": "review"})
+	moveRR := testResponseAuth(t, s, moveReq)
+	if moveRR.Code != http.StatusOK {
+		t.Fatalf("move to review: %d %s", moveRR.Code, moveRR.Body.String())
+	}
+
+	// Get commit preview
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/commit-preview", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-preview: %d %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+	commitMsg, ok := result["commit_message"].(string)
+	if !ok || commitMsg == "" {
+		t.Fatalf("expected non-empty commit_message, got %v", result["commit_message"])
+	}
+	// Message should contain the task title
+	if !strings.Contains(commitMsg, "preview-test") {
+		t.Fatalf("commit message should contain task title, got: %s", commitMsg)
+	}
+}
+
+// Test: commit-and-done accepts custom commit message from request body
+func TestCommitAndDoneCustomMessage(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "custom-msg")
+
+	// Move task to review
+	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{"status": "review"})
+	moveRR := testResponseAuth(t, s, moveReq)
+	if moveRR.Code != http.StatusOK {
+		t.Fatalf("move to review: %d %s", moveRR.Code, moveRR.Body.String())
+	}
+
+	// Commit-and-done with custom message (no worktree, but should still work)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", map[string]any{
+		"commit_message": "My custom commit message",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done with custom message: %d %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["status"] != "done" {
+		t.Fatalf("expected status=done, got %s", result["status"])
+	}
+}
+
 // Test: agent provider blocked when network isolation is enabled
 func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	s := testServer(t)

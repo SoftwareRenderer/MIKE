@@ -9,6 +9,7 @@ import {
     deleteTaskRaw,
     moveTaskRaw,
     commitAndDoneRaw,
+    getCommitPreviewRaw,
     clearDoneTasksRaw,
     startTaskRaw,
     startSubtaskRaw,
@@ -76,11 +77,16 @@ export async function moveTask(projectId: string, taskId: string, status: string
 }
 
 /** Commit changes and mark a task as done. Queued when offline. */
-export async function commitAndDone(projectId: string, taskId: string): Promise<Task> {
+export async function commitAndDone(projectId: string, taskId: string, commitMessage?: string): Promise<Task> {
     if (getOfflineStatus()) {
         return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done' } as Task);
     }
-    return commitAndDoneRaw(projectId, taskId);
+    return commitAndDoneRaw(projectId, taskId, commitMessage);
+}
+
+/** Get a preview of the commit message that would be used for commit-and-done. */
+export async function getCommitPreview(projectId: string, taskId: string): Promise<{ commit_message: string }> {
+    return getCommitPreviewRaw(projectId, taskId);
 }
 
 /** Delete all done tasks in a project. Queued when offline. */

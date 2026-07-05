@@ -479,11 +479,23 @@ async function moveTaskRaw(projectId: string, taskId: string, status: string): P
     return res.json();
 }
 
-async function commitAndDoneRaw(projectId: string, taskId: string): Promise<Task> {
+async function commitAndDoneRaw(projectId: string, taskId: string, commitMessage?: string): Promise<Task> {
+    const body: Record<string, string> = {};
+    if (commitMessage) body.commit_message = commitMessage;
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
     });
     if (!res.ok) throw await apiError(res, 'Failed to commit and mark as done');
+    return res.json();
+}
+
+async function getCommitPreviewRaw(projectId: string, taskId: string): Promise<{ commit_message: string }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit-preview`, {
+        method: 'GET',
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to get commit preview');
     return res.json();
 }
 
@@ -664,6 +676,7 @@ export {
     deleteTaskRaw,
     moveTaskRaw,
     commitAndDoneRaw,
+    getCommitPreviewRaw,
     clearDoneTasksRaw,
     startTaskRaw,
     startSubtaskRaw,

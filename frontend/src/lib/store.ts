@@ -144,3 +144,28 @@ export function showConfirm(options: ConfirmOptions): Promise<boolean> {
         } as ConfirmOptions & { _resolve?: (value: boolean) => void });
     });
 }
+
+// Commit dialog state
+export interface CommitDialogOptions {
+    loading: boolean;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+}
+
+export const commitDialog = writable<CommitDialogOptions | null>(null);
+
+/**
+ * Show a commit confirmation dialog and return a Promise that resolves with the edited message or null (cancelled).
+ */
+export function showCommitDialog(options: CommitDialogOptions): Promise<string | null> {
+    return new Promise((resolve) => {
+        commitDialog.set({
+            loading: options.loading,
+            message: options.message,
+            confirmText: options.confirmText ?? 'Commit and move to Done',
+            cancelText: options.cancelText ?? 'Cancel',
+            _resolve: resolve,
+        } as CommitDialogOptions & { _resolve?: (value: string | null) => void });
+    });
+}

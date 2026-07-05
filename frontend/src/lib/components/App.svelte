@@ -20,6 +20,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
+    import CommitDialog from './Chat/CommitDialog.svelte';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
     import BranchView from './BranchView.svelte';
@@ -900,6 +901,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     {/if}
     <Toast />
     <ConfirmationDialog />
+    <CommitDialog />
 </div>
 {/if}
 

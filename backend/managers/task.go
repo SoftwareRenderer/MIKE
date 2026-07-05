@@ -492,6 +492,56 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 	return nil
 }
 
+// generateCommitMessage builds a commit message from task title, summary, and model.
+// If task.ChangeSummary is empty, generates one via LLM from conversation + diff.
+func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) string {
+	modelName := task.ModelName
+	if modelName == "" {
+		modelName = "unknown model"
+	}
+	summary := task.ChangeSummary
+	if summary == "" {
+		diffStat, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+		if diffStat == "" {
+			diffStat = "no diff available"
+		}
+		taskMsgs, _ := h.store.GetTaskMessages(taskID, task.CurrentThreadID)
+		var conversation []types.ChatMessage
+		for _, m := range taskMsgs {
+			content := m.Content
+			if m.ReasoningContent != "" {
+				content = m.ReasoningContent + "\n" + m.Content
+			}
+			conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+		}
+		summary = h.executor.GenerateCommitLabel(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
+	}
+	return fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
+}
+
+// HandleCommitPreview generates and returns the commit message that would be used
+// for a commit-and-done operation, without performing the commit.
+func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
+	}
+
+	commitMsg := h.generateCommitMessage(taskID, task)
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"commit_message": commitMsg})
+}
+
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
 // Operations are serialized per project to prevent git race conditions.
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +561,12 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Read optional commit_message from request body
+	var body struct {
+		CommitMessage string `json:"commit_message"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1024*1024)).Decode(&body)
+
 	// Serialize commit-and-done per project to prevent git race conditions
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "queued")
 	release := h.commitQueue.Acquire(projectID)
@@ -521,30 +577,10 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if worktreeExists {
-		// Worktree exists — stage and commit
-		modelName := task.ModelName
-		if modelName == "" {
-			modelName = "unknown model"
+		commitMsg := body.CommitMessage
+		if commitMsg == "" {
+			commitMsg = h.generateCommitMessage(taskID, task)
 		}
-		summary := task.ChangeSummary
-		if summary == "" {
-			// Generate a descriptive label from conversation + diff
-			diffStat, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-			if diffStat == "" {
-				diffStat = "no diff available"
-			}
-			taskMsgs, _ := h.store.GetTaskMessages(taskID, task.CurrentThreadID)
-			var conversation []types.ChatMessage
-			for _, m := range taskMsgs {
-				content := m.Content
-				if m.ReasoningContent != "" {
-					content = m.ReasoningContent + "\n" + m.Content
-				}
-				conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-			}
-			summary = h.executor.GenerateCommitLabel(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
-		}
-		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}

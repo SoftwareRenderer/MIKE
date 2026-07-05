@@ -71,7 +71,7 @@
                 {/if}
             </button>
         {:else}
-            <button class="btn-commit-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move to Done'}>
+            <button class="btn-commit-done" class:has-changes={hasChanges} onclick={onCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move to Done'}>
                 {#if queueStatus === 'queued'}
                     <span class="spinner-inline"></span> In queue...
                 {:else if queueStatus === 'processing' || isCommitting}
@@ -158,15 +158,21 @@
         border-radius: var(--radius-md);
         font-size: 0.8125rem;
         font-weight: 600;
-        background: var(--color-status-green);
-        color: white;
-        border: none;
+        background: var(--color-surface-2);
+        color: var(--color-text-primary);
+        border: 1.5px solid var(--color-status-green);
         cursor: pointer;
         transition: all 0.15s ease;
     }
+    .btn-commit-done.has-changes {
+        border-color: var(--color-status-yellow);
+    }
     .btn-commit-done:hover:not(:disabled) {
-        opacity: 0.85;
-        transform: translateY(-1px);
+        background: var(--color-surface-3);
+        opacity: 0.9;
+    }
+    .btn-commit-done.has-changes:hover:not(:disabled) {
+        border-color: var(--color-status-yellow);
     }
     .btn-commit-done:disabled {
         opacity: 0.5;
