@@ -321,6 +321,16 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		activeSet[id] = true
 	}
 
+	// Get all active thread IDs for orphaned thread branch detection
+	activeThreadIDs, err := wm.store.GetAllThreadIDs()
+	if err != nil {
+		log.Printf("[gc] error getting thread IDs: %v", err)
+	}
+	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
+	for _, id := range activeThreadIDs {
+		activeThreadSet[id] = true
+	}
+
 	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
 		return 0, fmt.Errorf("read worktrees dir: %w", err)
@@ -374,6 +384,26 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
 					log.Printf("[gc] deleting orphaned branch %s in project %s", branch, p.Name)
+					wm.gitRun(p.Path, "branch", "-D", branch)
+				}
+			}
+		}
+		// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
+		threadBranchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "thread/*")
+		if err != nil {
+			continue
+		}
+		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
+			branch := strings.TrimSpace(line)
+			if branch == "" || !strings.HasPrefix(branch, "thread/") {
+				continue
+			}
+			threadID := strings.TrimPrefix(branch, "thread/")
+			if !activeThreadSet[threadID] {
+				if dryRun {
+					log.Printf("[gc] would delete orphaned thread branch %s in project %s", branch, p.Name)
+				} else {
+					log.Printf("[gc] deleting orphaned thread branch %s in project %s", branch, p.Name)
 					wm.gitRun(p.Path, "branch", "-D", branch)
 				}
 			}

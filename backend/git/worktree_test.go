@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/config"
 	"kanban/backend/store"
@@ -1048,4 +1049,106 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %s: %v", args, string(out), err)
 	}
 	return string(out)
+}
+
+func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Create a thread in the DB with a git_branch
+	threadID := "test-thread-abc"
+	thread := &types.TaskThread{
+		ID:        threadID,
+		TaskID:    taskID,
+		Name:      "Fork #1",
+		IsActive:  false,
+		GitBranch: "thread/" + threadID,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Create the corresponding git branch in the repo
+	runGit(t, repoDir, "branch", "thread/"+threadID)
+
+	// Verify branch exists
+	branches := getBranches(t, repoDir)
+	if !contains(branches, "thread/"+threadID) {
+		t.Fatal("thread branch should exist before GC")
+	}
+
+	// Delete the thread from DB (simulates task delete CASCADE)
+	if err := s.DeleteThread(threadID); err != nil {
+		t.Fatalf("delete thread: %v", err)
+	}
+
+	// Run GC
+	removed, err := wm.GarbageCollect(false)
+	if err != nil {
+		t.Fatalf("GarbageCollect: %v", err)
+	}
+	t.Logf("GC removed %d orphaned worktrees", removed)
+
+	// Verify thread branch is gone
+	branches = getBranches(t, repoDir)
+	if contains(branches, "thread/"+threadID) {
+		t.Error("orphaned thread branch should be pruned by GC")
+	}
+}
+
+func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Create a thread in the DB with a git_branch
+	threadID := "test-thread-xyz"
+	thread := &types.TaskThread{
+		ID:        threadID,
+		TaskID:    taskID,
+		Name:      "Fork #2",
+		IsActive:  true,
+		GitBranch: "thread/" + threadID,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Create the corresponding git branch in the repo
+	runGit(t, repoDir, "branch", "thread/"+threadID)
+
+	// Run GC — should NOT remove active thread branch
+	_, err := wm.GarbageCollect(false)
+	if err != nil {
+		t.Fatalf("GarbageCollect: %v", err)
+	}
+
+	// Verify thread branch still exists
+	branches := getBranches(t, repoDir)
+	if !contains(branches, "thread/"+threadID) {
+		t.Error("active thread branch should be kept by GC")
+	}
+}
+
+func getBranches(t *testing.T, dir string) []string {
+	t.Helper()
+	out := runGitOutput(t, dir, "branch")
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		b := strings.TrimSpace(line)
+		if b != "" && !strings.HasPrefix(b, "*") {
+			// Strip leading "* " for active branch
+			b = strings.TrimPrefix(b, "* ")
+			branches = append(branches, b)
+		}
+	}
+	return branches
+}
+
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

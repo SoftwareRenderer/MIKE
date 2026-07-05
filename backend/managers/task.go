@@ -626,9 +626,9 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		_ = h.executor.StopTask(taskID)
 		h.executor.StopSandbox(taskID)
 	}
-	if h.worktreeMgr != nil {
-		task, err := h.store.GetTaskByTaskID(taskID)
-		if err == nil && task.Branch != "" {
+	task, taskErr := h.store.GetTaskByTaskID(taskID)
+	if h.worktreeMgr != nil && taskErr == nil {
+		if task.Branch != "" {
 			h.boardStreamMgr.UnwatchWorktree(taskID)
 			// Clean up stash entries belonging to this task's branch
 			_ = h.worktreeMgr.DropStashEntriesForBranch(task.ProjectID, task.Branch)
@@ -636,12 +636,24 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
 			}
 		}
+		// Clean up fork thread branches (thread/<threadID>) before DB CASCADE deletes thread rows.
+		// Runs even when task.Branch is empty (e.g., task was created but never started).
+		threads, _ := h.store.GetThreadsByTask(taskID)
+		for _, th := range threads {
+			if th.GitBranch != "" {
+				h.worktreeMgr.GitRunInProject(task.ProjectID, "branch", "-D", th.GitBranch)
+			}
+		}
 	}
 	h.terminalMgr.RemoveSession(taskID)
 	// Delete from database - find project first
-	task, err := h.store.GetTaskByTaskID(taskID)
-	if err == nil {
+	if taskErr == nil {
 		_ = h.store.DeleteTask(task.ProjectID, taskID)
+	} else {
+		task, taskErr = h.store.GetTaskByTaskID(taskID)
+		if taskErr == nil {
+			_ = h.store.DeleteTask(task.ProjectID, taskID)
+		}
 	}
 }
 

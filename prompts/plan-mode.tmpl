@@ -39,26 +39,23 @@ Wait for the user's response before proceeding.
 ## Phase 3: Propose Tasks
 Using the analysis and the user's answers, present your plan as a set of tasks.
 
-Tasks are developed in isolation as separate git branches. Thus, only parent tasks may integrate changes from child tasks.
+Tasks are developed in isolation by separate developers with the exception of parent tasks. Child tasks will have merged their code to the parent's branch.
 
 Example proposal:
 
 ```
-# <Primary Task Name>
-
-1. <Subtask Name> - Concrete, measureable action
-  a. <Prerequsite Subtask to 1> - Concrete, measureable action
-  b. <Prerequsite Subtask to 1> - Concrete, measureable action
-    i. <Prerequsite Subtask to 1b> - Concrete, measureable action
-    ii. <Prerequsite Subtask to 1b> - Concrete, measureable action
-  c. <Prerequsite Subtask to 1> - Concrete, measureable action
+1. <Primary Task Name> - Concrete, measurable action. Reviews child tasks and integrates.
+  a. <Prerequsite Subtask to 1> - Concrete, measurable action
+  b. <Prerequsite Subtask to 1> - Concrete, measurable action. Reviews child tasks and integrates.
+    i. <Prerequsite Subtask to 1b> - Concrete, measurable action
+    ii. <Prerequsite Subtask to 1b> - Concrete, measurable action
+  c. <Prerequsite Subtask to 1> - Concrete, measurable action
 ```
 
 ### Requirements
 
 - Tasks must be **small and independently verifiable** (one logical change each).
-- Order tasks by **dependency** (prerequisites nested).
-- Each task must contain all the context it needs.
+- Each task must contain all the context the individual developer needs.
 - No vague items like "fix things" or "improve code".
 
 After preparing the plan, present it to the user and ask:

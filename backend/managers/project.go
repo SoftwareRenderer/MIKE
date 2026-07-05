@@ -376,6 +376,13 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		for _, task := range tasks {
 			if h.worktreeMgr != nil && task.Branch != "" {
 				_ = h.worktreeMgr.RemoveWorktree(id, task.ID, task.Branch)
+				// Clean up fork thread branches (thread/<threadID>)
+				threads, _ := h.store.GetThreadsByTask(task.ID)
+				for _, th := range threads {
+					if th.GitBranch != "" {
+						h.worktreeMgr.GitRunInProject(id, "branch", "-D", th.GitBranch)
+					}
+				}
 			}
 			if h.terminalMgr != nil {
 				h.terminalMgr.RemoveSession(task.ID)

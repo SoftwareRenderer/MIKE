@@ -110,6 +110,26 @@ func (s *Store) DeleteThread(threadID string) error {
 	return err
 }
 
+// GetAllThreadIDs returns all thread IDs across all tasks.
+func (s *Store) GetAllThreadIDs() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT id FROM task_threads`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // UpdateThreadWorktreeStashHash saves the worktree stash hash for a thread.
 func (s *Store) UpdateThreadWorktreeStashHash(threadID, hash string) error {
 	s.mu.Lock()

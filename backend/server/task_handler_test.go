@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -1118,4 +1119,57 @@ func createTestTaskWithAgent(t *testing.T, s *Server, projectID string, prompt s
 	}
 	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
+}
+
+// Test: task delete cleans up fork thread branches
+func TestTaskDeleteCleansThreadBranches(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "thread-branch-cleanup")
+
+	// Get project path to create git branch
+	proj, err := s.store.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	// Create a fork thread in the DB with a git_branch
+	threadID := "test-thread-branch-cleanup"
+	thread := &types.TaskThread{
+		ID:        threadID,
+		TaskID:    taskID,
+		Name:      "Fork #1",
+		IsActive:  false,
+		GitBranch: "thread/" + threadID,
+	}
+	if err := s.store.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Create the corresponding git branch in the project repo
+	cmd := exec.Command("git", "-C", proj.Path, "branch", "thread/"+threadID)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %s: %v", string(out), err)
+	}
+
+	// Verify branch exists
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", "thread/"+threadID)
+	out, err := cmd.Output()
+	if err != nil || !strings.Contains(string(out), "thread/"+threadID) {
+		t.Fatal("thread branch should exist before task delete")
+	}
+
+	// Delete the task
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify thread branch is gone
+	cmd = exec.Command("git", "-C", proj.Path, "branch", "--list", "thread/"+threadID)
+	out, _ = cmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("thread branch should be deleted after task delete, but still exists: %s", string(out))
+	}
 }
