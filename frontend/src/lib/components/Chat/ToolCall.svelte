@@ -144,8 +144,10 @@
         return text.slice(0, RESULT_MAX_BYTES) + '…';
     }
 
-    let bashResultNeedsTruncation = $derived(
-        tc.toolName === 'bash' && !isBashStreaming && !streamedBashToolIds.includes(tc.toolId) && effectiveResult && (
+    let resultNeedsTruncation = $derived(
+        (tc.toolName === 'bash' || tc.toolName === 'read_file') && effectiveResult && (
+            tc.toolName !== 'bash' || (!isBashStreaming && !streamedBashToolIds.includes(tc.toolId))
+        ) && (
             tc.resultTruncated || effectiveResult.split('\n').length > RESULT_MAX_LINES || effectiveResult.length > RESULT_MAX_BYTES
         )
     );
@@ -289,7 +291,7 @@
         {:else if tc.toolName === 'task_complete' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
         {:else if tc.result && tc.result.trim()}
-            {#if bashResultNeedsTruncation}
+            {#if resultNeedsTruncation}
                 <div class="tool-result-wrapper">
                     <pre class="tool-result" class:tool-result-error={!tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
                     <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>

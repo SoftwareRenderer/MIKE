@@ -800,3 +800,194 @@ func TestMessageListShortBashResultNotTruncated(t *testing.T) {
 		t.Fatalf("expected unchanged short output, got: %s", output)
 	}
 }
+
+func TestMessageListReadFileResultTruncated(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	longOutput := strings.Repeat("line of file content text\n", 20)
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_read",
+		"tool_name": "read_file",
+		"args":      map[string]any{"path": "src/large_file.go"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   longOutput,
+		"success":  true,
+		"duration": 10,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-read-long",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var readMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			readMsg = m
+			break
+		}
+	}
+	if readMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	// result_truncated should be true
+	if readMsg["result_truncated"] != true {
+		t.Fatalf("expected result_truncated=true, got %v", readMsg["result_truncated"])
+	}
+
+	// Parse tool_result and check output is truncated
+	var result map[string]any
+	if err := json.Unmarshal([]byte(readMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if !strings.Contains(output, "truncated") {
+		t.Fatalf("expected truncated output, got: %s", output)
+	}
+	outputLines := strings.Count(output, "\n")
+	if outputLines >= 20 {
+		t.Fatalf("expected fewer than 20 lines, got %d", outputLines)
+	}
+	originalLines := len(strings.Split(longOutput, "\n"))
+	if result["original_lines"] != float64(originalLines) {
+		t.Fatalf("expected original_lines=%d, got %v", originalLines, result["original_lines"])
+	}
+	if result["original_bytes"] != float64(len(longOutput)) {
+		t.Fatalf("expected original_bytes=%d, got %v", len(longOutput), result["original_bytes"])
+	}
+}
+
+func TestMessageListReadFileResultFull(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	longOutput := strings.Repeat("line of file content text\n", 20)
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_read",
+		"tool_name": "read_file",
+		"args":      map[string]any{"path": "src/large_file.go"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   longOutput,
+		"success":  true,
+		"duration": 10,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-read-full",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	// GET with full=1 — output should be preserved
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var readMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			readMsg = m
+			break
+		}
+	}
+	if readMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	if readMsg["result_truncated"] == true {
+		t.Fatalf("expected result_truncated=false with full=1, got true")
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(readMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if output != longOutput {
+		t.Fatalf("expected full output, got length %d", len(output))
+	}
+}
+
+func TestMessageListShortReadFileResultNotTruncated(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	shortOutput := "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"
+	toolCallsJSON, _ := json.Marshal(map[string]any{
+		"tool_id":   "call_read",
+		"tool_name": "read_file",
+		"args":      map[string]any{"path": "main.go"},
+	})
+	toolResultJSON, _ := json.Marshal(map[string]any{
+		"output":   shortOutput,
+		"success":  true,
+		"duration": 2,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:         "test-read-short",
+		TaskID:     taskID,
+		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
+		Role:       "tool_call",
+		Content:    "",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: string(toolResultJSON),
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	msgs := mustJSON[[]map[string]any](t, rr.Body)
+	var readMsg map[string]any
+	for _, m := range msgs {
+		if m["role"] == "tool_call" {
+			readMsg = m
+			break
+		}
+	}
+	if readMsg == nil {
+		t.Fatal("tool_call message not found")
+	}
+
+	if readMsg["result_truncated"] == true {
+		t.Fatalf("expected result_truncated=false for short output, got true")
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(readMsg["tool_result"].(string)), &result); err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	output := result["output"].(string)
+	if output != shortOutput {
+		t.Fatalf("expected unchanged short output, got: %s", output)
+	}
+}

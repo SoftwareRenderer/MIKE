@@ -114,7 +114,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if messages[i].Role == "tool_call" && messages[i].ToolResult != "" {
-				truncated := truncateBashResult(&messages[i])
+				truncated := truncateToolResult(&messages[i])
 				if truncated {
 					messages[i].ResultTruncated = true
 				}
@@ -311,14 +311,15 @@ func shouldSuppressReasoning(reasoningContent, content, toolCalls string) bool {
 	return true
 }
 
-// truncateBashResult truncates bash output to 10 lines / 1KB.
-func truncateBashResult(msg *types.TaskMessage) bool {
-	// Check if this is a bash tool call
+// truncateToolResult truncates bash and read_file output to 10 lines / 1KB.
+func truncateToolResult(msg *types.TaskMessage) bool {
+	// Check if this is a tool with displayable output
 	var tc map[string]any
 	if err := json.Unmarshal([]byte(msg.ToolCalls), &tc); err != nil {
 		return false
 	}
-	if tc["tool_name"] != "bash" {
+	toolName := tc["tool_name"].(string)
+	if toolName != "bash" && toolName != "read_file" {
 		return false
 	}
 	// Parse tool_result
