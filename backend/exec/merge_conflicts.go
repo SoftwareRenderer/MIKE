@@ -135,6 +135,13 @@ func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targe
 	return summary, nil
 }
 
+// isMergeInProgress checks whether a git merge is currently in progress in the given directory.
+// A merge is in progress if .git/MERGE_HEAD exists.
+func isMergeInProgress(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD"))
+	return err == nil
+}
+
 // getConflictedFilesInDir returns a list of files with merge conflicts in the given directory.
 // Uses git status --porcelain which catches ALL conflict types (UU, AD, DU, AA, DD, UD, UA),
 // unlike git diff --name-only --diff-filter=U which misses directory/file type conflicts.
@@ -163,15 +170,78 @@ func getConflictedFilesInDir(dir string) []string {
 	return files
 }
 
+// getConflictedFilesFallback returns conflicted files using git diff --diff-filter=U.
+// This catches cases that git status --porcelain might miss, such as binary conflicts
+// and rename conflicts.
+func getConflictedFilesFallback(dir string) []string {
+	cmd := osexec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for line := range strings.SplitSeq(string(out), "\n") {
+		f := strings.TrimSpace(line)
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+// getMergeStatusOutput returns the raw git status --porcelain output for diagnostics.
+func getMergeStatusOutput(dir string) string {
+	cmd := osexec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Sprintf("(git status failed: %v)", err)
+	}
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return "(working tree clean)"
+	}
+	return result
+}
+
 // tryResolveMergeConflicts attempts LLM-based conflict resolution after a failed merge.
+// Uses a fallback chain: primary scan → fallback scan → auto-continue → diagnostic error.
 // On success, stages files, commits, and logs a merge_resolution message.
 // On failure, aborts the merge and returns the error (caller should handle gracefully).
 func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
+	// Confirm we're actually in a merge state
+	if !isMergeInProgress(dir) {
+		// Not a merge conflict — likely a hook failure, lock issue, or other git error
+		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD)")
+	}
+
+	// Primary scan: git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA)
 	conflictedFiles := getConflictedFilesInDir(dir)
+
+	// Fallback scan: git diff --diff-filter=U (catches binary conflicts, renames)
 	if len(conflictedFiles) == 0 {
-		// No conflicted files found — abort merge
+		conflictedFiles = getConflictedFilesFallback(dir)
+		if len(conflictedFiles) > 0 {
+			log.Printf("[merge] task=%s fallback scan found %d conflicted file(s): %s",
+				taskID, len(conflictedFiles), strings.Join(conflictedFiles, ", "))
+		}
+	}
+
+	// No conflicted files found — try git merge --continue (git may have auto-resolved)
+	if len(conflictedFiles) == 0 {
+		log.Printf("[merge] task=%s no conflicted files found, trying merge --continue", taskID)
+		continueErr := runGitDir(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
+		if continueErr == nil {
+			log.Printf("[merge] task=%s merge auto-resolved via --continue", taskID)
+			te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
+			return nil
+		}
+		// --continue also failed — include diagnostics in error
+		statusOutput := getMergeStatusOutput(dir)
+		log.Printf("[merge] task=%s merge --continue failed: %v. Status: %s", taskID, continueErr, statusOutput)
 		_ = runGitDir(dir, "merge", "--abort")
-		return fmt.Errorf("merge conflict but no conflicted files found")
+		return fmt.Errorf("merge conflict but no conflicted files found (status: %s)", statusOutput)
 	}
 
 	log.Printf("[merge] task=%s conflict, resolving %d file(s) with LLM: %s",

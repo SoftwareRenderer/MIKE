@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -87,11 +88,40 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 
 	// Merge conflict detected — resolve with LLM
 	log.Printf("[merge] task=%s conflict merging into %s, resolving with LLM", taskID, originBranch)
+
+	// Confirm we're actually in a merge state
+	project, _ := h.store.GetProject(projectID)
+	if !isMergeInProgress(project.Path) {
+		// Not a merge conflict — likely a hook failure, lock issue, or other git error
+		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD)")
+	}
+
+	// Primary scan: git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA)
 	conflictedFiles := h.getConflictedFiles(projectID)
+
+	// Fallback scan: git diff --diff-filter=U (catches binary conflicts, renames)
 	if len(conflictedFiles) == 0 {
-		// Abort merge if no conflicted files found (shouldn't happen)
+		conflictedFiles = h.getConflictedFilesFallback(projectID)
+		if len(conflictedFiles) > 0 {
+			log.Printf("[merge] task=%s fallback scan found %d conflicted file(s): %s",
+				taskID, len(conflictedFiles), strings.Join(conflictedFiles, ", "))
+		}
+	}
+
+	// No conflicted files found — try git merge --continue (git may have auto-resolved)
+	if len(conflictedFiles) == 0 {
+		log.Printf("[merge] task=%s no conflicted files found, trying merge --continue", taskID)
+		continueErr := h.worktreeMgr.GitRunInProject(projectID, append(git.GitAuthorFlags(), "merge", "--continue")...)
+		if continueErr == nil {
+			log.Printf("[merge] task=%s merge auto-resolved via --continue", taskID)
+			h.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, originBranch)
+			return nil
+		}
+		// --continue also failed — include diagnostics in error
+		statusOutput := h.getMergeStatusOutput(projectID)
+		log.Printf("[merge] task=%s merge --continue failed: %v. Status: %s", taskID, continueErr, statusOutput)
 		_ = h.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
-		return fmt.Errorf("merge conflict but no conflicted files found")
+		return fmt.Errorf("merge conflict but no conflicted files found (status: %s)", statusOutput)
 	}
 
 	// Log conflict detection as system message
@@ -124,6 +154,13 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 	return nil
 }
 
+// isMergeInProgress checks whether a git merge is currently in progress in the given directory.
+// A merge is in progress if .git/MERGE_HEAD exists.
+func isMergeInProgress(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD"))
+	return err == nil
+}
+
 // getConflictedFiles returns a list of files with merge conflicts.
 // Uses git status --porcelain which catches ALL conflict types (UU, AD, DU, AA, DD, UD, UA),
 // unlike git diff --name-only --diff-filter=U which misses directory/file type conflicts.
@@ -148,6 +185,37 @@ func (h *TaskHandler) getConflictedFiles(projectID string) []string {
 		}
 	}
 	return files
+}
+
+// getConflictedFilesFallback returns conflicted files using git diff --diff-filter=U.
+// This catches cases that git status --porcelain might miss, such as binary conflicts
+// and rename conflicts.
+func (h *TaskHandler) getConflictedFilesFallback(projectID string) []string {
+	out, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for line := range strings.SplitSeq(out, "\n") {
+		f := strings.TrimSpace(line)
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+// getMergeStatusOutput returns the raw git status --porcelain output for diagnostics.
+func (h *TaskHandler) getMergeStatusOutput(projectID string) string {
+	out, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "status", "--porcelain")
+	if err != nil {
+		return fmt.Sprintf("(git status failed: %v)", err)
+	}
+	result := strings.TrimSpace(out)
+	if result == "" {
+		return "(working tree clean)"
+	}
+	return result
 }
 
 // resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
