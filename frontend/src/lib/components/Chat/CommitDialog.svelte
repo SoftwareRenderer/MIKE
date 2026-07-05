@@ -8,6 +8,8 @@
     let editedMessage = $state('');
     let confirmText = $state('Commit and move to Done');
     let cancelText = $state('Cancel');
+    let authorName = $state('');
+    let authorEmail = $state('');
     let resolveFn: ((value: string | null) => void) | null = $state(null);
     let textareaRef: HTMLTextAreaElement | null = $state(null);
 
@@ -60,6 +62,8 @@
                 editedMessage = value.message || '';
                 confirmText = value.confirmText ?? 'Commit and move to Done';
                 cancelText = value.cancelText ?? 'Cancel';
+                authorName = value.authorName || '';
+                authorEmail = value.authorEmail || '';
                 resolveFn = (value as CommitDialogOptions & { _resolve?: (value: string | null) => void })._resolve ?? null;
                 open = true;
 
@@ -112,6 +116,12 @@
                     placeholder="Enter commit message..."
                     aria-label="Commit message"
                 ></textarea>
+
+                {#if authorName || authorEmail}
+                    <div class="commit-author">
+                        Committed as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
+                    </div>
+                {/if}
 
                 <div class="commit-actions">
                     <button class="btn-cancel" onclick={handleCancel}>{cancelText}</button>
@@ -188,6 +198,12 @@
     }
 
     .commit-textarea::placeholder {
+        color: var(--color-text-tertiary);
+    }
+
+    .commit-author {
+        margin-top: 10px;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
     }
 

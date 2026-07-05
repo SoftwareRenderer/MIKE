@@ -1538,14 +1538,18 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     // Fetch preview in background
                     (async () => {
                         let commitMessage = '';
+                        let authorName = '';
+                        let authorEmail = '';
                         try {
                             const preview = await getCommitPreview(projectId, taskId);
                             commitMessage = preview.commit_message;
+                            authorName = preview.author_name || '';
+                            authorEmail = preview.author_email || '';
                         } catch (e) {
                             commitMessage = taskTitle;
                         }
                         // Update dialog with actual message
-                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage } : null);
+                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail } : null);
                     })();
                 });
                 if (!confirmedMessage) {

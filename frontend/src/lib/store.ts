@@ -151,6 +151,8 @@ export interface CommitDialogOptions {
     message: string;
     confirmText?: string;
     cancelText?: string;
+    authorName?: string;
+    authorEmail?: string;
 }
 
 export const commitDialog = writable<CommitDialogOptions | null>(null);

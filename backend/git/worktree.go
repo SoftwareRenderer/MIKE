@@ -22,21 +22,24 @@ import (
 const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 
 // Git author identity, configurable via environment variables.
+// When unset, Git uses its configured defaults (from .gitconfig / system config).
 var (
-	GitAuthorName = envDefault("KANBAN_GIT_AUTHOR_NAME", "Kanban")
-	GitAuthorEmail = envDefault("KANBAN_GIT_AUTHOR_EMAIL", "kanban@local")
+	GitAuthorName  = os.Getenv("KANBAN_GIT_AUTHOR_NAME")
+	GitAuthorEmail = os.Getenv("KANBAN_GIT_AUTHOR_EMAIL")
 )
 
-func envDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// GitAuthorFlags returns -c flags to set the commit author identity.
+// GitAuthorFlags returns -c flags to override the commit author identity.
+// Only returns flags when KANBAN_GIT_AUTHOR_NAME or KANBAN_GIT_AUTHOR_EMAIL is set.
+// When neither is set, returns nil so Git uses its configured defaults.
 func GitAuthorFlags() []string {
-	return []string{"-c", "user.name=" + GitAuthorName, "-c", "user.email=" + GitAuthorEmail}
+	var flags []string
+	if GitAuthorName != "" {
+		flags = append(flags, "-c", "user.name="+GitAuthorName)
+	}
+	if GitAuthorEmail != "" {
+		flags = append(flags, "-c", "user.email="+GitAuthorEmail)
+	}
+	return flags
 }
 
 // ignoredDirs is a set of well-known directory names that should never be

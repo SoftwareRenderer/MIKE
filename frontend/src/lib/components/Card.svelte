@@ -2,13 +2,13 @@
     import type { Task, Provider } from '$lib/types';
     import { PI_SENTINEL_URL } from '$lib/types';
     import { get } from 'svelte/store';
-    import { selectedTask, showCardDetail, board as boardStore, config as configStore, showConfirm, showToast, selectedProject } from '$lib/store';
+    import { selectedTask, showCardDetail, board as boardStore, config as configStore, showConfirm, showToast, selectedProject, commitDialog as commitDialogStore } from '$lib/store';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getCommitPreview, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { showEditTask, editTaskData } from '$lib/store';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
@@ -472,7 +472,37 @@
         try {
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
-                updated = await commitAndDone(projectId, task.id);
+                // Fetch commit message preview and show confirmation dialog
+                const confirmedMessage = await new Promise<string | null>((resolve) => {
+                    // Open dialog in loading state
+                    commitDialogStore.set({
+                        loading: true,
+                        message: '',
+                        confirmText: 'Commit and move to Done',
+                        cancelText: 'Cancel',
+                        _resolve: resolve,
+                    });
+                    // Fetch preview in background
+                    (async () => {
+                        let commitMessage = '';
+                        let authorName = '';
+                        let authorEmail = '';
+                        try {
+                            const preview = await getCommitPreview(projectId!, task.id);
+                            commitMessage = preview.commit_message;
+                            authorName = preview.author_name || '';
+                            authorEmail = preview.author_email || '';
+                        } catch (e) {
+                            commitMessage = task.title;
+                        }
+                        // Update dialog with actual message
+                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail } : null);
+                    })();
+                });
+                if (!confirmedMessage) {
+                    return; // User cancelled
+                }
+                updated = await commitAndDone(projectId, task.id, confirmedMessage);
                 // Clear stale diff stats immediately so the button updates right away
                 taskDiffStatsStore.update(map => { delete map[task.id]; return { ...map }; });
             } else {

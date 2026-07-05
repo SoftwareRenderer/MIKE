@@ -1281,6 +1281,71 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
+func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
+	// Save and restore package-level vars
+	origName, origEmail := GitAuthorName, GitAuthorEmail
+	defer func() {
+		GitAuthorName, GitAuthorEmail = origName, origEmail
+	}()
+
+	GitAuthorName, GitAuthorEmail = "", ""
+	flags := GitAuthorFlags()
+	if flags != nil {
+		t.Errorf("expected nil flags when no env vars set, got %v", flags)
+	}
+}
+
+func TestGitAuthorFlags_NameOnly(t *testing.T) {
+	origName, origEmail := GitAuthorName, GitAuthorEmail
+	defer func() {
+		GitAuthorName, GitAuthorEmail = origName, origEmail
+	}()
+
+	GitAuthorName, GitAuthorEmail = "Custom Name", ""
+	flags := GitAuthorFlags()
+	if len(flags) != 2 {
+		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
+	}
+	if flags[0] != "-c" || flags[1] != "user.name=Custom Name" {
+		t.Errorf("expected [-c user.name=Custom Name], got %v", flags)
+	}
+}
+
+func TestGitAuthorFlags_EmailOnly(t *testing.T) {
+	origName, origEmail := GitAuthorName, GitAuthorEmail
+	defer func() {
+		GitAuthorName, GitAuthorEmail = origName, origEmail
+	}()
+
+	GitAuthorName, GitAuthorEmail = "", "user@example.com"
+	flags := GitAuthorFlags()
+	if len(flags) != 2 {
+		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
+	}
+	if flags[0] != "-c" || flags[1] != "user.email=user@example.com" {
+		t.Errorf("expected [-c user.email=user@example.com], got %v", flags)
+	}
+}
+
+func TestGitAuthorFlags_BothSet(t *testing.T) {
+	origName, origEmail := GitAuthorName, GitAuthorEmail
+	defer func() {
+		GitAuthorName, GitAuthorEmail = origName, origEmail
+	}()
+
+	GitAuthorName, GitAuthorEmail = "Custom Name", "user@example.com"
+	flags := GitAuthorFlags()
+	if len(flags) != 4 {
+		t.Fatalf("expected 4 flags, got %d: %v", len(flags), flags)
+	}
+	expected := []string{"-c", "user.name=Custom Name", "-c", "user.email=user@example.com"}
+	for i, e := range expected {
+		if flags[i] != e {
+			t.Errorf("flags[%d]=%q, want %q", i, flags[i], e)
+		}
+	}
+}
+
 func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
 	// Verify that removed lines get old-file line numbers (not new-file line numbers).
 	// Bug: all removed lines in a hunk were assigned the same newLine value.

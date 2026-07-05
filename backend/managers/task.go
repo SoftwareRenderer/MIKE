@@ -519,6 +519,41 @@ func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) str
 	return fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
 }
 
+// resolveGitAuthor returns the effective git author name/email.
+// Priority: env var override > project git config > defaults.
+func resolveGitAuthor(projectID string, s *store.Store) (string, string) {
+	name := git.GitAuthorName
+	email := git.GitAuthorEmail
+
+	// If env vars are set, they take priority
+	nameSet := name != ""
+	emailSet := email != ""
+
+	// Try to get values from project's git config
+	if proj, err := s.GetProject(projectID); err == nil && proj.Path != "" {
+		if !nameSet {
+			if out, err := osexec.Command("git", "-C", proj.Path, "config", "user.name").CombinedOutput(); err == nil {
+				name = strings.TrimSpace(string(out))
+			}
+		}
+		if !emailSet {
+			if out, err := osexec.Command("git", "-C", proj.Path, "config", "user.email").CombinedOutput(); err == nil {
+				email = strings.TrimSpace(string(out))
+			}
+		}
+	}
+
+	// Fallback defaults if still empty
+	if name == "" {
+		name = "Kanban"
+	}
+	if email == "" {
+		email = "kanban@local"
+	}
+
+	return name, email
+}
+
 // HandleCommitPreview generates and returns the commit message that would be used
 // for a commit-and-done operation, without performing the commit.
 func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request) {
@@ -539,7 +574,15 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 	}
 
 	commitMsg := h.generateCommitMessage(taskID, task)
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"commit_message": commitMsg})
+
+	// Resolve effective git author: env var override, then project git config, then defaults
+	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
+
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{
+		"commit_message": commitMsg,
+		"author_name":    authorName,
+		"author_email":   authorEmail,
+	})
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.

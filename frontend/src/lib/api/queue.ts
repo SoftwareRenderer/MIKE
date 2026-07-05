@@ -491,7 +491,7 @@ async function commitAndDoneRaw(projectId: string, taskId: string, commitMessage
     return res.json();
 }
 
-async function getCommitPreviewRaw(projectId: string, taskId: string): Promise<{ commit_message: string }> {
+async function getCommitPreviewRaw(projectId: string, taskId: string): Promise<{ commit_message: string; author_name: string; author_email: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit-preview`, {
         method: 'GET',
     });
