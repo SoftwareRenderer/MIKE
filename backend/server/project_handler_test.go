@@ -320,8 +320,8 @@ func TestProjectCounts(t *testing.T) {
 	createTestTask(t, s, projID, "Backlog task 1")
 	createTestTask(t, s, projID, "Backlog task 2")
 
-	// Move one to in_progress
-	taskID := createTestTask(t, s, projID, "In progress task")
+	// Move one to in_progress (needs LLM config so auto-start succeeds)
+	taskID := createTestTaskWithLLM(t, s, projID, "In progress task")
 	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
 		"status": "in_progress",
 	})

@@ -343,6 +343,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	originalStatus := task.Status // save for revert on auto-start failure
 	task.Status = req.Status
 	task.UpdatedAt = time.Now()
 
@@ -360,7 +361,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		if task.ParentTaskID != "" {
 			if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-				task.ExecutionState = "failed"
+				task.ExecutionState = "idle"
+				task.Status = originalStatus
 				task.Output = err.Error()
 			}
 		} else {
@@ -372,14 +374,16 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
 					if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
 						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-						task.ExecutionState = "failed"
+						// Keep parent in in_progress (user's explicit action); record error for visibility
+						task.ExecutionState = "idle"
 						task.Output = err.Error()
 					}
 				}
 			} else {
 				if err := h.executor.StartTask(projectID, taskID); err != nil {
 					log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
-					task.ExecutionState = "failed"
+					task.ExecutionState = "idle"
+					task.Status = originalStatus
 					task.Output = err.Error()
 				}
 			}
@@ -391,7 +395,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Move all descendants to the same column (recursive, leaf-first)
-	h.moveAllDescendants(projectID, taskID, req.Status)
+	// Use task.Status (actual final status) in case auto-start failed and reverted
+	h.moveAllDescendants(projectID, taskID, task.Status)
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {

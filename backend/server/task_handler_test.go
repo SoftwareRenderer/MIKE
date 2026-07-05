@@ -160,9 +160,9 @@ func TestTaskDelete(t *testing.T) {
 func TestTaskMove(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Move me")
+	taskID := createTestTaskWithLLM(t, s, projID, "Move me")
 
-	// Move to in_progress
+	// Move to in_progress (auto-start succeeds because LLM is configured)
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
 		"status": "in_progress",
 	})
@@ -174,6 +174,31 @@ func TestTaskMove(t *testing.T) {
 	result := mustJSON[map[string]any](t, rr.Body)
 	if result["status"] != "in_progress" {
 		t.Fatalf("expected status=in_progress, got %s", result["status"])
+	}
+}
+
+// Test: move to in_progress reverts to backlog when auto-start fails
+func TestTaskMoveAutoStartFailReverts(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	// Task WITHOUT LLM config — auto-start will fail
+	taskID := createTestTask(t, s, projID, "No LLM task")
+
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
+		"status": "in_progress",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+	// Task reverts to backlog because auto-start failed (no LLM config)
+	if result["status"] != "backlog" {
+		t.Fatalf("expected status=backlog (reverted on auto-start failure), got %s", result["status"])
+	}
+	if result["execution_state"] != "idle" {
+		t.Fatalf("expected execution_state=idle, got %s", result["execution_state"])
 	}
 }
 
@@ -213,8 +238,8 @@ func TestTaskParentValidation(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	// Create a parent in backlog
-	parentID := createTestTask(t, s, projID, "Parent task")
+	// Create a parent in backlog (with LLM config so auto-start succeeds)
+	parentID := createTestTaskWithLLM(t, s, projID, "Parent task")
 
 	// Create a child with valid parent
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
@@ -232,7 +257,12 @@ func TestTaskParentValidation(t *testing.T) {
 	})
 	testResponseAuth(t, s, req)
 
-	// Try to create another child — should fail
+	// Verify parent stayed in in_progress (auto-start succeeded with LLM config)
+	if getTaskStatus(t, s, projID, parentID) != "in_progress" {
+		t.Fatalf("expected parent in_progress, got %s", getTaskStatus(t, s, projID, parentID))
+	}
+
+	// Try to create another child — should fail (parent not in backlog)
 	req = testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt":         "Another child",
 		"parent_task_id": parentID,
@@ -285,6 +315,24 @@ func createTestSubtask(t *testing.T, s *Server, projectID string, parentTaskID s
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create subtask: %d %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	return result["id"].(string)
+}
+
+// Helper: create a subtask with LLM config so the executor can start
+func createTestSubtaskWithLLM(t *testing.T, s *Server, projectID string, parentTaskID string, prompt string) string {
+	t.Helper()
+	task := map[string]any{
+		"prompt":           prompt,
+		"parent_task_id":   parentTaskID,
+		"llama_server_url": "http://localhost:9999/v1",
+		"model_name":       "mock-model",
+	}
+	req := testRequest("POST", "/api/projects/"+projectID+"/tasks", task)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create subtask with LLM: %d %s", rr.Code, rr.Body.String())
 	}
 	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
@@ -443,7 +491,8 @@ func TestSubtaskSiblingIsolation(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-sibling")
-	subA := createTestSubtask(t, s, projID, parentID, "sub-a")
+	// subA needs LLM config so auto-start succeeds when moved back to in_progress
+	subA := createTestSubtaskWithLLM(t, s, projID, parentID, "sub-a")
 	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
 
 	// Set all three to in_progress/idle via direct PUT (bypasses move endpoint's executor)
