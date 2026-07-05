@@ -188,7 +188,7 @@ function buildModifiedSegments(oldText: string, newText: string): {
  * Post-process rows to add word-level inline diff segments for adjacent
  * removed/added blocks (e.g. rows parsed from a git patch which lack them).
  */
-function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
+export function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
     const result: DiffRow[] = [];
     let index = 0;
 

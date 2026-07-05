@@ -1280,3 +1280,170 @@ func contains(slice []string, s string) bool {
 	}
 	return false
 }
+
+func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
+	// Verify that removed lines get old-file line numbers (not new-file line numbers).
+	// Bug: all removed lines in a hunk were assigned the same newLine value.
+	diff := `diff --git a/file.go b/file.go
+--- a/file.go
++++ b/file.go
+@@ -48,10 +48,7 @@ func hello() {
+ line48
+ line49
+-removed50
+-removed51
+-removed52
+ line53
+ line54
+ line55
++added56`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+
+	file, ok := files["file.go"]
+	if !ok {
+		t.Fatal("expected file.go in parsed files")
+	}
+
+	// Verify line numbers for each row
+	// Context: line48 -> oldLine=48, newLine=48
+	// Context: line49 -> oldLine=49, newLine=49
+	// Removed: removed50 -> oldLine=50 (NOT newLine)
+	// Removed: removed51 -> oldLine=51 (NOT newLine)
+	// Removed: removed52 -> oldLine=52 (NOT newLine)
+	// Context: line53 -> oldLine=53, newLine=50
+	// Context: line54 -> oldLine=54, newLine=51
+	// Context: line55 -> oldLine=55, newLine=52
+	// Added: added56 -> newLine=53
+
+	expected := []struct {
+		variant    string
+		text       string
+		lineNumber int
+	}{
+		{"context", "line48", 48},
+		{"context", "line49", 49},
+		{"removed", "removed50", 50},
+		{"removed", "removed51", 51},
+		{"removed", "removed52", 52},
+		{"context", "line53", 50},
+		{"context", "line54", 51},
+		{"context", "line55", 52},
+		{"added", "added56", 53},
+	}
+
+	if len(file.Rows) != len(expected) {
+		t.Fatalf("expected %d rows, got %d", len(expected), len(file.Rows))
+	}
+
+	for i, exp := range expected {
+		row := file.Rows[i]
+		if row.Variant != exp.variant {
+			t.Errorf("row %d: variant=%q, want %q", i, row.Variant, exp.variant)
+		}
+		if row.Text != exp.text {
+			t.Errorf("row %d: text=%q, want %q", i, row.Text, exp.text)
+		}
+		if row.LineNumber == nil || *row.LineNumber != exp.lineNumber {
+			t.Errorf("row %d (%s %q): lineNumber=%v, want %d", i, row.Variant, row.Text, row.LineNumber, exp.lineNumber)
+		}
+	}
+
+	// Key assertion: removed lines should have DIFFERENT (sequential) line numbers
+	removedLines := make([]int, 0, 3)
+	for _, row := range file.Rows {
+		if row.Variant == "removed" && row.LineNumber != nil {
+			removedLines = append(removedLines, *row.LineNumber)
+		}
+	}
+	if len(removedLines) != 3 {
+		t.Fatalf("expected 3 removed lines, got %d", len(removedLines))
+	}
+	for i := 1; i < len(removedLines); i++ {
+		if removedLines[i] == removedLines[i-1] {
+			t.Errorf("removed lines %d and %d have same lineNumber=%d (should be sequential)", i-1, i, removedLines[i])
+		}
+		if removedLines[i] != removedLines[i-1]+1 {
+			t.Errorf("removed lines not sequential: %d then %d", removedLines[i-1], removedLines[i])
+		}
+	}
+}
+
+func TestParseUnifiedDiffToFiles_MultipleHunks(t *testing.T) {
+	// Verify line numbers are correct across multiple hunks in the same file.
+	diff := `diff --git a/file.txt b/file.txt
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,4 @@
+ line1
++added2
+ line2
+ line3
+@@ -20,5 +21,4 @@
+ line20
+-line21-old
+ line22
+ line23
+-line24-old
+ line25
++added25`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+
+	file := files["file.txt"]
+
+	// Hunk 1: @@ -1,3 +1,4 @@
+	// context line1: old=1, new=1
+	// added added2: new=2
+	// context line2: old=2, new=3
+	// context line3: old=3, new=4
+	// Hunk 2: @@ -20,5 +21,4 @@
+	// context line20: old=20, new=21
+	// removed line21-old: old=21
+	// context line22: old=22, new=22
+	// context line23: old=23, new=23
+	// removed line24-old: old=24
+	// context line25: old=25, new=24
+	// added added25: new=25
+
+	expected := []struct {
+		variant    string
+		text       string
+		lineNumber int
+	}{
+		{"context", "line1", 1},
+		{"added", "added2", 2},
+		{"context", "line2", 3},
+		{"context", "line3", 4},
+		{"context", "line20", 21},
+		{"removed", "line21-old", 21},
+		{"context", "line22", 22},
+		{"context", "line23", 23},
+		{"removed", "line24-old", 24},
+		{"context", "line25", 24},
+		{"added", "added25", 25},
+	}
+
+	if len(file.Rows) != len(expected) {
+		t.Fatalf("expected %d rows, got %d", len(expected), len(file.Rows))
+	}
+
+	for i, exp := range expected {
+		row := file.Rows[i]
+		if row.Variant != exp.variant {
+			t.Errorf("row %d: variant=%q, want %q", i, row.Variant, exp.variant)
+		}
+		if row.Text != exp.text {
+			t.Errorf("row %d: text=%q, want %q", i, row.Text, exp.text)
+		}
+		if row.LineNumber == nil || *row.LineNumber != exp.lineNumber {
+			t.Errorf("row %d (%s %q): lineNumber=%v, want %d", i, row.Variant, row.Text, row.LineNumber, exp.lineNumber)
+		}
+	}
+}

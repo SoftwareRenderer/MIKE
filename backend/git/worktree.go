@@ -932,9 +932,8 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 
 	files := make(map[string]*TrackedDiffFile)
 	var current *TrackedDiffFile
-	var newLine int
+	var oldLine, newLine int
 	var inHunk bool
-	var rowIdx int
 
 	lines := strings.Split(diff, "\n")
 	// Remove trailing empty line
@@ -954,8 +953,8 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 				files[bPath] = current
 			}
 			inHunk = false
+			oldLine = 0
 			newLine = 0
-			rowIdx = 0
 			continue
 		}
 		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
@@ -984,6 +983,7 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		if strings.HasPrefix(line, "@@") {
 			inHunk = true
 			if m := hunkRe.FindStringSubmatch(line); m != nil {
+				oldLine, _ = strconv.Atoi(m[1])
 				newLine, _ = strconv.Atoi(m[3])
 			}
 			continue
@@ -1010,15 +1010,20 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		}
 
 		ln := newLine
+		if variant == "removed" {
+			ln = oldLine
+		}
 		row := DiffRow{
 			LineNumber: &ln,
 			Variant:    variant,
 			Text:       line[1:],
 		}
 		current.Rows = append(current.Rows, row)
-		rowIdx++
 
-		if variant == "added" || variant == "context" {
+		if variant == "context" || variant == "removed" {
+			oldLine++
+		}
+		if variant == "context" || variant == "added" {
 			newLine++
 		}
 	}

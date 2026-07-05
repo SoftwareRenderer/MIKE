@@ -6,7 +6,7 @@
     import { board as boardStore, config as configStore, selectedTask, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
     import { getStreamingContext, getTaskDiffStatsContext, getTaskDiffContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks, stageFile } from '$lib/api';
-    import { parseUnifiedDiff } from '$lib/utils/diff-parser';
+    import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { loadCollapsedSections, saveCollapsedSections, loadAppSetting, saveAppSetting } from '$lib/storage';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -1019,7 +1019,7 @@
                 try {
                     const data = await getDiffFile(task.project_id, task.id, path);
                     if (data.rows) {
-                        updatedDiff[path] = { path, rows: data.rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
+                        updatedDiff[path] = { path, rows: enrichRowsWithInlineSegments(data.rows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
                         updatedUntracked[path] = true;
@@ -1084,7 +1084,8 @@
                     const existing = diffFileCache[path];
                     const data = await getDiffFile(task.project_id, task.id, path, { signal: controller.signal });
                     if (data.rows) {
-                        updatedDiff[path] = { path, rows: data.rows, added: data.rows.filter((r: any) => r.variant === 'added').length, removed: data.rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: existing?.staged };
+                        const rows = enrichRowsWithInlineSegments(data.rows);
+                        updatedDiff[path] = { path, rows, added: rows.filter((r: any) => r.variant === 'added').length, removed: rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: existing?.staged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
                         updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false };
@@ -1144,7 +1145,7 @@
     async function expandTruncatedFile(path: string) {
         if (!task) return;
         try {
-            const data = await getDiffFile(task.project_id, task.id, path, true);
+            const data = await getDiffFile(task.project_id, task.id, path, { full: true });
             if (data.rows) {
                 const added = data.rows.filter((r: any) => r.variant === 'added').length;
                 const removed = data.rows.filter((r: any) => r.variant === 'removed').length;

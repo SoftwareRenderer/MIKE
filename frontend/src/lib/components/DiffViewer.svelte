@@ -1207,7 +1207,6 @@ import { slide } from 'svelte/transition';
     }
     .diff-segment-removed {
         background: rgba(248,81,73,0.4);
-        text-decoration: line-through;
     }
 
     /* Lezer token highlighting — GitHub Dark palette (matches FileEditor) */
