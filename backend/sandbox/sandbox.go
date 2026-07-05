@@ -63,10 +63,34 @@ func NewSandboxManager() *SandboxManager {
 	sm.available = sm.checkAvailable()
 	if sm.available {
 		log.Println("[sandbox] gVisor available, sandboxing enabled")
+		sm.cleanupStaleContainers()
 	} else {
 		log.Println("[sandbox] gVisor not available (runsc not found), sandboxing disabled")
 	}
 	return sm
+}
+
+// cleanupStaleContainers removes any kanban-sandbox-* containers left behind
+// by a previous server session (e.g. crash, SIGKILL). This runs at startup
+// so stale containers don't accumulate across restarts.
+func (sm *SandboxManager) cleanupStaleContainers() {
+	out, err := sm.podmanExec("ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
+	if err != nil {
+		log.Printf("[sandbox] startup: failed to list stale containers: %v", err)
+		return
+	}
+	names := strings.Fields(strings.TrimSpace(string(out)))
+	if len(names) == 0 {
+		return
+	}
+	for _, name := range names {
+		_, rmErr := sm.podmanExec("rm", "-f", name)
+		if rmErr != nil {
+			log.Printf("[sandbox] startup: failed to remove stale container %s: %v", name, rmErr)
+		} else {
+			log.Printf("[sandbox] startup: removed stale container %s", name)
+		}
+	}
 }
 
 // IsAvailable returns true if gVisor (runsc) is installed and podman can use it.

@@ -217,6 +217,71 @@ func TestExecWithInput(t *testing.T) {
 	}
 }
 
+func TestCleanupStaleContainers(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+
+	// Create containers with taskIDs that won't be in the active map
+	// (simulating containers left behind by a crashed server)
+	staleIDs := []string{"stale-task-alpha", "stale-task-beta"}
+	for _, id := range staleIDs {
+		_, _ = sm.podmanExec(
+			"--runtime-flag=overlay2=root:self",
+			"--runtime-flag=ignore-cgroups",
+			"create",
+			"--name", ContainerNamePrefix+"-"+id,
+			"--runtime", "runsc",
+			"--security-opt", "label=disable",
+			"--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges",
+			"-v", dir+":/sandbox/test:rprivate,rw",
+			BaseImage,
+			"/bin/sh", "-c", "sleep infinity",
+		)
+		_, _ = sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", ContainerNamePrefix+"-"+id)
+		t.Cleanup(func() {
+			_, _ = sm.podmanExec("rm", "-f", ContainerNamePrefix+"-"+id)
+		})
+	}
+
+	// Verify stale containers exist
+	for _, id := range staleIDs {
+		exists, _ := sm.containerExists(ContainerNamePrefix + "-" + id)
+		if !exists {
+			t.Fatalf("expected stale container %s to exist before cleanup", id)
+		}
+	}
+
+	// Run cleanup
+	sm.cleanupStaleContainers()
+
+	// Verify all stale containers are gone
+	for _, id := range staleIDs {
+		exists, _ := sm.containerExists(ContainerNamePrefix + "-" + id)
+		if exists {
+			t.Errorf("expected stale container %s to be removed after cleanup", id)
+		}
+	}
+}
+
+func TestCleanupStaleContainers_NoneExist(t *testing.T) {
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	// Should not panic or error when no stale containers exist
+	sm.cleanupStaleContainers()
+}
+
 func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{
