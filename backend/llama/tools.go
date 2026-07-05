@@ -176,7 +176,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"summary": map[string]any{"type": "string", "description": "Brief summary of the changes made (key decisions, issues encountered)."},
+						"summary": map[string]any{"type": "string", "description": "Brief summary of the changes made or issues encountered. Explain key decisions ONLY IF changes include complex logic."},
 					},
 					"required": []string{"summary"},
 				},
