@@ -1,7 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import VirtualList from '$lib/components/VirtualList.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
@@ -317,31 +316,31 @@
         {#if entries.length === 0 && !loading}
             <div class="file-browser-empty">Empty directory</div>
         {:else}
-            <div class="file-browser-list">
-                <VirtualList items={entries} itemHeight={28} minThreshold={50} role="tree" aria-label="File tree" let:item={entry}>
-                <button
-                    class="file-browser-item"
-                    class:dir={entry.isDir}
-                    onclick={() => handleClick(entry)}
-                    role="treeitem"
-                    aria-selected="false"
-                    title={entry.path}
-                >
-                    {#if entry.isDir}
-                        <img src={folderIcon} width="14" height="14" alt="" class="file-icon" />
-                    {:else}
-                        <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
-                    {/if}
-                    <span class="file-name">{entry.name}</span>
-                    {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
-                        <span class="unsaved-dot" title="Unsaved changes">
-                            <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-                                <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
-                            </svg>
-                        </span>
-                    {/if}
-                </button>
-            </VirtualList>
+            <div class="file-browser-list" role="tree" aria-label="File tree">
+                {#each entries as entry}
+                    <button
+                        class="file-browser-item"
+                        class:dir={entry.isDir}
+                        onclick={() => handleClick(entry)}
+                        role="treeitem"
+                        aria-selected="false"
+                        title={entry.path}
+                    >
+                        {#if entry.isDir}
+                            <img src={folderIcon} width="14" height="14" alt="" class="file-icon" />
+                        {:else}
+                            <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
+                        {/if}
+                        <span class="file-name">{entry.name}</span>
+                        {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
+                            <span class="unsaved-dot" title="Unsaved changes">
+                                <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+                                    <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
+                                </svg>
+                            </span>
+                        {/if}
+                    </button>
+                {/each}
             </div>
         {/if}
     {/if}
