@@ -99,7 +99,7 @@ func toAPIMessages(messages []types.ChatMessage) []map[string]any {
 }
 
 // ChatStream sends a chat completion request with streaming.
-func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback) (*types.ChatUsage, error) {
+func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("llama server URL not configured")
 	}
@@ -113,6 +113,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		"temperature":      0.7,
 		"max_tokens":       8192,
 		"reasoning_format": "auto",
+		"return_progress":  true,
 	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
@@ -209,6 +210,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
 			usage.PromptMs = int64(cr.Timings.PromptMs)
 			usage.PredictedMs = int64(cr.Timings.PredictedMs)
+		}
+		// Forward prompt processing progress (from llama.cpp return_progress).
+		// Sent once per frame, before choices, so caller can emit before first token.
+		if cr.PromptProgress != nil && onProgress != nil {
+			onProgress(*cr.PromptProgress)
 		}
 
 		for _, choice := range cr.Choices {

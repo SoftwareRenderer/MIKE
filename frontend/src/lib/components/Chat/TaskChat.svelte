@@ -194,6 +194,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let queuePosition = $state(0);
     let queueEstimatedWait = $state(0);
 
+    // Prompt processing progress (0-100) from llama.cpp's return_progress.
+    // Shown in the "Awaiting LLM provider" spinner while prompt is being processed.
+    let promptProgress = $state(0);
+
     // Context usage tracking
     let contextState = $state({ used: 0, limit: 0 });
 
@@ -362,11 +366,13 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         queueEstimatedWait = 0;
         streamTokenCount = 0;
         contextState.used = lastPromptTokens;
+        promptProgress = 0;
     }
 
     /** Clear the "awaiting LLM" spinner — first response from provider has arrived. */
     function clearAwaiting() {
         if (awaitingResponse) awaitingResponse = false;
+        promptProgress = 0;
     }
 
     function handleEvent(event: StreamEvent) {
@@ -804,6 +810,17 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 // Keep awaitingResponse visible while queued
                 if (queuePosition > 0) {
                     awaitingResponse = true;
+                }
+                break;
+            }
+            case 'prompt_progress': {
+                // Prompt processing progress from llama.cpp (0-100%).
+                // Shown in the "Awaiting LLM provider" message while the prompt is being processed.
+                const data = event.data as { total: number; cache: number; processed: number; time_ms: number };
+                if (data.total > 0) {
+                    // Actual progress = tokens processed / total tokens
+                    // (cache tokens are instant, so processed includes cached + newly processed)
+                    promptProgress = Math.round((data.processed / data.total) * 100);
                 }
                 break;
             }
@@ -1953,6 +1970,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         {connected}
         {queuePosition}
         {queueEstimatedWait}
+        {promptProgress}
         {isAgentSelected}
         {showHeader}
         {stickyUserMessage}

@@ -26,6 +26,7 @@ const (
 	WSTypeMergeResolution    WSMessageType = "merge_resolution"
 	WSTypeBuildProgress      WSMessageType = "build_progress"
 	WSTypePorts              WSMessageType = "ports"
+	WSTypePromptProgress     WSMessageType = "prompt_progress"
 )
 
 // StreamEvent carries a typed payload to broadcast.

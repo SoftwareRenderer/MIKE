@@ -438,6 +438,18 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}})
 					}
 				}
+			}, func(progress types.PromptProgressData) {
+				// Forward prompt processing progress to the frontend.
+				// Throttle to ~2 updates/sec to avoid flooding the WebSocket.
+				if time.Since(lastProgressSend) > 500*time.Millisecond {
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
+						"total":     progress.Total,
+						"cache":     progress.Cache,
+						"processed": progress.Processed,
+						"time_ms":   progress.TimeMs,
+					}})
+					lastProgressSend = time.Now()
+				}
 			})
 
 			// Retry on transient errors (skip if cancelled by user message).
@@ -473,6 +485,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 									"predicted_ms":   lc.usage.PredictedMs,
 								}})
 							}
+						}
+					}, func(progress types.PromptProgressData) {
+						if time.Since(lastProgressSend) > 500*time.Millisecond {
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
+								"total":     progress.Total,
+								"cache":     progress.Cache,
+								"processed": progress.Processed,
+								"time_ms":   progress.TimeMs,
+							}})
+							lastProgressSend = time.Now()
 						}
 					})
 					if streamErr == nil {

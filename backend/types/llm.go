@@ -104,12 +104,24 @@ type ChatTimings struct {
 	PredictedMs float64 `json:"predicted_ms"`
 }
 
+// PromptProgressData is the prompt processing progress from llama.cpp.
+type PromptProgressData struct {
+	Total     int `json:"total"`
+	Cache     int `json:"cache"`
+	Processed int `json:"processed"`
+	TimeMs    int `json:"time_ms"`
+}
+
 // ChatResponse is a full streaming response frame.
 type ChatResponse struct {
-	Choices []ChatChoice `json:"choices"`
-	Usage   *ChatUsage   `json:"usage,omitempty"`
-	Timings *ChatTimings `json:"timings,omitempty"`
+	Choices       []ChatChoice       `json:"choices"`
+	Usage         *ChatUsage         `json:"usage,omitempty"`
+	Timings       *ChatTimings       `json:"timings,omitempty"`
+	PromptProgress *PromptProgressData `json:"prompt_progress,omitempty"`
 }
 
 // StreamCallback is called for each streaming token/tool_call.
 type StreamCallback func(choice ChatChoice)
+
+// PromptProgressCallback is called when the LLM sends prompt processing progress.
+type PromptProgressCallback func(progress PromptProgressData)

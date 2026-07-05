@@ -243,7 +243,8 @@ export type StreamEventType =
     | 'merge_resolution'
     | 'diff_changed'
     | 'build_progress'
-    | 'port_conflict';
+    | 'port_conflict'
+    | 'prompt_progress';
 
 export interface StreamEvent {
     type: StreamEventType;
