@@ -561,7 +561,6 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	if headRef == "" && customBase == "" && !fullDiff {
 		// Discover which files are staged (in the index but differ from target).
 		stagedPaths := getStagedPaths(h.worktreeMgr, taskID, baseRef)
-		log.Printf("[debug] stagedPaths=%v", stagedPaths)
 		manifest := buildDiffManifest(taskDiff, stagedPaths)
 		httputil.JSONResponse(w, http.StatusOK, manifest)
 		return
@@ -649,7 +648,6 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}) diffMan
 	for path, f := range d.Tracked {
 		_, ok := stagedPaths[path]
 		staged := stagedPaths != nil && ok
-		log.Printf("[debug] path=%q ok=%v", path, ok)
 		entry := diffManifestFile{
 			Hash:        git.ComputeFileHash(f),
 			Type:        "tracked",

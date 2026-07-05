@@ -319,12 +319,11 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     onRefresh: () => refreshBoard(),
                     onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines, file_hashes, removed_files, staged_paths) => {
                         const stat = short_stat || '';
-                        const fileMatch = stat.match(/(\d+) file\w* changed/);
                         const insMatch = stat.match(/(\d+) insertion\w*/);
                         const delMatch = stat.match(/(\d+) deletion\w*/);
-                        const trackedFiles = fileMatch ? parseInt(fileMatch[1]) : 0;
-                        const untracked = untracked_n || 0;
-                        const totalFiles = trackedFiles + untracked;
+                        // Use file_hashes for file count — short_stat misses blank files
+                        // (shortStatFromDiff only counts files with + or - change lines).
+                        const totalFiles = file_hashes ? Object.keys(file_hashes).length : 0;
                         const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
                         if (hash) {

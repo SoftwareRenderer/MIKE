@@ -694,6 +694,7 @@ type TrackedDiffFile struct {
 	Removed   int       `json:"removed"`
 	FileSize  *int64    `json:"fileSize,omitempty"`  // set for binary/large files
 	IsBinary  bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
+	IsNew     bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
 	Truncated bool      `json:"truncated,omitempty"`
 	OrigAdded int       `json:"origAdded,omitempty"`
 	OrigRemoved int     `json:"origRemoved,omitempty"`
@@ -960,6 +961,12 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			newLine = 0
 			continue
 		}
+		if strings.HasPrefix(line, "new file mode ") {
+			if current != nil {
+				current.IsNew = true
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
 			continue
 		}
@@ -1033,7 +1040,9 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 
 	// Enrich with truncation metadata + annotation data
 	for path, f := range files {
-		if len(f.Rows) == 0 && f.FileSize == nil {
+		if len(f.Rows) == 0 && f.FileSize == nil && !f.IsNew {
+			// Skip files with no diff content, but preserve new files
+			// (a new blank file has a diff header but no hunk rows).
 			delete(files, path)
 			continue
 		}

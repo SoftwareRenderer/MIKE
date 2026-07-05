@@ -1512,3 +1512,167 @@ func TestParseUnifiedDiffToFiles_MultipleHunks(t *testing.T) {
 		}
 	}
 }
+
+func TestParseUnifiedDiffToFiles_NewBlankFile(t *testing.T) {
+	// A new blank file has a diff header but no hunk (no content to diff).
+	// Parser must detect "new file mode" and preserve the entry even with 0 rows.
+	diff := `diff --git a/empty.txt b/empty.txt
+new file mode 100644
+index 0000000..e69de29`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	file, ok := files["empty.txt"]
+	if !ok {
+		t.Fatal("expected empty.txt in files map")
+	}
+	if !file.IsNew {
+		t.Error("expected IsNew to be true for new blank file")
+	}
+	if len(file.Rows) != 0 {
+		t.Errorf("expected 0 rows for blank file, got %d", len(file.Rows))
+	}
+	if file.Added != 0 {
+		t.Errorf("expected 0 added for blank file, got %d", file.Added)
+	}
+}
+
+func TestParseUnifiedDiffToFiles_NewNonBlankFile(t *testing.T) {
+	// Verify existing behavior: new files with content still work correctly.
+	diff := `diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,3 @@
++line1
++line2
++line3`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	file, ok := files["new.txt"]
+	if !ok {
+		t.Fatal("expected new.txt in files map")
+	}
+	if !file.IsNew {
+		t.Error("expected IsNew to be true")
+	}
+	if file.Added != 3 {
+		t.Errorf("expected 3 added lines, got %d", file.Added)
+	}
+	if len(file.Rows) != 3 {
+		t.Errorf("expected 3 rows, got %d", len(file.Rows))
+	}
+}
+
+func TestParseUnifiedDiffToFiles_ModifiedFile_NotNew(t *testing.T) {
+	// Verify that modified (non-new) files do NOT get IsNew set.
+	diff := `diff --git a/existing.txt b/existing.txt
+index abc1234..def5678 100644
+--- a/existing.txt
++++ b/existing.txt
+@@ -1,3 +1,4 @@
+ line1
++new line
+ line2
+ line3`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	file, ok := files["existing.txt"]
+	if !ok {
+		t.Fatal("expected existing.txt in files map")
+	}
+	if file.IsNew {
+		t.Error("expected IsNew to be false for modified file")
+	}
+	if file.Added != 1 {
+		t.Errorf("expected 1 added line, got %d", file.Added)
+	}
+}
+
+func TestGetTaskDiff_StagedBlankNewFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create initial commit
+	writeFile(t, repoDir, "readme.md", "# README\n")
+	runGit(t, repoDir, "add", "readme.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Create a blank (empty) file and stage it
+	writeFile(t, worktreePath, "blank.txt", "")
+	runGit(t, worktreePath, "add", "blank.txt")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Staged blank new file should appear in Tracked map with IsNew=true
+	if result.Tracked == nil {
+		t.Fatal("expected Tracked map to be non-nil")
+	}
+	file, ok := result.Tracked["blank.txt"]
+	if !ok {
+		t.Fatal("expected blank.txt in Tracked map")
+	}
+	if !file.IsNew {
+		t.Error("expected IsNew to be true for staged blank file")
+	}
+	if len(file.Rows) != 0 {
+		t.Errorf("expected 0 rows for blank file, got %d", len(file.Rows))
+	}
+}
+
+func TestGetTaskDiff_UnstagedBlankNewFile(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create initial commit
+	writeFile(t, repoDir, "readme.md", "# README\n")
+	runGit(t, repoDir, "add", "readme.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	// Create a blank (empty) file — do NOT stage it
+	writeFile(t, worktreePath, "blank_untracked.txt", "")
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+
+	// Unstaged blank new file should appear in Untracked slice
+	found := false
+	for _, u := range result.Untracked {
+		if u.Path == "blank_untracked.txt" {
+			found = true
+			if len(u.Lines) != 0 {
+				t.Errorf("expected 0 lines for blank file, got %d", len(u.Lines))
+			}
+		}
+	}
+	if !found {
+		t.Error("expected blank_untracked.txt in Untracked slice")
+	}
+}

@@ -328,6 +328,20 @@ import { slide } from 'svelte/transition';
                                 </div>
                             </div>
                         </div>
+                    {:else if file.rows.length === 0}
+                        <div class="diff-file-content">
+                            <div class="diff-line-scroll">
+                                <div class="diff-line-content-wrapper">
+                                    <div class="diff-empty-file-notice">
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                            <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                        </svg>
+                                        <span>Empty file</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     {:else}
                         {@const items = getDisplayItems(file.rows)}
                         <div class="diff-file-content">
@@ -549,6 +563,20 @@ import { slide } from 'svelte/transition';
                                         <span>Large file — {formatFileSize(file.fileSize)} (+{file.origAdded ?? file.added}/-{file.origRemoved ?? file.removed})</span>
                                     </div>
                                     {/if}
+                                </div>
+                            </div>
+                        </div>
+                    {:else if file.rows.length === 0}
+                        <div class="diff-file-content">
+                            <div class="diff-line-scroll">
+                                <div class="diff-line-content-wrapper">
+                                    <div class="diff-empty-file-notice">
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                            <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                                        </svg>
+                                        <span>Empty file</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
