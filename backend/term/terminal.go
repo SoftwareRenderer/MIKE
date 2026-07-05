@@ -40,19 +40,33 @@ type taskTerminal struct {
 	onExit     func() // called when shell process exits, to remove session from manager
 }
 
+// sandboxOps is the subset of sandbox.SandboxManager methods used by the terminal manager.
+// Defined here so tests can provide a mock without depending on gVisor.
+type sandboxOps interface {
+	IsAvailable() bool
+	ImageReady(image string) bool
+	ImageReadyForProject(projectName string) bool
+	BuildImage(projectName, dockerfilePath string) error
+	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
+	PullImageWithProgress(image string, onProgress func(line string)) error
+	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*sandbox.ShellProcess, []types.AssignedPort, error)
+	Stop(taskID string) error
+	StopProjectContainers(projectID string, taskIDs []string)
+}
+
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
 	mu             sync.RWMutex
 	sessions       map[string]*taskTerminal
 	store          *store.Store
 	cfgStore       *config.ConfigStore
-	sandboxMgr     *sandbox.SandboxManager
+	sandboxMgr     sandboxOps
 	onPortsAssigned func(taskID, projectID string, ports []types.AssignedPort) // callback when ports are assigned
 	projectPorts   map[string][]types.AssignedPort // projectID -> assigned ports from project-level terminal
 }
 
 // NewTerminalManager creates a new TerminalManager.
-func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr *sandbox.SandboxManager) *TerminalManager {
+func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps) *TerminalManager {
 	return &TerminalManager{
 		sessions:     make(map[string]*taskTerminal),
 		store:        store,
@@ -205,6 +219,11 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		delete(tm.sessions, sessionKey)
 		tm.mu.Unlock()
 		log.Printf("[terminal] removed session %s after shell exit", sessionKey)
+		// For project-level sandbox terminals, stop the container when the shell exits.
+		// Task-level containers are managed by the task executor lifecycle.
+		if strings.HasPrefix(sessionKey, "proj:") && sandboxEnabled && tm.sandboxMgr != nil {
+			tm.sandboxMgr.Stop(sessionKey)
+		}
 	}
 	tm.sessions[sessionKey] = sess
 	go sess.readLoop()
