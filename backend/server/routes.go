@@ -101,7 +101,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 
 	// Frontend
-	frontendDist := GetEnv("FRONTEND_DIST", "./frontend/dist")
+	frontendDist := getEnv("FRONTEND_DIST", "./frontend/dist")
 	if _, err := os.Stat(frontendDist); err == nil {
 		sub, err := fs.Sub(os.DirFS(frontendDist), ".")
 		if err == nil {

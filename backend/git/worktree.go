@@ -1830,3 +1830,10 @@ func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool 
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
 var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
+
+// IsGitRepo checks if a path is a git repository.
+func IsGitRepo(path string) bool {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	cmd.Dir = path
+	return cmd.Run() == nil
+}

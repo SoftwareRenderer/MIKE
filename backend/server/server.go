@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	bkg "kanban/backend"
 	"kanban/backend/auth"
 	"kanban/backend/config"
 	"kanban/backend/exec"
@@ -56,7 +55,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		cfg.WorkspaceDir = wtDir
 	}
 
-	addr := fmt.Sprintf(":%s", GetEnv("PORT", "3000"))
+	addr := fmt.Sprintf(":%s", getEnv("PORT", "3000"))
 
 	s := &Server{
 		store:       store,
@@ -83,7 +82,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
-	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, bkg.NewCommitQueue())
+	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, exec.NewCommitQueue())
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
@@ -131,4 +130,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.sandboxMgr.Cleanup()
 	}
 	return s.store.Close()
+}
+
+func getEnv(key, defaultValue string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultValue
 }

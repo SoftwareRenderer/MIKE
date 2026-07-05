@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,14 +79,14 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !IsGitRepo(req.Path) {
+	if !git.IsGitRepo(req.Path) {
 		httputil.JSONError(w, http.StatusBadRequest, "path is not a git repository")
 		return
 	}
 
 	name := req.Name
 	if name == "" {
-		name = Basename(req.Path)
+		name = filepath.Base(req.Path)
 	}
 
 	// Collect existing project IDs to avoid collisions
@@ -110,7 +111,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		networkIsolation = *req.SandboxNetworkIsolation
 	}
 	p := &types.Project{
-		ID:                      GenerateProjectID(req.Path, existingIDs),
+		ID:                      generateProjectID(req.Path, existingIDs),
 		Name:                    name,
 		Path:                    req.Path,
 		SandboxEnabled:          req.SandboxEnabled,
@@ -390,4 +391,29 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// generateProjectID generates a project ID from path (basename or slugified).
+func generateProjectID(path string, existingIDs []string) string {
+	base := filepath.Base(path)
+	if !slicesContains(existingIDs, base) {
+		return base
+	}
+	// Collision — slugify the full path
+	slug := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, path)
+	// Collapse multiple dashes and trim leading/trailing dashes
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+	slug = strings.Trim(slug, "-")
+	return strings.ToLower(slug)
+}
+
+func slicesContains(slice []string, s string) bool {
+	return slices.Contains(slice, s)
 }

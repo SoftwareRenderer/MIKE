@@ -36,77 +36,27 @@ func isImageFile(path string) bool {
 	return ok
 }
 
-// unstageNewBinaryFiles unstages newly staged binary files that are not images.
-// Uses `git diff --staged --numstat --diff-filter=A` to find new files,
-// checks if git considers them binary (numstat shows "-"), and unstages
-// non-image binary files with `git reset HEAD -- <path>`.
+// unstageNewBinaryFiles unstages newly staged binary non-image files.
 func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--numstat", "--diff-filter=A")
 	if err != nil || len(strings.TrimSpace(out)) == 0 {
 		return
 	}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// numstat format: added<TAB>removed<TAB>path
-		parts := strings.Split(line, "\t")
-		if len(parts) < 3 {
-			continue
-		}
-		added := strings.TrimSpace(parts[0])
-		path := parts[2]
-		// Binary files show "-" in numstat
-		if added != "-" {
-			continue
-		}
-		if isImageFile(path) {
-			continue
-		}
-		_ = wm.GitRunInWorktree(taskID, append([]string{"reset", "HEAD", "--", path}, git.GitAuthorFlags()...)...)
-	}
+	paths := binaryPathsFromStaged(out)
+	unstagePaths(wm, taskID, paths)
 }
 
-// unstageNewBinaryFilesInDir is like unstageNewBinaryFiles but uses a plain directory path.
+// unstageNewBinaryFilesInDir is like unstageNewBinaryFiles but uses a directory path.
 func unstageNewBinaryFilesInDir(dir string) {
 	out, err := runGitCommand(dir, "diff", "--staged", "--numstat", "--diff-filter=A")
 	if err != nil || len(strings.TrimSpace(out)) == 0 {
 		return
 	}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// numstat format: added<TAB>removed<TAB>path
-		parts := strings.Split(line, "\t")
-		if len(parts) < 3 {
-			continue
-		}
-		added := strings.TrimSpace(parts[0])
-		path := parts[2]
-		if added != "-" {
-			continue
-		}
-		if isImageFile(path) {
-			continue
-		}
-		_, _ = runGitCommand(dir, "reset", "HEAD", "--", path)
-	}
+	paths := binaryPathsFromStaged(out)
+	unstagePathsInDir(dir, paths)
 }
 
-// runGitCommand runs a git command in the given directory and returns its output.
-func runGitCommand(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-// loopContext holds all mutable state for the AI conversation loop.
-// Consolidating into a single struct makes adding new state a one-line change
-// and keeps the main loop readable as a sequence of named phases.
+// loopContext holds mutable state for the AI conversation loop.
 type loopContext struct {
 	messages         []types.ChatMessage
 	assistantContent strings.Builder
@@ -126,7 +76,6 @@ type loopContext struct {
 	usage            *types.ChatUsage
 }
 
-// executeTask runs the AI conversation loop.
 func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -903,7 +852,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 }
 
-// sendAndPersistError sends an error event via WebSocket and persists it to the database.
+// sendAndPersistError sends an error via WebSocket and persists it.
 func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
 	task, _ := te.store.GetTaskByTaskID(taskID)
 	errMsg := &types.TaskMessage{

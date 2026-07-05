@@ -396,7 +396,7 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 	state := &executionState{createdIDs: nil}
 	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Plan complete",
-	}, "", parent, state)
+	}, "", parent, state, nil)
 
 	if ok {
 		t.Error("expected task_complete to fail in plan mode without subtasks")
@@ -433,7 +433,7 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	// Try to complete with subtask
 	result2, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Plan complete",
-	}, "", parent, state)
+	}, "", parent, state, nil)
 
 	if !ok {
 		t.Errorf("expected task_complete to succeed with subtasks, got: %s", result2)
@@ -464,7 +464,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 	// Try to complete without subtasks (should succeed)
 	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
 		"summary": "Task complete",
-	}, "", task, &executionState{})
+	}, "", task, &executionState{}, nil)
 
 	if !ok {
 		t.Errorf("expected task_complete to succeed in standard mode, got: %s", result)

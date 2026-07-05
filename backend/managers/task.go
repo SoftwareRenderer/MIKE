@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 
-	bkg "kanban/backend"
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
@@ -34,7 +33,7 @@ type TaskHandler struct {
 	terminalMgr    *term.TerminalManager
 	executor       *exec.TaskExecutor
 	worktreeMgr    *git.WorktreeManager
-	commitQueue    *bkg.CommitQueue
+	commitQueue    *exec.CommitQueue
 }
 
 // hasField checks if a key exists in a map[string]any.
@@ -44,7 +43,7 @@ func hasField(m map[string]any, key string) bool {
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *bkg.CommitQueue) *TaskHandler {
+func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *exec.CommitQueue) *TaskHandler {
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue}
 }
 
@@ -96,7 +95,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		task.ID = GenerateTaskID()
+		task.ID = types.GenerateTaskID()
 		task.ProjectID = projectID
 		if task.Status == "" {
 			task.Status = "backlog"
@@ -105,7 +104,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		task.CreatedAt = now
 		task.UpdatedAt = now
 		if task.Title == "" && task.Prompt != "" {
-			task.Title = AutoGenerateTitle(task.Prompt)
+			task.Title = autoGenerateTitle(task.Prompt)
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
@@ -158,7 +157,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// If the first line is short (≤5 words), use it as the title directly
-		if IsShortTitle(task.Prompt) {
+		if isShortTitle(task.Prompt) {
 			task.TitleGenerating = false
 		} else {
 			task.TitleGenerating = true
@@ -168,7 +167,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Create default thread for the task
-		defaultThreadID := GenerateThreadID()
+		defaultThreadID := types.GenerateThreadID()
 		if err := h.store.CreateThread(&types.TaskThread{
 			ID:        defaultThreadID,
 			TaskID:    task.ID,
@@ -898,4 +897,22 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	}
 
 	return nil
+}
+
+func autoGenerateTitle(prompt string) string {
+	line := strings.Split(prompt, "\n")[0]
+	line = strings.TrimSpace(line)
+	if len(line) > 80 {
+		line = line[:77] + "..."
+	}
+	return line
+}
+
+func isShortTitle(prompt string) bool {
+	line := strings.Split(prompt, "\n")[0]
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	return len(strings.Fields(line)) <= 5
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"kanban/backend/httputil"
-	"kanban/backend/managers"
 )
 
 // Re-export JSON helpers from httputil.
@@ -18,9 +17,6 @@ var (
 	JSONError    = httputil.JSONError
 	JSONErrorf   = httputil.JSONErrorf
 )
-
-// Re-export GetEnv from managers.
-var GetEnv = managers.GetEnv
 
 // Paths that don't require authentication.
 var publicPaths = map[string]map[string]struct{}{
