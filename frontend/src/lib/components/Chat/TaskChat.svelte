@@ -718,8 +718,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
                     // Mark task as streaming so badge updates on board view
                     markStreaming();
-                    // Agents: keep awaitingResponse until first token/tool_call.
-                    if (!isAgentSelected()) awaitingResponse = false;
+                    // Gate acquired — task is no longer queued. Clear stale queue position.
+                    queuePosition = 0;
+                    queueEstimatedWait = 0;
+                    // Keep awaitingResponse until first token/tool_call (clearAwaiting handles it).
                 } else if (data.state === 'cancelled') {
                     // Response was cancelled by new user message — clear streaming state.
                     closeCurrentAssistant();
