@@ -71,6 +71,57 @@
     /** Effective result: resolved (fetched) value, or the prop value. */
     let effectiveResult = $derived(resolvedResult ?? tc.result ?? '');
 
+    // Bash actively streaming — no truncation, auto-scroll enabled.
+    let isBashStreaming = $derived(
+        tc.toolName === 'bash' && tc.isPending && effectiveResult && effectiveResult.length > 0
+    );
+
+    let scrollEl: HTMLPreElement | null = null;
+    let userScrolledUp = $state(false);
+    let prevResultLen = $state(0);
+
+    // Bash tools streamed this session — never truncated (array for reactivity).
+    let streamedBashToolIds = $state<string[]>([]);
+    let prevIsPending = $state<boolean | undefined>();
+
+    $effect(() => {
+        if (tc.toolName !== 'bash') return;
+        const pending = tc.isPending;
+        if (prevIsPending === true && pending === false) {
+            streamedBashToolIds = [...streamedBashToolIds, tc.toolId];
+        }
+        prevIsPending = pending;
+    });
+
+    /** Scroll to bottom of result window. */
+    function scrollToBottom() {
+        if (scrollEl) {
+            scrollEl.scrollTop = scrollEl.scrollHeight;
+        }
+    }
+
+    /** Check if user is near the bottom (within 60px). */
+    function isNearBottom(el: HTMLPreElement): boolean {
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    }
+
+    function handleResultScroll() {
+        if (scrollEl) {
+            userScrolledUp = !isNearBottom(scrollEl);
+        }
+    }
+
+    $effect(() => {
+        if (!isBashStreaming) return;
+        const len = effectiveResult.length;
+        if (len > prevResultLen) {
+            if (!userScrolledUp) {
+                requestAnimationFrame(scrollToBottom);
+            }
+            prevResultLen = len;
+        }
+    });
+
     function getTruncatedResult(text: string): string {
         if (!text) return '';
         const lines = text.split('\n');
@@ -94,7 +145,7 @@
     }
 
     let bashResultNeedsTruncation = $derived(
-        tc.toolName === 'bash' && effectiveResult && (
+        tc.toolName === 'bash' && !isBashStreaming && !streamedBashToolIds.includes(tc.toolId) && effectiveResult && (
             tc.resultTruncated || effectiveResult.split('\n').length > RESULT_MAX_LINES || effectiveResult.length > RESULT_MAX_BYTES
         )
     );
@@ -240,13 +291,13 @@
         {:else if tc.result && tc.result.trim()}
             {#if bashResultNeedsTruncation}
                 <div class="tool-result-wrapper">
-                    <pre class="tool-result" class:tool-result-error={!tc.success} class:tool-result-expanded={resultExpanded}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
+                    <pre class="tool-result" class:tool-result-error={!tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
                     <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>
                         {resultLoading ? 'Loading...' : (resultExpanded ? 'Collapse' : `Show all (${bashResultStats.lineCount} lines, ${bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B'})`)}
                     </button>
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.success}>{effectiveResult}</pre>
+                <pre class="tool-result" class:tool-result-error={!tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'task_complete'}
