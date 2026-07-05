@@ -58,12 +58,13 @@ const maxLoopHints = 3
 
 // loopDetector tracks tool call targets and text responses to detect LLM loops.
 type loopDetector struct {
-	lastReadTarget string          // normalized target of the most recent read-only call
-	lastReadTime   time.Time       // when the last read occurred
-	textWindow     []string        // recent text-only responses (content, trimmed)
-	hintCount      int             // total hints injected for this task
-	phraseDet      *phraseDetector // real-time phrase repetition tracker
-	phraseFired    bool            // phrase loop detected during current streaming response
+	lastReadToolName string        // tool name of the most recent read-only call
+	lastReadArgs     string        // raw args JSON of the most recent read-only call
+	lastReadTime     time.Time     // when the last read occurred
+	textWindow       []string      // recent text-only responses (content, trimmed)
+	hintCount        int           // total hints injected for this task
+	phraseDet        *phraseDetector // real-time phrase repetition tracker
+	phraseFired      bool          // phrase loop detected during current streaming response
 }
 
 // newLoopDetector creates a new loopDetector.
@@ -76,7 +77,8 @@ func newLoopDetector() *loopDetector {
 
 // reset clears all tracked state (called on user message or after hint injection).
 func (d *loopDetector) reset() {
-	d.lastReadTarget = ""
+	d.lastReadToolName = ""
+	d.lastReadArgs = ""
 	d.lastReadTime = time.Time{}
 	d.textWindow = d.textWindow[:0]
 	d.phraseDet.reset()
@@ -91,7 +93,8 @@ func (d *loopDetector) resetText() {
 // recordTurn records an LLM turn and returns the loop type if detected.
 // toolCalls: the tool calls made this turn (nil or empty for text-only).
 // assistantText: the text content of the response.
-func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText string) LoopType {
+// Returns (loopType, toolName, rawArgs) where toolName/rawArgs identify the repeated call.
+func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText string) (LoopType, string, string) {
 	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
 
 	if hasToolCalls {
@@ -103,21 +106,19 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 			if tc.Function.Name == "" {
 				continue
 			}
-			target := extractTarget(tc.Function.Name, tc.Function.Arguments)
-			if target == "" {
-				continue
-			}
 
 			if isReadOnlyCall(tc.Function.Name, tc.Function.Arguments) {
-				// Read-only call: check if it repeats the last read target
-				if d.lastReadTarget != "" && target == d.lastReadTarget {
-					return LoopTool
+				// Read-only call: check if it repeats the last read (same tool + same args)
+				if d.lastReadToolName != "" && tc.Function.Name == d.lastReadToolName && tc.Function.Arguments == d.lastReadArgs {
+					return LoopTool, tc.Function.Name, tc.Function.Arguments
 				}
-				d.lastReadTarget = target
+				d.lastReadToolName = tc.Function.Name
+				d.lastReadArgs = tc.Function.Arguments
 				d.lastReadTime = time.Now()
 			} else {
 				// State-changing call: clear the read tracker
-				d.lastReadTarget = ""
+				d.lastReadToolName = ""
+				d.lastReadArgs = ""
 				d.lastReadTime = time.Time{}
 			}
 		}
@@ -127,12 +128,12 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 		d.textWindow = append(d.textWindow, trimmed)
 		if len(d.textWindow) >= 2 {
 			if d.detectTextLoop() {
-				return LoopText
+				return LoopText, "", ""
 			}
 		}
 	}
 
-	return LoopNone
+	return LoopNone, "", ""
 }
 
 // checkStreamingText feeds accumulated streaming text into the phrase detector.

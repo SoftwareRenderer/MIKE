@@ -754,11 +754,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 
 			// Loop detection: record this turn and check for repetition
-			loopType := lc.detector.recordTurn(lc.pendingToolCalls, assistantText)
+			loopType, _, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText)
 			if loopType != LoopNone {
 				target := ""
-				if loopType == LoopTool && len(lc.pendingToolCalls) > 0 && lc.pendingToolCalls[0].Function.Name != "" {
-					target = extractTarget(lc.pendingToolCalls[0].Function.Name, lc.pendingToolCalls[0].Function.Arguments)
+				if loopType == LoopTool {
+					target = extractPathFromArgs(toolArgs)
 				}
 				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, target, &lc.messages) {
 					return
@@ -805,7 +805,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.reasoningContent.Reset()
 
 			// Loop detection for text-only responses
-			loopType := lc.detector.recordTurn(nil, assistantText)
+			loopType, _, _ := lc.detector.recordTurn(nil, assistantText)
 			// Also check for phrase repetition detected during streaming
 			if loopType == LoopNone && lc.detector.phraseDetected() {
 				loopType = LoopPhrase

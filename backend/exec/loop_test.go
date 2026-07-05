@@ -241,14 +241,60 @@ func TestLoopDetector_ToolLoop(t *testing.T) {
 	args1 := map[string]string{"path": "src/main.go"}
 	args1JSON, _ := json.Marshal(args1)
 	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if d.recordTurn(tc1, "") != LoopNone {
+	if loopType, _, _ := d.recordTurn(tc1, ""); loopType != LoopNone {
 		t.Error("first read should not trigger loop")
 	}
 
 	// Second read of same file
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if d.recordTurn(tc2, "") != LoopTool {
+	if loopType, _, _ := d.recordTurn(tc2, ""); loopType != LoopTool {
 		t.Error("second read of same file should trigger LoopTool")
+	}
+}
+
+func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
+	d := newLoopDetector()
+
+	// First read
+	args1 := map[string]string{"path": "src/main.go"}
+	args1JSON, _ := json.Marshal(args1)
+	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	d.recordTurn(tc1, "")
+
+	// Second read of same file — returned args should match
+	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	loopType, _, returnedArgs := d.recordTurn(tc2, "")
+	if loopType != LoopTool {
+		t.Fatal("expected LoopTool")
+	}
+	if returnedArgs != string(args1JSON) {
+		t.Errorf("returned args = %q, want %q", returnedArgs, string(args1JSON))
+	}
+}
+
+func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
+	d := newLoopDetector()
+
+	// First turn: read_file then task_complete (state-changing clears tracker)
+	// So we need: first turn read_file, second turn task_complete + read_file
+	// The read_file on turn 2 should NOT trigger loop because task_complete cleared it
+	args1 := map[string]string{"path": "src/main.go"}
+	args1JSON, _ := json.Marshal(args1)
+
+	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	loopType, _, _ := d.recordTurn(tc1, "")
+	if loopType != LoopNone {
+		t.Error("first read should not trigger loop")
+	}
+
+	// Second turn: same read_file — should trigger loop
+	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+	loopType, _, returnedArgs := d.recordTurn(tc2, "")
+	if loopType != LoopTool {
+		t.Fatal("expected LoopTool on repeated read")
+	}
+	if returnedArgs != string(args1JSON) {
+		t.Errorf("returned args = %q, want %q", returnedArgs, string(args1JSON))
 	}
 }
 
@@ -263,10 +309,10 @@ func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args2JSON))}
 
-	if d.recordTurn(tc1, "") != LoopNone {
+	if loopType, _, _ := d.recordTurn(tc1, ""); loopType != LoopNone {
 		t.Error("first read should not trigger loop")
 	}
-	if d.recordTurn(tc2, "") != LoopNone {
+	if loopType, _, _ := d.recordTurn(tc2, ""); loopType != LoopNone {
 		t.Error("read of different file should not trigger loop")
 	}
 }
@@ -279,12 +325,12 @@ func TestLoopDetector_TextLoop(t *testing.T) {
 	text2 := "I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
 
 	// First text response
-	if d.recordTurn(nil, text1) != LoopNone {
+	if loopType, _, _ := d.recordTurn(nil, text1); loopType != LoopNone {
 		t.Error("first text should not trigger loop")
 	}
 
 	// Second similar text response (Jaccard > 0.6)
-	if d.recordTurn(nil, text2) != LoopText {
+	if loopType, _, _ := d.recordTurn(nil, text2); loopType != LoopText {
 		t.Error("similar text should trigger LoopText")
 	}
 }
