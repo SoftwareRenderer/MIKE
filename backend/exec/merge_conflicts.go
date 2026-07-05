@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +17,14 @@ import (
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
+
+// ErrNotAMergeConflict is returned when git merge failed but no merge is in
+// progress (no MERGE_HEAD). This indicates a non-conflict failure such as a
+// hook error, missing branch, or lock issue. Callers should handle this
+// separately from conflict resolution failures.
+// The sentinel message is empty — it's for errors.Is() detection only.
+// Callers should surface the underlying git error to the user.
+var ErrNotAMergeConflict = errors.New("")
 
 // resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
 // basePath is the directory containing the conflicted files (worktree or project dir).
@@ -136,9 +145,21 @@ func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targe
 }
 
 // isMergeInProgress checks whether a git merge is currently in progress in the given directory.
-// A merge is in progress if .git/MERGE_HEAD exists.
+// Uses `git rev-parse --git-dir` to correctly resolve the git directory in both
+// regular repos and worktrees (where .git is a file, not a directory).
 func isMergeInProgress(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".git", "MERGE_HEAD"))
+	cmd := osexec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	gitDir := strings.TrimSpace(string(out))
+	// git-dir might be relative (e.g., "../.git/worktrees/mytree")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(dir, gitDir)
+	}
+	_, err = os.Stat(filepath.Join(gitDir, "MERGE_HEAD"))
 	return err == nil
 }
 
@@ -213,7 +234,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetB
 	// Confirm we're actually in a merge state
 	if !isMergeInProgress(dir) {
 		// Not a merge conflict — likely a hook failure, lock issue, or other git error
-		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD)")
+		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD): %w", ErrNotAMergeConflict)
 	}
 
 	// Primary scan: git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA)

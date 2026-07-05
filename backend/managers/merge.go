@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +17,12 @@ import (
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
+
+// ErrNotAMergeConflict is returned when git merge failed but no merge is in
+// progress (no MERGE_HEAD). This indicates a non-conflict failure such as a
+// hook error, missing branch, or lock issue.
+// The sentinel message is empty — it's for errors.Is() detection only.
+var ErrNotAMergeConflict = errors.New("")
 
 // mergeWorktreeIntoOrigin merges the task's worktree branch into the project's current branch.
 // On merge conflict, it uses the LLM to resolve conflicts.
@@ -62,6 +69,12 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 		return nil
 	}
 
+	// Verify the branch points to a valid commit before attempting merge.
+	if _, err := h.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--verify", "--quiet", taskBranch); err != nil {
+		log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge", taskID, taskBranch)
+		return nil
+	}
+
 	// Stash any working tree changes to allow clean checkout
 	hadStash := false
 	if err := h.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", "kanban merge stash"); err == nil {
@@ -92,8 +105,13 @@ func (h *TaskHandler) mergeWorktreeIntoOrigin(projectID, taskID string, task *ty
 	// Confirm we're actually in a merge state
 	project, _ := h.store.GetProject(projectID)
 	if !isMergeInProgress(project.Path) {
-		// Not a merge conflict — likely a hook failure, lock issue, or other git error
-		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD)")
+		// Not a merge conflict — likely a hook failure, lock issue, or other git error.
+		// Include git output so the user sees the actual reason.
+		mergeDetail := strings.TrimSpace(mergeOut)
+		if mergeDetail == "" {
+			mergeDetail = mergeErr.Error()
+		}
+		return fmt.Errorf("%w%s", ErrNotAMergeConflict, mergeDetail)
 	}
 
 	// Primary scan: git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA)

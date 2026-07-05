@@ -295,6 +295,51 @@ func TestMergeConflictFallback_ChainWithAutoResolve(t *testing.T) {
 	}
 }
 
+// TestIsMergeInProgress_InWorktree verifies that isMergeInProgress works
+// correctly inside a git worktree (where .git is a file, not a directory).
+func TestIsMergeInProgress_InWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainRepo := filepath.Join(tmpDir, "main")
+	os.MkdirAll(mainRepo, 0o755)
+	runGit(t, mainRepo, "init")
+	runGit(t, mainRepo, "config", "user.email", "test@test.com")
+	runGit(t, mainRepo, "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644)
+	runGit(t, mainRepo, "add", "file.txt")
+	runGit(t, mainRepo, "commit", "-m", "Initial")
+
+	// Create a worktree on a new branch
+	wtDir := filepath.Join(tmpDir, "worktree")
+	runGit(t, mainRepo, "worktree", "add", wtDir, "-b", "wt-branch")
+
+	// Make conflicting change in worktree
+	os.WriteFile(filepath.Join(wtDir, "file.txt"), []byte("line 1\nwt change\nline 3\n"), 0o644)
+	runGitInDir(t, wtDir, "add", "file.txt")
+	runGitInDir(t, wtDir, "commit", "-m", "WT change")
+
+	// Make conflicting change in main
+	runGit(t, mainRepo, "checkout", "master")
+	os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("line 1\nmain change\nline 3\n"), 0o644)
+	runGit(t, mainRepo, "add", "file.txt")
+	runGit(t, mainRepo, "commit", "-m", "Main change")
+
+	// Merge in worktree (will conflict)
+	cmd := exec.Command("git", "merge", "master")
+	cmd.Dir = wtDir
+	_ = cmd.Run()
+
+	// isMergeInProgress should work inside the worktree
+	if !isMergeInProgress(wtDir) {
+		t.Fatal("expected isMergeInProgress to return true inside worktree during merge conflict")
+	}
+
+	runGitInDir(t, wtDir, "merge", "--abort")
+
+	if isMergeInProgress(wtDir) {
+		t.Fatal("expected isMergeInProgress to return false after abort in worktree")
+	}
+}
+
 // TestMergeConflictFallback_NoMergeHead verifies that isMergeInProgress
 // returns false after merge --abort.
 func TestMergeConflictFallback_NoMergeHead(t *testing.T) {

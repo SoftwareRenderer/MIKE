@@ -3,9 +3,11 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	osexec "os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -327,10 +329,16 @@ func (te *TaskExecutor) ensureParentBranch(projectID string, parent *types.Task)
 	// Generate branch name for the parent (same logic as prepareTaskExecution)
 	branchName := fmt.Sprintf("task/%s", parent.ID)
 	if !parent.AutoMerge && parent.Title != "" {
-		branchName = "task/" + slugifyBranchName(parent.Title)
-		if te.branchExists(projectID, branchName) {
-			branchName = branchName + "-" + parent.ID[:8]
+		slug := slugifyBranchName(parent.Title)
+		if len(slug) <= 50 {
+			branchName = "task/" + slug
 		}
+	}
+	parentWtPath, _ := te.worktreeMgr.WorktreePath(parent.ID)
+	_, parentWtErr := os.Stat(parentWtPath)
+	parentWtExists := parentWtErr == nil
+	if !parentWtExists && te.branchExists(projectID, branchName) {
+		branchName = branchName + "-" + parent.ID[:8]
 	}
 
 	// Create a worktree for the parent from HEAD.
@@ -503,11 +511,20 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	// Generate branch name: use slugified title for separate branches, task ID for merge-to-main
 	branchName := fmt.Sprintf("task/%s", task.ID)
 	if !task.AutoMerge && task.Title != "" {
-		branchName = "task/" + slugifyBranchName(task.Title)
-		// Ensure uniqueness: append task ID suffix if branch already exists
-		if te.branchExists(projectID, branchName) {
-			branchName = branchName + "-" + taskID[:8]
+		slug := slugifyBranchName(task.Title)
+		// If the slug is too long, fall back to the task ID (always short, ~22 chars)
+		if len(slug) <= 50 {
+			branchName = "task/" + slug
 		}
+	}
+	// Ensure uniqueness: if the branch already exists (e.g., from a deleted task)
+	// AND the worktree doesn't exist yet (first run), append a short suffix.
+	// If the worktree already exists, the branch was created with this name — keep it.
+	wtPath, wtErr := te.worktreeMgr.WorktreePath(taskID)
+	_, wtStatErr := os.Stat(wtPath)
+	wtExists := wtErr == nil && wtStatErr == nil
+	if !wtExists && te.branchExists(projectID, branchName) {
+		branchName = branchName + "-" + taskID[:8]
 	}
 	// If this is a child task, ensure the parent has a branch first.
 	// The parent's branch is the merge target for subtask auto-merge.
@@ -837,6 +854,16 @@ func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) 
 		return nil
 	}
 
+	// Verify the branch points to a valid commit before attempting merge.
+	// If the branch ref is broken (e.g., worktree was removed, ref corrupted),
+	// skip the merge gracefully rather than failing with a cryptic error.
+	cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", taskBranch)
+	cmd.Dir = project.Path
+	if err := cmd.Run(); err != nil {
+		log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge: %v", taskID, taskBranch, err)
+		return nil
+	}
+
 	// Determine target branch and the git directory to run merge in.
 	// For child tasks, the target is the parent's branch.
 	// If the parent has a worktree, merge inside it (branch is checked out there).
@@ -898,11 +925,22 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	}
 
 	// Merge the task branch
-	_, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
+	mergeOut, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
+			if errors.Is(resolveErr, ErrNotAMergeConflict) {
+				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
+				// Include git output so the user sees the actual reason
+				mergeDetail := strings.TrimSpace(mergeOut)
+				if mergeDetail == "" {
+					mergeDetail = mergeErr.Error()
+				}
+				log.Printf("[merge] task=%s merge failed (not a conflict): %s", taskID, mergeDetail)
+				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
+				return fmt.Errorf("merge failed (not a conflict): %s", mergeDetail)
+			}
 			_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
 			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
 			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
@@ -935,11 +973,20 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 	}
 
 	// Merge the task branch
-	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", taskBranch, "--no-edit")
+	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
+			if errors.Is(resolveErr, ErrNotAMergeConflict) {
+				mergeDetail := strings.TrimSpace(mergeOut)
+				if mergeDetail == "" {
+					mergeDetail = mergeErr.Error()
+				}
+				log.Printf("[merge] task=%s merge failed in worktree (not a conflict): %s", taskID, mergeDetail)
+				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
+				return fmt.Errorf("merge failed in worktree (not a conflict): %s", mergeDetail)
+			}
 			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
 			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
 			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
@@ -1101,9 +1148,10 @@ func slugifyBranchName(title string) string {
 	// Trim leading/trailing hyphens
 	out := string(result)
 	out = strings.Trim(out, "-")
-	// Truncate to 78 chars (git branch name limit is 255, leave room for "task/" prefix)
-	if len(out) > 78 {
-		out = out[:78]
+	// Truncate to 50 chars. If the slug exceeds this, the caller falls back
+	// to the task ID (e.g., "frost-amber-quartz"), which is always short.
+	if len(out) > 50 {
+		out = out[:50]
 	}
 	return out
 }
