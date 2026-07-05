@@ -198,7 +198,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         const projectId = params.get('project');
         const taskId = params.get('task');
         const fileParam = params.get('file') || '';
-        urlFileId = (fileParam && (fileParam.startsWith(currentProject?.path || '') || fileParam.startsWith('/sandbox/'))) ? fileParam : '';
+        urlFileId = (fileParam && (fileParam.startsWith(currentProject?.path || '') || fileParam.startsWith('/home/sandbox/'))) ? fileParam : '';
 
         // If URL has no project param, go back to project list
         if (!projectId && currentProject) {
@@ -747,7 +747,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         sandboxEnabled={currentProject.sandbox_enabled}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                        onUpdateFile={(path) => { if (path && (path.startsWith(currentProject?.path || '') || path.startsWith('/sandbox/'))) updateUrl({ project: currentProject?.id, view: 'branch', file: path }); else updateUrl({ project: currentProject?.id, view: 'branch', file: null }); }}
+                        onUpdateFile={(path) => { if (path && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'))) updateUrl({ project: currentProject?.id, view: 'branch', file: path }); else updateUrl({ project: currentProject?.id, view: 'branch', file: null }); }}
                         onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}

@@ -478,11 +478,11 @@ func TestPromptPath_SandboxEnabled(t *testing.T) {
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + projectName
+		promptPath = "/home/sandbox/" + projectName
 	}
 
-	if promptPath != "/sandbox/my-project" {
-		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/sandbox/my-project")
+	if promptPath != "/home/sandbox/my-project" {
+		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/home/sandbox/my-project")
 	}
 }
 
@@ -494,7 +494,7 @@ func TestPromptPath_SandboxDisabled(t *testing.T) {
 	// Simulate the prompt path logic from executeTask
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + projectName
+		promptPath = "/home/sandbox/" + projectName
 	}
 
 	if promptPath != worktreePath {

@@ -55,7 +55,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Translate sandbox path to host path
-		mountPath := "/sandbox/" + project.Name
+		mountPath := "/home/sandbox/" + project.Name
 		cleanPath := filepath.Clean(path)
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			rel := cleanPath[len(mountPath):]
@@ -132,7 +132,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Translate sandbox path to host path
-		mountPath := "/sandbox/" + project.Name
+		mountPath := "/home/sandbox/" + project.Name
 		cleanPath := filepath.Clean(req.Path)
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			rel := cleanPath[len(mountPath):]
@@ -200,7 +200,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Convert path to sandbox path (accept both host and sandbox paths)
-		mountPath := "/sandbox/" + project.Name
+		mountPath := "/home/sandbox/" + project.Name
 		cleanPath := filepath.Clean(path)
 		var sandboxPath string
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
@@ -459,7 +459,7 @@ func (s *Server) validateFSPath(path string, r *http.Request) error {
 	cleanPath := filepath.Clean(path)
 	cleanRoot := filepath.Clean(project.Path)
 
-	// Handle sandbox paths: /sandbox/<basename>/... → convert to host path
+	// Handle sandbox paths: /home/sandbox/<basename>/... → convert to host path
 	// The sandbox mounts the worktree, not the project. The worktree basename
 	// is the task ID. We can't resolve the exact worktree here, so we check
 	// if the path is within the workspace directory instead.
@@ -468,7 +468,7 @@ func (s *Server) validateFSPath(path string, r *http.Request) error {
 	if cfgErr == nil && cfg.WorkspaceDir != "" {
 		workspaceDir = filepath.Clean(cfg.WorkspaceDir)
 	}
-	if workspaceDir != "" && strings.HasPrefix(cleanPath, "/sandbox/") {
+	if workspaceDir != "" && strings.HasPrefix(cleanPath, "/home/sandbox/") {
 		// Sandbox path — allow if workspace is configured (worktree will be resolved by caller)
 		return nil
 	}
@@ -510,7 +510,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Initialize git repo inside the sandbox
-		mountPath := "/sandbox/" + project.Name
+		mountPath := "/home/sandbox/" + project.Name
 		relPath, _ := filepath.Rel(project.Path, req.Path)
 		sandboxPath := filepath.Join(mountPath, relPath)
 
@@ -611,7 +611,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Create directory inside the sandbox
-		mountPath := "/sandbox/" + project.Name
+		mountPath := "/home/sandbox/" + project.Name
 		relPath, _ := filepath.Rel(project.Path, req.Path)
 		sandboxPath := filepath.Join(mountPath, relPath)
 		sandboxParent := filepath.Dir(sandboxPath)

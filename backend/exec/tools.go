@@ -472,8 +472,8 @@ func normalizePath(worktreePath, projectName, path string) string {
 	if !filepath.IsAbs(cleaned) {
 		return cleaned
 	}
-	// Strip sandbox mount prefix: /sandbox/<projectName>/...
-	mountPath := "/sandbox/" + projectName
+	// Strip sandbox mount prefix: /home/sandbox/<projectName>/...
+	mountPath := "/home/sandbox/" + projectName
 	mountPrefix := mountPath + "/"
 	if cleaned == mountPath {
 		return "."

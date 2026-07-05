@@ -940,7 +940,7 @@ var wordRe = regexp.MustCompile(`\S+`)
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, int, string) {
 	promptPath := worktreePath
 	if sandboxEnabled {
-		promptPath = "/sandbox/" + projectName
+		promptPath = "/home/sandbox/" + projectName
 	}
 	var systemPrompt string
 	if task.PlanMode {

@@ -184,7 +184,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 }
 
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted read-write at /sandbox/<projectName> inside the container.
+// The worktree is bind-mounted read-write at /home/sandbox/<projectName> inside the container.
 // If projectPath is non-empty, the .git/ directory is also mounted read-only
 // at the same absolute path (so git can resolve refs, objects, worktree metadata, etc.).
 // If baseImage is empty, the default BaseImage constant is used.
@@ -229,8 +229,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	if err != nil {
 		return fmt.Errorf("resolve worktree path: %w", err), nil
 	}
-	// Compute mount path: /sandbox/<project-name>
-	mountPath := "/sandbox/" + projectName
+	// Compute mount path: /home/sandbox/<project-name>
+	mountPath := "/home/sandbox/" + projectName
 
 	// Resolve agent binary path (required)
 	agentPath, err := agentBinaryPath()

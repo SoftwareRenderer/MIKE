@@ -89,7 +89,7 @@
     }
 
     // Sandbox mount path for this project
-    let mountPath = $derived(sandboxEnabled ? '/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+    let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
     // Current path: sandbox path when sandbox enabled, host path otherwise
     let currentPath = $state('');
     // Reactive reference to projectPath for closures

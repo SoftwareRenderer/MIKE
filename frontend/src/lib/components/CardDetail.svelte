@@ -209,7 +209,7 @@
         if (!task.id) return null;
         if (sandboxEnabled) {
             if (!projectName) return null;
-            return `/sandbox/${projectName}/${relativePath}`;
+            return `/home/sandbox/${projectName}/${relativePath}`;
         }
         if (!workspaceDir) return null;
         return `${workspaceDir.replace(/\/+$/, '')}/${task.id}/${relativePath}`;

@@ -74,7 +74,7 @@
     });
 
     // Sandbox mount path for this project
-    let mountPath = $derived(sandboxEnabled ? '/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+    let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
 
     // Validate file path stays within project root (or sandbox mount)
     function isPathSafe(path: string): boolean {

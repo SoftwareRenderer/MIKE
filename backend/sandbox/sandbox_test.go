@@ -242,7 +242,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 			"--security-opt", "label=disable",
 			"--cap-drop", "ALL",
 			"--security-opt", "no-new-privileges",
-			"-v", dir+":/sandbox/test:rprivate,rw",
+			"-v", dir+":/home/sandbox/test:rprivate,rw",
 			BaseImage,
 			"/bin/sh", "-c", "sleep infinity",
 		)
