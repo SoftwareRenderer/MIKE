@@ -614,6 +614,45 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         sidebarCollapsed.set(collapsed);
     }
 
+    // Track whether sidebar was auto-collapsed for tablet Explorer (so we can restore it)
+    let sidebarAutoCollapsed = $state(false);
+
+    /** Check if viewport is tablet-sized (>768px and <=1024px). */
+    function isTablet(): boolean {
+        return !isMobile && window.innerWidth <= 1024;
+    }
+
+    /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
+    function handleExplorerFileChange(path: string | null) {
+        const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'));
+        if (isFileOpen) {
+            updateUrl({ project: currentProject?.id, view: 'branch', file: path });
+            // Auto-collapse sidebar on tablet to give editor more space
+            if (isTablet() && !collapsed) {
+                collapsed = true;
+                sidebarCollapsed.set(true);
+                sidebarAutoCollapsed = true;
+            }
+        } else {
+            updateUrl({ project: currentProject?.id, view: 'branch', file: null });
+            // Restore sidebar when file is closed
+            if (sidebarAutoCollapsed) {
+                collapsed = false;
+                sidebarCollapsed.set(false);
+                sidebarAutoCollapsed = false;
+            }
+        }
+    }
+
+    /** Restore sidebar if it was auto-collapsed for the Explorer. */
+    function restoreExplorerSidebar() {
+        if (sidebarAutoCollapsed) {
+            collapsed = false;
+            sidebarCollapsed.set(false);
+            sidebarAutoCollapsed = false;
+        }
+    }
+
     async function removeProject(p: Project) {
         const confirmed = await showConfirm({
             title: 'Remove Project',
@@ -747,8 +786,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         sandboxEnabled={currentProject.sandbox_enabled}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                        onUpdateFile={(path) => { if (path && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'))) updateUrl({ project: currentProject?.id, view: 'branch', file: path }); else updateUrl({ project: currentProject?.id, view: 'branch', file: null }); }}
-                        onClose={() => { showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        onUpdateFile={handleExplorerFileChange}
+                        onClose={() => { restoreExplorerSidebar(); showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {

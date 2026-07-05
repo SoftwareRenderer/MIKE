@@ -121,15 +121,21 @@
         }
     }
 
-    function confirmClose(discard: boolean) {
+    async function confirmClose(discard: boolean) {
         showConfirm = false;
         if (discard) {
+            clearTimeout((view as any)._draftTimer);
+            clearTimeout((view as any)._historyTimer);
+            // Reset editor content to original so state is clean
+            content = originalContent;
             hasChanges = false;
             historyBase = '';
             historyDeltas = [];
-            clearTimeout((view as any)._draftTimer);
-            clearTimeout((view as any)._historyTimer);
-            clearEditorDraft(filePath).catch(() => {});
+            // Await persistence cleanup before closing to prevent stale draft on re-open
+            await Promise.allSettled([
+                clearEditorDraft(filePath),
+                clearEditorHistory(filePath),
+            ]);
             onClose();
         }
     }
