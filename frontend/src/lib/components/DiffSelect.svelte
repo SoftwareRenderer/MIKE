@@ -107,10 +107,14 @@
         text-align: left;
     }
     .sel-meta {
-        flex-shrink: 0;
+        flex-shrink: 1;
+        min-width: 0;
         color: var(--color-text-tertiary);
         font-size: 0.7rem;
         text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .sel-chevron {
         position: absolute;

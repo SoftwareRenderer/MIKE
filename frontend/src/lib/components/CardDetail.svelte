@@ -200,9 +200,15 @@
     // File editor overlay
     let editingFile = $state<{ path: string; lineNumber: number; displayPath: string } | null>(null);
     let editorFullscreen = $state(false);
+    // Diff viewer fullscreen
+    let diffFullscreen = $state(false);
 
     function toggleEditorFullscreen() {
         editorFullscreen = !editorFullscreen;
+    }
+
+    function toggleDiffFullscreen() {
+        diffFullscreen = !diffFullscreen;
     }
 
     function resolveFilePath(relativePath: string): string | null {
@@ -461,6 +467,12 @@
     });
     let isMobile = $state(false);
 
+    $effect(() => {
+        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
+        check();
+        window.addEventListener('resize', check);
+        return () => window.removeEventListener('resize', check);
+    });
 
     // Build children map for subtask hierarchy
     const childrenMap = $derived.by(() => {
@@ -653,13 +665,6 @@
         saveRatio(CHAT_RATIO_KEY, chatRatio).catch(() => {});
     }
 
-    $effect(() => {
-        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
-        check();
-        window.addEventListener('resize', check);
-        return () => window.removeEventListener('resize', check);
-    });
-
     // Refresh diff when switching to Changes tab on mobile (WebSocket events may have been missed)
     let prevTab = $state(activeTab);
     $effect(() => {
@@ -701,7 +706,9 @@
 
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
-                if (checkpointDiffOpen) {
+                if (diffFullscreen) {
+                    diffFullscreen = false;
+                } else if (checkpointDiffOpen) {
                     closeCheckpointDiff();
                 } else {
                     onClose();
@@ -1207,7 +1214,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:fullscreen={isMobile && editorFullscreen}>
+    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen}>
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -1320,6 +1327,13 @@
                                 <DiffSelect options={fromOptions} value={diffFrom} onChange={onDiffFromChange} ariaLabel="From" />
                                 <span class="diff-arrow">→</span>
                                 <DiffSelect options={toOptions} value={diffTo} onChange={onDiffToChange} ariaLabel="To" />
+                                <button type="button" class="diff-fullscreen-btn" onclick={toggleDiffFullscreen} title="Toggle fullscreen">
+                                    {#if diffFullscreen}
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {:else}
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {/if}
+                                </button>
                             </div>
                         {/if}
                         <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
@@ -1414,6 +1428,24 @@
         padding: 0 2px;
         user-select: none;
         flex-shrink: 0;
+    }
+    .diff-fullscreen-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+        margin-left: auto;
+    }
+    .diff-fullscreen-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
     }
     .column.hidden {
         display: none;
