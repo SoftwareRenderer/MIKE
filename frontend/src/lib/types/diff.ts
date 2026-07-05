@@ -43,4 +43,8 @@ export interface DiffFile {
     origRemoved?: number;
     /** True if this file is staged in the git index. */
     staged?: boolean;
+    /** True if this file was deleted (git diff shows +++ /dev/null). */
+    isDeleted?: boolean;
+    /** True if this file is newly added (git diff shows --- /dev/null). */
+    isNewFile?: boolean;
 }

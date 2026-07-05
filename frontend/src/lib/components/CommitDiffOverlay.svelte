@@ -299,7 +299,15 @@ import { slide } from 'svelte/transition';
                         {#if !collapsed}
                             <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
                                 {#if file.rows.length === 0}
-                                <div class="diff-binary-notice">Binary file</div>
+                                {#if file.isBinary}
+                                    <div class="diff-binary-notice">Binary file</div>
+                                {:else if file.isDeleted}
+                                    <div class="diff-deleted-notice">Deleted file</div>
+                                {:else if file.isNewFile}
+                                    <div class="diff-empty-file-notice">Empty file</div>
+                                {:else}
+                                    <div class="diff-binary-notice">Binary file</div>
+                                {/if}
                             {:else}
                                 {@const rows = fileRows[file.path]}
                                 <div class="diff-sbs-body">
@@ -666,6 +674,31 @@ import { slide } from 'svelte/transition';
         border-top: none;
         border-radius: 0 0 6px 6px;
         padding: 12px 12px 12px 42px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        font-style: italic;
+    }
+
+    /* Deleted file notice */
+    .diff-deleted-notice {
+        margin-top: 2px;
+        border: 1px solid var(--color-border);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        padding: 12px 16px;
+        color: var(--color-status-red);
+        font-size: 0.8125rem;
+        font-style: italic;
+        opacity: 0.8;
+    }
+
+    /* Empty file notice */
+    .diff-empty-file-notice {
+        margin-top: 2px;
+        border: 1px solid var(--color-border);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        padding: 12px 16px;
         color: var(--color-text-tertiary);
         font-size: 0.8125rem;
         font-style: italic;

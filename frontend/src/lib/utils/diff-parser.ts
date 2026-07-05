@@ -50,18 +50,40 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
             continue;
         }
 
-        // Skip index line
+        // Index line — also detects new/deleted files via null SHA (0000000)
+        // For blank new files, git omits ---/+++ lines, so index is the only signal.
         if (line.startsWith('index ')) {
+            const idxMatch = line.match(/^index ([0-7]+)\.\.([0-7]+)/);
+            if (idxMatch && currentFile) {
+                if (idxMatch[1] === '0000000') currentFile.isNewFile = true;
+                if (idxMatch[2] === '0000000') currentFile.isDeleted = true;
+            }
             continue;
         }
 
         // Old file header
         if (line.startsWith('--- ')) {
+            if (line === '--- /dev/null' && currentFile) {
+                currentFile.isNewFile = true;
+            }
             continue;
         }
 
         // New file header
         if (line.startsWith('+++ ')) {
+            if (line === '+++ /dev/null' && currentFile) {
+                currentFile.isDeleted = true;
+            }
+            continue;
+        }
+
+        // File mode change lines — also indicate new/deleted files
+        if (line === 'new file mode 100644' || line === 'new file mode 100755') {
+            if (currentFile) currentFile.isNewFile = true;
+            continue;
+        }
+        if (line === 'deleted file mode 100644' || line === 'deleted file mode 100755') {
+            if (currentFile) currentFile.isDeleted = true;
             continue;
         }
 
@@ -150,8 +172,9 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
     }
 
     // Filter out files with no actual changes (keep binary/large files with metadata)
+    // Also keep deleted files and blank new files even if they have no diff rows.
     // Enrich rows with inline word-level diff segments
-    return files.filter(f => f.rows.length > 0 || f.fileSize).map(f => ({
+    return files.filter(f => f.rows.length > 0 || f.fileSize || f.isDeleted || f.isNewFile).map(f => ({
         ...f,
         rows: enrichRowsWithInlineSegments(f.rows || []),
     }));
