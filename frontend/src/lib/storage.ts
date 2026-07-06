@@ -4,7 +4,7 @@
 // All client-side storage for the Kanban app goes through this module.
 // Components should NEVER access IndexedDB directly.
 //
-// Single IndexedDB database: `kanban-storage` (v1)
+// Single IndexedDB database: `kanban-storage` (v2)
 //
 // Object stores:
 //   collapsed-tasks      — Single key 'ids' → string[] of collapsed parent task IDs
@@ -18,6 +18,7 @@
 //   collapsed-diff-files — Single key 'ids' → string[] of collapsed diff file paths
 //   app-settings         — key: setting key → any (terminal height, panel ratios, sidebar, etc.)
 //   attachments          — key: taskId → DraftAttachment[] (draft image attachments)
+//   board-cache          — key: cache type → BoardCacheEntry (projects, board, config mirror)
 //
 // Garbage collection:
 //   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
@@ -28,7 +29,7 @@
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DB_NAME = 'kanban-storage';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 // Object store names
 const STORE_COLLAPSED_TASKS = 'collapsed-tasks';
@@ -42,6 +43,7 @@ const STORE_EXPLORER_LAYOUT = 'explorer-layout';
 const STORE_COLLAPSED_DIFF_FILES = 'collapsed-diff-files';
 const STORE_APP_SETTINGS = 'app-settings';
 const STORE_ATTACHMENTS = 'attachments';
+const STORE_BOARD_CACHE = 'board-cache';
 
 // Fixed keys for single-value stores
 const KEY_IDS = 'ids';
@@ -60,6 +62,7 @@ const ALL_STORES = [
     STORE_COLLAPSED_DIFF_FILES,
     STORE_APP_SETTINGS,
     STORE_ATTACHMENTS,
+    STORE_BOARD_CACHE,
 ];
 
 // ─── Proxy-to-plain conversion ──────────────────────────────────────────────
@@ -96,9 +99,17 @@ export function openDB(): Promise<IDBDatabase> {
 
         request.onupgradeneeded = (event: any) => {
             const db = event.target.result as IDBDatabase;
+            const oldVersion = event.oldVersion || 0;
             for (const store of ALL_STORES) {
                 if (!db.objectStoreNames.contains(store)) {
                     db.createObjectStore(store);
+                }
+            }
+            // Schema migrations
+            if (oldVersion < 2) {
+                // v2: add board-cache store
+                if (!db.objectStoreNames.contains(STORE_BOARD_CACHE)) {
+                    db.createObjectStore(STORE_BOARD_CACHE);
                 }
             }
         };
@@ -452,8 +463,9 @@ export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
  *
  * @param allTaskIds  Set of currently existing task IDs
  * @param allProjectPaths  Optional set of valid project paths; if provided, also cleans stale editor drafts
+ * @param allProjectIds  Optional set of valid project IDs; if provided, also cleans stale board cache
  */
-export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>): Promise<void> {
+export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>): Promise<void> {
     // 1. Clean collapsed tasks
     await cleanCollapsedTasks(allTaskIds);
 
@@ -474,6 +486,11 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>)
     // 6. Clean editor history (if project paths provided)
     if (allProjectPaths) {
         await cleanEditorHistoryByProject(allProjectPaths);
+    }
+
+    // 7. Clean board cache (if project IDs provided)
+    if (allProjectIds) {
+        await cleanBoardCacheByProject(allProjectIds);
     }
 }
 
@@ -544,4 +561,63 @@ async function cleanEditorHistoryByProject(allProjectPaths: Set<string>): Promis
     if (toDelete.length > 0) {
         await dbDeleteKeys(STORE_EDITOR_HISTORY, toDelete);
     }
+}
+
+/** Remove board cache entries for projects that no longer exist. */
+async function cleanBoardCacheByProject(allProjectIds: Set<string>): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_BOARD_CACHE);
+    const toDelete = keys.filter(key => {
+        if (key === 'projects' || key === 'config') return false;
+        if (key.startsWith('board:')) {
+            const projectId = key.slice(6);
+            return !allProjectIds.has(projectId);
+        }
+        return false;
+    });
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_BOARD_CACHE, toDelete);
+    }
+}
+
+// ─── Board cache (IndexedDB: board-cache store) ─────────────────────────────
+// Lightweight mirror of server state for offline rendering.
+// Stores projects list, per-project board state, and app config.
+// Keys: 'projects', 'board:<projectId>', 'config'
+
+export interface BoardCacheEntry {
+    data: unknown;
+    cachedAt: number;  // epoch ms
+}
+
+/** Cache key for a project's board. */
+export function boardCacheKey(projectId: string): string {
+    return `board:${projectId}`;
+}
+
+/** Save a value to the board cache. */
+export async function setBoardCache(key: string, value: unknown): Promise<void> {
+    return dbPut(STORE_BOARD_CACHE, key, { data: value, cachedAt: Date.now() });
+}
+
+/** Load a value from the board cache. Returns `null` if not found. */
+export async function getBoardCache<T>(key: string): Promise<T | null> {
+    const entry = await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key);
+    return entry ? (entry.data as T) : null;
+}
+
+/** Get the age of a cached entry in ms. Returns `Infinity` if not cached. */
+export async function getCacheAge(key: string): Promise<number> {
+    const entry = await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key);
+    if (!entry) return Infinity;
+    return Date.now() - entry.cachedAt;
+}
+
+/** Remove a board cache entry. */
+export async function clearBoardCache(key: string): Promise<void> {
+    return dbDelete(STORE_BOARD_CACHE, key);
+}
+
+/** Remove all board cache entries for a project (board + related task data). */
+export async function clearProjectCache(projectId: string): Promise<void> {
+    await dbDelete(STORE_BOARD_CACHE, boardCacheKey(projectId));
 }

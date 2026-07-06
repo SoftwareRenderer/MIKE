@@ -11,13 +11,38 @@ import {
     resetProjectStatsRaw,
     reorderTasksRaw,
 } from './queue';
+import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import type { ReorderRequest } from '../types';
 
-/** Fetch all projects from the server. */
+/** Runtime marker on cached data to indicate it was served from the offline mirror. */
+const CACHE_MARKER = Symbol('fromCache');
+export function isFromCache(obj: unknown): boolean {
+    return (obj as any)?.[CACHE_MARKER] === true;
+}
+function markCached<T>(data: T): T {
+    return Object.assign(data, { [CACHE_MARKER]: true });
+}
+
+/** Fetch all projects from the server. Falls back to cached copy on failure or when offline. */
 export async function getProjects(): Promise<Project[]> {
-    const res = await apiFetch(`${API_BASE}/projects`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
-    return res.json();
+    // When offline, skip network and read cache directly
+    if (getOfflineStatus()) {
+        const cached = await getBoardCache<Project[]>('projects');
+        if (cached) return markCached(cached);
+        throw new Error('No cached projects available');
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/projects`);
+        if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
+        const data = await res.json();
+        // Cache fire-and-forget
+        setBoardCache('projects', data).catch(() => {});
+        return data;
+    } catch (e) {
+        const cached = await getBoardCache<Project[]>('projects');
+        if (cached) return markCached(cached);
+        throw e;
+    }
 }
 
 /** Fetch a single project by ID. */
@@ -96,11 +121,26 @@ export async function deleteProject(id: string): Promise<void> {
 
 // -- Board endpoints --
 
-/** Fetch the full board state (tasks + columns) for a project. */
+/** Fetch the full board state (tasks + columns) for a project. Falls back to cached copy on failure or when offline. */
 export async function getBoard(projectId: string): Promise<Board> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch board');
-    return res.json();
+    // When offline, skip network and read cache directly
+    if (getOfflineStatus()) {
+        const cached = await getBoardCache<Board>(boardCacheKey(projectId));
+        if (cached) return markCached(cached);
+        throw new Error(`No cached board available for project ${projectId}`);
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
+        if (!res.ok) throw await apiError(res, 'Failed to fetch board');
+        const data = await res.json();
+        // Cache fire-and-forget
+        setBoardCache(boardCacheKey(projectId), data).catch(() => {});
+        return data;
+    } catch (e) {
+        const cached = await getBoardCache<Board>(boardCacheKey(projectId));
+        if (cached) return markCached(cached);
+        throw e;
+    }
 }
 
 /** Reorder tasks within columns. Queued when offline. */

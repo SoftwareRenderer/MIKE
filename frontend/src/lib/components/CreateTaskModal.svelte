@@ -246,7 +246,7 @@
         // Always show optimistic card immediately — close modal right away
         const id = generateId();
         // Include optimistic ID in taskData so getQueuedTaskIds() can find it
-        const taskDataWithId = { ...taskData, id };
+        const taskDataWithId = { ...taskData, id, title: (taskData.prompt as string)?.slice(0, 80) || '' };
         const optimisticTask = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true } as any;
         if (isOfflineNow) {
             const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });

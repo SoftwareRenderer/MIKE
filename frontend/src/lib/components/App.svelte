@@ -3,7 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, showConfirm, showToast, showEditTask, editTaskData as editTaskDataStore } from '$lib/store';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -133,6 +133,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     let isMobile = $derived(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
+    let servingFromCache = $state(false);
+    let hasLocalCache = $state(false); // true when server unreachable but cache exists
     let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
@@ -270,6 +272,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     return latest || created;
                 });
                 boardStore.update(b => b ? { ...b, tasks } : b);
+                // Clear cache indicator after flush succeeds
+                servingFromCache = false;
             });
             const projs = await getProjects();
             projects = projs || [];
@@ -282,14 +286,28 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                 const targetProject = urlProjectId
                     ? projects.find(p => p.id === urlProjectId)
                     : null;
-                selectProject(targetProject || projects[0]);
+                await selectProject(targetProject || projects[0]);
+                // Replay queued actions onto cached board so UI reflects user's last actions
+                tasks = applyQueuedActionsToBoard(tasks);
+                boardStore.update(b => b ? { ...b, tasks } : b);
+                // Check if data was served from cache
+                servingFromCache = isFromCache(projs);
             }
-            const c = await getConfig();
-            cfg = c;
-            configStore.set(c);
-            // Fetch initial project counts
-            const counts = await getProjectCounts();
-            projectCounts = counts;
+            // Load config (best-effort — cache fallback inside getConfig)
+            try {
+                const c = await getConfig();
+                cfg = c;
+                configStore.set(c);
+            } catch {
+                // No cached config — proceed without it
+            }
+            // Fetch initial project counts (best-effort, no cache fallback)
+            try {
+                const counts = await getProjectCounts();
+                projectCounts = counts;
+            } catch {
+                // Use defaults — counts are non-critical
+            }
         } catch (e) {
             console.error('Failed to load:', e);
         }
@@ -303,9 +321,25 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     const streamingIdsContext = createStreamingContext();
 
     onMount(async () => {
-        // Check auth status first
+        // Check auth status first. If this fails, we're offline — load from cache.
+        // Show offline screen after 2s if no response yet (but don't abort the request).
+        let authResolved = false;
+        const offlineTimer = setTimeout(async () => {
+            if (authResolved) return;
+            setOfflineStatus(true);
+            try {
+                const { getBoardCache } = await import('../storage');
+                const cachedProjects = await getBoardCache<Project[]>('projects');
+                if (cachedProjects && cachedProjects.length > 0) {
+                    hasLocalCache = true;
+                }
+            } catch { /* no cache */ }
+            isLoadingAuth = false;
+        }, 2000);
         try {
             const authRes = await fetch('/api/auth/session', { credentials: 'include' });
+            authResolved = true;
+            clearTimeout(offlineTimer);
             const authData = await authRes.json();
             isAuthenticated = authData.authenticated;
             if (isAuthenticated) {
@@ -412,6 +446,10 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     onConnected: (connected) => {
                         wsConnected = connected;
                         setOfflineStatus(!connected);
+                        // Auto-refresh cached data on reconnect
+                        if (connected && servingFromCache) {
+                            silentRefresh().catch(() => {});
+                        }
                     },
                     onPortConflict: (project_id, conflicted_ports) => {
                         portConflict = { project_id, ports: conflicted_ports };
@@ -428,7 +466,21 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             }
             isLoadingAuth = false;
         } catch (e) {
+            authResolved = true;
+            clearTimeout(offlineTimer);
             console.error('Failed to check auth:', e);
+            // Mark as offline so API calls skip network and use cache immediately
+            setOfflineStatus(true);
+            // Check if we have cached data to offer the user
+            try {
+                const { getBoardCache } = await import('../storage');
+                const cachedProjects = await getBoardCache<Project[]>('projects');
+                if (cachedProjects && cachedProjects.length > 0) {
+                    hasLocalCache = true;
+                }
+            } catch (cacheErr) {
+                console.error('Failed to check cached data:', cacheErr);
+            }
             isLoadingAuth = false;
         }
     });
@@ -441,6 +493,35 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         }
         if (urlRafId !== null) cancelAnimationFrame(urlRafId);
     });
+
+    /** Load the board from local cache after the user clicks "Load Local Cache". */
+    async function loadFromCache() {
+        hasLocalCache = false; // hide the offline screen
+        isLoadingAuth = false; // hide loading screen
+        isAuthenticated = true;
+        appStream = createAppStream({
+            onProjectCounts: (counts) => { projectCounts = counts; },
+            onRefresh: () => refreshBoard(),
+            onDiffStats: () => {},
+            onDiff: () => {},
+            onBranch: (branch) => { currentBranch = branch; },
+            onFsEvent: () => {},
+            onTaskUpdated: () => {},
+            onTaskDeleted: () => {},
+            onCommitStatus: () => {},
+            onTaskEvent: () => {},
+            onConnected: (connected) => {
+                wsConnected = connected;
+                setOfflineStatus(!connected);
+                if (connected && servingFromCache) {
+                    silentRefresh().catch(() => {});
+                }
+            },
+            onPortConflict: () => {},
+        });
+        setAppStreamRef(appStream);
+        await loadAppData();
+    }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
     // Uses requestAnimationFrame with throttling — only checks when frame fires,
@@ -516,6 +597,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         if (!currentProject || boardRefreshPending) return;
         boardRefreshPending = true;
         try {
+            // Wait for pending queue flush
+            await waitForFlush();
             const b = await getBoard(currentProject.id);
             tasks = b.tasks || [];
             boardStore.set(b);
@@ -528,6 +611,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                     selectedTask.set(fresh);
                 }
             }
+            // Live data received — clear cache indicator
+            servingFromCache = false;
         } catch (e) {
             // When offline, sync tasks from boardStore (has optimistic updates)
             const b = (boardStore as any).get();
@@ -536,6 +621,36 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             }
         } finally {
             boardRefreshPending = false;
+        }
+    }
+
+    /** Silently refresh all cached data after reconnection. No flicker, no URL changes. */
+    async function silentRefresh() {
+        try {
+            // Wait for pending queue flush
+            await waitForFlush();
+            const projs = await getProjects();
+            projects = projs || [];
+            projectsStore.set(projects);
+            if (currentProject) {
+                const b = await getBoard(currentProject.id);
+                tasks = b.tasks || [];
+                boardStore.set(b);
+                // Update selected task reference
+                if (selectedTaskVal) {
+                    const fresh = tasks.find(t => t.id === selectedTaskVal.id);
+                    if (fresh) {
+                        selectedTaskVal = fresh;
+                        selectedTask.set(fresh);
+                    }
+                }
+            }
+            const c = await getConfig();
+            cfg = c;
+            configStore.set(c);
+            servingFromCache = false;
+        } catch {
+            // Still offline — keep cached data
         }
     }
 
@@ -579,6 +694,18 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
             }
         } catch (e) {
             console.error('Failed to load board:', e);
+            // Fallback: load board from cache if available
+            try {
+                const { getBoardCache, boardCacheKey } = await import('../storage');
+                const cachedBoard = await getBoardCache<{ tasks: Task[] }>(boardCacheKey(p.id));
+                if (cachedBoard) {
+                    tasks = cachedBoard.tasks || [];
+                    boardStore.set(cachedBoard);
+                    await restoreTaskFromUrl();
+                }
+            } catch {
+                // No cached board available
+            }
         }
     }
 
@@ -723,6 +850,28 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 <!-- Login gate -->
 {#if isLoadingAuth}
     <div class="loading-screen"></div>
+{:else if hasLocalCache}
+    <div class="offline-screen">
+        <svg class="offline-icon" viewBox="0 0 512 512" width="96" height="96" xmlns="http://www.w3.org/2000/svg">
+            <rect width="512" height="512" rx="76.8" fill="#141414"/>
+            <rect x="76.8" y="76.8" width="102.4" height="358.4" rx="15.36" fill="#99AAB5" opacity="0.9"/>
+            <rect x="204.8" y="76.8" width="102.4" height="256" rx="15.36" fill="#4C9AFF" opacity="0.9"/>
+            <rect x="332.8" y="76.8" width="102.4" height="358.4" rx="15.36" fill="#D29922" opacity="0.9"/>
+            <rect x="87.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
+            <rect x="87.04" y="179.2" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.25"/>
+            <rect x="87.04" y="240.64" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.15"/>
+            <rect x="215.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
+            <rect x="215.04" y="179.2" width="81.92" height="30.72" rx="7.68" fill="#141414" opacity="0.25"/>
+            <rect x="343.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
+            <rect x="343.04" y="179.2" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.25"/>
+            <rect x="343.04" y="240.64" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.15"/>
+        </svg>
+        <p class="offline-text">Server unreachable</p>
+        <button class="offline-btn" onclick={loadFromCache}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
+            Offline Mode
+        </button>
+    </div>
 {:else if !isAuthenticated}
     <LoginModal onClose={async () => {
         isAuthenticated = true;
@@ -733,10 +882,17 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 {#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting... Changes queued.
+        Reconnecting to stream...
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal} class:ws-disconnected={!wsConnected}>
+<!-- Offline cache banner -->
+{#if servingFromCache}
+    <div class="cache-banner" role="status" aria-live="polite">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Viewing cached data
+    </div>
+{/if}
+<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -959,6 +1115,50 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         background: #000;
     }
 
+    /* -- Offline screen -- */
+    .offline-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        background: #000;
+    }
+
+    .offline-text {
+        color: #99AAB5;
+        font-size: 0.875rem;
+        font-family: inherit;
+        margin: 0;
+    }
+
+    .offline-btn {
+        font-family: inherit;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1.5rem;
+        border: 1px solid #333;
+        border-radius: 8px;
+        background: #1a1a1a;
+        color: #d6d3d1;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .offline-btn svg {
+        flex-shrink: 0;
+    }
+
+    .offline-btn:hover {
+        background: #252525;
+        border-color: #555;
+    }
+
     /* -- Reconnecting banner -- */
     .reconnecting-banner {
         position: fixed;
@@ -1004,6 +1204,38 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     /* Shift app content down when banner is visible */
     .app.ws-disconnected {
         padding-top: 30px;
+    }
+
+    /* -- Cache banner (offline mirror) -- */
+    .cache-banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10001;
+        background: #550000;
+        color: #d6d3d1;
+        text-align: center;
+        padding: 5px 16px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        animation: slide-down 0.2s ease-out;
+    }
+    .cache-banner svg {
+        opacity: 0.6;
+    }
+    .app.cache-visible {
+        padding-top: 28px;
+    }
+
+    /* When both banners are visible, stack them */
+    .app.ws-disconnected.cache-visible {
+        padding-top: 58px;
     }
 
     /* -- Global mobile styles -- */

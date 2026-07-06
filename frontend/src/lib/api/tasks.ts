@@ -23,6 +23,7 @@ import {
     updateTaskMessageRaw,
     resetWorktreeRaw,
 } from './queue';
+import { setBoardCache, boardCacheKey } from '../storage';
 
 // -- Board endpoints --
 
@@ -30,7 +31,10 @@ import {
 export async function getBoard(projectId: string): Promise<Board> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch board');
-    return res.json();
+    const data = await res.json();
+    // Cache fire-and-forget
+    setBoardCache(boardCacheKey(projectId), data).catch(() => {});
+    return data;
 }
 
 // -- Task CRUD endpoints --

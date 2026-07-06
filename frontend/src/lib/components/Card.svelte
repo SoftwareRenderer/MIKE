@@ -22,9 +22,14 @@
         taskHasQueuedActions = getQueuedTaskIds().has(task.id);
         taskIsQueuedDelete = getQueuedDeleteTaskIds().has(task.id);
     }
+    let unsubscribeQueue: (() => void) | null = null;
     onMount(() => {
-        checkQueuedActions();
-        return onQueueChanged(() => checkQueuedActions());
+        // Defer so IndexedDB queue is loaded before check
+        queueMicrotask(checkQueuedActions);
+        unsubscribeQueue = onQueueChanged(checkQueuedActions);
+    });
+    onDestroy(() => {
+        unsubscribeQueue?.();
     });
 
     // Children of this task (from the map passed by Board)

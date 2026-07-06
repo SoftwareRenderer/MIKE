@@ -16,6 +16,8 @@ export {
     getQueuedDeleteTaskIds,
     getQueueLength,
     flushQueueNow,
+    waitForFlush,
+    applyQueuedActionsToBoard,
     __debugOfflineStatus,
 } from './queue';
 
@@ -35,6 +37,7 @@ export {
     deleteProject,
     getBoard,
     reorderTasks,
+    isFromCache,
 } from './projects';
 
 // -- Tasks --

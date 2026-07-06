@@ -27,6 +27,11 @@ let isOffline = false;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
 
+/** Wait for any in-flight flush to complete. Resolves immediately if none. */
+export async function waitForFlush(): Promise<void> {
+    if (flushPromise) await flushPromise;
+}
+
 /** Safe access to actionQueue length (defensive against null/undefined). */
 function queueLength(): number {
     return Array.isArray(actionQueue) ? actionQueue.length : 0;
@@ -165,8 +170,13 @@ export async function flushQueueNow(): Promise<void> {
                 }
                 actionQueue.shift();
                 await saveQueue();
-            } catch (e) {
-                console.error('[Queue] Failed to flush action, skipping:', action.type, e);
+            } catch (e: any) {
+                console.error('[Queue] Failed to flush action:', action.type, e);
+                // Transient errors (network unreachable, abort) — stop flushing, keep remaining actions in queue
+                if (e?.name === 'TypeError' || e?.name === 'AbortError') {
+                    break;
+                }
+                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
                 actionQueue.shift();
                 await saveQueue();
             }
@@ -176,6 +186,11 @@ export async function flushQueueNow(): Promise<void> {
         flushPromise = null;
     })();
     return flushPromise;
+}
+
+/** Check if an error is a transient network failure (retryable). */
+function isTransientError(e: unknown): boolean {
+    return (e as any)?.name === 'TypeError' || (e as any)?.name === 'AbortError';
 }
 
 /** Replay all queued actions in order. Triggered on WebSocket reconnect. */
@@ -209,22 +224,156 @@ async function flushQueue() {
                 }
                 actionQueue.shift();
                 await saveQueue();
-            } catch (e) {
-                console.error('[Queue] Failed to flush action, skipping:', action.type, e);
-                // Skip failed action — don't block remaining actions or re-set offline
+            } catch (e: any) {
+                console.error('[Queue] Failed to flush action:', action.type, e);
+                // Transient errors — stop flushing, keep remaining actions for next reconnect
+                if (isTransientError(e)) {
+                    isOffline = true;
+                    break;
+                }
+                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
                 actionQueue.shift();
                 await saveQueue();
             }
         }
 
-        // If we had a failure, keep failed actions in queue for next retry.
-        // Don't set isOffline=true — the WebSocket is connected, so new actions should go through.
         isOffline = wasOffline;
         // Notify listeners with resolved tasks so they can replace optimistic ones
         notifyQueueFlushed([], resolvedTasks);
         flushPromise = null;
     })();
     return flushPromise;
+}
+
+// =============================================================================
+// Replay queued actions onto cached board data (read-only transform)
+// =============================================================================
+// The cache mirrors server state. This function applies pending queue actions
+// on top so the UI reflects what the user last did before going offline.
+// Does NOT mutate the cache — returns a new tasks array for UI display.
+// =============================================================================
+
+/**
+ * Apply pending queue actions to a copy of the cached board data.
+ * Returns a new tasks array with optimistic updates applied.
+ *
+ * @param tasks  Cached tasks from the board (server state)
+ * @returns      New tasks array with queued actions applied
+ */
+export function applyQueuedActionsToBoard(
+    tasks: Task[],
+): Task[] {
+    // Map optimistic task IDs → real task IDs (resolved during flush)
+    const optIdMap = new Map<string, string>();
+    const result = tasks.map(t => ({ ...t })); // shallow copy
+
+    for (const action of actionQueue) {
+        const p = action.params;
+        const taskId = p.taskId;
+        const projectId = p.projectId;
+
+        switch (action.type) {
+            case 'createTask': {
+                const taskData = p.taskData || {};
+                const task: Task = {
+                    id: taskData.id || generateId(),
+                    project_id: projectId,
+                    title: taskData.title || '',
+                    prompt: taskData.prompt || '',
+                    status: taskData.status || 'backlog',
+                    column_order: taskData.column_order ?? 0,
+                    execution_state: taskData.execution_state || 'idle',
+                    model_name: taskData.model_name || '',
+                    llama_server_url: taskData.llama_server_url || '',
+                    reasoning_effort: taskData.reasoning_effort || '',
+                    max_consecutive_failed_turns: taskData.max_consecutive_failed_turns ?? 5,
+                    auto_commit: taskData.auto_commit ?? false,
+                    auto_merge: taskData.auto_merge ?? false,
+                    subtasks_auto_merge: taskData.subtasks_auto_merge ?? false,
+                    plan_mode: taskData.plan_mode ?? false,
+                    parent_task_id: taskData.parent_task_id || undefined,
+                    title_generating: taskData.title_generating ?? false,
+                    current_thread_id: taskData.current_thread_id || undefined,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                };
+                result.push(task);
+                optIdMap.set(task.id, task.id);
+                break;
+            }
+
+            case 'deleteTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const idx = result.findIndex(t => t.id === resolvedId);
+                if (idx !== -1) result.splice(idx, 1);
+                break;
+            }
+
+            case 'moveTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) task.status = p.status;
+                break;
+            }
+
+            case 'startTask':
+            case 'startSubtask':
+            case 'retryTask':
+            case 'resumeTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) {
+                    task.status = 'in_progress';
+                    task.execution_state = 'running';
+                }
+                break;
+            }
+
+            case 'stopTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) task.execution_state = 'idle';
+                break;
+            }
+
+            case 'commitAndDone': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) task.status = 'done';
+                break;
+            }
+
+            case 'clearDoneTasks': {
+                for (let i = result.length - 1; i >= 0; i--) {
+                    if (result[i].status === 'done') result.splice(i, 1);
+                }
+                break;
+            }
+
+            case 'updateTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                if (p.taskData) {
+                    const task = result.find(t => t.id === resolvedId);
+                    if (task) Object.assign(task, p.taskData);
+                }
+                break;
+            }
+
+            case 'reorderTasks': {
+                if (p.reorders) {
+                    for (const reorder of p.reorders) {
+                        const task = result.find(t => t.id === reorder.id);
+                        if (task) task.column_order = reorder.column_order;
+                    }
+                }
+                break;
+            }
+
+            // Message/project/config actions don't affect board task list
+        }
+    }
+
+    return result;
 }
 
 /** Execute a single queued action by type. Resolves optimistic task IDs via idMap. */
