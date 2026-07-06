@@ -409,7 +409,8 @@
 
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
-            <div class="config-row config-row-subsection" class:expanded={portsExpanded} onclick={() => { portsExpanded = !portsExpanded; }}>
+            <div class="config-row-group" class:expanded={portsExpanded}>
+            <div class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -476,6 +477,7 @@
             {/if}
             </div>
             {/if}
+            </div>
             {/if}
 
             <!-- Memory limit input -->
@@ -501,7 +503,8 @@
             </div>
 
             <!-- Custom mounts (collapsible) -->
-            <div class="config-row config-row-expandable" class:expanded={mountsExpanded} onclick={() => { mountsExpanded = !mountsExpanded; }}>
+            <div class="config-row-group" class:expanded={mountsExpanded}>
+            <div class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -582,6 +585,7 @@
             {/if}
             </div>
             {/if}
+            </div>
 
             <!-- Image source selector -->
             <div class="config-row">
@@ -852,21 +856,33 @@
     }
 
     .config-row-subsection:hover,
-    .config-row-subsection.expanded,
-    .config-row-expandable:hover,
-    .config-row-expandable.expanded {
+    .config-row-expandable:hover {
         background: var(--color-surface-3);
-    }
-
-    .config-row-subsection.expanded,
-    .config-row-expandable.expanded {
-        border-bottom: none;
-        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    }
-
-    .config-row-subsection:not(.expanded):hover,
-    .config-row-expandable:not(.expanded):hover {
         border-radius: var(--radius-sm);
+    }
+
+    /* Wrapper for expandable row + content — extends highlight into parent padding */
+    .config-row-group > .config-row {
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .config-row-group.expanded {
+        margin: 0 -12px;
+        background: var(--color-surface-3);
+        border-radius: var(--radius-sm);
+    }
+
+    .config-row-group.expanded > .config-row {
+        padding-right: 12px;
+        padding-left: 12px;
+        border-bottom: none;
+    }
+
+    .config-row-group.expanded > .ports-content,
+    .config-row-group.expanded > .mounts-content {
+        padding-left: 12px;
+        padding-right: 12px;
+        border-bottom: 1px solid var(--color-border);
     }
 
     .chevron {
@@ -1285,11 +1301,7 @@
     /* Expandable content block (ports + mounts) */
     .ports-content,
     .mounts-content {
-        background: var(--color-surface-3);
         padding: 0 0 4px;
-        margin-top: -4px;
-        border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-        border-bottom: 1px solid var(--color-border);
     }
 
     .port-list {
