@@ -27,6 +27,7 @@ const (
 	WSTypeBuildProgress      WSMessageType = "build_progress"
 	WSTypePorts              WSMessageType = "ports"
 	WSTypePromptProgress     WSMessageType = "prompt_progress"
+	WSTypeHint               WSMessageType = "hint"
 )
 
 // StreamEvent carries a typed payload to broadcast.

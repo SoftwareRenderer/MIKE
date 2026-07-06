@@ -751,6 +751,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 }
                 break;
             }
+            case 'hint': {
+                const data = event.data as { content: string; created_at: string };
+                // Loop-detection hint — show as a system message in real-time
+                if (data.content) {
+                    entries = [...entries, { id: genId(), role: 'system', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                }
+                break;
+            }
             case 'stats': {
                 const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number };
                 // Sync frontend counter with backend count for accuracy.

@@ -872,15 +872,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Append reasoning to conversation history so the LLM sees its own thinking
 			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: reasoningText})
 
-			// Generate and persist the hint as a visible system message
-			hint := buildHint(LoopReasoningOnly, "")
-			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "system",
-				Content: hint, CreatedAt: time.Now().UTC(),
-			})
-			lc.messages = append(lc.messages, types.ChatMessage{Role: "system", Content: hint})
-
-			// Advance loop detector and check max hints
+			// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
 			lc.detector.recordTurn(nil, "")
 			if handleLoopDetected(te, task, projectID, task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages) {
 				return

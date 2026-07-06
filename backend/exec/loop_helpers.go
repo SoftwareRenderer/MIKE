@@ -217,6 +217,11 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	})
 	detector.hintCount++
 	detector.reset()
+	// Broadcast hint to frontend in real-time
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
+		"content":    hint,
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	}})
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
 	return false // continue
 }
