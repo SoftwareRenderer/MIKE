@@ -108,4 +108,4 @@ export { createAppStream } from './stream';
 export type { AppStream, AppStreamCallbacks } from './stream';
 
 // -- Terminal --
-export { createTerminal, createProjectTerminal } from './terminal';
+export { createTerminal, createProjectTerminal, isTerminalStale } from './terminal';

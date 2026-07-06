@@ -10,7 +10,7 @@ export { setCsrfToken, clearCsrfToken, ensureCsrfToken };
 // Re-export stream and terminal modules
 export { createAppStream } from './api/stream';
 export type { AppStream, AppStreamCallbacks } from './api/stream';
-export { createTerminal, createProjectTerminal } from './api/terminal';
+export { createTerminal, createProjectTerminal, isTerminalStale } from './api/terminal';
 
 // Re-export all domain modules
 export {

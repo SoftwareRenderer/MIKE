@@ -1,5 +1,9 @@
 import { API_BASE } from './helpers';
 
+// Track last activity per terminal WebSocket for stale connection detection
+const terminalActivity = new WeakMap<WebSocket, number>();
+const TERMINAL_STALE_THRESHOLD = 60_000; // same as app stream
+
 /**
  * Terminal WebSocket connections.
  * Creates WebSocket connections for task terminals and project-level shells.
@@ -38,7 +42,9 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
     // Show status immediately — backend will send its own messages when ready
     term.write('\x1b[2mConnecting...\x1b[0m');
     const ws = new WebSocket(url);
+    terminalActivity.set(ws, Date.now());
     ws.onopen = () => {
+        terminalActivity.set(ws, Date.now());
         // Replace connecting message: go to row 1 col 1, clear line
         term.write('\x1b[1H\x1b[2K');
     };
@@ -57,6 +63,7 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
         }
     });
     ws.onmessage = (e) => {
+        terminalActivity.set(ws, Date.now());
         const msg = JSON.parse(e.data);
         if (msg.type === 'output') term.write(msg.data);
         if (msg.type === 'title') (term as any).title = msg.data; // xterm Terminal lacks .title in types
@@ -68,3 +75,13 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
     };
     return ws;
 }
+
+/** Check if a terminal WebSocket is stale (zombie) and should be closed.
+ * Returns true if the connection appears open but hasn't received data in too long. */
+export function isTerminalStale(ws: WebSocket): boolean {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    const lastActivity = terminalActivity.get(ws);
+    if (!lastActivity) return false;
+    return Date.now() - lastActivity > TERMINAL_STALE_THRESHOLD;
+}
+

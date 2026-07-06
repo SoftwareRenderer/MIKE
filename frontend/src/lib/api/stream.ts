@@ -23,6 +23,7 @@ export interface AppStreamCallbacks {
 
 export interface AppStream {
     close: () => void;
+    checkStale: () => void;
     subscribeProject: (projectId: string) => void;
     unsubscribeProject: (projectId: string) => void;
     subscribeTask: (projectId: string, taskId: string) => void;
@@ -31,10 +32,16 @@ export interface AppStream {
 
 export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectAttempts = 0;
     let isClosed = false;
     const maxDelay = 30_000;
     let currentWs: WebSocket | null = null;
+    // Client-side heartbeat — tracks last activity to detect zombie connections
+    // (e.g. phone sleep: WebSocket appears OPEN but server closed its end)
+    let lastActivityAt = Date.now();
+    const STALE_THRESHOLD = 60_000; // 60s — server pings at 27s + 10s timeout = ~37s, plus buffer
+    const HEARTBEAT_INTERVAL = 30_000; // check every 30s
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
     const subscribedTasks = new Set<string>(); // "projectId:taskId"
@@ -59,17 +66,49 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         pendingMessages.length = 0;
     }
 
+    function startHeartbeat() {
+        stopHeartbeat();
+        heartbeatTimer = setInterval(() => {
+            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                checkStale();
+            }
+        }, HEARTBEAT_INTERVAL);
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+    }
+
+    /** Check if the connection is stale (zombie) and force-close if so. */
+    function checkStale() {
+        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+            const idle = Date.now() - lastActivityAt;
+            if (idle > STALE_THRESHOLD) {
+                // Connection appears open but hasn't received data in too long.
+                // Force-close to trigger the reconnect logic.
+                currentWs.close();
+            }
+        }
+    }
+
     let hasConnectedOnce = false;
 
     function connect() {
         if (isClosed) return;
-        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream`);
+        // Use ?sync=1 on reconnect so the server sends the global event buffer
+        const syncParam = hasConnectedOnce ? '?sync=1' : '';
+        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream${syncParam}`);
         currentWs = ws;
 
         ws.onopen = () => {
             reconnectAttempts = 0;
             hasConnectedOnce = true;
+            lastActivityAt = Date.now();
             callbacks.onConnected?.(true);
+            startHeartbeat();
             // Flush pending messages first
             flushPending();
             // Re-subscribe to all previously subscribed projects/tasks
@@ -83,6 +122,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         };
 
         ws.onmessage = (e) => {
+            lastActivityAt = Date.now();
             const msg = JSON.parse(e.data);
             // Handle task_event (server-side multiplexed task events)
             if (msg.type === 'task_event' && callbacks.onTaskEvent) {
@@ -126,6 +166,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         };
 
         ws.onclose = () => {
+            stopHeartbeat();
             currentWs = null;
             if (isClosed) return;
             // Signal offline on any disconnect (including initial connection failure)
@@ -145,6 +186,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
     return {
         close: () => {
             isClosed = true;
+            stopHeartbeat();
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
@@ -154,6 +196,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
                 currentWs = null;
             }
         },
+        checkStale,
         subscribeProject: (projectId: string) => {
             subscribedProjects.add(projectId);
             sendMsg('subscribe_project', { project_id: projectId });

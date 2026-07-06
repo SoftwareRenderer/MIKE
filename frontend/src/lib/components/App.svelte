@@ -486,7 +486,17 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         }
     });
 
+    // Detect when the tab becomes visible again (e.g. phone wakes from sleep).
+    // Check the WebSocket for zombie connections and force reconnect if stale.
+    function handleVisibilityChange() {
+        if (!document.hidden && appStream) {
+            appStream.checkStale();
+        }
+    }
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+
     onDestroy(() => {
+        window.removeEventListener('visibilitychange', handleVisibilityChange);
         disconnectBoardStream();
         if (appStream) {
             appStream.close();

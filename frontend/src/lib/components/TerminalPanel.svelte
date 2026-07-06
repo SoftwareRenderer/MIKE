@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { WebglAddon } from '@xterm/addon-webgl';
     import { showTerminal, selectedProject, selectedTask } from '$lib/store';
-    import { createTerminal, createProjectTerminal } from '$lib/api';
+    import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
     import { startDrag } from '$lib/utils/use-resize-drag';
@@ -116,6 +116,19 @@
     // Load saved height on init
     loadHeight().then(h => { panelHeight = h; }).catch(() => {});
 
+    // Create/recreate the terminal WebSocket for the current project/task.
+    function createTerminalWS(proj: ReturnType<typeof selectedProject.get> | null, task: ReturnType<typeof selectedTask.get> | null) {
+        if (proj && task) {
+            ws = createTerminal(proj.id, task.id, term!, close, transformInput);
+            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
+        } else if (proj) {
+            ws = createProjectTerminal(proj.id, term!, close, transformInput);
+            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
+        } else {
+            term?.writeln('No project selected');
+        }
+    }
+
     function close() {
         trap?.destroy();
         trap = null;
@@ -173,15 +186,19 @@
 
         const proj = get(selectedProject);
         const task = get(selectedTask);
-        if (proj && task) {
-            ws = createTerminal(proj.id, task.id, term, close, transformInput);
-            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
-        } else if (proj) {
-            ws = createProjectTerminal(proj.id, term, close, transformInput);
-            ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
-        } else {
-            term.writeln('No project selected');
+        createTerminalWS(proj, task);
+
+        // Detect stale terminal WebSocket on visibility change (e.g. phone wakes from sleep).
+        function handleTerminalVisibility() {
+            if (!document.hidden && ws && isTerminalStale(ws)) {
+                term?.write('\r\n\x1b[2mReconnecting...\x1b[0m\r\n');
+                ws.close();
+                const p = get(selectedProject);
+                const t = get(selectedTask);
+                createTerminalWS(p, t);
+            }
         }
+        window.addEventListener('visibilitychange', handleTerminalVisibility);
 
         let fitPending = false;
         const observer = new ResizeObserver(() => {
@@ -686,6 +703,7 @@
             observer.disconnect();
             term.element.removeEventListener('paste', handlePaste, { capture: true });
             window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('visibilitychange', handleTerminalVisibility);
             webglRef = null;
             try { term?.dispose(); } catch {}
             term = null;
