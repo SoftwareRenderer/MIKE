@@ -379,7 +379,9 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                                 tasks.push(updatedTask);
                             }
                         }
-                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        // Spread into a new array so boardStore subscribers (e.g., CardDetail allTasks)
+                        // detect the change — Svelte 5 $derived is reference-based.
+                        boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
                             selectedTask.set(updatedTask);
                         }
@@ -388,7 +390,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
                         const idx = tasks.findIndex(t => t.id === task_id);
                         if (idx !== -1) {
                             tasks.splice(idx, 1);
-                            boardStore.update(b => b ? { ...b, tasks } : b);
+                            // Spread into a new array so boardStore subscribers detect the deletion.
+                            boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
                         }
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             clearTaskDetail();
