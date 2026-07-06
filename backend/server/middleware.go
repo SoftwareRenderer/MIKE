@@ -32,6 +32,14 @@ func isPublicPath(path, method string) bool {
 	if path == "/" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
 		return true
 	}
+	// PWA assets (manifest, service worker, icons) are always public
+	if path == "/manifest.webmanifest" ||
+		path == "/sw.js" ||
+		path == "/registerSW.js" ||
+		strings.HasPrefix(path, "/workbox-") ||
+		strings.HasPrefix(path, "/pwa-icon-") {
+		return true
+	}
 	if methods, ok := publicPaths[path]; ok {
 		_, ok := methods[method]
 		return ok

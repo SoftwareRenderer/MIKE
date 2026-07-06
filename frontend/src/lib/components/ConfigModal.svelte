@@ -4,7 +4,7 @@ import { slide } from 'svelte/transition';
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
-    import { config as configStore, showConfig, selectedProject } from '$lib/store';
+    import { config as configStore, showConfig, selectedProject, pwaInstallPrompt } from '$lib/store';
     import { createFocusTrap } from '$lib/a11y';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -532,6 +532,20 @@ import { slide } from 'svelte/transition';
         // Restore focus to trigger element
         setTimeout(() => triggerEl?.focus(), 50);
     }
+
+    // PWA install handler
+    async function handlePwaInstall() {
+        const promptEvent = $pwaInstallPrompt;
+        if (!promptEvent) return;
+        // Fire the install prompt
+        (promptEvent as any).prompt?.();
+        // Wait for the user to accept or dismiss
+        const { outcome } = await (promptEvent as any).userChoice || { outcome: 'dismissed' };
+        if (outcome === 'dismissed') {
+            // User dismissed — clear the prompt so the button goes away
+            pwaInstallPrompt.set(null);
+        }
+    }
 </script>
 
 <div class="overlay" onclick={handleClose} role="presentation">
@@ -895,6 +909,14 @@ import { slide } from 'svelte/transition';
                     <div class="readonly-value">{config?.database_path || '—'}</div>
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
+                {#if $pwaInstallPrompt}
+                    <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Install as PWA
+                    </button>
+                {/if}
             </fieldset>
 
             <!-- Task Defaults Section -->
@@ -1906,6 +1928,24 @@ import { slide } from 'svelte/transition';
     }
     .btn-signout:hover {
         background: var(--color-status-red, #f85149);
+        color: white;
+    }
+    .btn-pwa-install {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-accent);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid var(--color-accent);
+        transition: background 0.15s, color 0.15s;
+    }
+    .btn-pwa-install:hover {
+        background: var(--color-accent);
         color: white;
     }
     .btn-primary {

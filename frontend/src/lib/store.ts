@@ -145,6 +145,10 @@ export function showConfirm(options: ConfirmOptions): Promise<boolean> {
     });
 }
 
+// PWA install prompt state
+export const pwaInstallPrompt = writable<Event | null>(null);
+export const pwaInstalled = writable(false);
+
 // Commit dialog state
 export interface CommitDialogOptions {
     loading: boolean;

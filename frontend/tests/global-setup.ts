@@ -55,7 +55,7 @@ async function setup(): Promise<void> {
     // Use setsid to start server in a new session (truly independent of this process)
     kanbanServer = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB], {
         cwd: '/home/mwren/projects/kanban',
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD },
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
         detached: true,
     });
@@ -131,7 +131,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB_ISOLATED], {
         cwd: '/home/mwren/projects/kanban',
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD },
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
         detached: true,
     });
