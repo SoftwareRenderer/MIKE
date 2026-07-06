@@ -2,7 +2,6 @@ import type { Thread } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import {
     getOfflineStatus,
-    enqueueAction,
     queueWrite,
     switchTaskThreadRaw,
     forkTaskThreadRaw,
@@ -42,8 +41,7 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
 /** Delete a conversation thread. Queued when offline. */
 export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'deleteTaskThread', params: { projectId, taskId, threadId } });
-        return { status: 'queued' };
+        return await queueWrite('deleteTaskThread', { projectId, taskId, threadId }, { status: 'queued' });
     }
     return deleteTaskThreadRaw(projectId, taskId, threadId);
 }

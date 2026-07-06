@@ -45,8 +45,9 @@ export {
     deleteProject,
     getBoard,
     reorderTasks,
-    isFromCache,
 } from './api/projects';
+
+export { isFromCache } from './api/cache';
 
 export {
     createTask,

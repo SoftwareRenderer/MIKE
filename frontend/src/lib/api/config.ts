@@ -2,20 +2,12 @@ import type { Config } from '../types';
 import { API_BASE, apiFetch, apiError } from './helpers';
 import {
     getOfflineStatus,
-    enqueueAction,
+    queueWrite,
     updateConfigRaw,
     reloadPromptsRaw,
 } from './queue';
 import { setBoardCache, getBoardCache } from '../storage';
-
-/** Runtime marker on cached data to indicate it was served from the offline mirror. */
-const CACHE_MARKER = Symbol('fromCache');
-export function isFromCache(obj: unknown): boolean {
-    return (obj as any)?.[CACHE_MARKER] === true;
-}
-function markCached<T>(data: T): T {
-    return Object.assign(data, { [CACHE_MARKER]: true });
-}
+import { markCached } from './cache';
 
 // -- Configuration endpoints --
 
@@ -44,8 +36,7 @@ export async function getConfig(): Promise<Config> {
 /** Update server configuration. Sends partial updates — only changed fields are required. Queued when offline. */
 export async function updateConfig(config: Config): Promise<Config> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'updateConfig', params: { config } });
-        return config;
+        return await queueWrite('updateConfig', { config }, config);
     }
     return updateConfigRaw(config);
 }
@@ -86,8 +77,7 @@ export async function testPiConnection(): Promise<{ success: boolean; message: s
 /** Reload prompt templates from disk. Queued when offline. */
 export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'reloadPrompts', params: {} });
-        return { status: 'queued', message: 'Queued', files: [] };
+        return await queueWrite('reloadPrompts', {}, { status: 'queued', message: 'Queued', files: [] });
     }
     return reloadPromptsRaw();
 }

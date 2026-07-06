@@ -1,4 +1,4 @@
-import type { Board, Task, TaskCommit, TaskMessage } from '../types';
+import type { Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import {
     getOfflineStatus,
@@ -21,21 +21,7 @@ import {
     deleteTaskMessagesAfterRaw,
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
-    resetWorktreeRaw,
 } from './queue';
-import { setBoardCache, boardCacheKey } from '../storage';
-
-// -- Board endpoints --
-
-/** Fetch the full board state (tasks + columns) for a project. */
-export async function getBoard(projectId: string): Promise<Board> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch board');
-    const data = await res.json();
-    // Cache fire-and-forget
-    setBoardCache(boardCacheKey(projectId), data).catch(() => {});
-    return data;
-}
 
 // -- Task CRUD endpoints --
 
@@ -96,8 +82,7 @@ export async function getCommitPreview(projectId: string, taskId: string): Promi
 /** Delete all done tasks in a project. Queued when offline. */
 export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'clearDoneTasks', params: { projectId } });
-        return { deleted: 0 };
+        return await queueWrite('clearDoneTasks', { projectId }, { deleted: 0 });
     }
     return clearDoneTasksRaw(projectId);
 }
@@ -213,36 +198,6 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
         return;
     }
     return updateTaskMessageRaw(projectId, taskId, messageId, content);
-}
-
-// -- Git endpoints --
-
-/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content. */
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>; short_stat: string; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> }> {
-    const params = new URLSearchParams();
-    if (options?.headRef) params.set('head', options.headRef);
-    if (options?.baseRef) params.set('base', options.baseRef);
-    if (options?.full) params.set('full', '1');
-    const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
-    const res = await apiFetch(url);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
-    return res.json();
-}
-
-/** Fetch commit history for a task, including the base commit and all task commits. */
-export async function getTaskCommits(projectId: string, taskId: string): Promise<{ base_commit?: TaskCommit; commits: TaskCommit[] }> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch commits');
-    return res.json();
-}
-
-/** Reset a task's worktree to a specific commit. Queued when offline. */
-export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'resetWorktree', params: { projectId, taskId, commitHash } });
-        return { status: 'queued' };
-    }
-    return resetWorktreeRaw(projectId, taskId, commitHash);
 }
 
 /** Manually trigger context summarization for a task. */

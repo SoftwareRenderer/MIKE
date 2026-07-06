@@ -12,16 +12,8 @@ import {
     reorderTasksRaw,
 } from './queue';
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
+import { markCached } from './cache';
 import type { ReorderRequest } from '../types';
-
-/** Runtime marker on cached data to indicate it was served from the offline mirror. */
-const CACHE_MARKER = Symbol('fromCache');
-export function isFromCache(obj: unknown): boolean {
-    return (obj as any)?.[CACHE_MARKER] === true;
-}
-function markCached<T>(data: T): T {
-    return Object.assign(data, { [CACHE_MARKER]: true });
-}
 
 /** Fetch all projects from the server. Falls back to cached copy on failure or when offline. */
 export async function getProjects(): Promise<Project[]> {

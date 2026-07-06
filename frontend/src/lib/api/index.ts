@@ -4,6 +4,9 @@
 // -- Helpers --
 export { generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken } from './helpers';
 
+// -- Cache --
+export { isFromCache } from './cache';
+
 // -- Queue --
 export {
     getOfflineStatus,
@@ -22,7 +25,7 @@ export {
 } from './queue';
 
 // -- Types --
-export type { QueuedAction } from './queue';
+export type { QueuedAction, ActionType } from './queue';
 
 // -- Projects --
 export {

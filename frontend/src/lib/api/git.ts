@@ -2,7 +2,7 @@ import type { GitCommit, GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import {
     getOfflineStatus,
-    enqueueAction,
+    queueWrite,
     resetWorktreeRaw,
 } from './queue';
 
@@ -86,8 +86,7 @@ export async function getUntrackedFileContent(projectId: string, taskId: string,
 /** Reset a task's worktree to a specific commit. Queued when offline. */
 export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'resetWorktree', params: { projectId, taskId, commitHash } });
-        return { status: 'queued' };
+        return await queueWrite('resetWorktree', { projectId, taskId, commitHash }, { status: 'queued' });
     }
     return resetWorktreeRaw(projectId, taskId, commitHash);
 }

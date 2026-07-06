@@ -1,9 +1,12 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
-import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage } from '../storage';
+import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import type { Config, Project, ReorderRequest, Task, TaskMessage, Thread } from '../types';
 
 // Re-export helpers for direct imports
 export { generateId };
+
+// Re-export QueuedAction from storage (canonical definition)
+export type { StoredQueuedAction as QueuedAction };
 
 // Register setOfflineStatus so helpers can mark app offline on fetch failures
 registerSetOffline((offline: boolean) => setOfflineStatus(offline));
@@ -16,12 +19,30 @@ registerSetOffline((offline: boolean) => setOfflineStatus(offline));
 // On reconnect, actions are replayed in order.
 // =============================================================================
 
-export interface QueuedAction {
-    id: string;
-    type: string;
-    params: Record<string, any>;
-    timestamp: number;
-}
+type QueuedAction = StoredQueuedAction;
+
+/** All recognized action types for the offline queue. */
+export type ActionType =
+    // Task CRUD
+    | 'createTask' | 'updateTask' | 'deleteTask' | 'moveTask'
+    | 'commitAndDone' | 'clearDoneTasks'
+    // Task execution
+    | 'startTask' | 'startSubtask' | 'stopTask' | 'retryTask' | 'resumeTask'
+    // Messages
+    | 'sendTaskMessage' | 'createTaskMessage' | 'deleteTaskMessagesAfter'
+    | 'deleteTaskMessage' | 'updateTaskMessage'
+    // Threads
+    | 'switchTaskThread' | 'forkTaskThread' | 'deleteTaskThread'
+    // Board
+    | 'reorderTasks'
+    // Projects
+    | 'createProject' | 'updateProject' | 'deleteProject'
+    // Git
+    | 'resetWorktree'
+    // Config
+    | 'updateConfig' | 'resetProjectStats' | 'reloadPrompts'
+    // Sandbox
+    | 'buildSandboxImage';
 
 let isOffline = false;
 let actionQueue: QueuedAction[] = [];
@@ -94,7 +115,7 @@ async function saveQueue() {
 }
 
 /** Add an action to the queue and persist. */
-export async function enqueueAction(action: Omit<QueuedAction, 'id' | 'timestamp'>): Promise<QueuedAction> {
+export async function enqueueAction(action: { type: ActionType; params: Record<string, any> }): Promise<QueuedAction> {
     const item: QueuedAction = {
         ...action,
         id: generateId(),
@@ -145,52 +166,73 @@ export function __debugOfflineStatus(): boolean {
     return isOffline;
 }
 
+/** Check if an error is a transient network failure (retryable). */
+function isTransientError(e: unknown): boolean {
+    return (e as any)?.name === 'TypeError' || (e as any)?.name === 'AbortError';
+}
+
+/**
+ * Track task ID resolution and latest state during a flush.
+ * Maps optimistic IDs → real IDs (from createTask) and tracks
+ * latest state from subsequent actions (start, move, etc.).
+ */
+function trackResult(action: QueuedAction, result: any, idMap: Map<string, string>, resolvedTasks: Map<string, any>) {
+    if (action.type === 'createTask' && result && action.params.taskData?.id) {
+        const optId = action.params.taskData.id;
+        idMap.set(optId, result.id);
+        resolvedTasks.set(optId, result);
+    }
+    if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
+        action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
+        action.type === 'commitAndDone' || action.type === 'updateTask')) {
+        resolvedTasks.set(result.id, result);
+    }
+}
+
+/**
+ * Core flush loop: process all queued actions in order.
+ * @param onTransientError  Callback when a transient (retryable) error occurs.
+ *                          Return true to stop flushing, false to continue.
+ */
+async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<string, any>> {
+    const idMap = new Map<string, string>();
+    const resolvedTasks = new Map<string, any>();
+
+    while (queueLength() > 0) {
+        const action = actionQueue[0];
+        try {
+            const result = await executeQueuedAction(action, idMap);
+            trackResult(action, result, idMap, resolvedTasks);
+            actionQueue.shift();
+            await saveQueue();
+        } catch (e: any) {
+            console.error('[Queue] Failed to flush action:', action.type, e);
+            if (isTransientError(e)) {
+                if (onTransientError?.(e) !== false) {
+                    break; // stop flushing on transient error
+                }
+            } else {
+                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
+                actionQueue.shift();
+                await saveQueue();
+            }
+        }
+    }
+
+    return resolvedTasks;
+}
+
 /** Flush queued actions via HTTP immediately (e.g., on page load). Independent of WebSocket state. */
 export async function flushQueueNow(): Promise<void> {
     if (flushPromise) return flushPromise;
     if (queueLength() === 0) return;
 
     flushPromise = (async () => {
-        const idMap = new Map<string, string>();
-        const resolvedTasks = new Map<string, any>();
-
-        while (queueLength() > 0) {
-            const action = actionQueue[0];
-            try {
-                const result = await executeQueuedAction(action, idMap);
-                if (action.type === 'createTask' && result && action.params.taskData?.id) {
-                    const optId = action.params.taskData.id;
-                    idMap.set(optId, result.id);
-                    resolvedTasks.set(optId, result);
-                }
-                if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
-                    action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
-                    action.type === 'commitAndDone' || action.type === 'updateTask')) {
-                    resolvedTasks.set(result.id, result);
-                }
-                actionQueue.shift();
-                await saveQueue();
-            } catch (e: any) {
-                console.error('[Queue] Failed to flush action:', action.type, e);
-                // Transient errors (network unreachable, abort) — stop flushing, keep remaining actions in queue
-                if (e?.name === 'TypeError' || e?.name === 'AbortError') {
-                    break;
-                }
-                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
-                actionQueue.shift();
-                await saveQueue();
-            }
-        }
-
+        const resolvedTasks = await doFlush();
         notifyQueueFlushed([], resolvedTasks);
         flushPromise = null;
     })();
     return flushPromise;
-}
-
-/** Check if an error is a transient network failure (retryable). */
-function isTransientError(e: unknown): boolean {
-    return (e as any)?.name === 'TypeError' || (e as any)?.name === 'AbortError';
 }
 
 /** Replay all queued actions in order. Triggered on WebSocket reconnect. */
@@ -202,44 +244,18 @@ async function flushQueue() {
         const wasOffline = isOffline;
         // Temporarily set online so raw functions execute directly
         isOffline = false;
-        // Map optimistic task IDs → real Task objects (resolved during flush)
-        const idMap = new Map<string, string>();
-        const resolvedTasks = new Map<string, any>();
-
-        while (queueLength() > 0) {
-            const action = actionQueue[0];
-            try {
-                const result = await executeQueuedAction(action, idMap);
-                // If createTask returned a real task, map optimistic ID → real ID
-                if (action.type === 'createTask' && result && action.params.taskData?.id) {
-                    const optId = action.params.taskData.id;
-                    idMap.set(optId, result.id);
-                    resolvedTasks.set(optId, result);
-                }
-                // Track latest state of tasks modified by other actions (start, move, etc.)
-                if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
-                    action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
-                    action.type === 'commitAndDone' || action.type === 'updateTask')) {
-                    resolvedTasks.set(result.id, result);
-                }
-                actionQueue.shift();
-                await saveQueue();
-            } catch (e: any) {
-                console.error('[Queue] Failed to flush action:', action.type, e);
-                // Transient errors — stop flushing, keep remaining actions for next reconnect
+        try {
+            const resolvedTasks = await doFlush((e) => {
                 if (isTransientError(e)) {
                     isOffline = true;
-                    break;
+                    return true; // stop flushing
                 }
-                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
-                actionQueue.shift();
-                await saveQueue();
-            }
+                return false;
+            });
+            notifyQueueFlushed([], resolvedTasks);
+        } finally {
+            isOffline = wasOffline;
         }
-
-        isOffline = wasOffline;
-        // Notify listeners with resolved tasks so they can replace optimistic ones
-        notifyQueueFlushed([], resolvedTasks);
         flushPromise = null;
     })();
     return flushPromise;
@@ -466,8 +482,10 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'reloadPrompts':
             await reloadPromptsRaw();
             break;
-        default:
-            console.warn('[Queue] Unknown action type:', action.type);
+        default: {
+            const _exhaustive: never = action.type;
+            console.warn('[Queue] Unknown action type:', _exhaustive);
+        }
     }
 }
 
@@ -475,7 +493,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
  * Helper: enqueue an action and return an optimistic result.
  * Returns the queued action's ID for tracking.
  */
-export async function queueWrite<T>(type: string, params: Record<string, any>, optimistic: T): Promise<T> {
+export async function queueWrite<T>(type: ActionType, params: Record<string, any>, optimistic: T): Promise<T> {
     const queued = await enqueueAction({ type, params });
     return { ...optimistic, queued: true, actionId: queued.id } as T;
 }
