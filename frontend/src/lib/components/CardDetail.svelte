@@ -1038,7 +1038,7 @@
                         }
                     }
                 } catch (e) {
-                    // Silently fail for individual file fetches
+                    console.error(`[diff] Failed to fetch file ${path}:`, e);
                 }
             })());
         }

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1674,5 +1675,55 @@ func TestGetTaskDiff_UnstagedBlankNewFile(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected blank_untracked.txt in Untracked slice")
+	}
+}
+
+func TestParseUnifiedDiffToFiles_BlankLinesHaveTextField(t *testing.T) {
+	// Verify that blank lines in a diff (empty context/added/removed lines)
+	// have the Text field serialized as an empty string, not omitted.
+	// This is critical for the frontend's enrichRowsWithInlineSegments,
+	// which pairs removed/added rows and accesses row.text.
+	diff := `diff --git a/file.go b/file.go
+index abc1234..def5678 100644
+--- a/file.go
++++ b/file.go
+@@ -1,6 +1,4 @@
+ line1
+-
+-oldLine
+-
+ line2
++
++newLine
+ line3`
+
+	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	file := files["file.go"]
+
+	// Verify row count and that blank lines have empty (not nil/missing) text
+	if len(file.Rows) == 0 {
+		t.Fatal("expected non-zero rows")
+	}
+
+	// Serialize to JSON and verify text field is always present
+	jsonBytes, err := json.Marshal(file.Rows)
+	if err != nil {
+		t.Fatalf("failed to marshal rows: %v", err)
+	}
+
+	// Parse back and verify each row has a "text" key
+	var rows []map[string]any
+	if err := json.Unmarshal(jsonBytes, &rows); err != nil {
+		t.Fatalf("failed to unmarshal rows: %v", err)
+	}
+
+	for i, row := range rows {
+		if _, ok := row["text"]; !ok {
+			t.Errorf("row %d (variant=%q): missing 'text' field in JSON — frontend will crash on undefined.text", i, row["variant"])
+		}
 	}
 }

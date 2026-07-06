@@ -249,7 +249,7 @@ export function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
             const removedRow = removedBlock[pi];
             const addedRow = addedBlock[pi];
             if (removedRow && addedRow && !removedRow.segments && !addedRow.segments) {
-                const { oldSegments, newSegments } = buildModifiedSegments(removedRow.text, addedRow.text);
+                const { oldSegments, newSegments } = buildModifiedSegments(removedRow.text ?? '', addedRow.text ?? '');
                 removedBlock[pi] = { ...removedRow, segments: oldSegments };
                 addedBlock[pi] = { ...addedRow, segments: newSegments };
             }

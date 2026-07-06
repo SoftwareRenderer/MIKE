@@ -674,7 +674,7 @@ type UntrackedFile struct {
 type DiffRow struct {
 	LineNumber *int                `json:"lineNumber"` // null for non-code rows
 	Variant    string              `json:"variant"`    // "context", "added", "removed"
-	Text       string              `json:"text,omitempty"` // omitted when segments present
+	Text       string              `json:"text"` // empty string for blank lines; absent when segments present
 	Segments   []InlineDiffSegment `json:"segments,omitempty"`
 }
 
