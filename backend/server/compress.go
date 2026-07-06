@@ -38,13 +38,14 @@ func selectEncoding(acceptEncoding string) string {
 		// Strip quality factor (e.g. "br;q=0.8" -> "br")
 		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
 
-		rank, ok := encodingPriority[strings.ToLower(encoding)]
+		lower := strings.ToLower(encoding)
+		rank, ok := encodingPriority[lower]
 		if !ok {
 			continue
 		}
 		if rank < bestRank {
 			bestRank = rank
-			best = encoding
+			best = lower
 		}
 	}
 
