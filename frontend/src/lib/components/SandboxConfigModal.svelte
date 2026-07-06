@@ -9,6 +9,7 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import DockerfilePicker from './DockerfilePicker.svelte';
+    import DirectoryPicker from './DirectoryPicker.svelte';
 
     let { project, inProgressCount, onClose, onSaved }: {
         project: Project;
@@ -26,6 +27,7 @@
     let newContainerPort = $state('');
     let portError = $state('');
     let portsExpanded = $state(project.forward_ports && project.forward_ports.length > 0);
+    let hasPendingPort = $derived(String(newContainerPort).trim() !== '');
     // Custom mounts
     let sandboxMounts = $state<SandboxMount[]>(project.sandbox_mounts ?? []);
     let newMountHostPath = $state('');
@@ -33,6 +35,10 @@
     let newMountMode = $state<'rw' | 'ro'>('rw');
     let mountError = $state('');
     let mountsExpanded = $state(project.sandbox_mounts && project.sandbox_mounts.length > 0);
+    let hasPendingMount = $derived(newMountHostPath.trim() !== '' || newMountContainerPath.trim() !== '');
+    let showDirectoryPicker = $state(false);
+    // Save warning for un-added changes
+    let saveWarning = $state('');
     // Active host ports from running tasks (container_port → host_port map)
     let activeHostPorts = $state<Map<number, number>>(new Map());
     let hasActivePorts = $derived(activeHostPorts.size > 0);
@@ -153,6 +159,7 @@
     // Port forwarding helpers
     function addPortForward() {
         portError = '';
+        saveWarning = '';
         const container = parseInt(newContainerPort, 10);
         if (isNaN(container) || container < 1 || container > 65535) {
             portError = 'Port must be between 1 and 65535';
@@ -169,6 +176,7 @@
     // Mount helpers
     function addMount() {
         mountError = '';
+        saveWarning = '';
         if (!newMountHostPath.trim()) {
             mountError = 'Host path is required';
             return;
@@ -219,8 +227,14 @@
 
     async function handleSave() {
         if (isLocked || saving) return;
+        // Warn if user typed something in add fields but hasn't added them
+        if (hasPendingPort || hasPendingMount) {
+            saveWarning = 'You have un-added changes — click + to add them before saving.';
+            return;
+        }
         saving = true;
         error = '';
+        saveWarning = '';
 
         const changes: {
             sandbox_enabled?: boolean;
@@ -395,7 +409,7 @@
 
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
-            <div class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }}>
+            <div class="config-row config-row-subsection" class:expanded={portsExpanded} onclick={() => { portsExpanded = !portsExpanded; }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -450,7 +464,7 @@
             <!-- Add new port forward -->
             <div class="port-add-row">
                 <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container port" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
-                <button type="button" class="btn-add-port" onclick={addPortForward} disabled={isLocked} title="Add port forward">
+                <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title="Add port forward">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                         <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
@@ -487,7 +501,7 @@
             </div>
 
             <!-- Custom mounts (collapsible) -->
-            <div class="config-row" onclick={() => { mountsExpanded = !mountsExpanded; }}>
+            <div class="config-row config-row-expandable" class:expanded={mountsExpanded} onclick={() => { mountsExpanded = !mountsExpanded; }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -534,7 +548,12 @@
 
             <!-- Add new mount -->
             <div class="mount-add-row">
-                <input type="text" class="mount-input" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label="Host path" />
+                <input type="text" class="mount-input mount-input-host" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label="Host path" />
+                <button type="button" class="btn-browse-mount" onclick={() => showDirectoryPicker = true} disabled={isLocked} title="Browse host directory">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M2 4h4l1.5 1.5H12V12H2V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    </svg>
+                </button>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="mount-arrow">
                     <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -549,7 +568,7 @@
                         <span class="radio-text">ro</span>
                     </label>
                 </div>
-                <button type="button" class="btn-add-mount" onclick={addMount} disabled={isLocked} title="Add mount">
+                <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title="Add mount">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                         <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
@@ -677,6 +696,9 @@
             {/if}
         </div>
 
+        {#if saveWarning}
+            <div class="save-warning-message">{saveWarning}</div>
+        {/if}
         {#if error}
             <div class="error-message">{error}</div>
         {/if}
@@ -692,6 +714,10 @@
 
 {#if showDockerfilePicker}
     <DockerfilePicker initialPath={project.path} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
+{/if}
+
+{#if showDirectoryPicker}
+    <DirectoryPicker initialPath="/home" onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { newMountHostPath = path; showDirectoryPicker = false; }} />
 {/if}
 
 <style>
@@ -821,8 +847,34 @@
         user-select: none;
     }
 
-    .config-row-subsection:hover {
+    .config-row-subsection:hover,
+    .config-row-subsection.expanded {
         background: var(--color-surface-3);
+    }
+
+    .config-row-subsection.expanded {
+        border-bottom: none;
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    }
+
+    .config-row-subsection:not(.expanded):hover {
+        border-radius: var(--radius-sm);
+    }
+
+    /* Expandable non-subsection rows (e.g. Custom Mounts) */
+    .config-row-expandable:hover,
+    .config-row-expandable.expanded {
+        background: var(--color-surface-3);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .config-row-expandable.expanded {
+        border-bottom: none;
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    }
+
+    .config-row-expandable:not(.expanded):hover {
         border-radius: var(--radius-sm);
     }
 
@@ -1151,6 +1203,16 @@
         font-size: 0.75rem;
     }
 
+    .save-warning-message {
+        padding: 8px 12px;
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: var(--radius-md);
+        color: #22c55e;
+        font-size: 0.8125rem;
+        margin-bottom: 12px;
+    }
+
     .error-message {
         padding: 8px 12px;
         background: rgba(248, 81, 73, 0.1);
@@ -1230,6 +1292,14 @@
     }
 
     /* Port forwarding subsection */
+    .ports-content {
+        background: var(--color-surface-3);
+        padding: 0 0 4px;
+        margin-top: -4px;
+        border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+        border-bottom: 1px solid var(--color-border);
+    }
+
     .port-list {
         display: flex;
         flex-direction: column;
@@ -1355,6 +1425,12 @@
         border-color: var(--color-accent);
     }
 
+    .btn-add-port.pending {
+        background: rgba(34, 197, 94, 0.15);
+        border-color: rgba(34, 197, 94, 0.6);
+        color: #22c55e;
+    }
+
     .btn-add-port:disabled {
         opacity: 0.5;
         cursor: not-allowed;
@@ -1380,7 +1456,11 @@
 
     /* Mounts subsection */
     .mounts-content {
-        padding: 4px 0;
+        background: var(--color-surface-3);
+        padding: 0 0 4px;
+        margin-top: -4px;
+        border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+        border-bottom: 1px solid var(--color-border);
     }
 
     .mount-list {
@@ -1472,7 +1552,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-top: 4px;
+        margin: 4px 2px 0;
     }
 
     .mount-input {
@@ -1487,6 +1567,35 @@
         font-size: 0.75rem;
         font-family: var(--font-mono, monospace);
         transition: border-color 0.15s;
+    }
+
+    .mount-input-host {
+        max-width: 160px;
+    }
+
+    .btn-browse-mount {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, border-color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-browse-mount:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-browse-mount:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 
     .mount-input:focus {
@@ -1532,6 +1641,12 @@
         border-color: var(--color-accent);
     }
 
+    .btn-add-mount.pending {
+        background: rgba(34, 197, 94, 0.15);
+        border-color: rgba(34, 197, 94, 0.6);
+        color: #22c55e;
+    }
+
     .btn-add-mount:disabled {
         opacity: 0.5;
         cursor: not-allowed;
@@ -1544,5 +1659,21 @@
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
+    }
+
+    @media (max-width: 768px) {
+        .sandbox-config-dialog {
+            width: 100vw;
+            max-width: none;
+            max-height: 100dvh;
+            height: 100dvh;
+            border-radius: 0;
+            border: none;
+            padding: 16px;
+        }
+        .mount-input::placeholder,
+        .port-input::placeholder {
+            font-size: 12px;
+        }
     }
 </style>
