@@ -164,11 +164,8 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// applyPricing computes cost for each model in stats using provider pricing from config.
-// Cost formula (USD):
-//
-//	input_rate = cache_write_price if > 0, else input_price
-//	cost = (processed_tokens * input_rate + cache_tokens * cache_read_price + generated_tokens * output_rate) / 1,000,000
+// applyPricing computes cost (API + electricity) for each model in stats.
+// Agent providers skip power/electricity — they report cost directly.
 func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	cfg, err := h.configStore.GetConfig()
 	if err != nil {
@@ -197,12 +194,26 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 			inputRate = p.CacheWritePrice
 		}
 
-		cost := (float64(m.ProcessedTokens)*inputRate +
+		apiCost := (float64(m.ProcessedTokens)*inputRate +
 			float64(m.CacheTokens)*p.CacheReadPrice +
 			float64(m.GeneratedTokens)*p.OutputPrice) / 1_000_000
 
-		m.Cost = cost
-		stats.TotalCost += cost
+		m.Cost = apiCost
+		stats.TotalCost += apiCost
+
+		// Power consumption and electricity cost (LLM providers only)
+		if p.EffectiveKind() == types.ProviderKindLLM && p.PowerConsumptionW > 0 && m.PredictedMs > 0 {
+			// predicted_ms is cumulative generation time; convert ms to hours
+			powerKwh := p.PowerConsumptionW * float64(m.PredictedMs) / 3_600_000_000
+			m.PowerKwh = powerKwh
+			stats.TotalPowerKwh += powerKwh
+
+			if p.ElectricityCostPerKwh > 0 {
+				elecCost := powerKwh * p.ElectricityCostPerKwh
+				m.Cost += elecCost
+				stats.TotalCost += elecCost
+			}
+		}
 	}
 }
 

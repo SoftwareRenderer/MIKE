@@ -91,10 +91,12 @@ type Provider struct {
 	Concurrency     int           `json:"concurrency"`
 	DefaultModel    string        `json:"default_model"`
 	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
-	InputPrice      float64       `json:"input_price"`                // USD per 1M input (non-cached) tokens
-	OutputPrice     float64       `json:"output_price"`               // USD per 1M output tokens
-	CacheReadPrice  float64       `json:"cache_read_price"`           // USD per 1M cache-read tokens
-	CacheWritePrice float64       `json:"cache_write_price"`          // USD per 1M cache-write tokens (overrides input_price when set)
+	InputPrice            float64 `json:"input_price"`                 // USD per 1M input (non-cached) tokens
+	OutputPrice           float64 `json:"output_price"`                // USD per 1M output tokens
+	CacheReadPrice        float64 `json:"cache_read_price"`            // USD per 1M cache-read tokens
+	CacheWritePrice       float64 `json:"cache_write_price"`           // USD per 1M cache-write tokens (overrides input_price when set)
+	PowerConsumptionW     float64 `json:"power_consumption_w"`         // Watts
+	ElectricityCostPerKwh float64 `json:"electricity_cost_per_kwh"`    // USD per kWh
 }
 
 // IsAgent returns true if this provider is any coding agent (not a standard LLM).
@@ -260,8 +262,9 @@ type ProjectStats struct {
 	TotalGeneratedTokens int          `json:"total_generated_tokens"`
 	AvgPromptTps         float64      `json:"avg_prompt_tps"`
 	AvgGenerationTps     float64      `json:"avg_generation_tps"`
+	TotalPowerKwh        float64      `json:"total_power_kwh"`        // kWh
 	ByModel              []ModelStats `json:"by_model"`
-	TotalCost            float64      `json:"total_cost"` // USD total cost across all models
+	TotalCost            float64      `json:"total_cost"`             // USD (API + electricity)
 }
 
 // ModelStats holds token usage aggregated by provider/model.
@@ -274,6 +277,8 @@ type ModelStats struct {
 	GeneratedTokens  int     `json:"generated_tokens"`
 	AvgPromptTps     float64 `json:"avg_prompt_tps"`
 	AvgGenerationTps float64 `json:"avg_generation_tps"`
+	PredictedMs      int64   `json:"predicted_ms"` // Cumulative generation time in milliseconds
+	PowerKwh         float64 `json:"power_kwh"`    // kWh
 	TaskCount        int     `json:"task_count"`
-	Cost             float64 `json:"cost"` // USD cost for this model's usage
+	Cost             float64 `json:"cost"`          // USD (API + electricity)
 }

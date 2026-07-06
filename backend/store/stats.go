@@ -44,10 +44,10 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 
 	for rows.Next() {
 		var ms types.ModelStats
-		var promptMsRow, genMsRow int64
+		var promptMsRow int64
 		err := rows.Scan(&ms.ModelName, &ms.ProviderName, &ms.PromptTokens, &ms.CacheTokens,
 			&ms.ProcessedTokens, &ms.GeneratedTokens, &ms.AvgPromptTps, &ms.AvgGenerationTps,
-			&promptMsRow, &genMsRow)
+			&promptMsRow, &ms.PredictedMs)
 		if err != nil {
 			continue
 		}
@@ -59,7 +59,7 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		stats.TotalGeneratedTokens += ms.GeneratedTokens
 
 		totalPromptMs += promptMsRow
-		totalGenMs += genMsRow
+		totalGenMs += ms.PredictedMs
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -42,22 +42,6 @@ import { slide } from 'svelte/transition';
         return currencyPart ? currencyPart.value : '$';
     })();
 
-    /** Format a price number as a locale-aware string with 2 decimal places. */
-    function formatPrice(value: number): string {
-        if (!value && value !== 0) return '';
-        return Number(value).toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 4,
-        });
-    }
-
-    /** Parse a formatted price string back to a number. */
-    function parsePrice(str: string): number {
-        const cleaned = str.replace(/[^0-9.]/g, '');
-        const n = parseFloat(cleaned);
-        return isNaN(n) ? 0 : n;
-    }
-
     // -- Provider management --
     interface ModelEntry {
         name: string;
@@ -81,6 +65,9 @@ import { slide } from 'svelte/transition';
         output_price: number;
         cache_read_price: number;
         cache_write_price: number;
+        // Power & electricity
+        power_consumption_w: number;
+        electricity_cost_per_kwh: number;
         fetchingModels: boolean;
         fetchError: string;
         expanded: boolean; // card expansion state
@@ -141,6 +128,8 @@ import { slide } from 'svelte/transition';
                 output_price: p.output_price || 0,
                 cache_read_price: p.cache_read_price || 0,
                 cache_write_price: p.cache_write_price || 0,
+                power_consumption_w: p.power_consumption_w || 0,
+                electricity_cost_per_kwh: p.electricity_cost_per_kwh || 0,
                 fetchingModels: false,
                 fetchError: '',
                 expanded: false,
@@ -243,6 +232,8 @@ import { slide } from 'svelte/transition';
             output_price: 0,
             cache_read_price: 0,
             cache_write_price: 0,
+            power_consumption_w: 0,
+            electricity_cost_per_kwh: 0,
             fetchingModels: false,
             fetchError: '',
             expanded: true,
@@ -291,6 +282,8 @@ import { slide } from 'svelte/transition';
             output_price: 0,
             cache_read_price: 0,
             cache_write_price: 0,
+            power_consumption_w: 0,
+            electricity_cost_per_kwh: 0,
             fetchingModels: false,
             fetchError: '',
             expanded: true,
@@ -484,6 +477,8 @@ import { slide } from 'svelte/transition';
                         output_price: p.output_price,
                         cache_read_price: p.cache_read_price,
                         cache_write_price: p.cache_write_price,
+                        power_consumption_w: p.power_consumption_w,
+                        electricity_cost_per_kwh: p.electricity_cost_per_kwh,
                     };
                     if (!isMasked && p.kind !== 'agent') {
                         base.api_key = trimmedKey;
@@ -835,33 +830,58 @@ import { slide } from 'svelte/transition';
                                                 </svg>
                                             </span>
                                         </div>
-                                        <div class="pricing-grid">
-                                            <div class="pricing-field">
+                                        <div class="currency-grid" style="grid-template-columns: repeat(4, 1fr)">
+                                            <div class="currency-field">
                                                 <label for={`input-price-${i}`}>Input</label>
-                                                <div class="pricing-input-wrap">
-                                                    <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`input-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.input_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.input_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
+                                                <div class="currency-input-wrap">
+                                                    <span class="currency-prefix">{currencySymbol}</span>
+                                                    <input id={`input-price-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.input_price > 0 ? p.input_price : ''} oninput={(e) => { p.input_price = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="currency-input" />
                                                 </div>
                                             </div>
-                                            <div class="pricing-field">
+                                            <div class="currency-field">
                                                 <label for={`output-price-${i}`}>Output</label>
-                                                <div class="pricing-input-wrap">
-                                                    <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`output-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.output_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.output_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
+                                                <div class="currency-input-wrap">
+                                                    <span class="currency-prefix">{currencySymbol}</span>
+                                                    <input id={`output-price-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.output_price > 0 ? p.output_price : ''} oninput={(e) => { p.output_price = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="currency-input" />
                                                 </div>
                                             </div>
-                                            <div class="pricing-field">
+                                            <div class="currency-field">
                                                 <label for={`cache-read-price-${i}`}>Cache Read</label>
-                                                <div class="pricing-input-wrap">
-                                                    <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`cache-read-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_read_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.cache_read_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
+                                                <div class="currency-input-wrap">
+                                                    <span class="currency-prefix">{currencySymbol}</span>
+                                                    <input id={`cache-read-price-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.cache_read_price > 0 ? p.cache_read_price : ''} oninput={(e) => { p.cache_read_price = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="currency-input" />
                                                 </div>
                                             </div>
-                                            <div class="pricing-field">
+                                            <div class="currency-field">
                                                 <label for={`cache-write-price-${i}`}>Cache Write</label>
-                                                <div class="pricing-input-wrap">
-                                                    <span class="pricing-prefix">{currencySymbol}</span>
-                                                    <input id={`cache-write-price-${i}`} type="text" inputmode="decimal" value={formatPrice(p.cache_write_price)} onfocus={(e) => { (e.target as HTMLInputElement).select(); }} onblur={(e) => { p.cache_write_price = parsePrice((e.target as HTMLInputElement).value); }} onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="0.00" class="pricing-input" />
+                                                <div class="currency-input-wrap">
+                                                    <span class="currency-prefix">{currencySymbol}</span>
+                                                    <input id={`cache-write-price-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.cache_write_price > 0 ? p.cache_write_price : ''} oninput={(e) => { p.cache_write_price = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="currency-input" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Power & Electricity Section -->
+                                    <div class="currency-section">
+                                        <div class="currency-header">
+                                            <span class="currency-label">Power & Electricity</span>
+                                            <span class="help-icon" title="Estimate energy cost from system power draw. Power (W) × generation time gives kWh. Combined with electricity rate, adds to total cost.">
+                                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                                </svg>
+                                            </span>
+                                        </div>
+                                        <div class="currency-grid">
+                                            <div class="currency-field">
+                                                <label for={`power-w-${i}`}>Power Consumption (W)</label>
+                                                <input id={`power-w-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.power_consumption_w > 0 ? p.power_consumption_w : ''} oninput={(e) => { p.power_consumption_w = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="field-input" />
+                                            </div>
+                                            <div class="currency-field">
+                                                <label for={`elec-cost-${i}`}>Electricity ($/kWh)</label>
+                                                <div class="currency-input-wrap">
+                                                    <span class="currency-prefix">{currencySymbol}</span>
+                                                    <input id={`elec-cost-${i}`} type="number" inputmode="decimal" min="0" step="any" value={p.electricity_cost_per_kwh > 0 ? p.electricity_cost_per_kwh : ''} oninput={(e) => { p.electricity_cost_per_kwh = parseFloat((e.target as HTMLInputElement).value) || 0; }} class="currency-input" />
                                                 </div>
                                             </div>
                                         </div>
@@ -1671,64 +1691,105 @@ import { slide } from 'svelte/transition';
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
-    .pricing-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
+    /* Standalone number input */
+    .field-input[type="number"] {
+        -moz-appearance: textfield;
+    }
+    .field-input::-webkit-outer-spin-button,
+    .field-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    /* Currency inputs */
+    .currency-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+    .currency-header {
+        display: flex;
+        align-items: center;
         gap: 6px;
     }
-    .pricing-field {
+    .currency-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .currency-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+    .currency-field {
         display: flex;
         flex-direction: column;
         gap: 4px;
     }
-    .pricing-field label {
+    .currency-field label {
         font-size: 0.75rem;
         font-weight: 500;
         color: var(--color-text-secondary);
     }
-    .pricing-input-wrap {
+    .currency-input {
+        width: 100%;
+        border: 1px solid var(--color-border-bright);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-2);
+        padding: 8px 12px;
+        font-size: 0.875rem;
+        color: var(--color-text-primary);
+        transition: border-color 0.15s ease;
+    }
+    .currency-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+    .currency-input::placeholder {
+        color: var(--color-text-tertiary);
+    }
+    .currency-input::-webkit-outer-spin-button,
+    .currency-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .currency-input[type="number"] {
+        -moz-appearance: textfield;
+    }
+    .currency-input-wrap {
         display: flex;
         align-items: center;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border-bright);
+        border-radius: var(--radius-md);
         overflow: hidden;
+        background: var(--color-surface-2);
         transition: border-color 0.15s ease;
         width: fit-content;
         max-width: 100%;
     }
-    .pricing-input-wrap:focus-within {
+    .currency-input-wrap:focus-within {
         border-color: var(--color-accent);
     }
-    .pricing-prefix {
-        padding: 0 2px 0 6px;
-        font-size: 0.75rem;
+    .currency-prefix {
+        padding: 0 4px 0 12px;
+        font-size: 0.875rem;
         color: var(--color-text-tertiary);
         flex-shrink: 0;
     }
-    .pricing-input {
-        width: 68px;
-        min-width: 0;
+    .currency-input-wrap .currency-input {
         border: none;
         background: transparent;
-        padding: 4px 6px;
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        font-family: var(--font-mono, monospace);
+        width: 68px;
     }
-    .pricing-input:focus,
-    .pricing-input:focus-visible {
-        outline: none;
+    .currency-input-wrap .currency-input:focus {
         border: none;
     }
-    .pricing-input::placeholder {
-        color: var(--color-text-tertiary);
-    }
-    /* Remove number input spinners */
-    .pricing-input::-webkit-outer-spin-button,
-    .pricing-input::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
-    }
+
     /* Models section */
     .models-section {
         display: flex;

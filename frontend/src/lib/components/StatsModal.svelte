@@ -64,6 +64,15 @@
         return `${symbol}${literal}${formatted}`;
     }
 
+    function formatKwh(kwh: number | undefined): string {
+        if (!kwh || kwh === 0) return '-';
+        if (kwh >= 1) return `${kwh.toFixed(3)} kWh`;
+        // Show Wh for small values
+        const wh = kwh * 1000;
+        if (wh >= 1) return `${wh.toFixed(1)} Wh`;
+        return `${(wh * 1000).toFixed(0)} mWh`;
+    }
+
     function getTokenLabel(model: ModelStats): string {
         if (model.provider_name === 'title_generation') {
             return `${model.model_name} (Title Generation)`;
@@ -146,8 +155,12 @@
                             <span class="summary-label">Gen Speed</span>
                         </div>
                         <div class="summary-item">
+                            <span class="summary-value">{formatKwh(stats.total_power_kwh)}</span>
+                            <span class="summary-label">Power</span>
+                        </div>
+                        <div class="summary-item">
                             <span class="summary-value">{formatCost(stats.total_cost)}</span>
-                            <span class="summary-label">Est. Total Cost</span>
+                            <span class="summary-label" title="Includes API pricing and electricity cost (when configured)">Est. Total Cost</span>
                         </div>
                     </div>
                 </div>
@@ -163,7 +176,8 @@
                             <th class="col-num">Generated</th>
                             <th class="col-num">Prompt Speed</th>
                             <th class="col-num">Gen Speed</th>
-                            <th class="col-num">Est. Cost</th>
+                            <th class="col-num">Power</th>
+                            <th class="col-num" title="Includes API pricing and electricity cost (when configured)">Est. Total Cost</th>
                             <th class="col-action"></th>
                         </tr>
                     </thead>
@@ -179,6 +193,7 @@
                                 <td class="col-num">{formatNumber(model.generated_tokens)}</td>
                                 <td class="col-num">{formatTps(model.avg_prompt_tps)}</td>
                                 <td class="col-num">{formatTps(model.avg_generation_tps)}</td>
+                                <td class="col-num">{formatKwh(model.power_kwh)}</td>
                                 <td class="col-num">{formatCost(model.cost)}</td>
                                 <td class="col-action">
                                     <button class="btn-reset" onclick={() => resetModel(model)} title="Reset stats for this model" aria-label={`Reset stats for ${getTokenLabel(model)}`}>

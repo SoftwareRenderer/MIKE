@@ -132,6 +132,8 @@ export interface Provider {
     output_price?: number;     // USD per 1M output tokens
     cache_read_price?: number; // USD per 1M cache-read tokens
     cache_write_price?: number; // USD per 1M cache-write tokens (overrides input_price when set)
+    power_consumption_w?: number;        // Watts
+    electricity_cost_per_kwh?: number;   // USD per kWh
 }
 
 /** Sentinel URL used when a task uses Pi agent instead of an LLM provider. */
@@ -213,8 +215,9 @@ export interface ModelStats {
     generated_tokens: number;
     avg_prompt_tps: number;
     avg_generation_tps: number;
+    power_kwh?: number; // kWh
     task_count: number;
-    cost: number; // USD cost for this model's usage
+    cost: number; // USD (API + electricity)
 }
 
 export interface ProjectStats {
@@ -225,8 +228,9 @@ export interface ProjectStats {
     total_generated_tokens: number;
     avg_prompt_tps: number;
     avg_generation_tps: number;
+    total_power_kwh?: number; // kWh
     by_model: ModelStats[];
-    total_cost: number; // USD total cost across all models
+    total_cost: number; // USD (API + electricity)
 }
 
 // Stream events
