@@ -19,6 +19,12 @@ export interface PortForward {
     container_port: number;
 }
 
+export interface SandboxMount {
+    host_path: string;
+    container_path: string;
+    mode: 'rw' | 'ro';
+}
+
 export interface AssignedPort {
     host_port: number;
     container_port: number;
@@ -35,6 +41,7 @@ export interface Project {
     sandbox_dockerfile_path?: string;
     sandbox_memory_limit?: number;
     forward_ports?: PortForward[];
+    sandbox_mounts?: SandboxMount[];
     active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;

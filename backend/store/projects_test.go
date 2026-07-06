@@ -761,3 +761,86 @@ func TestProjectSandboxForwardPorts(t *testing.T) {
 		t.Fatal("expected to find proj-ports in list")
 	}
 }
+
+func TestProjectSandboxMounts(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with sandbox mounts
+	proj := newProject("proj-mounts", "mount-test", "/tmp/repo-mounts")
+	proj.SandboxMounts = []types.SandboxMount{
+		{HostPath: "/data/cache", ContainerPath: "/mnt/cache", Mode: "rw"},
+		{HostPath: "/etc/config", ContainerPath: "/etc/config", Mode: "ro"},
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-mounts")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if len(got.SandboxMounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %d", len(got.SandboxMounts))
+	}
+	if got.SandboxMounts[0].HostPath != "/data/cache" {
+		t.Fatalf("expected host path /data/cache, got %s", got.SandboxMounts[0].HostPath)
+	}
+	if got.SandboxMounts[0].ContainerPath != "/mnt/cache" {
+		t.Fatalf("expected container path /mnt/cache, got %s", got.SandboxMounts[0].ContainerPath)
+	}
+	if got.SandboxMounts[0].Mode != "rw" {
+		t.Fatalf("expected mode rw, got %s", got.SandboxMounts[0].Mode)
+	}
+	if got.SandboxMounts[1].Mode != "ro" {
+		t.Fatalf("expected mode ro, got %s", got.SandboxMounts[1].Mode)
+	}
+
+	// Update mounts
+	newMounts := []types.SandboxMount{
+		{HostPath: "/logs", ContainerPath: "/var/log/app", Mode: "rw"},
+	}
+	if err := s.UpdateProjectSandboxMounts("proj-mounts", newMounts); err != nil {
+		t.Fatalf("update mounts: %v", err)
+	}
+	got, err = s.GetProject("proj-mounts")
+	if err != nil {
+		t.Fatalf("get project after update: %v", err)
+	}
+	if len(got.SandboxMounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(got.SandboxMounts))
+	}
+	if got.SandboxMounts[0].HostPath != "/logs" {
+		t.Fatalf("expected host path /logs, got %s", got.SandboxMounts[0].HostPath)
+	}
+
+	// Clear mounts
+	if err := s.UpdateProjectSandboxMounts("proj-mounts", nil); err != nil {
+		t.Fatalf("clear mounts: %v", err)
+	}
+	got, err = s.GetProject("proj-mounts")
+	if err != nil {
+		t.Fatalf("get project after clear: %v", err)
+	}
+	if len(got.SandboxMounts) != 0 {
+		t.Fatalf("expected 0 mounts, got %d", len(got.SandboxMounts))
+	}
+
+	// Verify in list
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-mounts" {
+			found = true
+			if len(p.SandboxMounts) != 0 {
+				t.Fatalf("expected 0 mounts in list, got %d", len(p.SandboxMounts))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-mounts in list")
+	}
+}

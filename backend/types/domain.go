@@ -135,6 +135,13 @@ type AssignedPort struct {
 	ContainerPort int `json:"container_port"`
 }
 
+// SandboxMount specifies a custom host path bind mount for sandbox containers.
+type SandboxMount struct {
+	HostPath      string `json:"host_path"`
+	ContainerPath string `json:"container_path"`
+	Mode          string `json:"mode"` // "rw" or "ro"
+}
+
 // Project represents a workspace project.
 type Project struct {
 	ID                      string        `json:"id"`
@@ -146,7 +153,8 @@ type Project struct {
 	SandboxImage            string        `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath   string        `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
-	ForwardPorts            []PortForward `json:"forward_ports,omitempty"`
+	ForwardPorts            []PortForward  `json:"forward_ports,omitempty"`
+	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	CreatedAt               time.Time     `json:"created_at"`
 	UpdatedAt               time.Time     `json:"updated_at"`

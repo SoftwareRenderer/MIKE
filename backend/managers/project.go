@@ -313,7 +313,8 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		// mid-tool-call, causing "broken pipe" errors.
 		hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
 			req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
-			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil
+			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
+			req.SandboxMounts != nil
 		if hasSandboxChange && h.executor != nil && h.executor.HasRunningTasks(id) {
 			httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
 			return
@@ -351,6 +352,12 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if req.SandboxForwardPorts != nil {
 			if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, req.SandboxForwardPorts); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox forward ports setting")
+				return
+			}
+		}
+		if req.SandboxMounts != nil {
+			if updateErr := h.store.UpdateProjectSandboxMounts(id, req.SandboxMounts); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox mounts setting")
 				return
 			}
 		}

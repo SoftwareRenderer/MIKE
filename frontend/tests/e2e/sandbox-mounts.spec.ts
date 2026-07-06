@@ -1,0 +1,173 @@
+import { test, expect } from '@playwright/test';
+import { getProjectId, csrfFetch } from './helpers';
+
+test.describe.serial('Sandbox Mounts', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    // Ensure no tasks are in progress (blocks sandbox config)
+    const projectId = await getProjectId(page);
+    const tasks = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`);
+      return res.ok ? res.json() : [];
+    }, projectId);
+    for (const task of tasks) {
+      if (task.status === 'in_progress') {
+        await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
+          method: 'POST',
+          body: { status: 'backlog' },
+        });
+      }
+    }
+    // Ensure sandbox is enabled
+    await csrfFetch(page, `/api/projects/${projectId}`, {
+      method: 'PUT',
+      body: { sandbox_enabled: true, sandbox_network_isolation: false },
+    });
+    // Reload to reset component state
+    await page.reload();
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should show custom mounts section when sandbox is enabled', async ({ page }) => {
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Custom Mounts subsection header should be visible
+    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    await expect(mountsHeader).toBeVisible({ timeout: 5000 });
+
+    // Section starts collapsed — click to expand
+    await mountsHeader.click();
+    await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
+    // Description explains purpose
+    await expect(page.locator('.config-row-subsection .config-desc')).toContainText('Bind mount');
+
+    // Close modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should add and remove mount', async ({ page }) => {
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Expand Custom Mounts subsection
+    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    await mountsHeader.click();
+    await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
+
+    // Add mount
+    const hostInput = page.locator('.mount-input[aria-label="Host path"]');
+    const containerInput = page.locator('.mount-input[aria-label="Container path"]');
+    const addButton = page.locator('.btn-add-mount');
+
+    await hostInput.fill('/tmp/data');
+    await containerInput.fill('/mnt/data');
+    await addButton.click();
+
+    // Verify mount appears in list
+    await expect(page.locator('.mount-item')).toHaveCount(1);
+    await expect(page.locator('.mount-path')).toContainText('/tmp/data');
+    await expect(page.locator('.mount-container')).toContainText('/mnt/data');
+    await expect(page.locator('.mount-mode')).toContainText('rw');
+
+    // Remove mount
+    await page.locator('.btn-remove-mount').first().click();
+    await expect(page.locator('.mount-item')).toHaveCount(0);
+
+    // Close modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should reject empty paths', async ({ page }) => {
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Expand Custom Mounts subsection
+    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    await mountsHeader.click();
+    await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
+
+    const addButton = page.locator('.btn-add-mount');
+
+    // Try adding with empty host path
+    await addButton.click();
+    await expect(page.locator('.mount-error')).toContainText('Host path is required');
+
+    // Try adding with empty container path
+    const hostInput = page.locator('.mount-input[aria-label="Host path"]');
+    await hostInput.fill('/tmp/data');
+    await addButton.click();
+    await expect(page.locator('.mount-error')).toContainText('Container path is required');
+
+    // Close modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+  });
+
+  test('should toggle rw/ro mode', async ({ page }) => {
+    // Open sandbox config modal
+    await page.click('.sandbox-config-btn');
+    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+
+    // Expand Custom Mounts subsection
+    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    await mountsHeader.click();
+    await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
+
+    const hostInput = page.locator('.mount-input[aria-label="Host path"]');
+    const containerInput = page.locator('.mount-input[aria-label="Container path"]');
+    const addButton = page.locator('.btn-add-mount');
+
+    // Add a read-only mount
+    await hostInput.fill('/etc/config');
+    await containerInput.fill('/etc/config');
+    // Switch to ro mode
+    await page.locator('.radio-group-small .radio-label').filter({ hasText: 'ro' }).click();
+    await addButton.click();
+
+    // Verify mount has ro mode
+    await expect(page.locator('.mount-item')).toHaveCount(1);
+    await expect(page.locator('.mount-mode.mode-ro')).toContainText('ro');
+
+    // Close modal
+    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should save mounts via API', async ({ page }) => {
+    const projectId = await getProjectId(page);
+
+    // Update via API directly
+    const result = await csrfFetch(page, `/api/projects/${projectId}`, {
+      method: 'PUT',
+      body: { sandbox_mounts: [
+        { host_path: '/data/cache', container_path: '/mnt/cache', mode: 'rw' },
+        { host_path: '/etc/config', container_path: '/etc/config', mode: 'ro' },
+      ]},
+    });
+    expect(result.ok).toBe(true);
+
+    // Verify via API
+    const saved = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.ok ? res.json() : null;
+    }, projectId);
+    expect(saved.sandbox_mounts).toBeDefined();
+    expect(saved.sandbox_mounts.length).toBe(2);
+    expect(saved.sandbox_mounts[0].host_path).toBe('/data/cache');
+    expect(saved.sandbox_mounts[0].container_path).toBe('/mnt/cache');
+    expect(saved.sandbox_mounts[0].mode).toBe('rw');
+    expect(saved.sandbox_mounts[1].mode).toBe('ro');
+
+    // Clean up
+    await csrfFetch(page, `/api/projects/${projectId}`, {
+      method: 'PUT',
+      body: { sandbox_mounts: [] },
+    });
+  });
+});

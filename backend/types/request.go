@@ -20,7 +20,8 @@ type CreateProjectRequest struct {
 	SandboxImage            string        `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath   string        `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
-	SandboxForwardPorts     []PortForward `json:"sandbox_forward_ports,omitempty"`
+	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
+	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 }
 
 // UpdateProjectRequest is the request body for updating a project.
@@ -31,7 +32,8 @@ type UpdateProjectRequest struct {
 	SandboxImage            *string       `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath   *string       `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxMemoryLimit      *int          `json:"sandbox_memory_limit,omitempty"`
-	SandboxForwardPorts     []PortForward `json:"sandbox_forward_ports,omitempty"`
+	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
+	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 }
 
 // CreateDependencyRequest is the request body for creating a dependency.

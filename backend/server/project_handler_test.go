@@ -588,3 +588,69 @@ func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectUpdateSandboxMounts(t *testing.T) {
+	s := testServer(t)
+
+	// Create project
+	projID := createTestProject(t, s)
+
+	// Update mounts
+	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_mounts": []map[string]any{
+			{"host_path": "/data/cache", "container_path": "/mnt/cache", "mode": "rw"},
+			{"host_path": "/etc/config", "container_path": "/etc/config", "mode": "ro"},
+		},
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	mounts, ok := result["sandbox_mounts"].([]any)
+	if !ok {
+		t.Fatalf("expected sandbox_mounts to be array, got %T", result["sandbox_mounts"])
+	}
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %d", len(mounts))
+	}
+
+	// Verify first mount
+	m0 := mounts[0].(map[string]any)
+	if m0["host_path"] != "/data/cache" {
+		t.Fatalf("expected host_path /data/cache, got %v", m0["host_path"])
+	}
+	if m0["container_path"] != "/mnt/cache" {
+		t.Fatalf("expected container_path /mnt/cache, got %v", m0["container_path"])
+	}
+	if m0["mode"] != "rw" {
+		t.Fatalf("expected mode rw, got %v", m0["mode"])
+	}
+
+	// Update to single mount
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_mounts": []map[string]any{
+			{"host_path": "/logs", "container_path": "/var/log/app", "mode": "rw"},
+		},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	mounts = result["sandbox_mounts"].([]any)
+	if len(mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(mounts))
+	}
+
+	// Clear mounts
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_mounts": []map[string]any{},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	// sandbox_mounts is omitted when empty (omitempty)
+	if result["sandbox_mounts"] != nil {
+		mounts := result["sandbox_mounts"].([]any)
+		if len(mounts) != 0 {
+			t.Fatalf("expected 0 mounts, got %d", len(mounts))
+		}
+	}
+}

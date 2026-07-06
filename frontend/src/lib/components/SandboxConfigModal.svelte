@@ -4,7 +4,7 @@
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { showConfirm } from '$lib/store';
-    import type { PortForward, AssignedPort } from '$lib/types';
+    import type { PortForward, AssignedPort, SandboxMount } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -26,6 +26,13 @@
     let newContainerPort = $state('');
     let portError = $state('');
     let portsExpanded = $state(project.forward_ports && project.forward_ports.length > 0);
+    // Custom mounts
+    let sandboxMounts = $state<SandboxMount[]>(project.sandbox_mounts ?? []);
+    let newMountHostPath = $state('');
+    let newMountContainerPath = $state('');
+    let newMountMode = $state<'rw' | 'ro'>('rw');
+    let mountError = $state('');
+    let mountsExpanded = $state(project.sandbox_mounts && project.sandbox_mounts.length > 0);
     // Active host ports from running tasks (container_port → host_port map)
     let activeHostPorts = $state<Map<number, number>>(new Map());
     let hasActivePorts = $derived(activeHostPorts.size > 0);
@@ -159,6 +166,31 @@
         forwardPorts = forwardPorts.filter((_, i) => i !== index);
     }
 
+    // Mount helpers
+    function addMount() {
+        mountError = '';
+        if (!newMountHostPath.trim()) {
+            mountError = 'Host path is required';
+            return;
+        }
+        if (!newMountContainerPath.trim()) {
+            mountError = 'Container path is required';
+            return;
+        }
+        sandboxMounts = [...sandboxMounts, {
+            host_path: newMountHostPath.trim(),
+            container_path: newMountContainerPath.trim(),
+            mode: newMountMode,
+        }];
+        newMountHostPath = '';
+        newMountContainerPath = '';
+        newMountMode = 'rw';
+    }
+
+    function removeMount(index: number) {
+        sandboxMounts = sandboxMounts.filter((_, i) => i !== index);
+    }
+
     function getDockerfileName(path: string): string {
         return path.split('/').pop() || path;
     }
@@ -197,6 +229,7 @@
             sandbox_dockerfile_path?: string;
             sandbox_memory_limit?: number;
             sandbox_forward_ports?: PortForward[];
+            sandbox_mounts?: SandboxMount[];
         } = {};
         let needsConfirmation = false;
 
@@ -240,6 +273,16 @@
             forwardPorts.some((p, i) => p.container_port !== originalPorts[i]?.container_port);
         if (portsChanged) {
             changes.sandbox_forward_ports = forwardPorts;
+        }
+
+        // Custom mounts changes
+        const originalMounts = project.sandbox_mounts ?? [];
+        const mountsChanged = sandboxMounts.length !== originalMounts.length ||
+            sandboxMounts.some((m, i) => m.host_path !== originalMounts[i]?.host_path ||
+                m.container_path !== originalMounts[i]?.container_path ||
+                m.mode !== originalMounts[i]?.mode);
+        if (mountsChanged) {
+            changes.sandbox_mounts = sandboxMounts;
         }
 
         // Validate: dockerfile mode requires a path
@@ -442,6 +485,82 @@
                     <span class="memory-unit">MB</span>
                 </div>
             </div>
+
+            <!-- Custom mounts (collapsible) -->
+            <div class="config-row" onclick={() => { mountsExpanded = !mountsExpanded; }}>
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M2 4h5l1.5 1.5H18V16H2V4z" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                            <path d="M10 8v6M8 10l2-2 2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label" class:collapsed={!mountsExpanded}>Custom Mounts</span>
+                        {#if mountsExpanded}
+                        <span class="config-desc">Bind mount host paths into sandbox containers.</span>
+                        {/if}
+                    </div>
+                </div>
+                <svg class="chevron" class:chevron-open={mountsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+
+            {#if mountsExpanded}
+            <div class="mounts-content" transition:slide={{ duration: 200 }}>
+            <!-- Existing mounts list -->
+            {#if sandboxMounts.length > 0}
+            <div class="mount-list">
+                {#each sandboxMounts as mount, i}
+                <div class="mount-item">
+                    <div class="mount-info">
+                        <span class="mount-path" title={mount.host_path}>{mount.host_path}</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
+                        <span class="mount-mode" class:mode-ro={mount.mode === 'ro'}>{mount.mode}</span>
+                    </div>
+                    <button type="button" class="btn-remove-mount" onclick={() => removeMount(i)} disabled={isLocked} title="Remove">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {/each}
+            </div>
+            {/if}
+
+            <!-- Add new mount -->
+            <div class="mount-add-row">
+                <input type="text" class="mount-input" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label="Host path" />
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="mount-arrow">
+                    <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <input type="text" class="mount-input" bind:value={newMountContainerPath} placeholder="/container/path" disabled={isLocked} aria-label="Container path" />
+                <div class="radio-group radio-group-small">
+                    <label class="radio-label" class:active={newMountMode === 'rw'}>
+                        <input type="radio" name="mount-mode" value="rw" checked={newMountMode === 'rw'} onchange={() => newMountMode = 'rw'} disabled={isLocked} />
+                        <span class="radio-text">rw</span>
+                    </label>
+                    <label class="radio-label" class:active={newMountMode === 'ro'}>
+                        <input type="radio" name="mount-mode" value="ro" checked={newMountMode === 'ro'} onchange={() => newMountMode = 'ro'} disabled={isLocked} />
+                        <span class="radio-text">ro</span>
+                    </label>
+                </div>
+                <button type="button" class="btn-add-mount" onclick={addMount} disabled={isLocked} title="Add mount">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+
+            {#if mountError}
+            <div class="mount-error">{mountError}</div>
+            {/if}
+            </div>
+            {/if}
 
             <!-- Image source selector -->
             <div class="config-row">
@@ -1257,5 +1376,173 @@
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
         font-style: italic;
+    }
+
+    /* Mounts subsection */
+    .mounts-content {
+        padding: 4px 0;
+    }
+
+    .mount-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .mount-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+    }
+
+    .mount-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-primary);
+        min-width: 0;
+    }
+
+    .mount-path {
+        font-weight: 600;
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+    }
+
+    .mount-container {
+        font-weight: 600;
+        color: var(--color-accent);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+    }
+
+    .mount-mode {
+        font-size: 0.6875rem;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+
+    .mount-mode.mode-ro {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-yellow, #d29922);
+    }
+
+    .btn-remove-mount {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-remove-mount:hover:not(:disabled) {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--color-status-red);
+    }
+
+    .btn-remove-mount:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .mount-add-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+    }
+
+    .mount-input {
+        flex: 1;
+        min-width: 100px;
+        max-width: 180px;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+    }
+
+    .mount-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .mount-input:disabled {
+        opacity: 0.5;
+    }
+
+    .mount-arrow {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .radio-group-small {
+        border-radius: var(--radius-sm);
+    }
+
+    .radio-group-small .radio-label {
+        padding: 2px 7px;
+        font-size: 0.6875rem;
+    }
+
+    .btn-add-mount {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, border-color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-add-mount:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-add-mount:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .mount-error {
+        padding: 4px 8px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-sm);
+        color: var(--color-status-red);
+        font-size: 0.75rem;
     }
 </style>

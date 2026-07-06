@@ -60,7 +60,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	err, _ := sm.Create("task-1", "/tmp/test", "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create("task-1", "/tmp/test", "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -500,7 +500,7 @@ func TestPiAvailable(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-pi-available-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestStartProcess(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-startprocess-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 512, nil, "")
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 512, nil, "", nil)
 	if err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}

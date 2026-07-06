@@ -59,7 +59,7 @@ func (m *mockSandbox) BuildImage(string, string) error { return m.buildImageErr 
 func (m *mockSandbox) BuildImageWithProgress(string, string, func(string)) error { return m.buildImageErr }
 func (m *mockSandbox) PullImageWithProgress(string, func(string)) error { return nil }
 
-func (m *mockSandbox) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*sandbox.ShellProcess, []types.AssignedPort, error) {
+func (m *mockSandbox) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount) (*sandbox.ShellProcess, []types.AssignedPort, error) {
 	if m.startShellErr != nil {
 		return nil, nil, m.startShellErr
 	}
