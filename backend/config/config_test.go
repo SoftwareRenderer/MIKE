@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 
 	"kanban/backend/store"
@@ -33,6 +34,91 @@ func TestGetConfig(t *testing.T) {
 	}
 	if read.WorkspaceDir != "/tmp/workspace" {
 		t.Fatalf("expected /tmp/workspace, got %q", read.WorkspaceDir)
+	}
+}
+
+func TestGetAgentConfigDir_NoAgent(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		WorkspaceDir: "/tmp/workspace",
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// no agent configured
+	if got := cs.GetAgentConfigDir(); got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestGetAgentConfigDir_PiProvider(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		WorkspaceDir: "/tmp/workspace",
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+			{Name: "pi", Kind: "agent", URL: "pi://agent", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	got := cs.GetAgentConfigDir()
+	if got == "" {
+		t.Fatal("expected non-empty agent config dir")
+	}
+	// defaults to ~/.pi/agent
+	homeDir, _ := os.UserHomeDir()
+	expected := homeDir + "/.pi/agent"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestGetAgentConfigDir_PiWithExplicitDir(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		WorkspaceDir: "/tmp/workspace",
+		Providers: []types.Provider{
+			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "/custom/pi/config", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	got := cs.GetAgentConfigDir()
+	if got != "/custom/pi/config" {
+		t.Errorf("expected /custom/pi/config, got %q", got)
+	}
+}
+
+func TestGetAgentConfigDir_PiWithTildeDir(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		WorkspaceDir: "/tmp/workspace",
+		Providers: []types.Provider{
+			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "~/.my-pi", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	got := cs.GetAgentConfigDir()
+	homeDir, _ := os.UserHomeDir()
+	expected := homeDir + "/.my-pi"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
 	}
 }
 

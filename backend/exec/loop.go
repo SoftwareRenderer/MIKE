@@ -161,21 +161,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 		}
-		// Determine if agent config dir should be mounted (only for agent tasks)
-		piAgentDir := ""
-		if serverURL == PiSentinelURL {
-			piAgentDir = te.configStore.GetAgentConfigDir()
-		}
-		// Reuse existing container if it's already running from a previous executor (lazy-start).
-		// Only create a new container and send status if one doesn't exist.
-		// Exception: if Pi config is needed but the existing container was created without it
-		// (e.g., executor switched from LLM to Pi), recreate the container with the mount.
-		needPiConfig := piAgentDir != ""
+		// Mount agent config dir if any coding agent is configured.
+		piAgentDir := te.configStore.GetAgentConfigDir()
+		// Reuse existing container (lazy-start). Create only if none exists.
 		hasExistingContainer := te.sandboxMgr.ContainerRunning(task.ID)
-		if !hasExistingContainer || needPiConfig {
-			if needPiConfig && hasExistingContainer {
-				log.Printf("[sandbox] task=%s recreating container with Pi agent config mount (executor switch)", task.ID)
-			}
+		if !hasExistingContainer {
 			var assignedPorts []types.AssignedPort
 			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts)
 			if createErr != nil {
