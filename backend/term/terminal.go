@@ -485,6 +485,9 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 			case <-ticker.C:
 				pingCtx, pingCancel := context.WithTimeout(ctxRead, 10*time.Second)
 				err := conn.Ping(pingCtx)
+				if err == nil {
+					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
+				}
 				pingCancel()
 				if err != nil {
 					cancelRead()
@@ -564,6 +567,9 @@ func (tm *TerminalManager) handleTerminalWS(w http.ResponseWriter, r *http.Reque
 			case <-ticker.C:
 				pingCtx, pingCancel := context.WithTimeout(ctxRead, 10*time.Second)
 				err := conn.Ping(pingCtx)
+				if err == nil {
+					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
+				}
 				pingCancel()
 				if err != nil {
 					cancelRead()

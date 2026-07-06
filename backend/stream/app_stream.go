@@ -857,6 +857,12 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 				client.writeMu.Lock()
 				err := conn.Ping(pingCtx)
+				if err == nil {
+					// Also send a data frame so the browser's onmessage fires.
+					// Control Ping/Pong frames are transparent to JS and don't reset
+					// the client-side stale-detection timer.
+					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
+				}
 				client.writeMu.Unlock()
 				pingCancel()
 				if err != nil {
