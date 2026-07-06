@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"strconv"
@@ -14,6 +16,33 @@ import (
 
 // minCompressSize is the minimum response size to bother with compression.
 const minCompressSize = 1024
+
+// etagLen is the number of hex characters in the truncated SHA-256 ETag.
+const etagLen = 32
+
+// computeETag computes a strong ETag from the given body.
+// Returns a quoted SHA-256 hash truncated to etagLen hex characters.
+func computeETag(body []byte) string {
+	h := sha256.Sum256(body)
+	return `"` + hex.EncodeToString(h[:])[:etagLen] + `"`
+}
+
+// etagMatches checks if the given ETag matches the If-None-Match header value.
+// Handles comma-separated ETags and the wildcard "*".
+func etagMatches(etag, ifNoneMatch string) bool {
+	if ifNoneMatch == "" {
+		return false
+	}
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		if strings.TrimSpace(candidate) == etag {
+			return true
+		}
+	}
+	return false
+}
 
 // compressionLevel maps encoding name to its preference rank (lower = preferred).
 var encodingPriority = map[string]int{
@@ -54,15 +83,26 @@ func selectEncoding(acceptEncoding string) string {
 
 // CompressMiddleware wraps an http.Handler to compress responses when the
 // client supports it (brotli > gzip). Only compresses bodies >= minCompressSize.
+// For GET requests, also computes strong ETags and handles If-None-Match → 304.
 func CompressMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip compression for WebSocket upgrades (they hijack the connection).
+		// Skip for WebSocket upgrades (they hijack the connection).
 		if strings.Contains(r.Header.Get("Upgrade"), "websocket") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
+		// For GET requests, always route through compressWriter so ETags are
+		// computed even when the client sends no Accept-Encoding.
+		if r.Method == http.MethodGet {
+			encoding := selectEncoding(r.Header.Get("Accept-Encoding"))
+			cw := newCompressWriter(w, r, encoding)
+			next.ServeHTTP(cw, r)
+			cw.finish()
+			return
+		}
 
+		// Non-GET: only buffer when compression is requested.
 		encoding := selectEncoding(r.Header.Get("Accept-Encoding"))
 		if encoding == "" {
 			w.Header().Set("Vary", "Accept-Encoding")
@@ -70,7 +110,7 @@ func CompressMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		cw := newCompressWriter(w, encoding)
+		cw := newCompressWriter(w, r, encoding)
 		next.ServeHTTP(cw, r)
 		cw.finish()
 	})
@@ -84,16 +124,20 @@ type compressWriter struct {
 	wroteHeader   bool
 	committed     bool
 	encoding      string
+	method        string
+	req           *http.Request
 	gz            *gzip.Writer
 	br            *brotli.Writer
 	contentLength int64 // parsed from Content-Length header, -1 if unknown
 }
 
-func newCompressWriter(w http.ResponseWriter, encoding string) *compressWriter {
+func newCompressWriter(w http.ResponseWriter, r *http.Request, encoding string) *compressWriter {
 	return &compressWriter{
 		ResponseWriter: w,
 		headers:        make(http.Header),
 		encoding:       encoding,
+		method:         r.Method,
+		req:            r,
 		contentLength:  -1,
 	}
 }
@@ -139,13 +183,17 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		return c.ResponseWriter.Write(p)
 	}
 
-	// Buffer data until we can decide.
+	// For GET requests, always buffer the full body (needed for ETag computation).
+	if c.method == http.MethodGet {
+		return c.body.Write(p)
+	}
+
+	// Non-GET: buffer until large enough, then commit for streaming compression.
 	n, err := c.body.Write(p)
 	if err != nil {
 		return n, err
 	}
 
-	// Decide once we have enough data or know the declared size.
 	estimated := int64(c.body.Len())
 	if c.contentLength >= 0 && c.contentLength > estimated {
 		estimated = c.contentLength
@@ -197,6 +245,12 @@ func (c *compressWriter) commit() {
 }
 
 func (c *compressWriter) finish() {
+	// GET requests that haven't been committed (e.g. SSE streamed out) get ETag handling.
+	if c.method == http.MethodGet && !c.committed {
+		c.finishGET()
+		return
+	}
+
 	if !c.committed {
 		// Flush headers and write body uncompressed.
 		for k, vv := range c.headers {
@@ -219,6 +273,68 @@ func (c *compressWriter) finish() {
 		if c.gz != nil {
 			c.gz.Close()
 		}
+	}
+}
+
+// finishGET handles ETag computation and If-None-Match for GET responses.
+// The complete uncompressed body is available in c.body.
+func (c *compressWriter) finishGET() {
+	body := c.body.Bytes()
+
+	// Skip ETag logic if handler already set one or returned 304.
+	if c.headers.Get("ETag") != "" || c.code == http.StatusNotModified {
+		c.writeBody(body)
+		return
+	}
+
+	etag := computeETag(body)
+
+	// Check If-None-Match precondition.
+	ifNoneMatch := c.req.Header.Get("If-None-Match")
+	if etagMatches(etag, ifNoneMatch) {
+		c.ResponseWriter.Header().Set("ETag", etag)
+		c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
+		if cc := c.headers.Get("Cache-Control"); cc != "" {
+			c.ResponseWriter.Header().Set("Cache-Control", cc)
+		}
+		c.ResponseWriter.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	// Attach ETag and write full response.
+	c.headers.Set("ETag", etag)
+	c.writeBody(body)
+}
+
+// writeBody writes the response headers and body, compressing if applicable.
+func (c *compressWriter) writeBody(body []byte) {
+	c.headers.Del("Content-Length")
+
+	if c.encoding != "" && int64(len(body)) >= minCompressSize {
+		c.headers.Set("Content-Encoding", c.encoding)
+	}
+
+	for k, vv := range c.headers {
+		for _, v := range vv {
+			c.ResponseWriter.Header().Add(k, v)
+		}
+	}
+	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
+	c.ResponseWriter.WriteHeader(c.code)
+
+	if c.encoding != "" && int64(len(body)) >= minCompressSize {
+		switch c.encoding {
+		case "br":
+			br := brotli.NewWriter(c.ResponseWriter)
+			br.Write(body)
+			br.Close()
+		case "gzip":
+			gz := gzip.NewWriter(c.ResponseWriter)
+			gz.Write(body)
+			gz.Close()
+		}
+	} else {
+		c.ResponseWriter.Write(body)
 	}
 }
 
