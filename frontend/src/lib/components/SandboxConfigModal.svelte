@@ -842,38 +842,27 @@
         font-size: 0.75rem;
     }
 
-    .config-row-subsection {
+    /* Expandable rows (subsection + non-subsection like Custom Mounts) */
+    .config-row-subsection,
+    .config-row-expandable {
         cursor: pointer;
         user-select: none;
     }
 
     .config-row-subsection:hover,
-    .config-row-subsection.expanded {
-        background: var(--color-surface-3);
-    }
-
-    .config-row-subsection.expanded {
-        border-bottom: none;
-        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    }
-
-    .config-row-subsection:not(.expanded):hover {
-        border-radius: var(--radius-sm);
-    }
-
-    /* Expandable non-subsection rows (e.g. Custom Mounts) */
+    .config-row-subsection.expanded,
     .config-row-expandable:hover,
     .config-row-expandable.expanded {
         background: var(--color-surface-3);
-        cursor: pointer;
-        user-select: none;
     }
 
+    .config-row-subsection.expanded,
     .config-row-expandable.expanded {
         border-bottom: none;
         border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     }
 
+    .config-row-subsection:not(.expanded):hover,
     .config-row-expandable:not(.expanded):hover {
         border-radius: var(--radius-sm);
     }
@@ -1291,8 +1280,9 @@
         animation: spin 1s linear infinite;
     }
 
-    /* Port forwarding subsection */
-    .ports-content {
+    /* Expandable content block (ports + mounts) */
+    .ports-content,
+    .mounts-content {
         background: var(--color-surface-3);
         padding: 0 0 4px;
         margin-top: -4px;
@@ -1337,7 +1327,9 @@
         color: var(--color-accent);
     }
 
-    .btn-remove-port {
+    /* Remove buttons (ports + mounts) */
+    .btn-remove-port,
+    .btn-remove-mount {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1352,12 +1344,14 @@
         flex-shrink: 0;
     }
 
-    .btn-remove-port:hover:not(:disabled) {
+    .btn-remove-port:hover:not(:disabled),
+    .btn-remove-mount:hover:not(:disabled) {
         background: rgba(248, 81, 73, 0.15);
         color: var(--color-status-red);
     }
 
-    .btn-remove-port:disabled {
+    .btn-remove-port:disabled,
+    .btn-remove-mount:disabled {
         opacity: 0.4;
         cursor: not-allowed;
     }
@@ -1405,7 +1399,9 @@
         flex-shrink: 0;
     }
 
-    .btn-add-port {
+    /* Add buttons (ports + mounts) */
+    .btn-add-port,
+    .btn-add-mount {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1420,30 +1416,38 @@
         flex-shrink: 0;
     }
 
-    .btn-add-port:hover:not(:disabled) {
+    .btn-add-port:hover:not(:disabled),
+    .btn-add-mount:hover:not(:disabled) {
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }
 
-    .btn-add-port.pending {
+    .btn-add-port.pending,
+    .btn-add-mount.pending {
         background: rgba(34, 197, 94, 0.15);
         border-color: rgba(34, 197, 94, 0.6);
         color: #22c55e;
     }
 
-    .btn-add-port:disabled {
+    .btn-add-port:disabled,
+    .btn-add-mount:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
 
-    .port-error {
+    /* Error messages (ports + mounts) */
+    .port-error,
+    .mount-error {
         padding: 4px 8px;
-        padding-left: 36px;
         background: rgba(248, 81, 73, 0.1);
         border: 1px solid rgba(248, 81, 73, 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
+    }
+
+    .port-error {
+        padding-left: 36px;
     }
 
     .port-no-active {
@@ -1454,15 +1458,7 @@
         font-style: italic;
     }
 
-    /* Mounts subsection */
-    .mounts-content {
-        background: var(--color-surface-3);
-        padding: 0 0 4px;
-        margin-top: -4px;
-        border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-        border-bottom: 1px solid var(--color-border);
-    }
-
+    /* Mounts */
     .mount-list {
         display: flex;
         flex-direction: column;
@@ -1521,31 +1517,6 @@
     .mount-mode.mode-ro {
         background: rgba(210, 153, 34, 0.15);
         color: var(--color-status-yellow, #d29922);
-    }
-
-    .btn-remove-mount {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 20px;
-        height: 20px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-remove-mount:hover:not(:disabled) {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
-    }
-
-    .btn-remove-mount:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
     }
 
     .mount-add-row {
@@ -1619,46 +1590,6 @@
     .radio-group-small .radio-label {
         padding: 2px 7px;
         font-size: 0.6875rem;
-    }
-
-    .btn-add-mount {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, border-color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-add-mount:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-add-mount.pending {
-        background: rgba(34, 197, 94, 0.15);
-        border-color: rgba(34, 197, 94, 0.6);
-        color: #22c55e;
-    }
-
-    .btn-add-mount:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .mount-error {
-        padding: 4px 8px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
-        border-radius: var(--radius-sm);
-        color: var(--color-status-red);
-        font-size: 0.75rem;
     }
 
     @media (max-width: 768px) {
