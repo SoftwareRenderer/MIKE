@@ -251,14 +251,22 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		sendLine(line)
 	})
 
-	// Remove terminal sessions so they pick up the new image
-	if h.terminalMgr != nil {
-		h.terminalMgr.RemoveProjectSessions(id)
-	}
-
 	if err != nil {
 		sendLine("error: " + err.Error())
 		return
+	}
+
+	// Stop all containers and terminal sessions so they pick up the new image
+	tasks, _ := h.store.GetTasksByProject(id)
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	if h.sandboxMgr != nil {
+		h.sandboxMgr.StopProjectContainers(id, taskIDs)
+	}
+	if h.terminalMgr != nil {
+		h.terminalMgr.RemoveProjectSessions(id)
 	}
 
 	// Final result as JSON
@@ -315,17 +323,11 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return
 			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
-			}
 		}
 		if req.SandboxNetworkIsolation != nil {
 			if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox network isolation setting")
 				return
-			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
 			}
 		}
 		if req.SandboxImage != nil {
@@ -333,17 +335,11 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox image setting")
 				return
 			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
-			}
 		}
 		if req.SandboxDockerfilePath != nil {
 			if updateErr := h.store.UpdateProjectSandboxDockerfilePath(id, *req.SandboxDockerfilePath); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox dockerfile path setting")
 				return
-			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
 			}
 		}
 		if req.SandboxMemoryLimit != nil {
@@ -351,14 +347,23 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox memory limit setting")
 				return
 			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
-			}
 		}
 		if req.SandboxForwardPorts != nil {
 			if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, req.SandboxForwardPorts); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox forward ports setting")
 				return
+			}
+		}
+		// When sandbox settings change, stop all containers so they'll be
+		// recreated with the new settings on next use.
+		if hasSandboxChange {
+			tasks, _ := h.store.GetTasksByProject(id)
+			taskIDs := make([]string, 0, len(tasks))
+			for _, task := range tasks {
+				taskIDs = append(taskIDs, task.ID)
+			}
+			if h.sandboxMgr != nil {
+				h.sandboxMgr.StopProjectContainers(id, taskIDs)
 			}
 			if h.terminalMgr != nil {
 				h.terminalMgr.RemoveProjectSessions(id)

@@ -51,7 +51,6 @@ type sandboxOps interface {
 	PullImageWithProgress(image string, onProgress func(line string)) error
 	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
-	StopProjectContainers(projectID string, taskIDs []string)
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
@@ -240,22 +239,16 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	}
 }
 
-// RemoveProjectSessions closes all terminal sessions and stops sandbox containers
-// for every task in a project. Called when project sandbox settings change.
+// RemoveProjectSessions closes all terminal sessions for every task in a project.
+// Called when project sandbox settings change. Container cleanup is handled
+// separately by the caller (StopProjectContainers) to ensure all containers
+// are stopped even if there are no active terminal sessions.
 func (tm *TerminalManager) RemoveProjectSessions(projectID string) {
 	tasks, _ := tm.store.GetTasksByProject(projectID)
 	for _, task := range tasks {
 		tm.RemoveSession(task.ID)
 	}
 	tm.RemoveSession("proj:" + projectID)
-	// Stop sandbox containers so they'll be recreated with the new settings
-	if tm.sandboxMgr != nil {
-		taskIDs := make([]string, 0, len(tasks))
-		for _, task := range tasks {
-			taskIDs = append(taskIDs, task.ID)
-		}
-		tm.sandboxMgr.StopProjectContainers(projectID, taskIDs)
-	}
 }
 
 // readLoop reads from the PTY, buffers all output, and broadcasts to connected clients.

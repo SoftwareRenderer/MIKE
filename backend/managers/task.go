@@ -347,6 +347,11 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	task.Status = req.Status
 	task.UpdatedAt = time.Now()
 
+	// Stop the executor if the task is moved out of In Progress.
+	// This ensures the goroutine exits and HasRunningTasks() reflects the new state.
+	if task.Status == "in_progress" && req.Status != "in_progress" && h.executor != nil {
+		_ = h.executor.StopTask(taskID)
+	}
 	if req.Status == "done" {
 		task.ExecutionState = "completed"
 		if h.executor != nil {
@@ -450,6 +455,10 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string)
 		// Skip already-running descendants (e.g., just auto-started by the move handler)
 		if d.ExecutionState == "running" {
 			continue
+		}
+		// Stop the executor if the descendant was in In Progress and is being moved out
+		if d.Status == "in_progress" && targetStatus != "in_progress" && h.executor != nil {
+			_ = h.executor.StopTask(d.ID)
 		}
 		d.Status = targetStatus
 		d.UpdatedAt = time.Now().UTC()

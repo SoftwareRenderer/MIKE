@@ -540,7 +540,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		Title:                     title,
 		Prompt:                    prompt,
 		Status:                    "backlog",
-		ExecutionState:               "idle",
+		ExecutionState:            "idle",
 		LlamaServerURL:            parent.LlamaServerURL,
 		ModelName:                 parent.ModelName,
 		ReasoningEffort:           parent.ReasoningEffort,
