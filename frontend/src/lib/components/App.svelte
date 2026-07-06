@@ -7,6 +7,7 @@ import { createStreamingContext, createTaskDiffContext, createCommitQueueContext
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
@@ -497,7 +498,8 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     /** Load the board from local cache after the user clicks "Load Local Cache". */
     async function loadFromCache() {
         hasLocalCache = false; // hide the offline screen
-        isLoadingAuth = false; // hide loading screen
+        // Keep isLoadingAuth = true so the loading screen bridges the gap
+        // while cached data is read from IndexedDB (avoids flash of empty state)
         isAuthenticated = true;
         appStream = createAppStream({
             onProjectCounts: (counts) => { projectCounts = counts; },
@@ -521,6 +523,7 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         });
         setAppStreamRef(appStream);
         await loadAppData();
+        isLoadingAuth = false; // hide loading screen after data is loaded
     }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
@@ -849,23 +852,12 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 
 <!-- Login gate -->
 {#if isLoadingAuth}
-    <div class="loading-screen"></div>
+    <div class="loading-screen">
+        <img class="loading-icon" src={kanbanIcon} width="64" height="64" alt="Loading" />
+    </div>
 {:else if hasLocalCache}
     <div class="offline-screen">
-        <svg class="offline-icon" viewBox="0 0 512 512" width="96" height="96" xmlns="http://www.w3.org/2000/svg">
-            <rect width="512" height="512" rx="76.8" fill="#141414"/>
-            <rect x="76.8" y="76.8" width="102.4" height="358.4" rx="15.36" fill="#99AAB5" opacity="0.9"/>
-            <rect x="204.8" y="76.8" width="102.4" height="256" rx="15.36" fill="#4C9AFF" opacity="0.9"/>
-            <rect x="332.8" y="76.8" width="102.4" height="358.4" rx="15.36" fill="#D29922" opacity="0.9"/>
-            <rect x="87.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
-            <rect x="87.04" y="179.2" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.25"/>
-            <rect x="87.04" y="240.64" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.15"/>
-            <rect x="215.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
-            <rect x="215.04" y="179.2" width="81.92" height="30.72" rx="7.68" fill="#141414" opacity="0.25"/>
-            <rect x="343.04" y="117.76" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.35"/>
-            <rect x="343.04" y="179.2" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.25"/>
-            <rect x="343.04" y="240.64" width="81.92" height="40.96" rx="7.68" fill="#141414" opacity="0.15"/>
-        </svg>
+        <img class="offline-icon" src={kanbanIcon} width="96" height="96" alt="Offline" />
         <p class="offline-text">Server unreachable</p>
         <button class="offline-btn" onclick={loadFromCache}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
@@ -1113,6 +1105,13 @@ import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
         inset: 0;
         z-index: 99999;
         background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .loading-icon,
+    .offline-icon {
+        opacity: 0.8;
     }
 
     /* -- Offline screen -- */
