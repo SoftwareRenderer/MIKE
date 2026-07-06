@@ -534,13 +534,15 @@
                             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
-                        <span class="mount-mode" class:mode-ro={mount.mode === 'ro'}>{mount.mode}</span>
                     </div>
-                    <button type="button" class="btn-remove-mount" onclick={() => removeMount(i)} disabled={isLocked} title="Remove">
+                    <div class="mount-actions">
+                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'}>{mount.mode}</span>
+                        <button type="button" class="btn-remove-mount" onclick={() => removeMount(i)} disabled={isLocked} title="Remove">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
                     </button>
+                    </div>
                 </div>
                 {/each}
             </div>
@@ -1317,14 +1319,10 @@
         color: var(--color-text-primary);
     }
 
-    .port-host {
-        font-weight: 600;
-        color: var(--color-accent);
-    }
-
+    .port-host,
     .port-container {
         font-weight: 600;
-        color: var(--color-accent);
+        color: #60a5fa;
     }
 
     /* Remove buttons (ports + mounts) */
@@ -1497,11 +1495,18 @@
 
     .mount-container {
         font-weight: 600;
-        color: var(--color-accent);
+        color: #60a5fa;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         min-width: 0;
+    }
+
+    .mount-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
     }
 
     .mount-mode {
@@ -1511,12 +1516,16 @@
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
         font-weight: 600;
-        flex-shrink: 0;
     }
 
     .mount-mode.mode-ro {
         background: rgba(210, 153, 34, 0.15);
         color: var(--color-status-yellow, #d29922);
+    }
+
+    .mount-mode.mode-rw {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--color-status-red);
     }
 
     .mount-add-row {
