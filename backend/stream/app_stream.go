@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,68 @@ import (
 
 // toolCallMarker is the JSON substring used to identify tool_call events in buffered frames.
 var toolCallMarker = []byte(`"event":"tool_call"`)
+
+// isGitPath returns true if the path is inside a .git directory.
+// Matches ".git" as a path component (e.g. ".git/HEAD", "sub/.git/config").
+func isGitPath(path string) bool {
+	if path == ".git" {
+		return true
+	}
+	// Check if any path component is ".git"
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
+// isInternalFile returns true for paths that should be suppressed from
+// WebSocket broadcasts: .git directories and flight recorder trace files.
+func isInternalFile(path string) bool {
+	if isGitPath(path) {
+		return true
+	}
+	base := filepath.Base(path)
+	if base == "kanban.trace" || base == "kanban.trace.old" {
+		return true
+	}
+	return false
+}
+
+// filterInternalPathsFromHashes removes entries with internal paths from a hash map.
+func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
+	if len(hashes) == 0 {
+		return nil
+	}
+	filtered := make(map[string]string, len(hashes))
+	for path, hash := range hashes {
+		if !isInternalFile(path) {
+			filtered[path] = hash
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+// filterInternalPathsFromList removes internal paths from a string slice.
+func filterInternalPathsFromList(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	filtered := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !isInternalFile(p) {
+			filtered = append(filtered, p)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
 
 // maxFrameBufferSize is the maximum size of a single frame to buffer.
 // Frames larger than this (e.g., tool_result with large output, full diffs)
@@ -464,7 +527,11 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 
 // BroadcastFsEvent sends a fs_event to all clients of a project.
 // op is "create" or "delete", path is the affected file/directory path.
+// Events for internal files (.git, flight recorder) are suppressed.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
+	if isInternalFile(path) {
+		return
+	}
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type": "fs_event",
 		"op":   op,
@@ -494,9 +561,9 @@ func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, sho
 		"short_stat":      shortStat,
 		"untracked_n":     untrackedN,
 		"untracked_lines": untrackedLines,
-		"file_hashes":     changedHashes,
-		"removed_files":   removedFiles,
-		"staged_paths":    stagedPaths,
+		"file_hashes":     filterInternalPathsFromHashes(changedHashes),
+		"removed_files":   filterInternalPathsFromList(removedFiles),
+		"staged_paths":    filterInternalPathsFromList(stagedPaths),
 	})
 }
 
@@ -905,7 +972,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"short_stat":      diffResult.ShortStat,
 				"untracked_n":     len(diffResult.Untracked),
 				"untracked_lines": untrackedLines,
-				"file_hashes":     diffResult.GetPerFileHashes(),
+				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
@@ -914,6 +981,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		// Send manifest for detail view (per-file metadata, no diff content)
 		files := make(map[string]map[string]any)
 		for path, f := range diffResult.Tracked {
+			if isInternalFile(path) {
+				continue
+			}
 			entry := map[string]any{
 				"hash":        git.ComputeFileHash(f),
 				"type":        "tracked",
@@ -932,6 +1002,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			files[path] = entry
 		}
 		for _, u := range diffResult.Untracked {
+			if isInternalFile(u.Path) {
+				continue
+			}
 			// Skip untracked files already in the tracked section
 			if _, exists := files[u.Path]; exists {
 				continue

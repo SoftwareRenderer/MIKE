@@ -228,7 +228,7 @@
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
-    /** Stage or unstage a single file. Updates staged flag optimistically — the backend broadcasts staged_paths via WS for reconciliation. */
+    /** Stage or unstage a single file. Updates staged flag optimistically, then re-loads from server for reliable reconciliation. */
     async function handleStageFile(path: string, stage: boolean) {
         if (!task) return;
         // Optimistic update — flip staged flag in-place for instant UI feedback
@@ -238,6 +238,10 @@
         }
         try {
             await stageFile(task.project_id, task.id, path, stage);
+            // Re-load manifest for reliable reconciliation (matches handleStageAll/handleUnstageAll pattern).
+            // The WS broadcast alone is not sufficient: the effect may skip processing if the hash
+            // hasn't changed or if the broadcast arrives during an in-flight loadDiff.
+            loadDiff();
         } catch (e) {
             // Revert optimistic update on failure
             if (diffFileCache[path]) {
@@ -956,9 +960,22 @@
             diffLoading = false;
             // Mark initial load complete — delta processing can now start.
             diffInitialLoaded = true;
+            // Apply any pending staged_paths from a WebSocket broadcast that
+            // arrived during the load (the effect was blocked by !diffInitialLoaded).
+            // This must happen BEFORE syncing the tracker, otherwise the effect
+            // would skip processing (currentHash === diffTracker.hash).
+            const stat = diffStatsMap[task.id];
+            if (stat?.staged_paths && Object.keys(diffFileCache).length > 0) {
+                const stagedSet = new Set(stat.staged_paths);
+                const updated: Record<string, DiffFile> = {};
+                for (const [path, entry] of Object.entries(diffFileCache)) {
+                    updated[path] = { ...entry, staged: stagedSet.has(path) };
+                }
+                diffFileCache = updated;
+                diffCacheVersion++;
+            }
             // Sync tracker with current store value so a pending WebSocket
             // diffStats event doesn't trigger a redundant re-fetch.
-            const stat = diffStatsMap[task.id];
             diffTracker.hash = stat?.hash || null;
         }
     }

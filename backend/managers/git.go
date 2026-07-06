@@ -923,7 +923,7 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 			forkBranch = thread.GitBranch
 		}
 		baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
-		if diffResult, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+		if diffResult, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || len(diffResult.StagedPaths) > 0) {
 			hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {

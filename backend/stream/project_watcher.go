@@ -11,6 +11,30 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// isInternalPathInProject returns true if the absolute path is an internal file
+// (.git directory or flight recorder trace) relative to the project root.
+func isInternalPathInProject(absPath, projectRoot string) bool {
+	rel, err := filepath.Rel(projectRoot, absPath)
+	if err != nil {
+		return false
+	}
+	// Check .git paths
+	if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+		return true
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	// Check flight recorder files
+	base := filepath.Base(absPath)
+	if base == "kanban.trace" || base == "kanban.trace.old" {
+		return true
+	}
+	return false
+}
+
 // fsBroadcastFn is a callback to broadcast fs events to clients.
 type fsBroadcastFn func(projectID, op, path string)
 
@@ -137,10 +161,19 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
+	// Skip internal file events (.git, flight recorder)
+	if isInternalPathInProject(event.Name, projectPath) {
+		pw.mu.Unlock()
+		return
+	}
+
 	// If a new directory was created, start watching it recursively
 	if event.Op&(fsnotify.Create) != 0 {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-			_ = pw.addRecursive(event.Name)
+			// Don't watch .git directories
+			if !isInternalPathInProject(event.Name, projectPath) {
+				_ = pw.addRecursive(event.Name)
+			}
 		}
 	}
 
@@ -161,12 +194,6 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Skip kanban.trace files (flight recorder)
-	if filepath.Base(event.Name) == "kanban.trace" {
-		pw.mu.Unlock()
-		return
-	}
-
 	// Debounce per project to batch rapid events
 	if timer, exists := pw.debounces[projectID]; exists {
 		timer.Stop()
@@ -181,6 +208,7 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 }
 
 // addRecursive watches a directory and all its existing subdirectories.
+// Skips .git directories to avoid noise from internal git operations.
 func (pw *ProjectWatcher) addRecursive(dir string) error {
 	if err := pw.watcher.Add(dir); err != nil {
 		return err
@@ -190,6 +218,10 @@ func (pw *ProjectWatcher) addRecursive(dir string) error {
 			return nil
 		}
 		if d.IsDir() && path != dir {
+			// Skip .git directories
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
 			_ = pw.watcher.Add(path)
 		}
 		return nil

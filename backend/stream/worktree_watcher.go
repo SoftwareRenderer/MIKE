@@ -269,6 +269,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 // computeDiffDelta compares new file hashes with the cached previous state.
 // Returns changedHashes (new or modified files) and removedFiles (deleted paths).
 // Updates the cache with the new state.
+// Internal files (.git, flight recorder) are excluded from the delta and cache.
 func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.TaskDiff, cache *sync.Map) (changedHashes map[string]string, removedFiles []string) {
 	// Get previous state
 	prevRaw, hasPrev := cache.Load(taskID)
@@ -278,18 +279,34 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 		prevHashes = prevDiff.GetPerFileHashes()
 	}
 
+	// Filter out internal paths from new hashes
+	filteredNew := make(map[string]string, len(newHashes))
+	for path, hash := range newHashes {
+		if !isInternalFile(path) {
+			filteredNew[path] = hash
+		}
+	}
+
+	// Filter out internal paths from previous hashes
+	filteredPrev := make(map[string]string, len(prevHashes))
+	for path, hash := range prevHashes {
+		if !isInternalFile(path) {
+			filteredPrev[path] = hash
+		}
+	}
+
 	// Find changed files (new or hash changed)
 	changedHashes = make(map[string]string)
-	for path, newHash := range newHashes {
-		prevHash, exists := prevHashes[path]
+	for path, newHash := range filteredNew {
+		prevHash, exists := filteredPrev[path]
 		if !exists || prevHash != newHash {
 			changedHashes[path] = newHash
 		}
 	}
 
 	// Find removed files (in previous but not in new)
-	for path := range prevHashes {
-		if _, exists := newHashes[path]; !exists {
+	for path := range filteredPrev {
+		if _, exists := filteredNew[path]; !exists {
 			removedFiles = append(removedFiles, path)
 		}
 	}
