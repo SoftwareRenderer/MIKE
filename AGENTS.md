@@ -77,7 +77,7 @@ TLS is **enabled by default** with auto-generated self-signed certificates.
 - **E2E tests manage their own server** — global-setup starts/stops a test server automatically
 - **Restart manually after tests** — your dev server is killed during test runs
 - **Use background mode** (`&`) for development
-- **Test Driven Development** to validate functionality
+- **Test Driven Development** Validate functionality by testing for established facts
 
 ## Development Workflow (TDD)
 
@@ -93,10 +93,13 @@ TLS is **enabled by default** with auto-generated self-signed certificates.
 - **Every new feature** must have corresponding tests (Go unit + e2e)
 - **Go unit tests** go in `backend/` alongside the code they test
 - **E2E tests** go in `frontend/tests/e2e/` with descriptive filenames
-- **Use `test.describe.serial()`** when e2e tests share state (same task/messages)
+- **Use `test.describe.serial()`** when tests share state (same task/messages)
 - **Use unique identifiers** (`Date.now()`) to avoid test interference
 - **Graceful failures** — Tests should pass even if LLM is slow/unavailable
 - **Test the UX** — Verify UI elements, not just API responses
+- **Mock LLM is default** — tests use pre-recorded fixtures, never the real LLM endpoint
+- **Wait for selectors** for async operations; Do not use arbitrary timeouts or fixed delays
+- **Config-modifying tests** (sandbox toggle, model selector, settings) run in the `isolated` project on port 3001
 
 ### Test Structure
 ```typescript
@@ -128,9 +131,14 @@ npx playwright test --grep "should edit message"
 # With UI for debugging
 npx playwright test --ui
 
-# All Go unit tests (~33s, parallel)
+# All Go unit tests (~60s, parallel)
 go test ./backend/... -count=1 -parallel 8
 ```
+
+**Playwright config**: `frontend/playwright.config.ts` (parallel, 2 workers, 120s timeout).
+**Two Playwright projects**:
+- `chromium` (port 3000) — all tests except config-modifying suites
+- `isolated` (port 3001, serialized) — config-modifying tests: `sandbox-toggle`, `sandbox-tool-calls`, `model-selector`, `settings-*`, `reasoning-effort`, `debug-cards`
 
 **Before running e2e tests**: If a prior run was interrupted, clean stale state:
 ```bash
@@ -140,7 +148,7 @@ rm -rf /tmp/kanban-test-worktrees
 ```
 Stale processes from interrupted runs hold ports open, and a stale lock file causes global-setup to run teardown instead of setup.
 
-### Test Server Lifecycle
+### Test Environment
 E2E tests run against **two dedicated test servers** with isolated databases, fully managed by `global-setup.ts`:
 
 | Server | Port | DB | Purpose |
@@ -148,51 +156,29 @@ E2E tests run against **two dedicated test servers** with isolated databases, fu
 | Main | 3000 | `/tmp/kanban-test.db` | Default test server (chromium project) |
 | Isolated | 3001 | `/tmp/kanban-test-isolated.db` | Config-modifying tests (isolated project) |
 
-Both servers share a mock LLM on port 9999. Test worktrees: `/tmp/kanban-test-worktrees/`.
-
-1. **Setup** (before tests): Starts both kanban servers with test DBs, creates test projects + tasks, starts mock LLM
-2. **Teardown** (after tests): Stops all servers, deletes test DBs + worktrees
+Both servers share a mock LLM on port 9999. Test DBs, worktrees (`/tmp/kanban-test-worktrees/`), and servers are fully torn down and rebuilt each run.
 
 **Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
 cd /home/mwren/projects/kanban && ./kanban &
 ```
 
-### Test Environment
-- **Test DBs**: `/tmp/kanban-test.db`, `/tmp/kanban-test-isolated.db` (deleted after each run)
-- **Test worktrees**: `/tmp/kanban-test-worktrees/` (deleted after each run)
-- **Test git repo**: `/tmp/kanban-test-repo/` (persistent, recreated if missing)
-- **Lock file**: `/tmp/kanban-test-setup.lock` (coordinates setup/teardown phases)
-
-### Testing Rules
-- **Servers are auto-managed** — global-setup starts/stops test servers
-- **Mock LLM is enabled by default** — tests use pre-recorded responses, not real Neptune endpoint
-- **Tests must NOT depend on real LLM** — use mock fixtures for deterministic results
-- **Use timeouts** for async operations (LLM responses, network calls)
-- **Wait for selectors** instead of fixed delays where possible
-- **Full teardown/rebuild** — test DBs are deleted and recreated each run
-- **Serial tests** when modifying shared state (messages, tasks)
-- **Config-modifying tests** (sandbox toggle, model selector, settings) run in the `isolated` project on port 3001 to avoid interfering with other tests
-
-## Testing Workflow
-
-### E2E Tests (Playwright)
-- Run: `cd frontend && npx playwright test`
-- Tests in `frontend/tests/e2e/` using Playwright with Chromium
-- Servers auto-managed by `global-setup.ts` (ports 3000 + 3001, mock LLM on 9999)
-- Config: `frontend/playwright.config.ts` (parallel, 2 workers, 120s timeout)
-- **Two Playwright projects**:
-  - `chromium` (port 3000) — all tests except config-modifying suites
-  - `isolated` (port 3001, serialized) — config-modifying tests: `sandbox-toggle`, `sandbox-tool-calls`, `model-selector`, `settings-*`, `reasoning-effort`, `debug-cards`
-
 ### Go Unit Tests
-- Run: `go test ./backend/... -count=1 -parallel 8` (~33s, ~196 tests)
+- Run: `go test ./backend/... -count=1 -parallel 8` (~60s, ~560 tests)
 - Test packages:
-  - `backend/server/` — API handlers (102 tests)
-  - `backend/store/` — database operations (90+ tests)
-  - `backend/sandbox/` — gVisor sandboxing (6 tests)
-  - `backend/stream/` — git polling (1 test)
-  - `backend/exec/` — command execution (3 tests)
+  - `backend/server/` — API handlers (149 tests)
+  - `backend/store/` — database operations (89 tests)
+  - `backend/exec/` — tool execution (184 tests)
+  - `backend/git/` — git operations (46 tests)
+  - `backend/sandbox/` — gVisor sandboxing (22 tests)
+  - `backend/stream/` — git polling (15 tests)
+  - `backend/crypto/` — encryption (17 tests)
+  - `backend/pi/` — pi agent integration (13 tests)
+  - `backend/auth/` — auth/session (9 tests)
+  - `backend/tls/` — TLS config (9 tests)
+  - `backend/config/` — config loading (2 tests)
+  - `backend/llama/` — LLM client (2 tests)
+  - `backend/term/` — terminal (2 tests)
 - Use `testServer(t)` helper for isolated test server with temp DB
 - Use `t.TempDir()` for temporary files/directories (auto-cleaned)
 - Tests are deterministic — no external dependencies (LLM, network)
@@ -228,12 +214,6 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 {"choices": [{"delta": {"tool_calls": [{"id": "call_abc", "function": {"name": "read_file", "arguments": "{\"path\":\"README.md\"}"}, "type": "function"}]}, "finish_reason": "tool_calls"}]}
 ```
 
-### Manual Testing
-1. Restart server: `pkill -f "./kanban" && ./kanban`
-2. Verify config: `curl -s http://localhost:3000/api/config`
-3. Test WebSocket: use Python `websocket` library or browser console
-4. Check logs: `tail -f /tmp/kanban.log` (if redirected)
-
 ## Applying Changes
 
 ### Frontend
@@ -249,7 +229,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 3. Restart server to pick up changes
 4. Config persists in SQLite (`data/kanban.db`)
 
-### Config Updates
+### Default Config
 - Partial updates via PUT `/api/config` (only sends changed fields)
 - Required fields: `llama_server_url`, `model_name`, `workspace_dir`
 - LLM endpoint: `http://neptune:8010/v1`
@@ -262,10 +242,8 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - **The frontend client ONLY communicates through the Go server** (`localhost:3000/api/...`). It never calls the LLM endpoint directly.
 - All LLM traffic (chat completions, model listing, etc.) flows: Browser → Go server → LLM server.
 - This means features like "fetch models" must be proxied through a Go endpoint (e.g., `POST /api/config/fetch-models`), not called from the browser.
-
-### WebSocket Protocol
-- All real-time communication uses WebSocket through the Go server
-- Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields
+- All real-time communication uses WebSocket through the Go server.
+- Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields.
 
 ## Common Patterns
 
@@ -290,12 +268,13 @@ All functions are **async** (return `Promise`).
 - `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
 - `getEditorDraft(path)` / `setEditorDraft(path, text)` / `clearEditorDraft(path)` — per-file editor drafts
 - `loadEditorHistory(path)` / `saveEditorHistory(path, base, deltas)` / `clearEditorHistory(path)` — editor undo/redo
-- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` — collapsed parent task IDs
+- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` / `clearCollapsedTask(taskId)` — collapsed parent task IDs
 - `loadCollapsedSections()` / `saveCollapsedSections(ids)` — collapsed board sections
 - `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids)` — collapsed diff file paths
+- `loadUnsavedFiles(projectId)` / `saveUnsavedFiles(projectId, paths)` / `clearUnsavedFiles(projectId)` — unsaved file paths
 - `loadQueue()` / `saveQueue(actions)` — offline action queue
 - `loadExplorerLayout()` / `saveExplorerLayout(layout)` — explorer column widths
-- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` — generic key-value settings
+- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` / `clearAppSetting(key)` — generic key-value settings
 - `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts
 - `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>)` — garbage-collect ALL stale entries
 
@@ -315,7 +294,7 @@ All functions are **async** (return `Promise`).
 
 ### Task IDs
 - Format: `word-word-word` (e.g., `frost-amber-quartz`)
-- Generated from 96-word dictionary in `backend/managers.go`
+- Generated from 128-word dictionary in `backend/types/idgen.go`
 - URL: `/?task=frost-amber-quartz`
 
 ### Chat UI Rules
