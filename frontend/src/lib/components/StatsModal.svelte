@@ -74,25 +74,17 @@
     }
 
     function getTokenLabel(model: ModelStats): string {
-        if (model.provider_name === 'title_generation') {
-            return `${model.model_name} (Title Generation)`;
-        }
         if (model.provider_name) {
             return `${model.provider_name} / ${model.model_name}`;
         }
         return model.model_name;
     }
 
-    // Sort model rows: regular entries first, title generation at bottom, filter out zeroed entries
+    // Sort model rows by generated tokens descending, filter out zeroed entries
     let sortedModels: ModelStats[] = $derived.by(() => {
         const models = (stats as ProjectStats | null)?.by_model || [];
         return models.filter((m: ModelStats) => m.task_count > 0 || m.generated_tokens > 0 || m.processed_tokens > 0 || m.cache_tokens > 0)
-            .toSorted((a: ModelStats, b: ModelStats) => {
-                const aTitle = a.provider_name === 'title_generation' ? 1 : 0;
-                const bTitle = b.provider_name === 'title_generation' ? 1 : 0;
-                if (aTitle !== bTitle) return aTitle - bTitle;
-                return b.generated_tokens - a.generated_tokens;
-            });
+            .toSorted((a: ModelStats, b: ModelStats) => b.generated_tokens - a.generated_tokens);
     });
 
     async function resetModel(model: ModelStats) {
@@ -183,9 +175,9 @@
                     </thead>
                     <tbody>
                         {#each sortedModels as model}
-                            <tr class:title-gen-row={model.provider_name === 'title_generation'}>
+                            <tr>
                                 <td class="col-model">
-                                    <span class="model-label" class:title-gen-label={model.provider_name === 'title_generation'}>{getTokenLabel(model)}</span>
+                                    <span class="model-label">{getTokenLabel(model)}</span>
                                 </td>
                                 <td class="col-num">{model.task_count}</td>
                                 <td class="col-num">{formatNumber(model.cache_tokens)}</td>
@@ -383,20 +375,6 @@
         font-family: var(--font-mono, monospace);
         font-size: 0.8125rem;
     }
-    .title-gen-label {
-        color: var(--color-text-secondary);
-        font-style: italic;
-    }
-    .title-gen-row {
-        background: var(--color-surface-2);
-    }
-    .title-gen-row:hover {
-        background: var(--color-surface-3);
-    }
-    .title-gen-row td {
-        border-top: 1px dashed var(--color-border);
-    }
-
     @media (max-width: 768px) {
         .modal {
             width: 100vw;
