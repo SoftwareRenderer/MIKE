@@ -56,6 +56,21 @@ pkill -f "./kanban"
 curl -s http://localhost:3000/api/config
 ```
 
+### HTTPS / TLS
+
+TLS is **enabled by default** with auto-generated self-signed certificates.
+
+| Mode | Env Vars | Description |
+|------|----------|-------------|
+| **Default (HTTPS)** | (none) | Auto-generates self-signed cert in `data/tls/` on first startup |
+| **Custom certs** | `KANBAN_TLS_CERT=path` + `KANBAN_TLS_KEY=path` | Uses user-provided certificate and key files |
+| **Disable TLS** | `KANBAN_TLS=0` | Plain HTTP, no TLS |
+
+- Self-signed certs are valid for `localhost`, `127.0.0.1`, and `::1` (1 year expiry)
+- Certs are reused across restarts (only generated once)
+- WebSocket connections automatically upgrade to `wss://` when TLS is active
+- Session cookies get the `Secure` flag auto-enabled when TLS is active
+
 ### Rules
 - **Restarting** Backend changes require a restart. Frontend changes do not require restarts.
 - **Never leave running** after a crash or panic

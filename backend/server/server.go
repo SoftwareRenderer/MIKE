@@ -17,6 +17,7 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/term"
+	"kanban/backend/tls"
 	"kanban/backend/types"
 )
 
@@ -37,10 +38,11 @@ type Server struct {
 	sandboxMgr     *sandbox.SandboxManager
 	mux            *http.ServeMux
 	addr           string
+	tlsConfig      *tls.Config
 }
 
 // NewServer creates a new Server instance.
-func NewServer(dbPath, worktreesDir string) (*Server, error) {
+func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error) {
 	store, err := store.NewStore(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("create store: %w", err)
@@ -62,6 +64,7 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 		store:       store,
 		configStore: cfgStore,
 		addr:        addr,
+		tlsConfig:   tlsCfg,
 	}
 
 	// Create session manager — fails if KANBAN_PASSWORD is not set
@@ -71,10 +74,9 @@ func NewServer(dbPath, worktreesDir string) (*Server, error) {
 	}
 	s.sessionMgr = sessionMgr
 
-	// Configure cookie Secure flag based on bind address.
-	// Secure flag requires HTTPS — for local dev (HTTP), keep it off.
-	// Enable only when explicitly behind a reverse proxy with HTTPS.
-	sessionCookieSecure = os.Getenv("KANBAN_SECURE_COOKIES") == "1"
+	// Configure cookie Secure flag.
+	// Auto-enable when TLS is active; also respect explicit env var for reverse proxy setups.
+	sessionCookieSecure = tlsCfg != nil || os.Getenv("KANBAN_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -132,7 +134,13 @@ func (s *Server) Serve() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	log.Printf("Server starting on %s", s.addr)
+
+	if s.tlsConfig != nil {
+		log.Printf("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+		return srv.ListenAndServeTLS(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+	}
+
+	log.Printf("Server starting on http://%s", s.addr)
 	return srv.ListenAndServe()
 }
 

@@ -50,7 +50,7 @@ func testServer(t *testing.T) *Server {
 		}
 	})
 
-	s, err := NewServer(dbPath, worktreesDir)
+	s, err := NewServer(dbPath, worktreesDir, nil)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"kanban/backend/server"
+	"kanban/backend/tls"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -94,7 +95,13 @@ func main() {
 		}
 	}()
 
-	srv, err := server.NewServer(*dbPath, worktreesDir)
+	// Load TLS configuration (nil = plain HTTP)
+	tlsCfg, err := tls.Load(dataDir)
+	if err != nil {
+		log.Fatalf("Failed to load TLS config: %v", err)
+	}
+
+	srv, err := server.NewServer(*dbPath, worktreesDir, tlsCfg)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
