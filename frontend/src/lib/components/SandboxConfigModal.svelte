@@ -536,7 +536,7 @@
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
                     </div>
                     <div class="mount-actions">
-                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'}>{mount.mode}</span>
+                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Mount Read/Write' : 'Mount Read-only'}>{mount.mode}</span>
                         <button type="button" class="btn-remove-mount" onclick={() => removeMount(i)} disabled={isLocked} title="Remove">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
@@ -561,11 +561,11 @@
                 </svg>
                 <input type="text" class="mount-input" bind:value={newMountContainerPath} placeholder="/container/path" disabled={isLocked} aria-label="Container path" />
                 <div class="radio-group radio-group-small">
-                    <label class="radio-label" class:active={newMountMode === 'rw'}>
+                    <label class="radio-label" class:active={newMountMode === 'rw'} title="Mount Read/Write">
                         <input type="radio" name="mount-mode" value="rw" checked={newMountMode === 'rw'} onchange={() => newMountMode = 'rw'} disabled={isLocked} />
                         <span class="radio-text">rw</span>
                     </label>
-                    <label class="radio-label" class:active={newMountMode === 'ro'}>
+                    <label class="radio-label" class:active={newMountMode === 'ro'} title="Mount Read-only">
                         <input type="radio" name="mount-mode" value="ro" checked={newMountMode === 'ro'} onchange={() => newMountMode = 'ro'} disabled={isLocked} />
                         <span class="radio-text">ro</span>
                     </label>
