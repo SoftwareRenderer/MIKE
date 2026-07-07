@@ -451,6 +451,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						return
 					case <-time.After(time.Duration(i+1) * 2 * time.Second):
 					}
+					// Notify user of retry attempt
+					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/3)", streamErr, i+2)
+					log.Printf("[retry] task=%s %s", task.ID, retryMsg)
+					te.store.CreateTaskMessage(&types.TaskMessage{
+						ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "system",
+						Content: retryMsg, CreatedAt: time.Now().UTC(),
+					})
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
+						"content":    retryMsg,
+						"created_at": time.Now().UTC().Format(time.RFC3339),
+					}})
 					// Reset builders so retry doesn't concatenate partial content
 					lc.assistantContent.Reset()
 					lc.reasoningContent.Reset()
