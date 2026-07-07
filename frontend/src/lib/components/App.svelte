@@ -352,26 +352,16 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         projectCounts = counts;
                     },
                     onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, hash, short_stat, untracked_n, untracked_lines, file_hashes, removed_files, staged_paths) => {
+                    onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, file_hashes, removed_files, staged_paths) => {
                         const stat = short_stat || '';
                         const insMatch = stat.match(/(\d+) insertion\w*/);
                         const delMatch = stat.match(/(\d+) deletion\w*/);
-                        // Use file_hashes for file count — short_stat misses blank files
-                        // (shortStatFromDiff only counts files with + or - change lines).
-                        const totalFiles = file_hashes ? Object.keys(file_hashes).length : 0;
                         const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
-                        if (hash) {
-                            taskDiffStatsContext.update(map => {
-                                map[task_id] = { hash, files: totalFiles, additions, deletions, file_hashes, removed_files, staged_paths };
-                                return { ...map }; // new ref for Svelte 5 $state reactivity
-                            });
-                        } else {
-                            taskDiffStatsContext.update(map => {
-                                delete map[task_id];
-                                return { ...map };
-                            });
-                        }
+                        taskDiffStatsContext.update(map => {
+                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, file_hashes, removed_files, staged_paths };
+                            return { ...map };
+                        });
                     },
                     onDiff: (task_id, hash, diff, untracked, files) => {
                         taskDiffContext.update(map => {

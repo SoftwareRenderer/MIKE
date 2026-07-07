@@ -87,7 +87,8 @@ func (te *TaskExecutor) broadcastDiffStats(projectID, taskID string, task *types
 	for _, u := range diffResult.Untracked {
 		untrackedLines += len(u.Lines)
 	}
-	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
+	filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
 }
 
 // extractPrevSummary returns the content of the most recent summarization message.

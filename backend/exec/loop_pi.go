@@ -534,7 +534,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		for _, u := range diffResult.Untracked {
 			untrackedLines += len(u.Lines)
 		}
-		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
+		filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
 	}
 
 	// Auto-start next sibling if subtask

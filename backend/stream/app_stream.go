@@ -549,16 +549,13 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 }
 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
-// Used by the card UI to show file counts and the commit button.
-// The hash lets the frontend detect content changes without receiving the full diff.
-// fileHashes is a per-file hash map for incremental updates.
-// stagedPaths lists paths currently staged in the index.
-func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string) {
+func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, filesN, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":            "task_diff_stats",
 		"task_id":         taskID,
 		"hash":            diffHash,
 		"short_stat":      shortStat,
+		"files_n":         filesN,
 		"untracked_n":     untrackedN,
 		"untracked_lines": untrackedLines,
 		"file_hashes":     filterInternalPathsFromHashes(changedHashes),
@@ -579,18 +576,6 @@ func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash stri
 		hashInput.WriteString("\x00staged:" + stagedHash)
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
-}
-
-// BroadcastDiff sends the full diff to all clients of a project.
-func (asm *AppStreamManager) BroadcastDiff(projectID, taskID, diffHash, diff string, shortStat string, untrackedN int, untracked []map[string]any) {
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type":       "task_diff",
-		"task_id":    taskID,
-		"hash":       diffHash,
-		"diff":       diff,
-		"short_stat": shortStat,
-		"untracked":  untracked,
-	})
 }
 
 // BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project,
@@ -976,11 +961,13 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			for _, u := range diffResult.Untracked {
 				untrackedLines += len(u.Lines)
 			}
+			filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
 			statsMsg, _ := json.Marshal(map[string]any{
 				"type":            "task_diff_stats",
 				"task_id":         task.ID,
 				"hash":            hash,
 				"short_stat":      diffResult.ShortStat,
+				"files_n":         filesN,
 				"untracked_n":     len(diffResult.Untracked),
 				"untracked_lines": untrackedLines,
 				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),

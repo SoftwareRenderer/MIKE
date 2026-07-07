@@ -14,11 +14,8 @@ import (
 	"kanban/backend/git"
 )
 
-// diffBroadcastFn is a callback to broadcast diff stats to clients.
-// changedHashes contains only files that are new or modified (path -> hash).
-// removedFiles lists paths that were deleted.
-// stagedPaths lists file paths currently staged in the index.
-type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string)
+// diffBroadcastFn broadcasts diff stats to clients.
+type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, filesN, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string)
 
 // diffCacheUpdateFn is a callback to update the GitHandler's diff cache.
 type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
@@ -247,29 +244,30 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}
 
 	untrackedN := len(diffResult.Untracked)
+	filesN := len(diffResult.Tracked) + untrackedN
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
-		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, "")
+		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 		newHashes := diffResult.GetPerFileHashes()
-
-		// Compute delta against previous state
 		changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
-		// Update GitHandler's diffCache so on-demand file fetches work
 		if ww.updateCache != nil {
 			ww.updateCache(taskID, diffResult)
 		}
-		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, untrackedN, untrackedLines, changedHashes, removedFiles, diffResult.StagedPaths)
+		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, filesN, untrackedN, untrackedLines, changedHashes, removedFiles, diffResult.StagedPaths)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else {
-		// No changes — broadcast empty hash to clear
-		ww.broadcast(projectID, taskID, "", "", 0, 0, nil, nil, nil)
+		// Diff is empty — check if files were deleted
+		newHashes := diffResult.GetPerFileHashes()
+		_, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
+		if ww.updateCache != nil {
+			ww.updateCache(taskID, diffResult)
+		}
+		ww.broadcast(projectID, taskID, "", "", 0, 0, 0, nil, removedFiles, nil)
 	}
 }
 
 // computeDiffDelta compares new file hashes with the cached previous state.
-// Returns changedHashes (new or modified files) and removedFiles (deleted paths).
-// Updates the cache with the new state.
-// Internal files (.git, flight recorder) are excluded from the delta and cache.
+// Internal files are excluded from the delta and cache.
 func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.TaskDiff, cache *sync.Map) (changedHashes map[string]string, removedFiles []string) {
 	// Get previous state
 	prevRaw, hasPrev := cache.Load(taskID)

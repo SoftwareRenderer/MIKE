@@ -385,9 +385,8 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 				for _, u := range diffResult.Untracked {
 					untrackedLines += len(u.Lines)
 				}
-				// Send staged_paths so the frontend updates in-cache staged status
-				// with zero HTTP requests. nil fileHashes avoids redundant re-fetches.
-				te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, nil, nil, diffResult.StagedPaths)
+				filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+				te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, nil, nil, diffResult.StagedPaths)
 			}
 		}
 

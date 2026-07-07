@@ -401,7 +401,10 @@ func (s *Server) getLastCommitHashInThread(threadID string) string {
 	return ""
 }
 
-// broadcastTaskDiff sends the current git diff via WebSocket.
+// broadcastTaskDiff sends the current git diff manifest via WebSocket.
+// Sends manifest format (files map with per-file metadata) instead of legacy
+// TaskDiff (diff string + untracked array) so the frontend gets staged status
+// and per-file hashes in the WebSocket update.
 func (s *Server) broadcastTaskDiff(taskID string) {
 	task, _ := s.store.GetTaskByTaskID(taskID)
 	if task == nil {
@@ -413,9 +416,9 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 		forkBranch = thread.GitBranch
 	}
 	baseRef, _ := s.executor.WorktreeMgr().ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
-	taskDiff, err := s.executor.WorktreeMgr().GetTaskDiff(taskID, baseRef, "")
+	manifest, err := s.gitHandler.GetDiffManifest(taskID, baseRef)
 	if err != nil {
 		return
 	}
-	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: taskDiff})
+	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: manifest})
 }

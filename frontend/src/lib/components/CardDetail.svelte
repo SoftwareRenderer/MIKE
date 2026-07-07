@@ -747,101 +747,67 @@
             const removedFiles = stat?.removed_files || [];
             const stagedPaths = stat?.staged_paths;
 
+            // Remove deleted files from cache
+            if (removedFiles.length > 0) {
+                const newDiff = { ...diffFileCache };
+                const newUntracked = { ...untrackedCache };
+                const newHashes = { ...diffFileHashes };
+                for (const path of removedFiles) {
+                    delete newDiff[path];
+                    delete newUntracked[path];
+                    delete newHashes[path];
+                }
+                diffFileCache = newDiff;
+                untrackedCache = newUntracked;
+                diffFileHashes = newHashes;
+            }
 
-            // No diff data (e.g., after commit-and-done) — clear cache
+            // Empty diff — clear cache and reload
             if (!currentHash) {
                 diffFileCache = {};
                 untrackedCache = {};
                 diffFileHashes = {};
                 diffInitialLoaded = false;
-                return;
-            }
-
-            if (!diffInitialLoaded || Object.keys(diffFileCache).length === 0) {
-                // Phase 1: initial load — fetch full manifest + all files
-                // Also re-load if cache was cleared (e.g., error recovery)
                 loadDiff();
                 return;
             }
 
-            // Update in-cache staged status from server (zero HTTP requests).
-            // Sent by checkpoint after git add -A when staged status changed
-            // but file content hashes are the same.
-            let stagedPathsApplied = false;
+            // Initial load
+            if (!diffInitialLoaded || Object.keys(diffFileCache).length === 0) {
+                loadDiff();
+                return;
+            }
+
+            // Update staged status in-place
             if (stagedPaths) {
                 const stagedSet = new Set(stagedPaths);
-                // Create entirely new objects to force $derived reactivity
                 const updated: Record<string, DiffFile> = {};
                 for (const [path, entry] of Object.entries(diffFileCache)) {
                     updated[path] = { ...entry, staged: stagedSet.has(path) };
                 }
                 diffFileCache = updated as Record<string, DiffFile>;
-                diffCacheVersion++; // force $derived.by to re-run
-                stagedPathsApplied = true;
+                diffCacheVersion++;
 
-                // If no file content changed, skip to next event.
                 if (!fileHashes || Object.keys(fileHashes).length === 0) {
                     return;
                 }
             }
 
-            // Phase 2: delta updates — WS tells us which files changed.
-            // Skip if initial load is still in progress (loadDiff will fetch everything).
+            // Delta fetch for changed files
             if (fileHashes && !diffLoading) {
-                // Remove deleted files from cache
-                if (removedFiles.length > 0) {
-                    const newDiff = { ...diffFileCache };
-                    const newUntracked = { ...untrackedCache };
-                    const newHashes = { ...diffFileHashes };
-                    for (const path of removedFiles) {
-                        delete newDiff[path];
-                        delete newUntracked[path];
-                        delete newHashes[path];
-                    }
-                    diffFileCache = newDiff;
-                    untrackedCache = newUntracked;
-                    diffFileHashes = newHashes;
-                }
-                // Fetch only changed files directly (skip manifest)
-                if (Object.keys(fileHashes).length > 0) {
-                    const oldHashes = { ...diffFileHashes };
-                    diffFileHashes = { ...diffFileHashes, ...fileHashes };
-                    fetchDeltaFiles(fileHashes, oldHashes);
-                }
+                const oldHashes = { ...diffFileHashes };
+                diffFileHashes = { ...diffFileHashes, ...fileHashes };
+                fetchDeltaFiles(fileHashes, oldHashes);
                 return;
             }
 
-            // Fallback: no file_hashes — check WS fast-path or full reload.
-            // Skip full reload if stagedPaths was already applied (cache is up to date).
-            if (stagedPathsApplied) {
-                return;
-            }
-            // Skip WS fast-path if initial load is in progress.
+            // Fallback: WS fast-path or full reload
             if (!diffLoading) {
                 const wsDiff = wsDiffMap[task.id];
-                if (wsDiff && wsDiff.hash === currentHash) {
-                    // When manifest cache exists, skip WS fast-path and do a full HTTP
-                    // reload instead. The WS legacy format (diff string + untracked) lacks
-                    // per-file staged status, and the worktree watcher may not detect
-                    // baseline changes (e.g., git reset --soft after message deletion).
-                    // The HTTP manifest endpoint computes fresh staged status against
-                    // the current baseline, ensuring correctness.
-                    const hasManifestCache = Object.keys(diffFileHashes).length > 0;
-                    if (hasManifestCache) {
-                        // Clear stale cache and reload from HTTP
-                        diffFileCache = {};
-                        untrackedCache = {};
-                        diffFileHashes = {};
-                        diffInitialLoaded = false;
-                        loadDiff();
-                        return;
-                    }
-                    // Save old hashes before updateDiff overwrites them
+                if (wsDiff && wsDiff.hash === currentHash && wsDiff.files) {
                     const oldHashes = { ...diffFileHashes };
-                    updateDiff({ diff: wsDiff.diff, untracked: wsDiff.untracked, files: wsDiff.files }, 'websocket');
-                    if (wsDiff.files) {
-                        fetchChangedFiles(wsDiff.files, oldHashes);
-                    }
+                    updateDiff({ files: wsDiff.files });
+                    fetchChangedFiles(wsDiff.files, oldHashes);
                     return;
                 }
             }
@@ -886,89 +852,48 @@
         }
     }
 
-    type DiffData = { diff?: string; untracked?: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }> };
+    type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
 
-    function updateDiff(data: DiffData, source: 'http' | 'http-force' | 'websocket' = 'http') {
+    function updateDiff(data: DiffData) {
+        if (!data.files || Object.keys(data.files).length === 0) return;
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
-
-        // New manifest format: per-file entries
-        if (data.files && Object.keys(data.files).length > 0) {
-            const newCache: Record<string, DiffFile> = {};
-            const newUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
-            for (const [path, entry] of Object.entries(data.files)) {
-                if (!ignoreSwp(path) && entry.type === 'untracked') continue;
-                if (entry.type === 'tracked') {
-                    // Keep existing rows if cached (hash unchanged), update metadata
-                    const existing = diffFileCache[path];
-                    newCache[path] = {
-                        path,
-                        rows: existing?.rows || [],
-                        added: entry.added ?? 0,
-                        removed: entry.removed ?? 0,
-                        fileSize: entry.file_size,
-                        isBinary: entry.is_binary,
-                        truncated: !!entry.truncated,
-                        origAdded: entry.origAdded,
-                        origRemoved: entry.origRemoved,
-                        staged: entry.staged,
-                    };
-                } else if (entry.type === 'untracked') {
-                    const existing = diffFileCache[path];
-                    newUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
-                    newCache[path] = {
-                        path,
-                        rows: existing?.rows || [],
-                        added: entry.line_count ?? 0,
-                        removed: 0,
-                        staged: false,
-                    };
-                }
-            }
-            diffFileCache = newCache;
-            untrackedCache = newUntracked;
-            // Store per-file hashes for incremental comparison
-            const newHashes: Record<string, string> = {};
-            for (const [path, entry] of Object.entries(data.files!)) {
-                newHashes[path] = entry.hash;
-            }
-            diffFileHashes = newHashes;
-            return;
-        }
-
-        // Legacy format: monolithic diff string + untracked array.
-        // If cache was built from manifest format (diffFileHashes populated),
-        // skip legacy updates — the legacy TaskDiff from WebSocket lacks the
-        // per-file metadata (hashes, staged status) that the manifest provides.
-        // The CardDetail $effect handles proper manifest-based delta updates.
-        // Only skip if the cache has actual content (rows), not just empty entries.
-        const hasManifestCache = Object.keys(diffFileHashes).length > 0 &&
-            Object.values(diffFileCache).some(f => f.rows && f.rows.length > 0);
-        if (hasManifestCache) {
-            return; // keep existing manifest data
-        }
-        const truncatedSet = new Set(data.truncated_files || []);
-        const origStats = data.original_file_stats || {};
         const newCache: Record<string, DiffFile> = {};
         const newUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
-
-        parseUnifiedDiff(data.diff || '').filter(f => ignoreSwp(f.path)).forEach(f => {
-            const isTruncated = truncatedSet.has(f.path);
-            const stat = origStats[f.path];
-            newCache[f.path] = {
-                ...f,
-                truncated: isTruncated,
-                origAdded: stat?.added,
-                origRemoved: stat?.removed,
-            };
-        });
-
-        (data.untracked || []).filter(u => ignoreSwp(u.path)).forEach(u => {
-            newUntracked[u.path] = { fileSize: u.file_size, isBinary: u.is_binary, truncated: u.truncated, origAdded: u.orig_added, loading: false };
-            newCache[u.path] = buildUntrackedDiffFile(u.path, u.lines, u.line_count);
-        });
-
+        for (const [path, entry] of Object.entries(data.files)) {
+            if (!ignoreSwp(path) && entry.type === 'untracked') continue;
+            if (entry.type === 'tracked') {
+                const existing = diffFileCache[path];
+                newCache[path] = {
+                    path,
+                    rows: existing?.rows || [],
+                    added: entry.added ?? 0,
+                    removed: entry.removed ?? 0,
+                    fileSize: entry.file_size,
+                    isBinary: entry.is_binary,
+                    truncated: !!entry.truncated,
+                    origAdded: entry.origAdded,
+                    origRemoved: entry.origRemoved,
+                    staged: entry.staged,
+                };
+            } else if (entry.type === 'untracked') {
+                const existing = diffFileCache[path];
+                newUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
+                newCache[path] = {
+                    path,
+                    rows: existing?.rows || [],
+                    added: entry.line_count ?? 0,
+                    removed: 0,
+                    staged: false,
+                };
+            }
+        }
         diffFileCache = newCache;
         untrackedCache = newUntracked;
+        const newHashes: Record<string, string> = {};
+        for (const [path, entry] of Object.entries(data.files)) {
+            newHashes[path] = entry.hash;
+        }
+        diffFileHashes = newHashes;
     }
 
     let diffLoading = $state(false);
@@ -1023,7 +948,7 @@
             const isDefaultMode = !headRef && !baseRef;
             // Save old hashes before updateDiff overwrites them
             const oldHashes = { ...diffFileHashes };
-            updateDiff(result, isDefaultMode ? 'http' : 'http-force');
+            updateDiff(result);
             // For manifest format, fetch individual files (skip unchanged)
             if (result.files && isDefaultMode) {
                 await fetchChangedFiles(result.files, oldHashes);
@@ -1180,8 +1105,7 @@
             const headRef = diffTo === 'working' ? undefined : diffTo;
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef, full: true });
-            const isDefaultMode = !headRef && !baseRef;
-            updateDiff(result, isDefaultMode ? 'http' : 'http-force');
+            updateDiff(result);
         } catch (e) {
             // Silently fail
         }
@@ -1320,7 +1244,7 @@
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
                             taskTitle={task.title}
-                            onRefreshDiff={(data: DiffData) => updateDiff(data, 'websocket')}
+                            onRefreshDiff={(data: DiffData) => updateDiff(data)}
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
                             onViewChanges={handleViewChanges}

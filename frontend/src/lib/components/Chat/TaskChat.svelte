@@ -69,7 +69,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         queued?: boolean; // true if message is queued (sent while offline)
     }
 
-    type DiffData = { diff: string; untracked: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
+    type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
 
     let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
 

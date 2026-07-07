@@ -106,7 +106,7 @@ func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error)
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 	// Wire stage/unstage → WebSocket broadcast so frontend updates in-cache staged status
 	s.gitHandler.SetStageChangeHandler(func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, stagedPaths []string) {
-		s.appStreamMgr.BroadcastDiffStats(projectID, taskID, diffHash, shortStat, untrackedN, untrackedLines, nil, nil, stagedPaths)
+		s.appStreamMgr.BroadcastDiffStats(projectID, taskID, diffHash, shortStat, 0, untrackedN, untrackedLines, nil, nil, stagedPaths)
 	})
 
 	// Run garbage collector on startup

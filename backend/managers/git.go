@@ -46,6 +46,26 @@ func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
 	h.diffCache.Store(taskID, taskDiff)
 }
 
+// GetDiffManifest builds a diff manifest for a task's worktree.
+// Returns the manifest (JSON-serializable) with per-file metadata and staged status.
+// Used by broadcastTaskDiff to send manifest format via WebSocket.
+func (h *GitHandler) GetDiffManifest(taskID, baseRef string) (any, error) {
+	if h.worktreeMgr == nil {
+		return nil, fmt.Errorf("worktree manager not available")
+	}
+	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
+	if err != nil {
+		return nil, err
+	}
+	if taskDiff.Untracked == nil {
+		taskDiff.Untracked = []git.UntrackedFile{}
+	}
+	// Cache the full result for on-demand file fetches
+	h.diffCache.Store(taskID, taskDiff)
+	stagedPaths := getStagedPaths(h.worktreeMgr, taskID, baseRef)
+	return buildDiffManifest(taskDiff, stagedPaths), nil
+}
+
 // HandleLog returns commit log for a project.
 // With ?full=1 query param, returns extended fields: hash, author, date, parents, branches.
 // Also includes current_branch and origin_tip metadata.
