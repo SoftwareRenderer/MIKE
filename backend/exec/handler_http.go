@@ -237,12 +237,13 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	}
 	worktreePath, _ := te.worktreeMgr.WorktreePath(taskID)
 
-	messages, lastSummaryIdx, previousSummary := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
+	messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
 
 	// Build system prompt for summarizeContext (same as used in buildMessagesFromDB)
 	systemPrompt := messages[0].Content
+	previousSummary := extractPrevSummary(messages)
 
-	sumResult, err := te.summarizeContext(messages, lastSummaryIdx, systemPrompt, task.LlamaServerURL, task.ModelName, previousSummary)
+	sumResult, err := te.summarizeContext(messages, systemPrompt, task.LlamaServerURL, task.ModelName, previousSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
@@ -277,12 +278,12 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		"model_name":       task.ModelName,
 	}})
 
-	log.Printf("[summarize] task=%s manual summarization: %d messages -> %d messages", taskID, sumResult.oldLen, len(sumResult.newMessages))
+	log.Printf("[summarize] task=%s manual summarization complete (messages preserved, LLM context compressed)", taskID)
 
 	// Return updated token estimate
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
-		"summary":   sumResult.summary,
-		"old_count": sumResult.oldLen,
-		"new_count": len(sumResult.newMessages),
+		"summary":     sumResult.summary,
+		"old_count":   sumResult.oldLen,
+		"new_count":   sumResult.oldLen + 1, // summary appended, all messages preserved
 	})
 }

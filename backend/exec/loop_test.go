@@ -1341,7 +1341,9 @@ func TestExtractPrevSummary_NoSummary(t *testing.T) {
 func TestExtractPrevSummary_WithSummary(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "you are a helper"},
-		{Role: "assistant", Content: "[Context summary: The user asked about Go generics]"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi there"},
+		{Role: "summarization", Content: "The user asked about Go generics"},
 		{Role: "user", Content: "tell me more"},
 	}
 	got := extractPrevSummary(messages)
@@ -1350,14 +1352,207 @@ func TestExtractPrevSummary_WithSummary(t *testing.T) {
 	}
 }
 
-func TestExtractPrevSummary_MalformedSummary(t *testing.T) {
+func TestExtractPrevSummary_MultipleSummaries(t *testing.T) {
+	// Should return the most recent summary.
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "you are a helper"},
-		{Role: "assistant", Content: "not a summary format"},
+		{Role: "summarization", Content: "first summary"},
+		{Role: "user", Content: "more stuff"},
+		{Role: "summarization", Content: "second summary"},
+	}
+	got := extractPrevSummary(messages)
+	if got != "second summary" {
+		t.Errorf("expected 'second summary', got %q", got)
+	}
+}
+
+func TestExtractPrevSummary_OnlyAssistantMessages(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "you are a helper"},
+		{Role: "assistant", Content: "not a summary"},
 	}
 	got := extractPrevSummary(messages)
 	if got != "" {
-		t.Errorf("expected empty string for malformed summary, got %q", got)
+		t.Errorf("expected empty string for no summarization role, got %q", got)
+	}
+}
+
+// --- buildLLMContext Tests ---
+
+func TestBuildLLMContext_NoSummary(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	}
+	result := buildLLMContext(messages)
+	// No summary: passthrough.
+	if len(result) != len(messages) {
+		t.Fatalf("expected %d messages, got %d", len(messages), len(result))
+	}
+	for i := range messages {
+		if result[i].Role != messages[i].Role || result[i].Content != messages[i].Content {
+			t.Errorf("message[%d] mismatch: got %v, want %v", i, result[i], messages[i])
+		}
+	}
+}
+
+func TestBuildLLMContext_WithSummary(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "old message 1"},
+		{Role: "assistant", Content: "old response 1"},
+		{Role: "user", Content: "old message 2"},
+		{Role: "assistant", Content: "old response 2"},
+		{Role: "summarization", Content: "summary of conversation"},
+		{Role: "user", Content: "new message"},
+		{Role: "assistant", Content: "new response"},
+	}
+	result := buildLLMContext(messages)
+
+	// Expected: system + summary + 2 pre-summary turns + 2 post-summary = 8
+	if len(result) != 8 {
+		t.Fatalf("expected 8 messages, got %d: %v", len(result), func() []string {
+			var s []string
+			for _, m := range result {
+				s = append(s, m.Role+":"+m.Content[:min(len(m.Content), 20)])
+			}
+			return s
+		}())
+	}
+	if result[0].Role != "system" {
+		t.Errorf("expected system at [0], got %s", result[0].Role)
+	}
+	if result[1].Role != "assistant" || !strings.HasPrefix(result[1].Content, "[Context summary: ") {
+		t.Errorf("expected formatted summary at [1], got %s: %q", result[1].Role, result[1].Content)
+	}
+}
+
+func TestBuildLLMContext_SkipsOldMessagesBeyond3Turns(t *testing.T) {
+	// 5 turns before summary, only last 3 should appear.
+	var messages []types.ChatMessage
+	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
+	for i := 1; i <= 5; i++ {
+		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("old message %d", i)})
+		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("old response %d", i)})
+	}
+	messages = append(messages, types.ChatMessage{Role: "summarization", Content: "summary"})
+	messages = append(messages, types.ChatMessage{Role: "user", Content: "new message"})
+
+	result := buildLLMContext(messages)
+
+	// Count how many "old message" entries appear
+	oldCount := 0
+	for _, m := range result {
+		if strings.Contains(m.Content, "old message") {
+			oldCount++
+		}
+	}
+	// Should be exactly 3.
+	if oldCount != 3 {
+		t.Errorf("expected 3 old messages in context, got %d", oldCount)
+	}
+	// The oldest (message 1, 2) should NOT appear
+	for _, m := range result {
+		if strings.Contains(m.Content, "old message 1") || strings.Contains(m.Content, "old message 2") {
+			t.Errorf("old message beyond 3-turn window should not appear: %q", m.Content)
+		}
+	}
+}
+
+func TestBuildLLMContext_WithToolCalls(t *testing.T) {
+	assistantWithTool := types.ChatMessage{
+		Role:    "assistant",
+		Content: "ok",
+		ToolCalls: []types.ToolCallMsg{
+			{ID: "call1", Type: "function"},
+		},
+	}
+	assistantWithTool.ToolCalls[0].Function.Name = "bash"
+	assistantWithTool.ToolCalls[0].Function.Arguments = "{}"
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "do something"},
+		assistantWithTool,
+		{Role: "tool", Content: "output", ToolCallID: "call1"},
+		{Role: "summarization", Content: "summary"},
+		{Role: "user", Content: "done"},
+	}
+	result := buildLLMContext(messages)
+
+	// Tool calls included in pre-summary turns.
+	hasToolCall := false
+	hasToolResult := false
+	for _, m := range result {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			hasToolCall = true
+		}
+		if m.Role == "tool" {
+			hasToolResult = true
+		}
+	}
+	if !hasToolCall {
+		t.Error("expected tool call in context")
+	}
+	if !hasToolResult {
+		t.Error("expected tool result in context")
+	}
+}
+
+// --- shouldSummarize Tests ---
+
+func TestShouldSummarize_SmallContext(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	}
+	if shouldSummarize(messages, 32768) {
+		t.Error("small context should not trigger summarization")
+	}
+}
+
+func TestShouldSummarize_LargeContext(t *testing.T) {
+	// Build a large context that exceeds 90% of a small window
+	var messages []types.ChatMessage
+	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
+	// Each message ~20 words, ~26 tokens. Window = 100 tokens, threshold = 90.
+	// Need ~4 messages to exceed threshold.
+	for i := 0; i < 10; i++ {
+		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("message number %d with some extra words to pad the token count higher", i)})
+		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("response number %d with some extra words to pad the token count higher", i)})
+	}
+	if !shouldSummarize(messages, 100) {
+		t.Error("large context should trigger summarization")
+	}
+}
+
+func TestShouldSummarize_AfterExistingSummary(t *testing.T) {
+	// Existing summary + many new messages should trigger re-summarization.
+	var messages []types.ChatMessage
+	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
+	// Old messages.
+	messages = append(messages, types.ChatMessage{Role: "user", Content: "old message"})
+	messages = append(messages, types.ChatMessage{Role: "assistant", Content: "old response"})
+	messages = append(messages, types.ChatMessage{Role: "summarization", Content: "summary of earlier conversation"})
+	// Many new messages should push context over limit.
+	for i := 0; i < 10; i++ {
+		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("new message number %d with some extra words to pad the token count higher", i)})
+		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("new response number %d with some extra words to pad the token count higher", i)})
+	}
+	if !shouldSummarize(messages, 100) {
+		t.Error("context with existing summary + many new messages should trigger re-summarization")
+	}
+}
+
+func TestShouldSummarize_ZeroWindow(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "hello"},
+	}
+	if shouldSummarize(messages, 0) {
+		t.Error("zero context window should never trigger summarization")
 	}
 }
 

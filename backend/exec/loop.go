@@ -58,7 +58,7 @@ func unstageNewBinaryFilesInDir(dir string) {
 
 // loopContext holds mutable state for the AI conversation loop.
 type loopContext struct {
-	messages         []types.ChatMessage
+	messages         []types.ChatMessage // full conversation (all messages preserved)
 	assistantContent strings.Builder
 	reasoningContent strings.Builder
 	pendingToolCalls []types.ChatToolCall
@@ -69,7 +69,6 @@ type loopContext struct {
 	client           *llama.LlamaClient
 	providerName     string
 	contextWindow    *int
-	lastSummarizeIdx int
 	systemPrompt     string
 	sandboxEnabled   bool
 	startTime        time.Time
@@ -244,7 +243,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		tools = llama.GetToolDefinitions()
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-	messages, lastSummarizeIdx, _ := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
+	messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
 
 	// Context tracking: load context window from provider config, discover if unknown
 	var contextWindow *int
@@ -271,7 +270,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		client:           client,
 		providerName:     providerName,
 		contextWindow:    contextWindow,
-		lastSummarizeIdx: lastSummarizeIdx,
 		systemPrompt:     messages[0].Content,
 		sandboxEnabled:   sandboxEnabled,
 		startTime:        time.Now(),
@@ -368,8 +366,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		var lastProgressSend time.Time // throttle progress updates to ~1/2s
 		var lastPredictedN int         // track predicted tokens for real-time stats events
 
+		// Assemble LLM context (compresses history via summary if one exists).
+		llmMessages := buildLLMContext(lc.messages)
+
 		go func() {
-			lc.usage, streamErr = lc.client.ChatStream(callCtx, lc.messages, tools, func(choice types.ChatChoice) {
+			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
 				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 					lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
@@ -466,7 +467,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					lc.assistantContent.Reset()
 					lc.reasoningContent.Reset()
 					lc.pendingToolCalls = nil
-					lc.usage, streamErr = lc.client.ChatStream(callCtx, lc.messages, tools, func(choice types.ChatChoice) {
+					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
 						if choice.Delta.ReasoningContent != nil {
 							lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
@@ -881,16 +882,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			continue
 		}
 
-		// Context summarization: check if we're approaching the context window limit
-		if lc.contextWindow != nil && lc.lastSummarizeIdx < len(lc.messages)-1 {
+		// Auto-summarize if context is approaching the window limit.
+		if lc.contextWindow != nil {
 			if shouldSummarize(lc.messages, *lc.contextWindow) {
-				lc.messages, lc.lastSummarizeIdx = te.applySummarization(task, projectID, task.ID, lc.messages, lc.lastSummarizeIdx, lc.systemPrompt, serverURL, activeModel, nil)
+				lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, lc.systemPrompt, serverURL, activeModel, nil)
 			}
 		}
 
-		// Block waiting for a user message before the next LLM call.
-		// Without this, the executor would immediately loop and call the LLM again
-		// with the same conversation (text-only response already added to history).
+		// Block for user message before next LLM call.
 		select {
 		case <-ctx.Done():
 			te.handleStopped(task, projectID, task.ID, "Stopped by user", "stopped", true)
@@ -898,7 +897,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case resultCh := <-summarizeCh:
 			// Manual summarization request from HandleSummarize
 			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
-			lc.messages, lc.lastSummarizeIdx = te.applySummarization(task, projectID, task.ID, lc.messages, lc.lastSummarizeIdx, lc.systemPrompt, serverURL, activeModel, resultCh)
+			lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, lc.systemPrompt, serverURL, activeModel, resultCh)
 			continue
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)

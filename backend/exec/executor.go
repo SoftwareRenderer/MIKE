@@ -1046,9 +1046,8 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 
 var wordRe = regexp.MustCompile(`\S+`)
 
-// buildMessagesFromDB reconstructs the conversation from the task's persisted messages.
-// Returns (messages, lastSummaryIdx, previousSummary).
-func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, int, string) {
+// buildMessagesFromDB loads all persisted messages. LLM context is assembled via buildLLMContext.
+func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
 	promptPath := worktreePath
 	if sandboxEnabled {
 		promptPath = "/home/sandbox/" + projectName
@@ -1060,36 +1059,13 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 		systemPrompt = llama.BuildSystemPrompt(promptPath)
 	}
 
-	// Restore summary checkpoint across restarts.
-	var lastSummaryMsg *types.TaskMessage
-	for i := len(taskMsgs) - 1; i >= 0; i-- {
-		if taskMsgs[i].Role == "summarization" {
-			lastSummaryMsg = &taskMsgs[i]
-			break
-		}
-	}
-
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
-	lastSummaryIdx := -1
-	var previousSummary string
-	if lastSummaryMsg != nil {
-		// Restore summary as assistant message
-		messages = append(messages, types.ChatMessage{
-			Role:    "assistant",
-			Content: "[Context summary: " + lastSummaryMsg.Content + "]",
-		})
-		lastSummaryIdx = 1
-		previousSummary = lastSummaryMsg.Content
-	}
 
 	for _, m := range taskMsgs {
-		// Skip messages before summary checkpoint
-		if lastSummaryMsg != nil && m.CreatedAt.Before(lastSummaryMsg.CreatedAt) {
-			continue
-		}
 		switch m.Role {
 		case "summarization":
-			continue // already incorporated as the summary above
+			// Keep as-is with role "summarization" — buildLLMContext formats it for the LLM
+			messages = append(messages, types.ChatMessage{Role: "summarization", Content: m.Content})
 		case "user":
 			if m.Attachments != "" {
 				var atts []struct {
@@ -1147,7 +1123,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 		}
 	}
 
-	return messages, lastSummaryIdx, previousSummary
+	return messages
 }
 
 func estimateTokensFromText(text string) int {

@@ -33,23 +33,35 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}
-		// Get the task to find its current thread
-		task, _ := s.store.GetTask(projectID, taskID)
-		threadID := ""
-		if task != nil {
-			threadID = task.CurrentThreadID
+		// Get the message's role, thread_id, and created_at BEFORE deletion.
+		msg, msgErr := s.store.GetTaskMessageByID(req.MessageID)
+		msgRole := ""
+		msgThreadID := ""
+		if msgErr == nil && msg != nil {
+			msgRole = msg.Role
+			msgThreadID = msg.ThreadID
 		}
-		// Get the message's created_at BEFORE deletion (needed for checkpoint matching below).
 		msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(req.MessageID)
-		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, threadID); err != nil {
+		// Use the message's own thread_id so deletion targets the correct thread
+		// even if the task's active thread has switched since the message was created.
+		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID); err != nil {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		// Clear buffered task events so reconnecting clients don't replay
+		// stale events (e.g., summarization for a deleted message).
+		if !req.Regenerate {
+			s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
 		}
 		// Check if the deleted message was a checkpoint for any fork threads.
 		// If so, delete those orphaned fork threads and switch to parent if needed.
 		// Skip during regeneration — the message is being re-sent, not permanently removed.
-		if !req.Regenerate {
-			s.cleanupDeletedMessageForks(projectID, taskID, task, threadID, req.MessageID, msgCreatedAt, msgTimeErr)
+		// Skip fork cleanup for summarization — it doesn't change files.
+		task, _ := s.store.GetTask(projectID, taskID)
+		if !req.Regenerate && msgRole != "summarization" {
+			s.cleanupDeletedMessageForks(projectID, taskID, task, msgThreadID, req.MessageID, msgCreatedAt, msgTimeErr, msgRole)
+		} else {
+			s.broadcastTaskDiff(taskID)
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -187,7 +199,8 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // cleanupDeletedMessageForks deletes orphan fork threads when a checkpoint message is deleted.
-func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *types.Task, threadID, messageID string, msgCreatedAt *time.Time, msgTimeErr error) {
+// Skips worktree reset if the deleted message was a summary (summary doesn't change files).
+func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *types.Task, threadID, messageID string, msgCreatedAt *time.Time, msgTimeErr error, msgRole string) {
 	// Match by message ID first (direct match), then by created_at time (for copied messages
 	// in fork threads that have new IDs but preserved timestamps).
 	checkpointThreads, _ := s.store.GetThreadsByCheckpointMessageID(messageID)
@@ -256,18 +269,23 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 				s.deleteThreadBranch(taskID, branch)
 			}
 		}
-		// Reset file state to match the (possibly new) active thread's conversation
-		lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
-		s.resetWorktreeToCommit(taskID, lastCommit)
+		// Reset file state to match the (possibly new) active thread's conversation.
+		// Skip for summary deletion — summary doesn't change files.
+		if msgRole != "summarization" {
+			lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
+			s.resetWorktreeToCommit(taskID, lastCommit)
+		}
 		s.broadcastTaskDiff(taskID)
 		// Broadcast updated task so frontend has new currentThreadID before diff loads
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
 		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
 	} else {
 		// No fork threads affected, but messages were deleted.
-		// Reset file state to match remaining conversation in active thread.
-		lastCommit := s.getLastCommitHashInThread(threadID)
-		s.resetWorktreeToCommit(taskID, lastCommit)
+		// Reset file state to match remaining conversation. Skip for summary deletion.
+		if msgRole != "summarization" {
+			lastCommit := s.getLastCommitHashInThread(threadID)
+			s.resetWorktreeToCommit(taskID, lastCommit)
+		}
 		s.broadcastTaskDiff(taskID)
 	}
 }

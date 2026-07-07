@@ -27,34 +27,31 @@ func buildCommitMessages(diffStat, turnText string) []types.ChatMessage {
 
 // summarizeResult holds the result of a context summarization operation.
 type summarizeResult struct {
-	newMessages         []types.ChatMessage
-	newLastSummarizeIdx int
-	summary             string
-	oldLen              int
-	promptTokens        int
-	predictedTokens     int
-	promptMs            int64
-	predictedMs         int64
+	summary       string
+	oldLen        int
+	promptTokens  int
+	predictedTokens int
+	promptMs      int64
+	predictedMs   int64
 }
 
-// shouldSummarize checks if the current context (estimated from messages) is approaching the context window limit.
-// Uses the same token estimation as estimatePromptTokens for consistency.
+// shouldSummarize checks if the assembled LLM context is approaching the window limit.
 func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 	if contextWindow <= 0 {
 		return false
 	}
-	estimatedTokens := estimatePromptTokens(messages)
+	// Estimate tokens in assembled context (what the LLM actually sees)
+	llmCtx := buildLLMContext(messages)
+	estimatedTokens := estimatePromptTokens(llmCtx)
 	return estimatedTokens >= contextWindow*9/10
 }
 
-// summarizeContext summarizes the conversation history to reduce context size.
-// It sends a non-streaming chat completion with a summarization prompt,
-// then returns a new messages array: [system, summary] + last N recent messages.
-// previousSummary is the content of the last summarization checkpoint (empty if first summarization).
-func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName, previousSummary string) (summarizeResult, error) {
+// summarizeContext produces a compact summary of the conversation history.
+// Sends a non-streaming chat completion. Does not modify the messages slice.
+func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, systemPrompt, serverURL, modelName, previousSummary string) (summarizeResult, error) {
 	oldLen := len(messages)
 
-	chatHistory := formatChatHistory(messages, lastSummarizeIdx, previousSummary != "")
+	chatHistory := formatChatHistory(messages, previousSummary != "")
 	summarizePrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
 		ChatHistory:     chatHistory,
 		PreviousSummary: previousSummary,
@@ -62,13 +59,12 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSumma
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("load summarize prompt: %w", err)
 	}
-	// The formatted chat history is embedded in the system prompt,
-	// so we only need a single system message (no raw messages needed).
+	// Chat history is embedded in the system prompt.
 	summarizeMessages := []types.ChatMessage{
 		{Role: "system", Content: summarizePrompt},
 	}
 
-	// Send non-streaming summarization request (concurrency handled by ChatCompletion)
+	// Non-streaming summarization request.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, 32768)
 	cancel()
@@ -76,52 +72,86 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, lastSumma
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
 
-	// Keep last N messages for continuity (system + last ~10 messages = ~5 turns)
-	keepRecent := 10
-	var recent []types.ChatMessage
-	if len(messages) > keepRecent+1 {
-		recent = messages[len(messages)-keepRecent:]
-	} else {
-		recent = messages[1:] // skip system
-	}
-
-	// Build new messages: system + summary + recent
-	newMessages := []types.ChatMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "assistant", Content: "[Context summary: " + summary + "]"},
-	}
-	newMessages = append(newMessages, recent...)
-
-	// New lastSummarizeIdx: points to the summary message (index 1)
-	newLastSummarizeIdx := 1
-
 	return summarizeResult{
-		newMessages:         newMessages,
-		newLastSummarizeIdx: newLastSummarizeIdx,
-		summary:             summary,
-		oldLen:              oldLen,
-		promptTokens:        usage.PromptTokens,
-		predictedTokens:     usage.CompletionTokens,
-		promptMs:            usage.PromptMs,
-		predictedMs:         usage.PredictedMs,
+		summary:       summary,
+		oldLen:        oldLen,
+		promptTokens:  usage.PromptTokens,
+		predictedTokens: usage.CompletionTokens,
+		promptMs:      usage.PromptMs,
+		predictedMs:   usage.PredictedMs,
 	}, nil
 }
 
-// formatChatHistory formats the conversation into a plain-text history for the summarization prompt.
-// Format:
-//
-//	User: <content>
-//	Assistant: <content>
-//	Assistant: (I used the [tool name] tool to [action], which was [successful/unsuccessful])
-//
-// System messages are skipped. Tool result messages are incorporated into the preceding
-// assistant tool call line. Only messages from summarizeFrom onwards are included.
-// When skipSummaryMsg is true, the [Context summary: ...] message at index 1 is skipped
-// because it is passed separately as PreviousSummary.
-func formatChatHistory(messages []types.ChatMessage, lastSummarizeIdx int, skipSummaryMsg bool) string {
-	summarizeFrom := max(lastSummarizeIdx, 0)
+// buildLLMContext assembles the context sent to the LLM.
+// With a summary: [system, summary, last-3-turns-before, all-after].
+// Without a summary: returns all messages unchanged.
+func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
+	// Find most recent summary.
+	summaryIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "summarization" {
+			summaryIdx = i
+			break
+		}
+	}
+	if summaryIdx < 0 {
+		return messages // no summary, use all messages
+	}
 
-	// Build a map of toolCallID -> output for quick lookup
+	// Group messages before summary into turns, keep last 3.
+	var allTurns [][]types.ChatMessage
+	var currentTurn []types.ChatMessage
+	for i := 1; i < summaryIdx; i++ {
+		if messages[i].Role == "system" {
+			continue
+		}
+		if messages[i].Role == "user" && len(currentTurn) > 0 {
+			allTurns = append(allTurns, currentTurn)
+			currentTurn = nil
+		}
+		currentTurn = append(currentTurn, messages[i])
+	}
+	if len(currentTurn) > 0 {
+		allTurns = append(allTurns, currentTurn)
+	}
+
+	// Keep last 3.
+	var recentTurns [][]types.ChatMessage
+	if len(allTurns) > 3 {
+		recentTurns = allTurns[len(allTurns)-3:]
+	} else {
+		recentTurns = allTurns
+	}
+
+	// Flatten.
+	var preSummary []types.ChatMessage
+	for _, turn := range recentTurns {
+		preSummary = append(preSummary, turn...)
+	}
+
+	// Messages after summary.
+	var postSummary []types.ChatMessage
+	for i := summaryIdx + 1; i < len(messages); i++ {
+		if messages[i].Role != "system" {
+			postSummary = append(postSummary, messages[i])
+		}
+	}
+
+	// Assemble final context.
+	result := []types.ChatMessage{
+		messages[0], // system prompt
+		{Role: "assistant", Content: "[Context summary: " + messages[summaryIdx].Content + "]"},
+	}
+	result = append(result, preSummary...)
+	result = append(result, postSummary...)
+	return result
+}
+
+// formatChatHistory formats conversation as plain text for the summarization prompt.
+// System and tool messages are skipped. Summarization messages are skipped when
+// skipSummaryMsg is true (content passed as PreviousSummary instead).
+func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string {
+	// Map tool results for status lookup.
 	toolResults := make(map[string]string)
 	for _, m := range messages {
 		if m.Role == "tool" && m.ToolCallID != "" {
@@ -136,14 +166,17 @@ func formatChatHistory(messages []types.ChatMessage, lastSummarizeIdx int, skipS
 	}
 	sb := strings.Builder{}
 	sb.Grow(totalSize + len(messages)*50)
-	for i := summarizeFrom; i < len(messages); i++ {
-		m := messages[i]
-		// Skip the previous summary message — it is passed as PreviousSummary
-		if skipSummaryMsg && i == 1 && strings.HasPrefix(m.Content, "[Context summary: ") {
-			continue
-		}
+	for _, m := range messages {
 		switch m.Role {
 		case "system":
+			continue
+		case "summarization":
+			if skipSummaryMsg {
+				continue // passed as PreviousSummary
+			}
+			sb.WriteString("Assistant: [Context summary: ")
+			sb.WriteString(m.Content)
+			sb.WriteString("]\n")
 			continue
 		case "tool":
 			// Already incorporated into assistant line above

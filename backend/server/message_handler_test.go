@@ -161,6 +161,85 @@ func TestMessageDeleteAfter(t *testing.T) {
 	_ = remaining // verified above
 }
 
+func TestMessageDeleteSummarizationSkipsForkCleanup(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	task, _ := s.store.GetTask(projID, taskID)
+	threadID := task.CurrentThreadID
+
+	// Create messages with explicit timestamps: msg1 < summarization < msg2 < msg3
+	baseTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "msg-1",
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "user",
+		Content:   "msg 1",
+		CreatedAt: baseTime,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "summ-msg",
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "summarization",
+		Content:   "Summary of changes",
+		CreatedAt: baseTime.Add(time.Second),
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "msg-2",
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "user",
+		Content:   "msg 2",
+		CreatedAt: baseTime.Add(2 * time.Second),
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "msg-3",
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "user",
+		Content:   "msg 3",
+		CreatedAt: baseTime.Add(3 * time.Second),
+	})
+
+	// Delete the summarization message (default mode, not delete_single)
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"message_id": "summ-msg",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Summarization deletion should succeed and truncate messages after it
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	remaining := mustJSON[[]map[string]any](t, listRR.Body)
+
+	// The summarization message and messages after it should be gone
+	for _, m := range remaining {
+		if m["id"] == "summ-msg" {
+			t.Fatal("summarization message should have been deleted")
+		}
+		if m["id"] == "msg-2" || m["id"] == "msg-3" {
+			t.Fatalf("message after summarization should have been deleted, got %v", m["id"])
+		}
+	}
+	// msg-1 should still be present
+	found := false
+	for _, m := range remaining {
+		if m["id"] == "msg-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("msg-1 should still be present")
+	}
+}
+
 func TestMessageDeleteMissingID(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)

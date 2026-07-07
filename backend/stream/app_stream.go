@@ -736,6 +736,11 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	delete(asm.taskBuffers, taskKey)
 }
 
+// ClearTaskBuffer removes the per-task ring buffer.
+func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
+	asm.clearTaskBuffer(projectID + ":" + taskID)
+}
+
 // -- Diff poller --
 
 // getDiffBaseline computes the effective diff baseline for a task.

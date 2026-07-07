@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, showConfirm, commitDialog as commitDialogStore, selectedTask } from '$lib/store';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -796,6 +796,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 // Thread was switched (possibly from another tab or API call)
                 const data = event.data as { thread_id: string; task_id: string };
                 updateActiveThread(data.thread_id);
+                updateThreadUrl(data.thread_id);
                 onThreadSwitch?.();
                 // Skip loadHistory during regenerate to avoid clobbering the
                 // optimistic user message entry before the echo arrives.
@@ -1424,7 +1425,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     async function handleSummarize() {
         const confirmed = await showConfirm({
             title: 'Compress Context',
-            message: 'This will summarize and remove older messages from the context window to reduce token usage. You will be able to delete the summary to reverse this.',
+            message: 'This will create a summary of the conversation to reduce token usage. All messages are preserved — delete the summary entry to restore the full context.',
             confirmText: 'Compress',
             cancelText: 'Cancel',
             variant: 'default',
@@ -1631,28 +1632,17 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (idx === -1) return;
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
+
+            // Discard deleted entries so loadHistory doesn't merge them back as non-DB entries.
             entries = entries.filter((_, i) => i < idx);
 
-            // Roll back worktree to the last checkpoint before the deleted messages
-            const lastCheckpointHash = (() => {
-                for (let i = entries.length - 1; i >= 0; i--) {
-                    const hash = checkpointCommitHashes.get(entries[i].id);
-                    if (hash) return hash;
-                }
-                return null;
-            })();
-            if (lastCheckpointHash) {
-                try {
-                    await resetWorktree(projectId, taskId, lastCheckpointHash);
-                } catch {
-                    // Best-effort: worktree may not exist if task is done
-                }
-            }
+            // Reload from DB — restores pre-summary messages if summary was deleted.
+            await loadHistory(true);
 
-            // Refresh threads list and sync active thread after deletion
+            // Refresh threads.
             threads = await getTaskThreads(projectId, taskId);
             const active = threads.find(t => t.is_active);
-            if (active) {
+            if (active && active.id !== activeThreadId) {
                 activeThreadId = active.id;
                 // Update URL to reflect the new active thread
                 updateThreadUrl(active.id);

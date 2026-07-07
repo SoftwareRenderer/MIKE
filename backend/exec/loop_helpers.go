@@ -90,38 +90,32 @@ func (te *TaskExecutor) broadcastDiffStats(projectID, taskID string, task *types
 	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
 }
 
-// extractPrevSummary extracts the previous summary text from messages[1] if it exists
-// in the format "[Context summary: ...]".
+// extractPrevSummary returns the content of the most recent summarization message.
 func extractPrevSummary(messages []types.ChatMessage) string {
-	if len(messages) > 1 {
-		prev := messages[1].Content
-		if strings.HasPrefix(prev, "[Context summary: ") && strings.HasSuffix(prev, "]") {
-			return prev[len("[Context summary: ") : len(prev)-1]
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "summarization" {
+			return messages[i].Content
 		}
 	}
 	return ""
 }
 
-// applySummarization runs context summarization: extracts previous summary, calls
-// summarizeContext, persists the summary message, and broadcasts the event.
-// Returns the new messages slice and lastSummarizeIdx on success.
-// If resultCh is non-nil, sends nil (success) or err through it (manual summarize path).
-func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID string, messages []types.ChatMessage, lastSummarizeIdx int, systemPrompt, serverURL, modelName string, resultCh chan error) ([]types.ChatMessage, int) {
+// applySummarization runs summarization, appends the summary message, and broadcasts the event.
+// All existing messages are preserved. LLM context is assembled via buildLLMContext.
+func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID string, messages []types.ChatMessage, systemPrompt, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
 	prevSummary := extractPrevSummary(messages)
-	sumResult, err := te.summarizeContext(messages, lastSummarizeIdx, systemPrompt, serverURL, modelName, prevSummary)
+	sumResult, err := te.summarizeContext(messages, systemPrompt, serverURL, modelName, prevSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)
 		if resultCh != nil {
 			resultCh <- err
 		}
-		return messages, lastSummarizeIdx
+		return messages
 	}
 
-	messages = sumResult.newMessages
-	lastSummarizeIdx = sumResult.newLastSummarizeIdx
-
-	// Persist summary with stats
+	// Persist to DB.
 	summaryMsgID := uuid.New().String()
+	summaryCreatedAt := time.Now().UTC()
 	_ = te.store.CreateTaskMessage(&types.TaskMessage{
 		ID:              summaryMsgID,
 		TaskID:          taskID,
@@ -133,24 +127,31 @@ func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID s
 		PredictedTokens: sumResult.predictedTokens,
 		PromptMs:        int(sumResult.promptMs),
 		PredictedMs:     int(sumResult.predictedMs),
-		CreatedAt:       time.Now().UTC(),
+		CreatedAt:       summaryCreatedAt,
 	})
+
+	// Append to in-memory messages.
+	messages = append(messages, types.ChatMessage{
+		Role:    "summarization",
+		Content: sumResult.summary,
+	})
+
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: "summarization", Data: map[string]any{
 		"id":               summaryMsgID,
 		"summary":          sumResult.summary,
-		"created_at":       time.Now().UTC().Format(time.RFC3339),
+		"created_at":       summaryCreatedAt.Format(time.RFC3339),
 		"prompt_tokens":    sumResult.promptTokens,
 		"predicted_tokens": sumResult.predictedTokens,
 		"prompt_ms":        sumResult.promptMs,
 		"predicted_ms":     sumResult.predictedMs,
 		"model_name":       modelName,
 	}})
-	log.Printf("[summarize] task=%s summarized context: %d messages -> %d messages", taskID, sumResult.oldLen, len(messages))
+	log.Printf("[summarize] task=%s summarized context (messages preserved, LLM context compressed)", taskID)
 
 	if resultCh != nil {
 		resultCh <- nil
 	}
-	return messages, lastSummarizeIdx
+	return messages
 }
 
 // userMessageToChatMessage converts a UserMessage (with optional image attachments)
