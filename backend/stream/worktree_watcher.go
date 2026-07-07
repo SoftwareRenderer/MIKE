@@ -31,12 +31,12 @@ type worktreeInfo struct {
 
 // WorktreeWatcher uses fsnotify to detect file changes in git worktrees.
 // A single shared fsnotify.Watcher monitors all worktree directories.
-// Events are debounced per-task before computing and broadcasting diff stats.
+// Events are throttled per-task: at most one diff compute/broadcast every 2 seconds.
 type WorktreeWatcher struct {
 	mu          sync.Mutex
 	watcher     *fsnotify.Watcher
 	worktrees   map[string]worktreeInfo // taskID -> info
-	debounces   map[string]*time.Timer  // taskID -> debounce timer
+	throttles   map[string]*time.Timer  // taskID -> throttle timer (at most 1 per 2s)
 	diffCache   sync.Map                // taskID -> *git.TaskDiff (previous state for delta computation)
 	broadcast   diffBroadcastFn
 	updateCache diffCacheUpdateFn       // callback to update GitHandler's diffCache
@@ -52,7 +52,7 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 	return &WorktreeWatcher{
 		watcher:     w,
 		worktrees:   make(map[string]worktreeInfo),
-		debounces:   make(map[string]*time.Timer),
+		throttles:   make(map[string]*time.Timer),
 		broadcast:   broadcast,
 		updateCache: updateCache,
 		worktreeMgr: worktreeMgr,
@@ -133,10 +133,10 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	}
 	delete(ww.worktrees, taskID)
 
-	// Cancel any pending debounce
-	if timer, ok := ww.debounces[taskID]; ok {
+	// Cancel any pending throttle
+	if timer, ok := ww.throttles[taskID]; ok {
 		timer.Stop()
-		delete(ww.debounces, taskID)
+		delete(ww.throttles, taskID)
 	}
 
 	log.Printf("[watcher] task=%s stopped watching", taskID)
@@ -147,8 +147,8 @@ func (ww *WorktreeWatcher) Close() {
 	ww.mu.Lock()
 	defer ww.mu.Unlock()
 
-	// Cancel all pending debounces
-	for _, timer := range ww.debounces {
+	// Cancel all pending throttles
+	for _, timer := range ww.throttles {
 		timer.Stop()
 	}
 
@@ -264,12 +264,15 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		}
 	}
 
-	// Skip remove/rename events for debounce trigger — they still count as changes
-	// but we only need one event to trigger the debounce
+	// Skip remove/rename events for throttle trigger — they still count as changes
+	// but we only need one event to trigger the throttle
 
-	// Debounce: reset timer for this task
-	if timer, exists := ww.debounces[taskID]; exists {
-		timer.Stop()
+	// Throttle: compute and broadcast at most once every 2 seconds.
+	// If a broadcast is already pending for this task, skip — the in-flight
+	// timer will fire within the window.
+	if _, exists := ww.throttles[taskID]; exists {
+		ww.mu.Unlock()
+		return
 	}
 
 	projectID := info.projectID
@@ -277,17 +280,17 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	timer := time.AfterFunc(2000*time.Millisecond, func() {
 		ww.computeAndBroadcast(taskID, projectID, baseRef)
 	})
-	ww.debounces[taskID] = timer
+	ww.throttles[taskID] = timer
 	ww.mu.Unlock()
 }
 
 func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string) {
-	// Remove debounce timer
+	// Remove throttle timer
 	ww.mu.Lock()
-	if timer, exists := ww.debounces[taskID]; exists {
+	if timer, exists := ww.throttles[taskID]; exists {
 		timer.Stop()
 	}
-	delete(ww.debounces, taskID)
+	delete(ww.throttles, taskID)
 	ww.mu.Unlock()
 
 	// Compute diff
