@@ -492,16 +492,18 @@
                         let commitMessage = '';
                         let authorName = '';
                         let authorEmail = '';
+                        let mergeTarget = '';
                         try {
                             const preview = await getCommitPreview(projectId!, task.id);
                             commitMessage = preview.commit_message;
                             authorName = preview.author_name || '';
                             authorEmail = preview.author_email || '';
+                            mergeTarget = preview.merge_target || '';
                         } catch (e) {
                             commitMessage = task.title;
                         }
                         // Update dialog with actual message
-                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail } : null);
+                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail, mergeTarget } : null);
                     })();
                 });
                 if (!confirmedMessage) {

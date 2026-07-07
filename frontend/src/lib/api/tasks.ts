@@ -75,7 +75,7 @@ export async function commitAndDone(projectId: string, taskId: string, commitMes
 }
 
 /** Get a preview of the commit message that would be used for commit-and-done. */
-export async function getCommitPreview(projectId: string, taskId: string): Promise<{ commit_message: string; author_name: string; author_email: string }> {
+export async function getCommitPreview(projectId: string, taskId: string): Promise<{ commit_message: string; author_name: string; author_email: string; merge_target: string }> {
     return getCommitPreviewRaw(projectId, taskId);
 }
 

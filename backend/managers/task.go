@@ -513,24 +513,23 @@ func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) str
 	if modelName == "" {
 		modelName = "unknown model"
 	}
-	summary := task.ChangeSummary
-	if summary == "" {
-		diffStat, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-		if diffStat == "" {
-			diffStat = "no diff available"
-		}
-		taskMsgs, _ := h.store.GetTaskMessages(taskID, task.CurrentThreadID)
-		var conversation []types.ChatMessage
-		for _, m := range taskMsgs {
-			content := m.Content
-			if m.ReasoningContent != "" {
-				content = m.ReasoningContent + "\n" + m.Content
-			}
-			conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-		}
-		summary = h.executor.GenerateCommitMessage(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
+
+	diffStat, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+	if diffStat == "" {
+		diffStat = "no diff available"
 	}
-	return fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
+	taskMsgs, _ := h.store.GetTaskMessages(taskID, task.CurrentThreadID)
+	var conversation []types.ChatMessage
+	for _, m := range taskMsgs {
+		content := m.Content
+		if m.ReasoningContent != "" {
+			content = m.ReasoningContent + "\n" + m.Content
+		}
+		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+	}
+	commitMsg := h.executor.GenerateCommitMessage(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
+
+	return fmt.Sprintf("%s\n\nCo-authored-by: %s", commitMsg, modelName)
 }
 
 // resolveGitAuthor returns the effective git author name/email.
@@ -592,11 +591,32 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 	// Resolve effective git author: env var override, then project git config, then defaults
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
 
+	// Resolve merge target branch
+	mergeTarget := h.resolveMergeTarget(projectID, task)
+
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{
 		"commit_message": commitMsg,
 		"author_name":    authorName,
 		"author_email":   authorEmail,
+		"merge_target":   mergeTarget,
 	})
+}
+
+// resolveMergeTarget determines the branch that changes will be merged into.
+// For child tasks, the target is the parent's branch.
+// For root tasks, the target is the project's origin branch (or current HEAD).
+func (h *TaskHandler) resolveMergeTarget(projectID string, task *types.Task) string {
+	if task.ParentTaskID != "" {
+		parent, err := h.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch != "" {
+			return parent.Branch
+		}
+	}
+	project, err := h.store.GetProject(projectID)
+	if err != nil || project.OriginBranch == "" {
+		return ""
+	}
+	return project.OriginBranch
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
