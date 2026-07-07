@@ -460,8 +460,25 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
 						}
-						if choice.Delta.Content != nil {
+						if choice.Delta.Content != nil && *choice.Delta.Content != "" {
+							lc.assistantContent.WriteString(*choice.Delta.Content)
 							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+						}
+						if len(choice.Delta.ToolCalls) > 0 {
+							lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
+							for i := 0; i < len(lc.pendingToolCalls); i++ {
+								tc := lc.pendingToolCalls[i]
+								if tc.ID == "" || tc.Function.Name == "" {
+									continue
+								}
+								argLen := len(tc.Function.Arguments)
+								prevLen := lc.prevArgLens[tc.ID]
+								lc.prevArgLens[tc.ID] = argLen
+								if argLen != prevLen {
+									path := extractPathFromArgs(tc.Function.Arguments)
+									te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+								}
+							}
 						}
 						// Send stats event when predicted token count changes (retry path)
 						if lc.usage != nil {
