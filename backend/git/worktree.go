@@ -1335,11 +1335,25 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		if baseRef != "" {
 			target = baseRef
 		}
-		if stagedOut, err := wm.gitRunOutput(worktreePath, "diff", "--cached", target); err == nil {
+		// git diff exits 1 when changes exist — output is still valid.
+		stagedOut, stagedErr := wm.gitRunOutput(worktreePath, "diff", "--cached", target)
+		if stagedErr != nil {
+			if exitErr, ok := stagedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
+			}
+		} else {
 			stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
 		}
 		// Get set of staged file paths to mark Staged on tracked entries.
-		if stagedNames, err := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", target); err == nil {
+		stagedNames, namesErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", target)
+		if namesErr != nil {
+			if exitErr, ok := namesErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				// Changes exist, output is valid
+			} else {
+				stagedNames = ""
+			}
+		}
+		if stagedNames != "" {
 			stagedPaths = make(map[string]struct{})
 			for line := range strings.SplitSeq(stagedNames, "\n") {
 				p := strings.TrimSpace(line)

@@ -73,15 +73,22 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, serv
 	}
 }
 
-// broadcastDiffStats fetches the task diff and broadcasts stats to all connected clients.
-// If forkBranch is provided, it resolves the thread to get the fork branch for diff baseline.
-func (te *TaskExecutor) broadcastDiffStats(projectID, taskID string, task *types.Task, forkBranch string) {
+// checkAndBroadcastDiff computes the task diff and broadcasts stats only if the hash
+// differs from the last broadcast. This avoids duplicate broadcasts when fsnotify
+// already caught the same change. If forkBranch is provided, it resolves the thread
+// to get the fork branch for diff baseline.
+func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState, forkBranch string) {
 	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
 	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
 	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+	// Skip if hash unchanged — fsnotify already broadcast this state
+	if hash == state.lastDiffHash {
+		return
+	}
+	state.lastDiffHash = hash
 	fileHashes := diffResult.GetPerFileHashes()
 	untrackedLines := 0
 	for _, u := range diffResult.Untracked {

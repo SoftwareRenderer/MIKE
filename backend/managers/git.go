@@ -15,29 +15,19 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
-// stageChangeFn broadcasts updated staged paths after a file is staged/unstaged.
-type stageChangeFn func(projectID, taskID, diffHash, shortStat string, untrackedN, untrackedLines int, stagedPaths []string)
-
 // GitHandler handles git operations.
 type GitHandler struct {
-	store             *store.Store
-	worktreeMgr       *git.WorktreeManager
-	diffCache         sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
-	broadcastStageFn  stageChangeFn
+	store       *store.Store
+	worktreeMgr *git.WorktreeManager
+	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
 }
 
 // NewGitHandler creates a new GitHandler.
 func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
 	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
-}
-
-// SetStageChangeHandler sets the callback invoked after a file is staged/unstaged.
-func (h *GitHandler) SetStageChangeHandler(fn stageChangeFn) {
-	h.broadcastStageFn = fn
 }
 
 // UpdateDiffCache stores a precomputed TaskDiff in the cache.
@@ -645,8 +635,14 @@ func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]
 	}
 	cmd := exec.Command("git", "-C", worktreePath, "diff", "--staged", "--name-only", target)
 	out, err := cmd.CombinedOutput()
+	// git diff exits 0 = no changes, 1 = changes found (output is valid).
+	// Only treat non-1 exit codes as real errors.
 	if err != nil {
-		return nil
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Changes exist, output is valid
+		} else {
+			return nil
+		}
 	}
 	paths := make(map[string]struct{})
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
@@ -932,24 +928,6 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 				// In that case, just recreate it empty or skip.
 				_ = out
 			}
-		}
-	}
-
-	// Broadcast staged paths via WebSocket so the frontend updates in-cache status.
-	if h.broadcastStageFn != nil {
-		thread, _ := h.store.GetThread(task.CurrentThreadID)
-		forkBranch := ""
-		if thread != nil {
-			forkBranch = thread.GitBranch
-		}
-		baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
-		if diffResult, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || len(diffResult.StagedPaths) > 0) {
-			hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-			untrackedLines := 0
-			for _, u := range diffResult.Untracked {
-				untrackedLines += len(u.Lines)
-			}
-			h.broadcastStageFn(projectID, taskID, hash, diffResult.ShortStat, len(diffResult.Untracked), untrackedLines, diffResult.StagedPaths)
 		}
 	}
 

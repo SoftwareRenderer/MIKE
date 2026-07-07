@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"kanban/backend/prompts"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -367,27 +366,6 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		// Store stash hash on the assistant message (reuses git_commit_hash field)
 		if stashHash != "" {
 			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, stashHash)
-		}
-
-		// Broadcast updated diff stats so the frontend updates staged/unstaged split
-		// (git reset HEAD doesn't trigger fsnotify, so the watcher won't pick this up)
-		taskForBroadcast, _ := te.store.GetTaskByTaskID(taskID)
-		if taskForBroadcast != nil {
-			thread, _ := te.store.GetThread(taskForBroadcast.CurrentThreadID)
-			forkBranch := ""
-			if thread != nil {
-				forkBranch = thread.GitBranch
-			}
-			baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(taskForBroadcast.ID, taskForBroadcast.BaseRef, taskForBroadcast.Branch, forkBranch)
-			if diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-				hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-				untrackedLines := 0
-				for _, u := range diffResult.Untracked {
-					untrackedLines += len(u.Lines)
-				}
-				filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
-				te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, nil, nil, diffResult.StagedPaths)
-			}
 		}
 
 		// Send complete event to frontend

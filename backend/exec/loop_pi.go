@@ -525,19 +525,6 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
-	// Broadcast diff
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, "")
-	if diffResult, err := te.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil {
-		hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-		fileHashes := diffResult.GetPerFileHashes()
-		untrackedLines := 0
-		for _, u := range diffResult.Untracked {
-			untrackedLines += len(u.Lines)
-		}
-		filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
-		te.appStreamMgr.BroadcastDiffStats(projectID, task.ID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
-	}
-
 	// Auto-start next sibling if subtask
 	if task.ParentTaskID != "" {
 		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)

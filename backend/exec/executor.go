@@ -48,6 +48,9 @@ type executionState struct {
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
 	taskStatus   string   // task status at start; cleared by StopTask so HasRunningTasks can skip it
+	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
+	// when fsnotify already caught the same change.
+	lastDiffHash string
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
 	sandboxExec       execFunc
 	sandboxExecStream execStreamFunc

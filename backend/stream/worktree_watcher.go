@@ -25,6 +25,7 @@ type worktreeInfo struct {
 	projectID   string
 	path        string
 	baseRef     string
+	gitIndexDir string             // directory containing the git index (for worktrees, this is in the main repo)
 	ignoredDirs map[string]struct{} // merged set: hardcoded + git-ignored directory names
 }
 
@@ -71,6 +72,9 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 	// Remove existing watcher if re-watching
 	if info, exists := ww.worktrees[taskID]; exists {
 		_ = ww.watcher.Remove(info.path)
+		if info.gitIndexDir != "" {
+			_ = ww.watcher.Remove(info.gitIndexDir)
+		}
 	}
 
 	// Discover ignored directories (hardcoded + .gitignore)
@@ -90,6 +94,25 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 		return err
 	}
 
+	// Watch the git index directory to detect stage/unstage operations.
+	// In worktrees, .git is a file pointing to the real index location
+	// (e.g. /repo/.git/worktrees/<task-id>/index). Git atomically replaces
+	// index via write-to-temp + rename, so we watch the parent directory.
+	wtInfo := ww.worktrees[taskID]
+	indexDir := resolveGitIndexDir(path)
+	if indexDir != "" {
+		_ = ww.watcher.Add(indexDir)
+		wtInfo.gitIndexDir = indexDir
+	} else {
+		// Fallback: for a regular (non-worktree) repo, watch .git/ directly
+		gitDir := filepath.Join(path, ".git")
+		if fi, err := os.Stat(gitDir); err == nil && fi.IsDir() {
+			_ = ww.watcher.Add(gitDir)
+			wtInfo.gitIndexDir = gitDir
+		}
+	}
+	ww.worktrees[taskID] = wtInfo
+
 	log.Printf("[watcher] task=%s watching %s (ignored dirs: %d)", taskID, path, len(ignored))
 	return nil
 }
@@ -105,6 +128,9 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	}
 
 	_ = ww.watcher.Remove(info.path)
+	if info.gitIndexDir != "" {
+		_ = ww.watcher.Remove(info.gitIndexDir)
+	}
 	delete(ww.worktrees, taskID)
 
 	// Cancel any pending debounce
@@ -170,37 +196,64 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	}
 
 	if taskID == "" {
+		// Check if this event is from a git index directory.
+		// The index dir lives outside the worktree, so normal prefix matching misses it.
+		for id, winfo := range ww.worktrees {
+			if winfo.gitIndexDir != "" {
+				prefix := winfo.gitIndexDir
+				if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+					prefix += string(filepath.Separator)
+				}
+				if event.Name == winfo.gitIndexDir || strings.HasPrefix(event.Name, prefix) {
+					taskID = id
+					info = winfo
+					break
+				}
+			}
+		}
+	}
+
+	if taskID == "" {
 		ww.mu.Unlock()
 		return
 	}
 
-	// Skip events from ignored directories
-	if len(info.ignoredDirs) > 0 {
-		relPath, err := filepath.Rel(info.path, event.Name)
-		if err == nil && git.ShouldIgnorePath(relPath) {
+	// For git index directory events, only react to index file changes
+	// (stage/unstage). Skip HEAD, logs/, refs/, and other metadata.
+	if info.gitIndexDir != "" && (event.Name == info.gitIndexDir || strings.HasPrefix(event.Name, info.gitIndexDir+string(filepath.Separator))) {
+		base := filepath.Base(event.Name)
+		parent := filepath.Dir(event.Name)
+		if base == "index" {
+			// index file itself — proceed
+		} else if parent == info.gitIndexDir && !isGitMetadataFile(base) {
+			// Temp file in the index dir (git atomically rewrites index via temp+rename) — proceed
+		} else {
+			// Subdirectory (logs/, refs/) or metadata file — skip
 			ww.mu.Unlock()
 			return
 		}
-		// Also check against git-discovered ignored dirs (top-level only)
-		if basename := filepath.Base(event.Name); basename != "." {
-			if _, ok := info.ignoredDirs[basename]; ok {
-				ww.mu.Unlock()
-				return
-			}
-		}
 	}
+
 	// Skip temporary/backup files (*.swp, *~, .DS_Store, etc.)
 	if git.ShouldIgnoreFile(event.Name) {
 		ww.mu.Unlock()
 		return
 	}
 
-	// If a new directory was created, start watching it recursively
-	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+	// Skip events from ignored directories (skip for git index events,
+	// where event.Name is outside the worktree and rel path is unreliable)
+	relPath, _ := filepath.Rel(info.path, event.Name)
+	if !strings.HasPrefix(relPath, "..") && git.ShouldIgnorePath(relPath) {
+		ww.mu.Unlock()
+		return
+	}
+
+	// If a new directory was created inside the worktree, start watching it.
+	// Skip for git index events (outside the worktree).
+	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 && !strings.HasPrefix(relPath, "..") {
 		if absPath, err := filepath.Abs(event.Name); err == nil {
 			if dirInfo, err := filepath.EvalSymlinks(absPath); err == nil {
 				if fi, err := os.Stat(dirInfo); err == nil && fi.IsDir() {
-					// Skip ignored directories
 					basename := filepath.Base(event.Name)
 					if _, ok := info.ignoredDirs[basename]; !ok && !git.ShouldIgnorePath(basename) {
 						_ = ww.watcher.Add(event.Name)
@@ -245,24 +298,31 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 
 	untrackedN := len(diffResult.Untracked)
 	filesN := len(diffResult.Tracked) + untrackedN
+
+	// Compute hash and compare against cached state BEFORE the cache is overwritten.
+	hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+	if hash != "" {
+		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
+			prevDiff := prevRaw.(*git.TaskDiff)
+			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.Untracked, prevDiff.StagedHash)
+			if hash == prevHash {
+				return // nothing changed
+			}
+		}
+	}
+
+	newHashes := diffResult.GetPerFileHashes()
+	changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
+	if ww.updateCache != nil {
+		ww.updateCache(taskID, diffResult)
+	}
+
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
-		hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-		newHashes := diffResult.GetPerFileHashes()
-		changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
-		if ww.updateCache != nil {
-			ww.updateCache(taskID, diffResult)
-		}
 		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, filesN, untrackedN, untrackedLines, changedHashes, removedFiles, diffResult.StagedPaths)
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
-	} else {
-		// Diff is empty — check if files were deleted
-		newHashes := diffResult.GetPerFileHashes()
-		_, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
-		if ww.updateCache != nil {
-			ww.updateCache(taskID, diffResult)
-		}
-		ww.broadcast(projectID, taskID, "", "", 0, 0, 0, nil, removedFiles, nil)
+	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
+		ww.broadcast(projectID, taskID, "", "", 0, 0, 0, changedHashes, removedFiles, diffResult.StagedPaths)
 	}
 }
 
@@ -384,6 +444,37 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 	}
 
 	return result
+}
+
+// resolveGitIndexDir reads the .git file in a worktree to find the
+// directory containing the git index. Returns empty string for regular repos.
+func resolveGitIndexDir(worktreePath string) string {
+	gitFile := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(gitFile)
+	if err != nil || !info.Mode().IsRegular() {
+		return "" // not a worktree (.git is a directory or missing)
+	}
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "gitdir: ") {
+			return strings.TrimPrefix(line, "gitdir: ")
+		}
+	}
+	return ""
+}
+
+// isGitMetadataFile returns true for well-known git metadata files
+// that should not trigger stage/unstage detection.
+func isGitMetadataFile(name string) bool {
+	switch name {
+	case "HEAD", "commondir", "gitdir", "config", "options", "logs", "refs", "objects":
+		return true
+	}
+	return false
 }
 
 // addRecursive watches a directory and all its existing subdirectories.

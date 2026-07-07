@@ -617,6 +617,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: assistantCreatedAt,
 			})
 
+			// Track if any tool call was a git command — needed because fsnotify
+			// can't detect diff state changes from git commit/checkout/merge
+			// (branch pointer moves without working tree file changes).
+			hadGitCmd := false
+
 			for _, tc := range lc.pendingToolCalls {
 				if tc.ID == "" || tc.Function.Name == "" {
 					log.Printf("[tool] skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
@@ -678,6 +683,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					success:   success,
 				})
 
+				// Detect git commands in bash tool calls
+				if tc.Function.Name == "bash" {
+					if cmd, ok := args["command"].(string); ok && strings.Contains(cmd, "git ") {
+						hadGitCmd = true
+					}
+				}
+
 				if tc.Function.Name == "task_complete" {
 					// Extract summary from tool args
 					if summary, ok := args["summary"].(string); ok && summary != "" {
@@ -705,8 +717,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"model_name": activeModel, "duration": time.Since(lc.startTime).Milliseconds(),
 					}})
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-					// Broadcast diff so the frontend updates the diff panel
-					te.broadcastDiffStats(projectID, task.ID, task, "")
+					// Post-tool git check: broadcast diff if a git command changed the state
+					if hadGitCmd {
+						te.taskMu.Lock()
+						execState := te.tasks[task.ID]
+						te.taskMu.Unlock()
+						if execState != nil {
+							te.checkAndBroadcastDiff(projectID, task.ID, task, execState, "")
+						}
+					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
 						_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
@@ -714,6 +733,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					return
 				}
 			}
+			// Post-tool git check: broadcast diff if a git command changed the state
+			if hadGitCmd {
+				te.taskMu.Lock()
+				execState := te.tasks[task.ID]
+				te.taskMu.Unlock()
+				if execState != nil {
+					te.checkAndBroadcastDiff(projectID, task.ID, task, execState, "")
+				}
+			}
+
 			// Check consecutive identical tool call failures (turn-level).
 			if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
 				task.ExecutionState = "failed"
@@ -770,13 +799,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Auto-commit file changes as a checkpoint
 			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, lc.messages, lc.sandboxEnabled)
 
-			// Broadcast updated diff stats to board viewers
-			thread, _ := te.store.GetThread(task.CurrentThreadID)
-			forkBranch := ""
-			if thread != nil {
-				forkBranch = thread.GitBranch
-			}
-			te.broadcastDiffStats(projectID, task.ID, task, forkBranch)
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
 		} else if assistantText != "" {
@@ -838,8 +860,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			task.ExecutionState = "idle"
 			te.store.UpdateTask(task)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			// Broadcast diff so the frontend updates the diff panel
-			te.broadcastDiffStats(projectID, task.ID, task, "")
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,

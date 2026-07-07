@@ -797,7 +797,8 @@
             if (fileHashes && !diffLoading) {
                 const oldHashes = { ...diffFileHashes };
                 diffFileHashes = { ...diffFileHashes, ...fileHashes };
-                fetchDeltaFiles(fileHashes, oldHashes);
+                const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
+                fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
                 return;
             }
 
@@ -1020,10 +1021,8 @@
     /** Per-file AbortControllers to cancel stale in-flight fetches. */
     let diffAbortControllers: Record<string, AbortController> = {};
 
-    /** Fetch changed files directly (no manifest fetch). Used for delta updates.
-     * Skips files whose hash is unchanged compared to oldHashes.
-     * Uses per-file AbortControllers to cancel stale fetches when newer deltas arrive. */
-    async function fetchDeltaFiles(changedHashes: Record<string, string>, oldHashes?: Record<string, string>) {
+    /** Fetch changed files directly (no manifest fetch). Used for delta updates. */
+    async function fetchDeltaFiles(changedHashes: Record<string, string>, oldHashes?: Record<string, string>, stagedSet?: Set<string>) {
         if (!task) return;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
@@ -1054,15 +1053,15 @@
                 try {
                     const existing = diffFileCache[path];
                     const data = await getDiffFile(task.project_id, task.id, path, { signal: controller.signal });
+                    const isStaged = stagedSet?.has(path) ?? existing?.staged ?? false;
                     if (data.rows) {
                         const rows = enrichRowsWithInlineSegments(data.rows);
-                        updatedDiff[path] = { path, rows, added: rows.filter((r: any) => r.variant === 'added').length, removed: rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: existing?.staged };
+                        updatedDiff[path] = { path, rows, added: rows.filter((r: any) => r.variant === 'added').length, removed: rows.filter((r: any) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: isStaged };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
+                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, staged: isStaged };
                         updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false };
                     } else if (data.isBinary || data.fileSize) {
-                        // Binary/large file — no rows but has metadata
-                        updatedDiff[path] = { path, rows: [], added: existing?.added ?? 0, removed: existing?.removed ?? 0, fileSize: data.fileSize, isBinary: data.isBinary, truncated: false, staged: existing?.staged };
+                        updatedDiff[path] = { path, rows: [], added: existing?.added ?? 0, removed: existing?.removed ?? 0, fileSize: data.fileSize, isBinary: data.isBinary, truncated: false, staged: isStaged };
                         if (untrackedCache[path]) {
                             updatedUntracked[path] = { ...(untrackedCache[path] || {}), loading: false, fileSize: data.fileSize };
                         }
@@ -1074,11 +1073,9 @@
             })());
         }
         await Promise.all(fetches);
-        // Merge: preserve current staged values over captured snapshots.
-        // A stagedPaths WS update may have arrived while fetches were in-flight.
+        // Merge, preserving any newer staged values that arrived while fetches were in-flight.
         const currentStaged = new Map(Object.entries(diffFileCache).map(([p, f]) => [p, f.staged]));
         diffFileCache = { ...diffFileCache, ...updatedDiff };
-        // Restore staged values from pre-merge state (both true and false)
         for (const path of Object.keys(updatedDiff)) {
             const staged = currentStaged.get(path);
             if (staged !== undefined) {
