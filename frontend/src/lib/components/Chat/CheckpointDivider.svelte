@@ -108,9 +108,6 @@
                     role="menuitem"
                 >
                     <span class="thread-name">{thread.name}</span>
-                    {#if thread.is_active}
-                        <span class="thread-active">● Active</span>
-                    {/if}
                 </button>
             {/each}
         </div>
@@ -245,9 +242,5 @@
     }
     .thread-name {
         font-weight: 500;
-    }
-    .thread-active {
-        font-size: 0.75rem;
-        color: var(--color-accent);
     }
 </style>
