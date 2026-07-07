@@ -47,7 +47,7 @@ The agent is responsible for starting/stopping the server.
 
 ```bash
 # Start (background)
-cd /home/mwren/projects/kanban && ./kanban &
+./kanban &
 
 # Stop
 pkill -f "./kanban"
@@ -160,7 +160,7 @@ Both servers share a mock LLM on port 9999. Test DBs, worktrees (`/tmp/kanban-te
 
 **Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
-cd /home/mwren/projects/kanban && ./kanban &
+./kanban &
 ```
 
 ### Go Unit Tests
@@ -234,7 +234,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - Required fields: `llama_server_url`, `model_name`, `workspace_dir`
 - LLM endpoint: `http://neptune:8010/v1`
 - Model: `Qwen3.6-35B-A3B` (NOT `-Q8_0.gguf`)
-- Workspace: `/home/mwren/projects/kanban/worktrees` (absolute path)
+- Workspace: `<project-root>/worktrees` (absolute path)
 
 ## Architecture
 

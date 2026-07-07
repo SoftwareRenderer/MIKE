@@ -22,7 +22,13 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import path from 'node:path';
 import { execSync } from 'node:child_process';
+
+// Resolve project root relative to this file (frontend/tests/ -> ../..)
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const FRONTEND_DIR = path.resolve(__dirname, '..');
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
@@ -36,7 +42,7 @@ const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
 const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
 const AUTH_FILE = '/tmp/kanban-test-auth.json';
-const KANBAN_BIN = '/home/mwren/projects/kanban/kanban';
+const KANBAN_BIN = path.join(PROJECT_ROOT, 'kanban');
 const TEST_PASSWORD = 'test-password-1234';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
@@ -54,7 +60,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting test kanban server...');
     // Use setsid to start server in a new session (truly independent of this process)
     kanbanServer = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB], {
-        cwd: '/home/mwren/projects/kanban',
+        cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
         detached: true,
@@ -98,7 +104,7 @@ async function setup(): Promise<void> {
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
         mockServer = spawn('setsid', ['node', 'tests/mock-llm.js', MOCK_PORT.toString()], {
-            cwd: '/home/mwren/projects/kanban/frontend',
+            cwd: FRONTEND_DIR,
             stdio: 'ignore',
             detached: true,
         });
@@ -130,7 +136,7 @@ async function setup(): Promise<void> {
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB_ISOLATED], {
-        cwd: '/home/mwren/projects/kanban',
+        cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
         detached: true,
