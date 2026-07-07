@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 )
 
@@ -231,5 +232,108 @@ func TestMessageScopedToThread(t *testing.T) {
 		if m["thread_id"] != forkThreadID {
 			t.Fatalf("message should be in fork thread, got thread_id=%s", m["thread_id"])
 		}
+	}
+}
+
+func TestThreadSwitchConcurrent(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	// Get existing threads
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	threads := mustJSON[[]map[string]any](t, listRR.Body)
+	if len(threads) < 1 {
+		t.Fatal("expected at least 1 thread")
+	}
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create a message to fork from
+	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"role":    "user",
+		"content": "Fork point",
+	})
+	createRR := testResponseAuth(t, s, createReq)
+	msg := mustJSON[map[string]any](t, createRR.Body)
+	msgID := msg["id"].(string)
+
+	// Fork to create a second thread
+	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
+		"from_thread_id":  mainThreadID,
+		"from_message_id": msgID,
+	})
+	forkRR := testResponseAuth(t, s, forkReq)
+	fork := mustJSON[map[string]any](t, forkRR.Body)
+	forkThreadID := fork["id"].(string)
+
+	// Fire two concurrent thread switch requests (back and forth)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var results []int
+
+	// Switch to fork thread
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+			"thread_id": forkThreadID,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		mu.Lock()
+		results = append(results, rr.Code)
+		mu.Unlock()
+	}()
+
+	// Switch back to main thread
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+			"thread_id": mainThreadID,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		mu.Lock()
+		results = append(results, rr.Code)
+		mu.Unlock()
+	}()
+
+	wg.Wait()
+
+	// Both requests should succeed (serialized, not rejected)
+	for i, code := range results {
+		if code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i, code)
+		}
+	}
+
+	// Final state: exactly one active thread
+	taskReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	taskRR := testResponseAuth(t, s, taskReq)
+	task := mustJSON[map[string]any](t, taskRR.Body)
+
+	// Current thread should be one of the two valid threads
+	currentThreadID := task["current_thread_id"].(string)
+	if currentThreadID != mainThreadID && currentThreadID != forkThreadID {
+		t.Fatalf("unexpected current_thread_id: %s", currentThreadID)
+	}
+
+	// Verify exactly one active thread in the list
+	listReq2 := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR2 := testResponseAuth(t, s, listReq2)
+	threads2 := mustJSON[[]map[string]any](t, listRR2.Body)
+
+	activeCount := 0
+	for _, th := range threads2 {
+		if th["is_active"] == true {
+			activeCount++
+		}
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected 1 active thread after concurrent switches, got %d", activeCount)
 	}
 }

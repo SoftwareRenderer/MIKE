@@ -159,6 +159,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
+    let threadSwitching = $state(false); // true while a thread switch is in-flight
     // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
     // For in_progress tasks, buffer events are legitimate and must be replayed.
     let suppressEvents = $state(taskStatus !== 'in_progress');
@@ -1220,6 +1221,9 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     async function handleThreadSwitch(threadId: string) {
         if (threadId === activeThreadId) return;
+        // Prevent concurrent thread switches — wait for the in-flight one to settle.
+        if (threadSwitching) return;
+        threadSwitching = true;
         try {
             const switched = await switchTaskThread(projectId, taskId, threadId);
             // Refresh threads list from server to pick up any changes (deletions, etc.)
@@ -1245,6 +1249,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             // Server sends thread_switch + diff_changed events over existing connection.
         } catch (e) {
             showToast(String(e));
+        } finally {
+            threadSwitching = false;
         }
     }
 
@@ -1789,14 +1795,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (!urlThread) return;
         // If URL specifies a thread and it differs from current active thread, switch to it
         if (urlThread !== activeThreadId && threads.some(t => t.id === urlThread)) {
-            try {
-                const switched = await switchTaskThread(projectId, taskId, urlThread);
-                updateActiveThread(switched.id);
-                await loadHistory();
-                // No reconnect needed — broadcaster is per-task
-            } catch (e) {
-                showToast(String(e));
-            }
+            await handleThreadSwitch(urlThread);
         }
     }
 

@@ -23,11 +23,29 @@ type GitHandler struct {
 	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
+	// getWorktreeMutex returns a per-task mutex for serializing git operations.
+	// Set by the server to prevent concurrent worktree mutations.
+	getWorktreeMutex func(taskID string) *sync.Mutex
+	// getProjectMutex returns a per-project mutex for serializing project-level
+	// git operations (checkout, pull, push) that touch shared state.
+	getProjectMutex func(projectID string) *sync.Mutex
 }
 
 // NewGitHandler creates a new GitHandler.
 func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
 	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
+}
+
+// SetWorktreeMutex sets the callback for acquiring per-task worktree mutexes.
+// Called by the server to wire up the shared mutex map.
+func (h *GitHandler) SetWorktreeMutex(fn func(taskID string) *sync.Mutex) {
+	h.getWorktreeMutex = fn
+}
+
+// SetProjectMutex sets the callback for acquiring per-project mutexes.
+// Called by the server to wire up the shared project mutex map.
+func (h *GitHandler) SetProjectMutex(fn func(projectID string) *sync.Mutex) {
+	h.getProjectMutex = fn
 }
 
 // UpdateDiffCache stores a precomputed TaskDiff in the cache.
@@ -350,6 +368,12 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	// Acquire per-project mutex to serialize project-level git operations.
+	if h.getProjectMutex != nil {
+		mu := h.getProjectMutex(projectID)
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	c := exec.Command("git", "-C", project.Path, "checkout", req.Branch)
 	if out, err := c.CombinedOutput(); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git checkout failed: %v: %s", err, out))
@@ -366,6 +390,12 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	// Acquire per-project mutex to serialize project-level git operations.
+	if h.getProjectMutex != nil {
+		mu := h.getProjectMutex(projectID)
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	c := exec.Command("git", "-C", project.Path, "pull")
 	if out, err := c.CombinedOutput(); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git pull failed: %v: %s", err, out))
@@ -381,6 +411,12 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
 		return
+	}
+	// Acquire per-project mutex to serialize project-level git operations.
+	if h.getProjectMutex != nil {
+		mu := h.getProjectMutex(projectID)
+		mu.Lock()
+		defer mu.Unlock()
 	}
 	c := exec.Command("git", "-C", project.Path, "push")
 	if out, err := c.CombinedOutput(); err != nil {
@@ -854,6 +890,12 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
 		return
 	}
+	// Acquire per-task mutex to serialize git operations on this worktree.
+	if h.getWorktreeMutex != nil {
+		mu := h.getWorktreeMutex(taskID)
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	// Reset worktree to the checkpoint (commit hash or stash hash)
 	if err := h.worktreeMgr.ResetWorktreeTo(taskID, req.CommitHash); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("reset failed: %v", err))
@@ -892,6 +934,12 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	if task.Status == "backlog" || task.Status == "done" {
 		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
 		return
+	}
+	// Acquire per-task mutex to serialize git operations on this worktree.
+	if h.getWorktreeMutex != nil {
+		mu := h.getWorktreeMutex(taskID)
+		mu.Lock()
+		defer mu.Unlock()
 	}
 	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 	if err != nil {

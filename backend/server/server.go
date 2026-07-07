@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"kanban/backend/auth"
@@ -39,6 +40,21 @@ type Server struct {
 	mux            *http.ServeMux
 	addr           string
 	tlsConfig      *tls.Config
+
+	// worktreeMu serializes all git operations per task.
+	// Prevents concurrent stash/checkout/branch/reset operations that would
+	// corrupt worktree state if interleaved (e.g., fork+switch, delete+switch).
+	worktreeMu   sync.Mutex
+	worktreeMux  map[string]*sync.Mutex // taskID -> per-task mutex
+	worktreeMuxMu sync.RWMutex          // protects worktreeMux map
+
+	// projectMu serializes project-level git operations (stash, checkout, pull, push)
+	// that touch shared state like .git/refs/stash. Multiple tasks in the same
+	// project share the same stash ref, so concurrent stash push/rev-parse/drop
+	// would clobber each other's commit hashes.
+	projectMu   sync.Mutex
+	projectMux  map[string]*sync.Mutex // projectID -> per-project mutex
+	projectMuxMu sync.RWMutex          // protects projectMux map
 }
 
 // NewServer creates a new Server instance.
@@ -65,6 +81,8 @@ func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error)
 		configStore: cfgStore,
 		addr:        addr,
 		tlsConfig:   tlsCfg,
+		worktreeMux: make(map[string]*sync.Mutex),
+		projectMux:  make(map[string]*sync.Mutex),
 	}
 
 	// Create session manager — fails if KANBAN_PASSWORD is not set
@@ -102,6 +120,10 @@ func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error)
 	s.depHandler = managers.NewDependencyHandler(store)
 	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
+	// Wire worktree mutex so GitHandler can serialize per-task git operations.
+	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
+	// Wire project mutex so GitHandler can serialize project-level git operations.
+	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 

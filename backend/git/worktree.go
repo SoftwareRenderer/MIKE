@@ -1158,6 +1158,10 @@ func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchNam
 		return fmt.Errorf("get project: %w", err)
 	}
 
+	// Serialize with shared stash mutex — stash list/drop touches .git/refs/stash.
+	wm.GetProjectStashMu(projectID).Lock()
+	defer wm.GetProjectStashMu(projectID).Unlock()
+
 	// List stash entries with their subjects
 	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%s")
 	if err != nil {

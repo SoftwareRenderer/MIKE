@@ -954,14 +954,18 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
 	project, _ := te.store.GetProject(projectID)
 
-	// Stash any working tree changes
+	// Stash any working tree changes (serialized with shared stash mutex).
 	hadStash := false
+	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
 		hadStash = true
 	}
+	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 	defer func() {
 		if hadStash {
+			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 			_ = te.worktreeMgr.GitRunInProject(projectID, "stash", "pop")
+			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 		}
 	}()
 
@@ -1002,14 +1006,18 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 // mergeInWorktree performs a merge inside a specific worktree directory.
 // Used when the target branch is checked out in another worktree (e.g., parent's worktree).
 func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
-	// Stash any working tree changes in the worktree
+	// Stash any working tree changes in the worktree (serialized with shared stash mutex).
 	hadStash := false
+	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
 		hadStash = true
 	}
+	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 	defer func() {
 		if hadStash {
+			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 		}
 	}()
 

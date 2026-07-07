@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"kanban/backend/types"
@@ -52,6 +53,20 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 			return
 		}
 	}
+
+	// Acquire per-task mutex to serialize git operations on this worktree.
+	// Delete may checkout a replacement branch and reset the worktree.
+	mu := s.getWorktreeMutex(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-fetch task after acquiring lock — state may have changed.
+	task, err = s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
 	// Delete messages for this thread
 	_, err = s.store.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, req.ThreadID)
 	if err != nil {
@@ -124,6 +139,21 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "thread not found")
 		return
 	}
+
+	// Acquire per-task mutex to serialize git operations on this worktree.
+	// Prevents concurrent stash/checkout/branch/reset operations that would
+	// corrupt worktree state if interleaved.
+	mu := s.getWorktreeMutex(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-fetch task after acquiring lock — state may have changed.
+	task, err = s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
 	// Stop executor if running
 	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
@@ -140,13 +170,19 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 				oldBranch = task.Branch
 			}
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
+			// Stash push/rev-parse/drop touches .git/refs/stash which is shared
+			// across all worktrees in the project. Serialize with the shared stash mutex.
+			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("switch-%s", taskID))
 			stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
 			stashHash = strings.TrimSpace(stashHash)
 			if stashHash != "" {
 				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
-				_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
 			}
+			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
+		if stashHash != "" {
+			_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
+		}
 		}
 		// Checkout target thread's branch (or task's original branch if none)
 		targetBranch := thread.GitBranch
@@ -221,6 +257,21 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "source thread not found")
 		return
 	}
+
+	// Acquire per-task mutex to serialize git operations on this worktree.
+	// Prevents concurrent stash/checkout/branch/reset operations that would
+	// corrupt worktree state if interleaved with a switch or another fork.
+	mu := s.getWorktreeMutex(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-fetch task after acquiring lock — state may have changed.
+	task, err = s.store.GetTask(projectID, taskID)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
 	// Generate new thread ID and branch name
 	newThreadID := types.GenerateThreadID()
 	newBranchName := fmt.Sprintf("thread/%s", newThreadID)
@@ -236,12 +287,17 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// to capture worktree as a commit hash saved to source thread metadata.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
-		// Stash worktree, extract commit hash, drop stash entry.
+		// Stash push/rev-parse/drop touches .git/refs/stash which is shared
+		// across all worktrees in the project. Serialize with the shared stash mutex.
+		s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("fork-%s", taskID))
 		stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
 		stashHash = strings.TrimSpace(stashHash)
 		if stashHash != "" {
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
+		}
+		s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
+		if stashHash != "" {
 			_ = s.store.UpdateThreadWorktreeStashHash(req.FromThreadID, stashHash)
 		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
@@ -421,4 +477,50 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 		return
 	}
 	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: manifest})
+}
+
+// getWorktreeMutex returns a per-task mutex for serializing git operations.
+// Creates a new mutex per task on first access. The mutex is never cleaned up
+// (bounded by number of tasks, negligible memory overhead).
+func (s *Server) getWorktreeMutex(taskID string) *sync.Mutex {
+	s.worktreeMuxMu.RLock()
+	if mu, ok := s.worktreeMux[taskID]; ok {
+		s.worktreeMuxMu.RUnlock()
+		return mu
+	}
+	s.worktreeMuxMu.RUnlock()
+
+	s.worktreeMuxMu.Lock()
+	// Double-check after acquiring write lock
+	if mu, ok := s.worktreeMux[taskID]; ok {
+		s.worktreeMuxMu.Unlock()
+		return mu
+	}
+	mu := &sync.Mutex{}
+	s.worktreeMux[taskID] = mu
+	s.worktreeMuxMu.Unlock()
+	return mu
+}
+
+// getProjectMutex returns a per-project mutex for serializing project-level git
+// operations (stash, checkout, pull, push) that touch shared state like
+// .git/refs/stash. Creates a new mutex per project on first access.
+func (s *Server) getProjectMutex(projectID string) *sync.Mutex {
+	s.projectMuxMu.RLock()
+	if mu, ok := s.projectMux[projectID]; ok {
+		s.projectMuxMu.RUnlock()
+		return mu
+	}
+	s.projectMuxMu.RUnlock()
+
+	s.projectMuxMu.Lock()
+	// Double-check after acquiring write lock
+	if mu, ok := s.projectMux[projectID]; ok {
+		s.projectMuxMu.Unlock()
+		return mu
+	}
+	mu := &sync.Mutex{}
+	s.projectMux[projectID] = mu
+	s.projectMuxMu.Unlock()
+	return mu
 }
