@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -173,4 +174,161 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 	// Cleanup
 	setup.cancel()
 	te.StopTask(taskID)
+}
+
+func TestHasRunningTasks_InProgress(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-running-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Status:    "in_progress",
+	}
+	te.store.CreateTask(task)
+
+	// Manually add an entry to the tasks map (simulating a running executor)
+	ctx, cancel := context.WithCancel(context.Background())
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "in_progress"}
+	t.Cleanup(func() { cancel() })
+
+	if !te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return true for in_progress task in map")
+	}
+}
+
+func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-backlog-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(task)
+
+	// Manually add a stale entry to the tasks map (status != in_progress)
+	ctx, cancel := context.WithCancel(context.Background())
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "backlog"}
+	t.Cleanup(func() { cancel() })
+
+	if te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return false for backlog task")
+	}
+
+	// Entry remains in map — HasRunningTasks is read-only, cleanup is done by StopTask
+	te.taskMu.Lock()
+	_, stillExists := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if !stillExists {
+		t.Error("backlog entry should still be in tasks map (not mutated)")
+	}
+}
+
+func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-review-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Status:    "review",
+	}
+	te.store.CreateTask(task)
+
+	// Manually add a stale entry to the tasks map (status != in_progress)
+	ctx, cancel := context.WithCancel(context.Background())
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "review"}
+	t.Cleanup(func() { cancel() })
+
+	if te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return false for review task")
+	}
+
+	// Entry remains in map — HasRunningTasks is read-only, cleanup is done by StopTask
+	te.taskMu.Lock()
+	_, stillExists := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if !stillExists {
+		t.Error("review entry should still be in tasks map (not mutated)")
+	}
+}
+
+func TestHasRunningTasks_NotInMap(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-not-running-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Status:    "in_progress",
+	}
+	te.store.CreateTask(task)
+
+	// Task is in DB with in_progress status but NOT in the tasks map
+	if te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return false when task is not in tasks map")
+	}
+}
+
+func TestHasRunningTasks_MixedTasks(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+
+	// Task 1: in_progress + in map → considered running
+	task1 := &types.Task{ID: "task-a", ProjectID: projectID, Title: "A", Status: "in_progress"}
+	te.store.CreateTask(task1)
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm", taskStatus: "in_progress"}
+	t.Cleanup(func() { cancel1() })
+
+	// Task 2: backlog in map (taskStatus != in_progress) → not considered running
+	task2 := &types.Task{ID: "task-b", ProjectID: projectID, Title: "B", Status: "backlog"}
+	te.store.CreateTask(task2)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm", taskStatus: "backlog"}
+	t.Cleanup(func() { cancel2() })
+
+	// Task 3: review + not in map → nothing to clean
+	task3 := &types.Task{ID: "task-c", ProjectID: projectID, Title: "C", Status: "review"}
+	te.store.CreateTask(task3)
+
+	// Should return true because task-a has taskStatus=in_progress
+	if !te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return true when at least one in_progress task is in map")
+	}
+
+	// Both entries remain in the map — HasRunningTasks is read-only
+	te.taskMu.Lock()
+	_, taskBExists := te.tasks["task-b"]
+	_, taskAExists := te.tasks["task-a"]
+	te.taskMu.Unlock()
+	if !taskBExists {
+		t.Error("backlog entry (task-b) should still be in tasks map (not mutated)")
+	}
+	if !taskAExists {
+		t.Error("in_progress entry (task-a) should still be in tasks map")
+	}
+}
+
+func TestHasRunningTasks_NoTasks(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+
+	// Project exists but has no tasks
+	if te.HasRunningTasks(projectID) {
+		t.Error("HasRunningTasks should return false when project has no tasks")
+	}
+}
+
+func TestHasRunningTasks_InvalidProject(t *testing.T) {
+	te, _, _, _ := setupExecutorWithGit(t)
+
+	// Non-existent project
+	if te.HasRunningTasks("nonexistent-project") {
+		t.Error("HasRunningTasks should return false for non-existent project")
+	}
 }

@@ -46,6 +46,7 @@ type executionState struct {
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
+	taskStatus   string   // task status at start; cleared by StopTask so HasRunningTasks can skip it
 	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
 	sandboxExec       execFunc
 	sandboxExecStream execStreamFunc
@@ -618,7 +619,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "pi"
 	}
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, executorType: execType}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, executorType: execType, taskStatus: task.Status}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -684,6 +685,7 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not running")
 	}
+	state.taskStatus = ""
 	state.cancel()
 	delete(te.tasks, taskID)
 	return nil
@@ -717,17 +719,23 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 	return stopped
 }
 
-// HasRunningTasks returns true if any task in the given project has an active executor.
+// HasRunningTasks returns true if any task in the given project has an active
+// executor with taskStatus == "in_progress". Uses only the in-memory map
+// (no DB call) — taskStatus is stored in executionState at creation time and
+// cleared by StopTask, so there is no race between DB status and map state.
 func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 	tasks, err := te.store.GetTasksByProject(projectID)
 	if err != nil {
 		return false
 	}
+	taskIDs := make([]string, 0, len(tasks))
 	for _, task := range tasks {
-		te.taskMu.Lock()
-		_, ok := te.tasks[task.ID]
-		te.taskMu.Unlock()
-		if ok {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	for _, id := range taskIDs {
+		if state, ok := te.tasks[id]; ok && state.taskStatus == "in_progress" {
 			return true
 		}
 	}
