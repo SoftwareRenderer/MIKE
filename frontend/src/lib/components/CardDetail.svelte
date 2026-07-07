@@ -706,6 +706,10 @@
     $effect(() => {
         const stat = diffStatsMap[task.id];
         const currentHash = stat?.hash || null;
+        // Skip processing while loadDiff() is in progress. The full reload will
+        // provide authoritative data; delta events during a reload would corrupt
+        // the cache by replacing fetched rows with empty metadata.
+        if (diffLoading) return;
         if (currentHash !== diffTracker.hash) {
             diffTracker.hash = currentHash;
             const fileHashes = stat?.file_hashes;
@@ -1186,7 +1190,12 @@
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
                             taskTitle={task.title}
-                            onRefreshDiff={(data: DiffData) => updateDiff(data)}
+                            onRefreshDiff={(data: DiffData) => {
+                                // Skip update while loadDiff() is in progress to prevent
+                                // WS diff_changed events from overwriting the cache with
+                                // empty rows before fetchChangedFiles() completes.
+                                if (!diffLoading) updateDiff(data);
+                            }}
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
                             onViewChanges={handleViewChanges}
