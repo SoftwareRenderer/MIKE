@@ -4,7 +4,7 @@
     import type { Task, Provider, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { board as boardStore, config as configStore, selectedTask, showTerminal, showConfirm, showToast, showCreateTask, creatingChildOf, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
-    import { getStreamingContext, getTaskDiffStatsContext, getTaskDiffContext, getExpandedTasksContext } from '$lib/context';
+    import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, updateTask, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { loadCollapsedSections, saveCollapsedSections, loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -238,10 +238,6 @@
         }
         try {
             await stageFile(task.project_id, task.id, path, stage);
-            // Re-load manifest for reliable reconciliation (matches handleStageAll/handleUnstageAll pattern).
-            // The WS broadcast alone is not sufficient: the effect may skip processing if the hash
-            // hasn't changed or if the broadcast arrives during an in-flight loadDiff.
-            loadDiff();
         } catch (e) {
             // Revert optimistic update on failure
             if (diffFileCache[path]) {
@@ -259,7 +255,6 @@
         for (const path of paths) {
             try { await stageFile(task.project_id, task.id, path, true); } catch { /* skip */ }
         }
-        loadDiff();
     }
 
     /** Unstage all staged files. */
@@ -269,7 +264,6 @@
         for (const path of paths) {
             try { await stageFile(task.project_id, task.id, path, false); } catch { /* skip */ }
         }
-        loadDiff();
     }
 
     function closeFileEditor(saved: boolean) {
@@ -363,19 +357,16 @@
 
     function onDiffFromChange(value: string) {
         diffFrom = value;
-        loadDiffForMode();
     }
 
     function onDiffToChange(value: string) {
         diffTo = value;
-        loadDiffForMode();
     }
 
     /** Set diff to compare base ref vs a specific checkpoint commit. */
     function setDiffToCommit(commitHash: string) {
         diffFrom = '';
         diffTo = commitHash;
-        loadDiffForMode();
     }
 
     /** Handle "View Changes" from a checkpoint divider — opens an overlay in the diff panel.
@@ -669,31 +660,7 @@
         saveRatio(CHAT_RATIO_KEY, chatRatio).catch(() => {});
     }
 
-    // Refresh diff when switching to Changes tab on mobile (WebSocket events may have been missed)
-    let prevTab = $state(activeTab);
-    $effect(() => {
-        const currentTab = activeTab;
-        if (currentTab !== prevTab && currentTab === 'diff') {
-            loadDiff();
-        }
-        prevTab = currentTab;
-    });
 
-    // Load diff when task transitions out of backlog (worktree now exists)
-    let prevStatus = $state(task.status);
-    $effect(() => {
-        const currentStatus = task.status;
-        const status = $boardStore?.tasks.find(t => t.id === task.id)?.status ?? currentStatus;
-        if (prevStatus === 'backlog' && status && status !== 'backlog') {
-            loadDiff();
-        }
-        prevStatus = status || '';
-    });
-
-
-
-    // WebSocket diff data (pushed via task_diff events)
-    let wsDiffMap = $state<Record<string, { hash: string; diff?: string; untracked?: any[]; files?: Record<string, { hash: string; type: string }>; updated_at: number }>>({});
 
     onMount(() => {
         const unsubBoard = boardStore.subscribe(b => {
@@ -704,7 +671,6 @@
             }
         });
         const unsubDiff = taskDiffStats.subscribe(v => { diffStatsMap = v; });
-        const unsubWsDiff = getTaskDiffContext().subscribe(v => { wsDiffMap = v; });
 
         loadDiff();
 
@@ -723,7 +689,6 @@
         return () => {
             unsubBoard();
             unsubDiff();
-            unsubWsDiff();
             window.removeEventListener('keydown', handleKey);
         };
     });
@@ -762,19 +727,12 @@
                 diffFileHashes = newHashes;
             }
 
-            // Empty diff — clear cache and reload
+            // Empty diff — clear cache (WS already told us the state)
             if (!currentHash) {
                 diffFileCache = {};
                 untrackedCache = {};
                 diffFileHashes = {};
                 diffInitialLoaded = false;
-                loadDiff();
-                return;
-            }
-
-            // Initial load
-            if (!diffInitialLoaded || Object.keys(diffFileCache).length === 0) {
-                loadDiff();
                 return;
             }
 
@@ -799,20 +757,7 @@
                 diffFileHashes = { ...diffFileHashes, ...fileHashes };
                 const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
                 fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
-                return;
             }
-
-            // Fallback: WS fast-path or full reload
-            if (!diffLoading) {
-                const wsDiff = wsDiffMap[task.id];
-                if (wsDiff && wsDiff.hash === currentHash && wsDiff.files) {
-                    const oldHashes = { ...diffFileHashes };
-                    updateDiff({ files: wsDiff.files });
-                    fetchChangedFiles(wsDiff.files, oldHashes);
-                    return;
-                }
-            }
-            loadDiff();
         }
     });
 
@@ -1246,16 +1191,11 @@
                             onThreadSwitch={() => loadDiff()}
                             onViewChanges={handleViewChanges}
                             onInvalidateDiff={() => {
-                                // Clear manifest cache and force full HTTP reload.
-                                // Needed after message deletion: the backend resets worktree
-                                // to a different commit, changing the diff baseline.
-                                // The worktree watcher doesn't detect soft resets
-                                // (working tree/index unchanged), so the cache becomes stale.
+                                // Clear cache so next WS event triggers a full reload.
                                 diffFileCache = {};
                                 untrackedCache = {};
                                 diffFileHashes = {};
                                 diffInitialLoaded = false;
-                                loadDiff();
                             }}
                         />
                     {/key}
