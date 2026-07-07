@@ -41,11 +41,11 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "read_file",
 				DisplayName: "Read",
-				Description: "Read the contents of a file from the worktree. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
+				Description: "Read the contents of a file. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"path":   map[string]any{"type": "string", "description": "Path to the file relative to worktree root"},
+						"path":   map[string]any{"type": "string", "description": "Path to the file"},
 						"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
 						"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
 					},
@@ -58,7 +58,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "bash",
 				DisplayName: "Execute",
-				Description: "Execute a read-only shell command in the worktree directory. Only safe, non-destructive commands are allowed: ls, cat, grep, find, head, tail, wc, diff, git log, git status, git diff, git show, git branch, git remote, env, echo, pwd, tree, file, stat, du, which, man, help. Do NOT use write commands (rm, mv, cp, chmod, chown, touch, install, build, test, etc.). Always set timeout: 2s for fast commands.",
+				Description: "Execute a read-only shell command. Only safe, non-destructive commands are allowed: ls, cat, grep, find, head, tail, wc, diff, git log, git status, git diff, git show, git branch, git remote, env, echo, pwd, tree, file, stat, du, which, man, help. Do NOT use write commands (rm, mv, cp, chmod, chown, touch, install, build, test, etc.). Always set timeout: 2s for fast commands.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -80,7 +80,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 					"properties": map[string]any{
 						"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
 						"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
-						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
+						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a primary task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
 				},
@@ -112,11 +112,11 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "read_file",
 				DisplayName: "Read",
-				Description: "Read the contents of a file from the worktree. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
+				Description: "Read the contents of a file. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"path":   map[string]any{"type": "string", "description": "Path to the file relative to worktree root"},
+						"path":   map[string]any{"type": "string", "description": "Path to the file"},
 						"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
 						"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
 					},
@@ -129,7 +129,7 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "write_file",
 				DisplayName: "Write",
-				Description: "Write content to a file in the worktree (creates directories as needed)",
+				Description: "Write content to a file (creates directories as needed)",
 				Parameters: map[string]any{
 					"type": "object",
 					// ensure that the LLM sees path before content
@@ -146,7 +146,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
 				Parameters: map[string]any{
 					"type":       "object",
-					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit (relative to worktree root)"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
 					"required":   []string{"path", "edits"},
 				},
 			},
@@ -156,7 +156,7 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "bash",
 				DisplayName: "Execute",
-				Description: "Execute a shell command in the worktree directory. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
+				Description: "Execute a shell command. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -193,7 +193,7 @@ func GetToolDefinitions() []types.ChatTool {
 					"properties": map[string]any{
 						"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
 						"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
-						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, nests under the current task. Use a previously created task_id to create nested subtasks."},
+						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a parent task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
 				},
