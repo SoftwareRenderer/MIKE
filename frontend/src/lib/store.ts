@@ -151,13 +151,17 @@ export const pwaInstalled = writable(false);
 
 // Commit dialog state
 export interface CommitDialogOptions {
-    loading: boolean;
     message: string;
     confirmText?: string;
     cancelText?: string;
     authorName?: string;
     authorEmail?: string;
     mergeTarget?: string;
+    // Streaming support
+    streaming?: boolean;       // true while LLM is streaming tokens
+    promptProgress?: number;   // 0-100 prompt processing percentage
+    projectId?: string;        // needed for streaming endpoint
+    taskId?: string;           // needed for streaming endpoint
 }
 
 export const commitDialog = writable<CommitDialogOptions | null>(null);
@@ -168,7 +172,6 @@ export const commitDialog = writable<CommitDialogOptions | null>(null);
 export function showCommitDialog(options: CommitDialogOptions): Promise<string | null> {
     return new Promise((resolve) => {
         commitDialog.set({
-            loading: options.loading,
             message: options.message,
             confirmText: options.confirmText ?? 'Commit and move to Done',
             cancelText: options.cancelText ?? 'Cancel',

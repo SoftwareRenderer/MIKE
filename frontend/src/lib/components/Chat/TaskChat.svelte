@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, getCommitPreview, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, resetWorktree, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, showToast, showConfirm, commitDialog as commitDialogStore, selectedTask } from '$lib/store';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -1560,34 +1560,17 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         try {
             let updated;
             if (hasChanges) {
-                // Fetch commit message preview (dialog shows loading spinner)
+                // Open dialog — it will stream the commit message from the backend
                 const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    // Open dialog in loading state
                     commitDialogStore.set({
-                        loading: true,
+                        streaming: true,
                         message: '',
                         confirmText: 'Commit and move to Done',
                         cancelText: 'Cancel',
+                        projectId,
+                        taskId,
                         _resolve: resolve,
                     });
-                    // Fetch preview in background
-                    (async () => {
-                        let commitMessage = '';
-                        let authorName = '';
-                        let authorEmail = '';
-                        let mergeTarget = '';
-                        try {
-                            const preview = await getCommitPreview(projectId, taskId);
-                            commitMessage = preview.commit_message;
-                            authorName = preview.author_name || '';
-                            authorEmail = preview.author_email || '';
-                            mergeTarget = preview.merge_target || '';
-                        } catch (e) {
-                            commitMessage = taskTitle;
-                        }
-                        // Update dialog with actual message
-                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail, mergeTarget } : null);
-                    })();
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled

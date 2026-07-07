@@ -582,6 +582,45 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// HandleCommitPreviewStream streams the commit message generation via SSE.
+// Events: "metadata" (author/merge info), "prompt_progress", "token", "done".
+func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "event: error\ndata: {\"error\":\"task not found\"}\n\n")
+		return
+	}
+
+	// Send metadata immediately (author + merge target)
+	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
+	mergeTarget := h.resolveMergeTarget(projectID, task)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	metadata, _ := json.Marshal(map[string]string{
+		"author_name":  authorName,
+		"author_email": authorEmail,
+		"merge_target": mergeTarget,
+	})
+	fmt.Fprintf(w, "event: metadata\ndata: %s\n\n", string(metadata))
+	w.(http.Flusher).Flush()
+
+	// Stream the commit message generation
+	flusher, ok := w.(exec.SSEFlusher)
+	if !ok {
+		fmt.Fprintf(w, "event: error\ndata: {\"error\":\"streaming not supported\"}\n\n")
+		return
+	}
+	h.executor.StreamCommitMessage(flusher, taskID, task)
+}
+
 // resolveMergeTarget determines the branch that changes will be merged into.
 // For child tasks, the target is the parent's branch.
 // For root tasks, the target is the project's origin branch (or current HEAD).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -12,6 +13,17 @@ import (
 	"kanban/backend/stream"
 	"kanban/backend/types"
 )
+
+// commitMessagePrompt is the system prompt for generating commit messages.
+const commitMessagePrompt = "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."
+
+// buildCommitMessages creates the chat messages for commit message generation.
+func buildCommitMessages(diffStat, turnText string) []types.ChatMessage {
+	return []types.ChatMessage{
+		{Role: "system", Content: commitMessagePrompt},
+		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
+	}
+}
 
 // summarizeResult holds the result of a context summarization operation.
 type summarizeResult struct {
@@ -366,10 +378,7 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 	}
 	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, task.ModelName)
 
-	labelMessages := []types.ChatMessage{
-		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."},
-		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
-	}
+	labelMessages := buildCommitMessages(diffStat, turnText)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -417,6 +426,93 @@ func (te *TaskExecutor) GenerateCommitMessageForTask(taskID string, task *types.
 	}
 
 	return fmt.Sprintf("%s\n\nCo-authored-by: %s", commitMsg, modelName)
+}
+
+// SSEFlusher is the interface needed for SSE streaming.
+type SSEFlusher interface {
+	http.ResponseWriter
+	http.Flusher
+}
+
+// StreamCommitMessage generates a commit message via LLM streaming and sends
+// tokens as SSE events. No timeout is applied. Caller must set SSE headers first.
+func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
+	serverURL := task.LlamaServerURL
+	if serverURL == "" || task.ModelName == "" {
+		fallback := task.Title
+		if fallback == "" {
+			fallback = "file changes"
+		}
+		fmt.Fprintf(w, "event: done\ndata: {\"content\":%q}\n\n", fallback)
+		return
+	}
+
+	diffStat, _ := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+	if diffStat == "" {
+		diffStat = "no diff available"
+	}
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
+	var conversation []types.ChatMessage
+	for _, m := range taskMsgs {
+		content := m.Content
+		if m.ReasoningContent != "" {
+			content = m.ReasoningContent + "\n" + m.Content
+		}
+		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+	}
+	turnText := FormatConversationTurns(ExtractLastTurns(conversation, 3))
+	labelMessages := buildCommitMessages(diffStat, turnText)
+
+	var sb strings.Builder
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	writeSSE := func(event, data string) {
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			cancel()
+			return
+		}
+		w.Flush()
+	}
+
+	_, err := te.StreamCompletion(ctx, serverURL, task.ModelName, labelMessages,
+		func(choice types.ChatChoice) {
+			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
+				token := *choice.Delta.Content
+				sb.WriteString(token)
+				writeSSE("token", fmt.Sprintf("{\"content\":%q}", token))
+			}
+			if choice.FinishReason != "" {
+				content := strings.TrimSpace(sb.String())
+				if content == "" {
+					content = task.Title
+					if content == "" {
+						content = "file changes"
+					}
+				}
+				writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
+			}
+		},
+		func(progress types.PromptProgressData) {
+			total := progress.Total
+			if total == 0 {
+				total = 1
+			}
+			pct := (progress.Processed * 100) / total
+			writeSSE("prompt_progress", fmt.Sprintf("{\"processed\":%d,\"total\":%d,\"percent\":%d}", progress.Processed, progress.Total, pct))
+		},
+	)
+	if err != nil {
+		log.Printf("[commit-preview-stream] task=%s LLM stream failed: %v", taskID, err)
+		content := strings.TrimSpace(sb.String())
+		if content == "" {
+			content = task.Title
+			if content == "" {
+				content = "file changes"
+			}
+		}
+		writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
+	}
 }
 
 // ExtractLastTurns extracts the last N turns (user + assistant pairs, including tool results) from a conversation.

@@ -8,7 +8,7 @@
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getCommitPreview, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { showEditTask, editTaskData } from '$lib/store';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
@@ -477,34 +477,17 @@
         try {
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
-                // Fetch commit message preview and show confirmation dialog
+                // Open dialog — it will stream the commit message from the backend
                 const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    // Open dialog in loading state
                     commitDialogStore.set({
-                        loading: true,
+                        streaming: true,
                         message: '',
                         confirmText: 'Commit and move to Done',
                         cancelText: 'Cancel',
+                        projectId: projectId!,
+                        taskId: task.id,
                         _resolve: resolve,
                     });
-                    // Fetch preview in background
-                    (async () => {
-                        let commitMessage = '';
-                        let authorName = '';
-                        let authorEmail = '';
-                        let mergeTarget = '';
-                        try {
-                            const preview = await getCommitPreview(projectId!, task.id);
-                            commitMessage = preview.commit_message;
-                            authorName = preview.author_name || '';
-                            authorEmail = preview.author_email || '';
-                            mergeTarget = preview.merge_target || '';
-                        } catch (e) {
-                            commitMessage = task.title;
-                        }
-                        // Update dialog with actual message
-                        commitDialogStore.update(d => d ? { ...d, loading: false, message: commitMessage, authorName, authorEmail, mergeTarget } : null);
-                    })();
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled

@@ -134,6 +134,21 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 	return usage, text, err
 }
 
+// StreamCompletion sends a streaming chat request through the concurrency gate.
+// The caller passes messages and receives tokens via the callback — queue management
+// is fully transparent. Uses the same provider concurrency limits as ChatCompletion.
+func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
+	apiKey := te.configStore.GetProviderAPIKey(serverURL)
+	client := llama.NewLlamaClient(serverURL, modelName, "off", apiKey)
+	var usage *types.ChatUsage
+	err := te.RunWithGate(ctx, serverURL, func() error {
+		var err error
+		usage, err = client.ChatStream(ctx, messages, nil, cb, onProgress)
+		return err
+	})
+	return usage, err
+}
+
 // ResetForTest stops all running executors and clears state.
 func (te *TaskExecutor) ResetForTest() {
 	te.taskMu.Lock()
