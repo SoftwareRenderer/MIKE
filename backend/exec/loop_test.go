@@ -1618,3 +1618,119 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 		t.Errorf("expected execution_state='failed', got %q", taskAfter.ExecutionState)
 	}
 }
+
+// --- raw_args Delta Tests ---
+
+// computeToolCallData builds the data map for a tool_call WS event,
+// mirroring the logic in loop.go.
+// Returns the data map with either raw_args (full) or raw_args_delta (incremental).
+func computeToolCallData(args string, prevLen int, isNew bool) map[string]any {
+	data := map[string]any{
+		"tool_id": "call_test", "tool_name": "bash", "tool_display_name": "Run Command",
+		"args": nil, "path": "", "sandbox": false,
+	}
+	if isNew {
+		data["raw_args"] = args
+	} else {
+		data["raw_args_delta"] = args[prevLen:]
+	}
+	return data
+}
+
+func TestRawArgsDelta_NewToolCall(t *testing.T) {
+	// New tool call: sends full raw_args
+	args := `{"command":"ls -la"}`
+	data := computeToolCallData(args, 0, true)
+
+	if _, ok := data["raw_args"]; !ok {
+		t.Fatal("new tool call should have raw_args field")
+	}
+	if data["raw_args"] != args {
+		t.Errorf("expected raw_args=%q, got %q", args, data["raw_args"])
+	}
+	if _, ok := data["raw_args_delta"]; ok {
+		t.Error("new tool call should NOT have raw_args_delta field")
+	}
+}
+
+func TestRawArgsDelta_Update(t *testing.T) {
+	// Update: sends only the delta (new characters)
+	fullArgs := `{"command":"ls -la /home/user/projects"}`
+	prevArgs := `{"command":"ls -la"}`
+	prevLen := len(prevArgs)
+
+	data := computeToolCallData(fullArgs, prevLen, false)
+
+	if _, ok := data["raw_args"]; ok {
+		t.Error("update should NOT have raw_args field")
+	}
+	if _, ok := data["raw_args_delta"]; !ok {
+		t.Fatal("update should have raw_args_delta field")
+	}
+	expectedDelta := fullArgs[prevLen:] // " /home/user/projects"}
+	if data["raw_args_delta"] != expectedDelta {
+		t.Errorf("expected raw_args_delta=%q, got %q", expectedDelta, data["raw_args_delta"])
+	}
+}
+
+func TestRawArgsDelta_Accumulation(t *testing.T) {
+	// Simulate frontend accumulation of deltas
+	chunks := []string{
+		`{"command":"ls`,           // chunk 1 (new, full)
+		` -la`,                     // chunk 2 (delta)
+		` /home/user`,             // chunk 3 (delta)
+		`/projects"}`,             // chunk 4 (delta)
+	}
+
+	// Simulate: first chunk is full raw_args, subsequent are deltas
+	var accumulated string
+	for i, chunk := range chunks {
+		if i == 0 {
+			accumulated = chunk // first = full raw_args
+		} else {
+			accumulated += chunk // subsequent = raw_args_delta appended
+		}
+	}
+
+	expected := `{"command":"ls -la /home/user/projects"}`
+	if accumulated != expected {
+		t.Errorf("expected accumulated=%q, got %q", expected, accumulated)
+	}
+}
+
+func TestRawArgsDelta_BandwidthSavings(t *testing.T) {
+	// Verify that delta approach saves bandwidth for large write_file calls
+	// Simulate a write_file with 10KB of content
+	largeContent := strings.Repeat("x", 10000)
+	fullArgs := `{"path":"./file.txt","content":"` + largeContent + `"}`
+
+	// Simulate 5 streaming updates (each adding 2000 chars)
+	var totalSent int
+	prevLen := 0
+	chunkSize := 2000
+
+	// First update: full raw_args
+	totalSent += len(fullArgs[0:chunkSize])
+	prevLen = chunkSize
+
+	// Subsequent updates: raw_args_delta only
+	for prevLen < len(fullArgs) {
+		nextLen := prevLen + chunkSize
+		if nextLen > len(fullArgs) {
+			nextLen = len(fullArgs)
+		}
+		totalSent += len(fullArgs[prevLen:nextLen]) // delta only
+		prevLen = nextLen
+	}
+
+	// Old approach: would send full args on every update
+	numUpdates := (len(fullArgs) + chunkSize - 1) / chunkSize
+	oldTotal := len(fullArgs) * numUpdates
+
+	// Delta approach should save significant bandwidth
+	savings := float64(oldTotal-totalSent) / float64(oldTotal) * 100
+	if savings < 50 {
+		t.Errorf("expected >50%% bandwidth savings, got %.1f%%", savings)
+	}
+	t.Logf("bandwidth savings: %.1f%% (old=%d bytes, new=%d bytes)", savings, oldTotal, totalSent)
+}

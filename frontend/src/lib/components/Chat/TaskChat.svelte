@@ -413,7 +413,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             case 'tool_call': {
                 if (suppressEvents) break;
                 clearAwaiting();
-                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
+                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string };
                 // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
                 if (!data.tool_id || data.tool_id === '') {
                     break;
@@ -454,11 +454,16 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                     if (!existing.isPending && existing.result !== undefined) {
                         break;
                     }
+                    // Accumulate raw_args_delta (incremental streaming update) or
+                    // replace with full raw_args (first frame / buffer replay).
+                    const newRawArgs = data.raw_args_delta
+                        ? (existing.raw_args || '') + data.raw_args_delta
+                        : data.raw_args;
                     const updated = { ...existing,
                         toolName: data.tool_name,
                         displayName: data.tool_display_name,
                         args: data.args || {},
-                        raw_args: data.raw_args,
+                        raw_args: newRawArgs,
                         sandbox: data.sandbox,
                         path: data.path,
                     };

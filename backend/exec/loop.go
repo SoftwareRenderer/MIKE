@@ -403,7 +403,23 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 						lc.prevArgLens[tc.ID] = argLen
 						path := extractPathFromArgs(tc.Function.Arguments)
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+						// Send full raw_args for new tool calls, delta only for updates.
+						// Delta = new characters appended since last update, saves bandwidth
+						// for large tool calls (e.g. write_file with big file content).
+						data := map[string]any{
+							"tool_id":           tc.ID,
+							"tool_name":         tc.Function.Name,
+							"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
+							"args":              nil,
+							"path":              path,
+							"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
+						}
+						if isNew {
+							data["raw_args"] = tc.Function.Arguments
+						} else {
+							data["raw_args_delta"] = tc.Function.Arguments[prevLen:]
+						}
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
 					}
 				}
 				// Throttled progress updates for write_file (1 per 2 seconds)
@@ -488,7 +504,22 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 								lc.prevArgLens[tc.ID] = argLen
 								if argLen != prevLen {
 									path := extractPathFromArgs(tc.Function.Arguments)
-									te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{"tool_id": tc.ID, "tool_name": tc.Function.Name, "tool_display_name": llama.GetToolDisplayName(tc.Function.Name), "args": nil, "raw_args": tc.Function.Arguments, "path": path, "sandbox": lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)}})
+									// Retry path: always send delta (no isNew tracking in retry path).
+									// For the first frame after retry, prevLen=0 so delta = full string.
+									data := map[string]any{
+										"tool_id":           tc.ID,
+										"tool_name":         tc.Function.Name,
+										"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
+										"args":              nil,
+										"path":              path,
+										"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
+									}
+									if prevLen == 0 {
+										data["raw_args"] = tc.Function.Arguments
+									} else {
+										data["raw_args_delta"] = tc.Function.Arguments[prevLen:]
+									}
+									te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
 								}
 							}
 						}
