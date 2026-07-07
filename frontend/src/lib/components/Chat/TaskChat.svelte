@@ -1424,7 +1424,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     async function handleSummarize() {
         const confirmed = await showConfirm({
             title: 'Compress Context',
-            message: 'This will summarize and remove older messages from the context window to reduce token usage. The summary will be inserted as a new message. Continue?',
+            message: 'This will summarize and remove older messages from the context window to reduce token usage. You will be able to delete the summary to reverse this.',
             confirmText: 'Compress',
             cancelText: 'Cancel',
             variant: 'default',

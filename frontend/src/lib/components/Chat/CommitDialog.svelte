@@ -290,11 +290,6 @@
 
             {#if streaming}
                 <div class="commit-progress" role="status" aria-busy={streaming}>
-                    {#if promptProgress > 0 && promptProgress < 100}
-                        <span class="progress-text">Processing prompt: {promptProgress}%</span>
-                    {:else if streaming}
-                        <span class="progress-text">Generating...</span>
-                    {/if}
                     <svg
                         class="progress-spinner"
                         width="14"
@@ -307,6 +302,11 @@
                     >
                         <path d="M12 2a10 10 0 0 1 10 10"/>
                     </svg>
+                    {#if promptProgress > 0 && promptProgress < 100}
+                        <span class="progress-text">Processing prompt: {promptProgress}%</span>
+                    {:else}
+                        <span class="progress-text">Generating...</span>
+                    {/if}
                 </div>
             {/if}
 
