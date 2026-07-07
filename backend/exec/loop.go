@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"kanban/backend/git"
@@ -54,6 +55,138 @@ func unstageNewBinaryFilesInDir(dir string) {
 	}
 	paths := binaryPathsFromStaged(out)
 	unstagePathsInDir(dir, paths)
+}
+
+// streamFlusher batches token, reasoning, and tool_call WebSocket events
+// and sends them at most once every throttleInterval (500ms).
+// This reduces WebSocket write overhead during fast LLM streaming.
+type streamFlusher struct {
+	mu             sync.Mutex
+	tokenBuf       strings.Builder
+	reasoningBuf   strings.Builder
+	toolCallDeltas map[string]toolCallDelta // tool_id -> delta info
+	projectID      string
+	taskID         string
+	sandboxEnabled bool
+	send           func(projectID, taskID string, event types.StreamEvent)
+	loopDetector   *loopDetector // for phrase repetition detection on tokens
+}
+
+// toolCallDelta holds buffered delta info for a single tool call.
+type toolCallDelta struct {
+	toolName      string
+	displayName   string
+	path          string
+	sandbox       bool
+	startArgLen   int    // arg length when first seen (0 = new, send full raw_args)
+	currentArgLen int    // latest arg length
+	args          string // full args string at currentArgLen
+}
+
+const streamThrottleInterval = 100 * time.Millisecond
+
+func newStreamFlusher(projectID, taskID string, sandboxEnabled bool, send func(projectID, taskID string, event types.StreamEvent), detector *loopDetector) *streamFlusher {
+	return &streamFlusher{
+		toolCallDeltas: make(map[string]toolCallDelta),
+		projectID:      projectID,
+		taskID:         taskID,
+		sandboxEnabled: sandboxEnabled,
+		send:           send,
+		loopDetector:   detector,
+	}
+}
+
+// appendToken buffers a token for batched sending.
+func (f *streamFlusher) appendToken(text string) {
+	f.loopDetector.checkStreamingText(text)
+	f.mu.Lock()
+	f.tokenBuf.WriteString(text)
+	f.mu.Unlock()
+}
+
+// appendReasoning buffers reasoning text for batched sending.
+func (f *streamFlusher) appendReasoning(text string) {
+	f.mu.Lock()
+	f.reasoningBuf.WriteString(text)
+	f.mu.Unlock()
+}
+
+// appendToolCall buffers a tool call delta for batched sending.
+func (f *streamFlusher) appendToolCall(toolID, toolName, displayName, path, args string, argLen, prevLen int, isNew, sandbox bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.toolCallDeltas[toolID]
+	if !ok {
+		// First time seeing this tool_id — record start position.
+		f.toolCallDeltas[toolID] = toolCallDelta{
+			toolName:      toolName,
+			displayName:   displayName,
+			path:          path,
+			sandbox:       sandbox,
+			startArgLen:   prevLen,
+			currentArgLen: argLen,
+			args:          args,
+		}
+	} else if argLen > existing.currentArgLen {
+		// Args grew — update to latest state.
+		existing.currentArgLen = argLen
+		existing.args = args
+		existing.path = path
+		f.toolCallDeltas[toolID] = existing
+	}
+}
+
+// flush sends all buffered events. Must be called with f.mu held by caller
+// OR from the ticker goroutine (which locks internally).
+func (f *streamFlusher) flush() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Flush buffered tokens as a single batched event.
+	if f.tokenBuf.Len() > 0 {
+		text := f.tokenBuf.String()
+		f.tokenBuf.Reset()
+		f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": text}})
+	}
+
+	// Flush buffered reasoning as a single batched event.
+	if f.reasoningBuf.Len() > 0 {
+		text := f.reasoningBuf.String()
+		f.reasoningBuf.Reset()
+		f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": text}})
+	}
+
+	// Flush buffered tool call deltas.
+	if len(f.toolCallDeltas) > 0 {
+		for toolID, d := range f.toolCallDeltas {
+			data := map[string]any{
+				"tool_id":           toolID,
+				"tool_name":         d.toolName,
+				"tool_display_name": d.displayName,
+				"args":              nil,
+				"path":              d.path,
+				"sandbox":           d.sandbox,
+			}
+			if d.startArgLen == 0 {
+				// New tool call — send full raw_args.
+				data["raw_args"] = d.args
+			} else {
+				// Update — send delta from start position.
+				data["raw_args_delta"] = d.args[d.startArgLen:d.currentArgLen]
+			}
+			f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
+		}
+		f.toolCallDeltas = make(map[string]toolCallDelta)
+	}
+}
+
+// reset clears all buffered content. Called before retry.
+func (f *streamFlusher) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tokenBuf.Reset()
+	f.reasoningBuf.Reset()
+	f.toolCallDeltas = make(map[string]toolCallDelta)
 }
 
 // loopContext holds mutable state for the AI conversation loop.
@@ -112,15 +245,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	te.taskMu.Unlock()
 
 	if sandboxEnabled {
-			if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-				task.ExecutionState = "failed"
-				task.Status = "review"
-				task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
-				te.store.UpdateTask(task)
-				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-				te.sendAndPersistError(task.ID, "gVisor not available", "sandbox_unavailable")
-				return
-			}
+		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
+			task.ExecutionState = "failed"
+			task.Status = "review"
+			task.Output = "Sandbox enabled but gVisor (runsc) is not available. Install gVisor: sudo bash scripts/install-gvisor.sh"
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.sendAndPersistError(task.ID, "gVisor not available", "sandbox_unavailable")
+			return
+		}
 		// Determine image to use: Dockerfile build takes precedence over pre-built image
 		imageToUse := ""
 		if sandboxDockerfilePath != "" {
@@ -369,16 +502,35 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Assemble LLM context (compresses history via summary if one exists).
 		llmMessages := buildLLMContext(lc.messages)
 
+		// Stream flusher: batches token/reasoning/tool_call events and sends
+		// at most once every 500ms to reduce WebSocket write overhead.
+		flusher := newStreamFlusher(projectID, task.ID, lc.sandboxEnabled,
+			te.appStreamMgr.SendTaskEvent, lc.detector)
+		flushDone := make(chan struct{})
+		go func() {
+			tick := time.NewTicker(streamThrottleInterval)
+			defer tick.Stop()
+			defer close(flushDone)
+			for {
+				select {
+				case <-callCtx.Done():
+					return
+				case <-tick.C:
+					flusher.flush()
+				}
+			}
+		}()
+
 		go func() {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
 				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 					lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+					flusher.appendReasoning(*choice.Delta.ReasoningContent)
 				}
 				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 					lc.assistantContent.WriteString(*choice.Delta.Content)
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
-					// Real-time phrase repetition detection
+					flusher.appendToken(*choice.Delta.Content)
+					// Real-time phrase repetition detection (not throttled — detection runs per-token)
 					if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
 						log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
 						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
@@ -387,8 +539,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if len(choice.Delta.ToolCalls) > 0 {
 					priorLen := len(lc.pendingToolCalls)
 					lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
-					// Send tool_call events for new tool calls and updates when args change.
-					// This lets the frontend show the command text as it streams in.
 					for i := 0; i < len(lc.pendingToolCalls); i++ {
 						tc := lc.pendingToolCalls[i]
 						if tc.ID == "" || tc.Function.Name == "" {
@@ -403,23 +553,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 						lc.prevArgLens[tc.ID] = argLen
 						path := extractPathFromArgs(tc.Function.Arguments)
-						// Send full raw_args for new tool calls, delta only for updates.
-						// Delta = new characters appended since last update, saves bandwidth
-						// for large tool calls (e.g. write_file with big file content).
-						data := map[string]any{
-							"tool_id":           tc.ID,
-							"tool_name":         tc.Function.Name,
-							"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
-							"args":              nil,
-							"path":              path,
-							"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
-						}
-						if isNew {
-							data["raw_args"] = tc.Function.Arguments
-						} else {
-							data["raw_args_delta"] = tc.Function.Arguments[prevLen:]
-						}
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
+						flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
 					}
 				}
 				// Throttled progress updates for write_file (1 per 2 seconds)
@@ -438,10 +572,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if predictedN != lastPredictedN {
 						lastPredictedN = predictedN
 						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-							"model_name":     activeModel,
-							"prompt_tokens":  lc.usage.PromptTokens,
+							"model_name":       activeModel,
+							"prompt_tokens":    lc.usage.PromptTokens,
 							"predicted_tokens": predictedN,
-							"predicted_ms":   lc.usage.PredictedMs,
+							"predicted_ms":     lc.usage.PredictedMs,
 						}})
 					}
 				}
@@ -464,6 +598,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				for i := range 3 {
 					select {
 					case <-callCtx.Done():
+						flusher.flush()
 						close(streamDone)
 						return
 					case <-time.After(time.Duration(i+1) * 2 * time.Second):
@@ -479,18 +614,21 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						"content":    retryMsg,
 						"created_at": time.Now().UTC().Format(time.RFC3339),
 					}})
-					// Reset builders so retry doesn't concatenate partial content
+					// Flush any remaining buffered events before retry.
+					flusher.flush()
+					// Reset builders so retry doesn't concatenate partial content.
 					lc.assistantContent.Reset()
 					lc.reasoningContent.Reset()
 					lc.pendingToolCalls = nil
+					flusher.reset()
 					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
 						if choice.Delta.ReasoningContent != nil {
 							lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": *choice.Delta.ReasoningContent}})
+							flusher.appendReasoning(*choice.Delta.ReasoningContent)
 						}
 						if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 							lc.assistantContent.WriteString(*choice.Delta.Content)
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": *choice.Delta.Content}})
+							flusher.appendToken(*choice.Delta.Content)
 						}
 						if len(choice.Delta.ToolCalls) > 0 {
 							lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
@@ -504,22 +642,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 								lc.prevArgLens[tc.ID] = argLen
 								if argLen != prevLen {
 									path := extractPathFromArgs(tc.Function.Arguments)
-									// Retry path: always send delta (no isNew tracking in retry path).
-									// For the first frame after retry, prevLen=0 so delta = full string.
-									data := map[string]any{
-										"tool_id":           tc.ID,
-										"tool_name":         tc.Function.Name,
-										"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
-										"args":              nil,
-										"path":              path,
-										"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
-									}
-									if prevLen == 0 {
-										data["raw_args"] = tc.Function.Arguments
-									} else {
-										data["raw_args_delta"] = tc.Function.Arguments[prevLen:]
-									}
-									te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
+									flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, prevLen == 0, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
 								}
 							}
 						}
@@ -529,10 +652,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							if predictedN != lastPredictedN {
 								lastPredictedN = predictedN
 								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-									"model_name":     activeModel,
-									"prompt_tokens":  lc.usage.PromptTokens,
+									"model_name":       activeModel,
+									"prompt_tokens":    lc.usage.PromptTokens,
 									"predicted_tokens": predictedN,
-									"predicted_ms":   lc.usage.PredictedMs,
+									"predicted_ms":     lc.usage.PredictedMs,
 								}})
 							}
 						}
@@ -553,6 +676,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 
+			// Flush any remaining buffered events before signalling completion.
+			flusher.flush()
 			close(streamDone)
 		}()
 
@@ -1001,5 +1126,3 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	predictedMs = durationMs * 3 / 10
 	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
 }
-
-

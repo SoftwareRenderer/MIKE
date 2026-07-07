@@ -1734,3 +1734,207 @@ func TestRawArgsDelta_BandwidthSavings(t *testing.T) {
 	}
 	t.Logf("bandwidth savings: %.1f%% (old=%d bytes, new=%d bytes)", savings, oldTotal, totalSent)
 }
+
+// --- streamFlusher Tests ---
+
+func TestStreamFlusher_TokenBatching(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// Append multiple tokens
+	flusher.appendToken("Hello")
+	flusher.appendToken(" ")
+	flusher.appendToken("world")
+
+	// No events sent yet (not flushed)
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events before flush, got %d", len(events))
+	}
+
+	// Flush — should send a single batched token event
+	flusher.flush()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event after flush, got %d", len(events))
+	}
+	if events[0].Type != types.WSTypeToken {
+		t.Fatalf("expected WSTypeToken, got %v", events[0].Type)
+	}
+	text := events[0].Data.(map[string]string)["text"]
+	if text != "Hello world" {
+		t.Errorf("expected 'Hello world', got %q", text)
+	}
+}
+
+func TestStreamFlusher_ReasoningBatching(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	flusher.appendReasoning("Thinking")
+	flusher.appendReasoning(" about")
+	flusher.appendReasoning(" the problem")
+
+	flusher.flush()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != types.WSTypeReasoning {
+		t.Fatalf("expected WSTypeReasoning, got %v", events[0].Type)
+	}
+	text := events[0].Data.(map[string]string)["text"]
+	if text != "Thinking about the problem" {
+		t.Errorf("expected 'Thinking about the problem', got %q", text)
+	}
+}
+
+func TestStreamFlusher_ToolCallBatching(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// Simulate streaming tool call args: {"command":"ls -la"}
+	// First chunk: new tool call with partial args
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls`, 14, 0, true, false)
+	// Second chunk: args grew
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls -la"}`, 20, 14, false, false)
+
+	flusher.flush()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != types.WSTypeToolCall {
+		t.Fatalf("expected WSTypeToolCall, got %v", events[0].Type)
+	}
+	data := events[0].Data.(map[string]any)
+	// New tool call: sends full raw_args
+	if data["raw_args"] != `{"command":"ls -la"}` {
+		t.Errorf("expected full raw_args, got %v", data["raw_args"])
+	}
+	if _, ok := data["raw_args_delta"]; ok {
+		t.Error("should NOT have raw_args_delta for new tool call")
+	}
+}
+
+func TestStreamFlusher_ToolCallUpdateDelta(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// Simulate existing tool call (prevLen > 0, so it's an update)
+	flusher.appendToolCall("call_2", "bash", "Run Command", "", `{"command":"ls -la /home"}`, 26, 14, false, false)
+
+	flusher.flush()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	data := events[0].Data.(map[string]any)
+	// Update: sends delta from start position
+	if data["raw_args_delta"] != ` -la /home"}` {
+		t.Errorf("expected delta ' -la /home\"}', got %v", data["raw_args_delta"])
+	}
+	if _, ok := data["raw_args"]; ok {
+		t.Error("should NOT have raw_args for update")
+	}
+}
+
+func TestStreamFlusher_MixedEvents(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// Mix of token, reasoning, and tool_call
+	flusher.appendToken("Hello")
+	flusher.appendReasoning("thinking...")
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
+
+	flusher.flush()
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+
+	// Verify event types
+	eventTypes := make(map[types.WSMessageType]bool)
+	for _, e := range events {
+		eventTypes[e.Type] = true
+	}
+	if !eventTypes[types.WSTypeToken] || !eventTypes[types.WSTypeReasoning] || !eventTypes[types.WSTypeToolCall] {
+		t.Errorf("expected all three event types, got %v", eventTypes)
+	}
+}
+
+func TestStreamFlusher_Reset(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	flusher.appendToken("Hello")
+	flusher.appendReasoning("thinking")
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
+
+	// Reset should clear all buffers
+	flusher.reset()
+
+	// Flush should send nothing
+	flusher.flush()
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events after reset+flush, got %d", len(events))
+	}
+}
+
+func TestStreamFlusher_MultipleToolCalls(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// Two separate tool calls
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
+	flusher.appendToolCall("call_2", "read_file", "Read File", "./foo.txt", `{"path":"./foo.txt"}`, 19, 0, true, false)
+
+	flusher.flush()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	// Verify both tool calls are present
+	toolIDs := make(map[string]bool)
+	for _, e := range events {
+		data := e.Data.(map[string]any)
+		toolIDs[data["tool_id"].(string)] = true
+	}
+	if !toolIDs["call_1"] || !toolIDs["call_2"] {
+		t.Errorf("expected both tool IDs, got %v", toolIDs)
+	}
+}
+
+func TestStreamFlusher_SecondFlush(t *testing.T) {
+	var events []types.StreamEvent
+	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+		events = append(events, e)
+	}, newLoopDetector())
+
+	// First batch
+	flusher.appendToken("Hello ")
+	flusher.flush()
+
+	// Second batch
+	flusher.appendToken("world")
+	flusher.flush()
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (one per flush), got %d", len(events))
+	}
+	if events[0].Data.(map[string]string)["text"] != "Hello " {
+		t.Errorf("expected first batch 'Hello ', got %q", events[0].Data.(map[string]string)["text"])
+	}
+	if events[1].Data.(map[string]string)["text"] != "world" {
+		t.Errorf("expected second batch 'world', got %q", events[1].Data.(map[string]string)["text"])
+	}
+}
