@@ -820,6 +820,22 @@
             if (!diffLoading) {
                 const wsDiff = wsDiffMap[task.id];
                 if (wsDiff && wsDiff.hash === currentHash) {
+                    // When manifest cache exists, skip WS fast-path and do a full HTTP
+                    // reload instead. The WS legacy format (diff string + untracked) lacks
+                    // per-file staged status, and the worktree watcher may not detect
+                    // baseline changes (e.g., git reset --soft after message deletion).
+                    // The HTTP manifest endpoint computes fresh staged status against
+                    // the current baseline, ensuring correctness.
+                    const hasManifestCache = Object.keys(diffFileHashes).length > 0;
+                    if (hasManifestCache) {
+                        // Clear stale cache and reload from HTTP
+                        diffFileCache = {};
+                        untrackedCache = {};
+                        diffFileHashes = {};
+                        diffInitialLoaded = false;
+                        loadDiff();
+                        return;
+                    }
                     // Save old hashes before updateDiff overwrites them
                     const oldHashes = { ...diffFileHashes };
                     updateDiff({ diff: wsDiff.diff, untracked: wsDiff.untracked, files: wsDiff.files }, 'websocket');
@@ -919,9 +935,15 @@
             return;
         }
 
-        // Legacy format: monolithic diff string + untracked array
-        // If cache already has data (from manifest), skip empty legacy updates
-        if (!data.diff && !data.untracked && (Object.keys(diffFileCache).length > 0 || Object.keys(untrackedCache).length > 0)) {
+        // Legacy format: monolithic diff string + untracked array.
+        // If cache was built from manifest format (diffFileHashes populated),
+        // skip legacy updates — the legacy TaskDiff from WebSocket lacks the
+        // per-file metadata (hashes, staged status) that the manifest provides.
+        // The CardDetail $effect handles proper manifest-based delta updates.
+        // Only skip if the cache has actual content (rows), not just empty entries.
+        const hasManifestCache = Object.keys(diffFileHashes).length > 0 &&
+            Object.values(diffFileCache).some(f => f.rows && f.rows.length > 0);
+        if (hasManifestCache) {
             return; // keep existing manifest data
         }
         const truncatedSet = new Set(data.truncated_files || []);
@@ -1302,6 +1324,18 @@
                             onMoveTask={handleMove}
                             onThreadSwitch={() => loadDiff()}
                             onViewChanges={handleViewChanges}
+                            onInvalidateDiff={() => {
+                                // Clear manifest cache and force full HTTP reload.
+                                // Needed after message deletion: the backend resets worktree
+                                // to a different commit, changing the diff baseline.
+                                // The worktree watcher doesn't detect soft resets
+                                // (working tree/index unchanged), so the cache becomes stale.
+                                diffFileCache = {};
+                                untrackedCache = {};
+                                diffFileHashes = {};
+                                diffInitialLoaded = false;
+                                loadDiff();
+                            }}
                         />
                     {/key}
                 </div>

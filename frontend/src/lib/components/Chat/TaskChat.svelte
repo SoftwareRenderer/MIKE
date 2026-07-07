@@ -71,7 +71,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     type DiffData = { diff: string; untracked: Array<{ path: string; lines?: string[]; line_count?: number; file_size?: number; is_binary?: boolean; truncated?: boolean; orig_added?: number }>; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }> };
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
 
     let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
@@ -1647,6 +1647,11 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 // Update URL to reflect the new active thread
                 updateThreadUrl(active.id);
             }
+            // Invalidate diff cache — the backend reset worktree to a different commit,
+            // changing the diff baseline. The worktree watcher doesn't detect soft resets
+            // (working tree/index unchanged), so staged status in cache becomes stale.
+            // Force a full HTTP reload to get fresh staged status.
+            onInvalidateDiff?.();
         } catch (e) {
             showToast(String(e));
         }
@@ -1711,6 +1716,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 activeThreadId = active.id;
                 updateThreadUrl(active.id);
             }
+            // Invalidate diff cache (same reason as handleDeleteRequest)
+            onInvalidateDiff?.();
         } catch (e) {
             showToast(String(e));
             return;
