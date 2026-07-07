@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"kanban/backend/types"
 )
 
 // findAgentBinary locates the sandbox-bridge binary for tests.
@@ -627,5 +629,47 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	}
 	if output != "hello\n" {
 		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	baseDir := t.TempDir()
+	// Use a nested path that does NOT exist yet
+	hostPath := filepath.Join(baseDir, "a", "b", "c")
+	taskID := "test-mount-createdir-task"
+
+	sandboxMounts := []types.SandboxMount{
+		{HostPath: hostPath, ContainerPath: "/mnt/custom", Mode: "rw"},
+	}
+
+	// Verify directory does not exist before Create
+	if _, err := os.Stat(hostPath); err == nil {
+		t.Fatal("host path should not exist before Create")
+	}
+
+	err, _ := sm.Create(taskID, baseDir, "", "test-proj", "", "", false, 0, nil, "", sandboxMounts)
+	if err != nil {
+		t.Fatalf("create sandbox with custom mount: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Verify the host directory was created
+	info, err := os.Stat(hostPath)
+	if err != nil {
+		t.Fatalf("host path was not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("expected host path to be a directory")
 	}
 }

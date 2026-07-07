@@ -333,8 +333,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 			continue
 		}
 		if _, err := os.Stat(hostPath); err != nil {
-			log.Printf("[sandbox] task=%s skipping mount: host path does not exist: %s", taskID, hostPath)
-			continue
+			if mkErr := os.MkdirAll(hostPath, 0o755); mkErr != nil {
+				log.Printf("[sandbox] task=%s skipping mount: cannot create host path %s: %v", taskID, hostPath, mkErr)
+				continue
+			}
+			log.Printf("[sandbox] task=%s created host directory %s", taskID, hostPath)
 		}
 		mode := m.Mode
 		if mode != "ro" && mode != "rw" {
