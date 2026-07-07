@@ -367,7 +367,7 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, task.ModelName)
 
 	labelMessages := []types.ChatMessage{
-		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a very concise commit message body. Explain key decisions ONLY IF changes include complex logic."},
+		{Role: "system", Content: "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."},
 		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
 	}
 
