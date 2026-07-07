@@ -326,9 +326,9 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-sbs-column diff-sbs-left">
                                         <div class="diff-sbs-scroll">
                                             {#each rows as row}
-                                                <div class="diff-sbs-line">
+                                                <div class="diff-sbs-line" class:removed={row.leftVariant === 'removed'}>
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
-                                                    <span class="diff-line-content" class:removed={row.leftVariant === 'removed'} class:context={row.leftVariant === 'context'}>
+                                                    <span class="diff-line-content">
                                                         {@html getHighlighted(file.path, row.leftText) || row.leftText}
                                                     </span>
                                                 </div>
@@ -339,9 +339,9 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-sbs-column diff-sbs-right">
                                         <div class="diff-sbs-scroll">
                                             {#each rows as row}
-                                                <div class="diff-sbs-line">
+                                                <div class="diff-sbs-line" class:added={row.rightVariant === 'added'}>
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
-                                                    <span class="diff-line-content" class:added={row.rightVariant === 'added'} class:context={row.rightVariant === 'context'}>
+                                                    <span class="diff-line-content">
                                                         {@html getHighlighted(file.path, row.rightText) || row.rightText}
                                                     </span>
                                                 </div>
@@ -535,16 +535,6 @@ import { slide } from 'svelte/transition';
         opacity: 0.3;
         cursor: default;
     }
-    /* Fullscreen toggle: visible only on tablets (768–1024px) */
-    .diff-fullscreen-toggle {
-        display: none;
-    }
-    @media (min-width: 768px) and (max-width: 1024px) {
-        .diff-fullscreen-toggle {
-            display: flex;
-        }
-    }
-
     .close-btn {
         width: 24px;
         height: 24px;
@@ -627,7 +617,6 @@ import { slide } from 'svelte/transition';
         border: 1px solid var(--color-border);
         border-top: none;
         border-radius: 0 0 6px 6px;
-        overflow: hidden;
     }
     .diff-file-header:hover {
         background: var(--color-surface-3);
@@ -731,7 +720,6 @@ import { slide } from 'svelte/transition';
         flex: 1;
         min-width: 0;
         border-right: 1px solid var(--color-border);
-        overflow: hidden;
     }
     .diff-sbs-column:last-child {
         border-right: none;
@@ -748,6 +736,12 @@ import { slide } from 'svelte/transition';
         font-size: 0.8125rem;
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
+    }
+    .diff-sbs-line.added .diff-line-num,
+    .diff-sbs-line.added .diff-line-content,
+    .diff-sbs-line.removed .diff-line-num,
+    .diff-sbs-line.removed .diff-line-content {
+        color: var(--color-text-primary);
     }
     .diff-line-num {
         width: 3.5rem;
@@ -766,17 +760,16 @@ import { slide } from 'svelte/transition';
         white-space: pre;
         color: var(--color-text-secondary);
         cursor: text;
+        overflow: visible;
     }
-    .diff-line-content.added {
+    /* Colored lines: background on content, expands to text width */
+    .diff-sbs-line.added .diff-line-content {
         background: rgba(63, 185, 80, 0.15);
-        color: var(--color-text-primary);
+        min-width: max-content;
     }
-    .diff-line-content.removed {
+    .diff-sbs-line.removed .diff-line-content {
         background: rgba(248, 81, 73, 0.15);
-        color: var(--color-text-primary);
-    }
-    .diff-line-content.context {
-        color: var(--color-text-secondary);
+        min-width: max-content;
     }
 
     /* Expand button for truncated files */
