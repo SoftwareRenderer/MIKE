@@ -1334,7 +1334,7 @@
     .port-host,
     .port-container {
         font-weight: 600;
-        color: #60a5fa;
+        color: var(--color-accent-light);
     }
 
     /* Remove buttons (ports + mounts) */
@@ -1507,7 +1507,7 @@
 
     .mount-container {
         font-weight: 600;
-        color: #60a5fa;
+        color: var(--color-accent-light);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1537,7 +1537,7 @@
 
     .mount-mode.mode-rw {
         background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
+        color: #FF7575;
     }
 
     .mount-add-row {
