@@ -1422,6 +1422,14 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     }
 
     async function handleSummarize() {
+        const confirmed = await showConfirm({
+            title: 'Compress Context',
+            message: 'This will summarize and remove older messages from the context window to reduce token usage. The summary will be inserted as a new message. Continue?',
+            confirmText: 'Compress',
+            cancelText: 'Cancel',
+            variant: 'default',
+        });
+        if (!confirmed) return;
         try {
             const result = await summarizeTask(projectId, taskId);
             // Update context usage after summarization
