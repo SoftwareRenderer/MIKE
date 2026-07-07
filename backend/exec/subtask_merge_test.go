@@ -179,7 +179,7 @@ func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
 	}
 }
 
-// TestMergeBranch_SubtaskMergesIntoParentBranch verifies that mergeBranch
+// TestMergeBranch_SubtaskMergesIntoParentBranch verifies that MergeBranch
 // correctly merges a subtask's branch into the parent's branch (not origin).
 func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
@@ -232,9 +232,9 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	parentTipBefore := strings.TrimSpace(string(out))
 
 	// Merge subtask into parent
-	err := te.mergeBranch(projectID, subtaskID, subtask)
+	err := te.MergeBranch(projectID, subtaskID, subtask)
 	if err != nil {
-		t.Fatalf("mergeBranch failed: %v", err)
+		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
 	// Verify the subtask's commit is now on the parent branch
@@ -312,9 +312,9 @@ func TestMergeBranch_SubtaskFallsBackToOriginWhenParentHasNoBranch(t *testing.T)
 	runGit(t, repoDir, "checkout", "master")
 
 	// Merge — should fall back to origin (master) since parent has no branch
-	err := te.mergeBranch(projectID, subtaskID, subtask)
+	err := te.MergeBranch(projectID, subtaskID, subtask)
 	if err != nil {
-		t.Fatalf("mergeBranch failed: %v", err)
+		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
 	// Verify the commit ended up on master (the fallback target)
@@ -500,9 +500,9 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 
 	// Step 3: Merge subtask into parent branch
 	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
-	err = te.mergeBranch(projectID, subtaskID, subtaskFromDB)
+	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
-		t.Fatalf("mergeBranch (subtask → parent) failed: %v", err)
+		t.Fatalf("MergeBranch (subtask → parent) failed: %v", err)
 	}
 
 	// Verify subtask changes are on parent branch but NOT on master.
@@ -544,9 +544,9 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 
 	// Step 6: Merge parent into origin (master)
 	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
-	err = te.mergeBranch(projectID, parentID, parentFromDB)
+	err = te.MergeBranch(projectID, parentID, parentFromDB)
 	if err != nil {
-		t.Fatalf("mergeBranch (parent → origin) failed: %v", err)
+		t.Fatalf("MergeBranch (parent → origin) failed: %v", err)
 	}
 
 	// Verify BOTH subtask and parent changes are on master
@@ -638,7 +638,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 
 	// Try to merge — should conflict
 	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
-	err = te.mergeBranch(projectID, subtaskID, subtaskFromDB)
+	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 
 	// Merge should fail because:
 	// 1. Git merge conflicts
@@ -824,5 +824,72 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	}
 	if parentFromDB.ExecutionState == "running" {
 		t.Error("parent should NOT be running — it was auto-started when it should stay in backlog")
+	}
+}
+
+// TestMergeBranch_CommitAndDonePath verifies that MergeBranch merges a subtask
+// into the parent branch, not origin.
+func TestMergeBranch_CommitAndDonePath(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent with an explicit branch
+	parentID := "parent-commit-done"
+	parent := &types.Task{
+		ID:             parentID,
+		ProjectID:      projectID,
+		Title:          "Parent Task",
+		Prompt:         "Parent prompt",
+		Status:         "backlog",
+		Branch:         "task/" + parentID,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(parent)
+
+	// Create parent branch in git
+	runGit(t, repoDir, "branch", parent.Branch)
+
+	// Create subtask
+	subtaskID := "subtask-commit-done"
+	subtask := &types.Task{
+		ID:             subtaskID,
+		ProjectID:      projectID,
+		Title:          "Subtask",
+		Prompt:         "Subtask prompt",
+		Status:         "review",
+		Branch:         "task/" + subtaskID,
+		ParentTaskID:   parentID,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(subtask)
+
+	// Create subtask branch from parent branch
+	runGit(t, repoDir, "branch", subtask.Branch, parent.Branch)
+
+	// Make a commit on the subtask branch
+	runGit(t, repoDir, "checkout", subtask.Branch)
+	subtaskFile := filepath.Join(repoDir, "commit_done_file.txt")
+	os.WriteFile(subtaskFile, []byte("subtask work from commit-and-done\n"), 0o644)
+	runGit(t, repoDir, "add", "commit_done_file.txt")
+	runGit(t, repoDir, "commit", "-m", "subtask work")
+
+	// Merge subtask
+	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
+	if err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// Verify the subtask's commit is on the parent branch
+	runGit(t, repoDir, "checkout", parent.Branch)
+	if _, err := os.Stat(subtaskFile); err != nil {
+		t.Fatalf("subtask file should exist on parent branch after merge: %v", err)
+	}
+
+	// Verify the commit is NOT on master (origin) — it should only be on parent
+	runGit(t, repoDir, "checkout", "master")
+	if _, err := os.Stat(subtaskFile); err == nil {
+		t.Error("subtask file should NOT exist on master — MergeBranch must target parent branch, not origin")
 	}
 }

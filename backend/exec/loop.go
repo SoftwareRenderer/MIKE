@@ -674,7 +674,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
 						// Merge into origin branch if auto_merge is enabled
 						if task.AutoMerge {
-							if err := te.mergeBranch(projectID, task.ID, task); err != nil {
+							if err := te.MergeBranch(projectID, task.ID, task); err != nil {
 								log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
 							}
 						}

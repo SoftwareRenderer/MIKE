@@ -653,14 +653,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// User-initiated commit-and-done: always merge into origin
-	var mergeErr error
-	mergeErr = h.mergeWorktreeIntoOrigin(projectID, taskID, task)
-	if mergeErr != nil {
+	// Merge task branch
+	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
-		// Log merge error as merge_resolution message (styled as error in UI)
-		h.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", mergeErr))
-		// Continue to move task to done even if merge fails
 	}
 
 	// Move task to Done

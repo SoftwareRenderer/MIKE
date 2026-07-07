@@ -850,7 +850,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 // worktree was created by ensureParentBranch), the merge is performed inside
 // that worktree instead of the main repo, since git won't allow checking out
 // a branch that's already used by a worktree.
-func (te *TaskExecutor) mergeBranch(projectID, taskID string, task *types.Task) error {
+func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
 		return fmt.Errorf("get project: %w", err)
