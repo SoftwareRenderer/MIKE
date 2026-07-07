@@ -293,13 +293,13 @@
         {:else if tc.result && tc.result.trim()}
             {#if resultNeedsTruncation}
                 <div class="tool-result-wrapper">
-                    <pre class="tool-result" class:tool-result-error={!tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
+                    <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
                     <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>
                         {resultLoading ? 'Loading...' : (resultExpanded ? 'Collapse' : `Show all (${bashResultStats.lineCount} lines, ${bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B'})`)}
                     </button>
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
+                <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'task_complete'}
