@@ -39,9 +39,15 @@
         </button>
         <div class="header-main">
             {#if sandboxEnabled !== undefined}
-                <button class="icon-btn" class:sandbox-badge-off={!sandboxEnabled} onclick={() => { showSandboxPanel = true; }} title={sandboxEnabled ? 'Sandbox enabled (click for details)' : 'Sandbox disabled'}>
-                    <img src={sandboxEnabled ? shieldIcon : shieldOffIcon} width="14" height="14" alt="" />
-                </button>
+                {#if sandboxEnabled}
+                    <button class="icon-btn" onclick={() => { showSandboxPanel = true; }} title="Sandbox enabled (click for details)">
+                        <img src={shieldIcon} width="14" height="14" alt="" />
+                    </button>
+                {:else}
+                    <span class="sandbox-badge" title="Sandbox disabled">
+                        <img src={shieldOffIcon} width="14" height="14" alt="" />
+                    </span>
+                {/if}
             {/if}
             <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', taskId)}>{getWorktreeDisplayPath(workspaceDir || '', taskId)}</span>
             <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
@@ -127,8 +133,13 @@
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
-    .sandbox-badge-off {
-        color: var(--color-status-red, #f85149);
+    .sandbox-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-tertiary);
     }
     .header-actions {
         display: flex;
