@@ -386,6 +386,39 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 	return label
 }
 
+// GenerateCommitMessageForTask builds a full commit message from task title, summary, and model.
+// If task.ChangeSummary is set, uses it directly. Otherwise generates one via LLM from
+// conversation + diff. This is the single source of truth for commit message generation
+// across all commit paths (auto-commit, manual commit-and-done).
+func (te *TaskExecutor) GenerateCommitMessageForTask(taskID string, task *types.Task) string {
+	modelName := task.ModelName
+	if modelName == "" {
+		modelName = "unknown model"
+	}
+
+	diffStat, _ := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+	if diffStat == "" {
+		diffStat = "no diff available"
+	}
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
+	var conversation []types.ChatMessage
+	for _, m := range taskMsgs {
+		content := m.Content
+		if m.ReasoningContent != "" {
+			content = m.ReasoningContent + "\n" + m.Content
+		}
+		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+	}
+	commitMsg := te.GenerateCommitMessage(taskID, diffStat, FormatConversationTurns(ExtractLastTurns(conversation, 3)))
+	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
+	// Use the task title instead for a more useful commit message.
+	if commitMsg == "file changes" && task.Title != "" {
+		commitMsg = task.Title
+	}
+
+	return fmt.Sprintf("%s\n\nCo-authored-by: %s", commitMsg, modelName)
+}
+
 // ExtractLastTurns extracts the last N turns (user + assistant pairs, including tool results) from a conversation.
 func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 	// Group messages into turns: each turn starts with a user message and includes

@@ -682,30 +682,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if summary, ok := args["summary"].(string); ok && summary != "" {
 						task.ChangeSummary = summary
 					}
-					modelName := activeModel
-					if modelName == "" {
-						modelName = "unknown model"
-					}
 					if task.AutoCommit {
-						summary := task.ChangeSummary
-						if summary == "" {
-							// Generate a descriptive label from conversation + diff
-							diffStat, err := te.worktreeMgr.GitRunInWorktreeOutput(task.ID, "diff", "--stat", "HEAD")
-							if err != nil {
-								diffStat = "no diff available"
-							}
-							summary = te.GenerateCommitMessage(task.ID, diffStat, FormatConversationTurns(ExtractLastTurns(lc.messages, 3)))
-						}
-						commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, modelName)
-						te.gitRun(worktreePath, "add", "-A")
-						unstageNewBinaryFilesInDir(worktreePath)
-						te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
-						// Merge into origin branch if auto_merge is enabled
-						if task.AutoMerge {
-							if err := te.MergeBranch(projectID, task.ID, task); err != nil {
-								log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
-							}
-						}
+						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
 						task.ExecutionState = "completed"
 						task.Status = "done"
 						if te.sandboxMgr != nil {

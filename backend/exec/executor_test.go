@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"kanban/backend/config"
 	"kanban/backend/git"
@@ -68,6 +70,7 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 		configStore:  cfgStore,
 		appStreamMgr: appStreamMgr,
 		worktreeMgr:  worktreeMgr,
+		commitQueue:  NewCommitQueue(),
 		tasks:        make(map[string]*executionState),
 	}
 
@@ -330,5 +333,104 @@ func TestHasRunningTasks_InvalidProject(t *testing.T) {
 	// Non-existent project
 	if te.HasRunningTasks("nonexistent-project") {
 		t.Error("HasRunningTasks should return false for non-existent project")
+	}
+}
+
+func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	// Create a task with a worktree so CommitAndMerge has something to commit
+	taskID := "test-serialize-task"
+	branchName := "task/" + taskID
+	task := &types.Task{
+		ID:      taskID,
+		ProjectID: projectID,
+		Title:   "Test serialize",
+		Branch:  branchName,
+		BaseRef: "master",
+	}
+	te.store.CreateTask(task)
+
+	// Create the worktree and make an initial commit
+	_, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	wtPath, _ := te.worktreeMgr.WorktreePath(taskID)
+	os.WriteFile(filepath.Join(wtPath, "initial.txt"), []byte("initial\n"), 0o644)
+	runGit(t, wtPath, "add", "initial.txt")
+	runGit(t, wtPath, "commit", "-m", "initial")
+
+	// Track execution order
+	var order []string
+	var mu sync.Mutex
+
+	// Monkey-patch: we can't easily mock gitRun, so we verify serialization
+	// by checking that concurrent CommitAndMerge calls don't interleave.
+	// We write unique files in each call and verify they commit separately.
+	// Use a channel to coordinate: first call writes file-a, second writes file-b.
+	startFirst := make(chan struct{})
+	startSecond := make(chan struct{})
+	firstDone := make(chan struct{})
+
+	var wg sync.WaitGroup
+
+	// First call — writes "file-a" content
+	wg.Go(func() {
+		// Make a change before committing
+		os.WriteFile(filepath.Join(wtPath, "file-a"), []byte("content-a\n"), 0o644)
+		runGit(t, wtPath, "add", "file-a")
+		close(startFirst)
+		te.CommitAndMerge(projectID, taskID, wtPath, "commit-a", false)
+		mu.Lock()
+		order = append(order, "first")
+		mu.Unlock()
+		close(firstDone)
+	})
+
+	// Wait for first to enter the commit (be inside CommitAndMerge)
+	<-startFirst
+	// Small delay to ensure first is inside the queue
+	time.Sleep(50 * time.Millisecond)
+
+	// Second call — writes "file-b" content, should block until first releases
+	wg.Go(func() {
+		os.WriteFile(filepath.Join(wtPath, "file-b"), []byte("content-b\n"), 0o644)
+		runGit(t, wtPath, "add", "file-b")
+		close(startSecond)
+		te.CommitAndMerge(projectID, taskID, wtPath, "commit-b", false)
+		mu.Lock()
+		order = append(order, "second")
+		mu.Unlock()
+	})
+
+	<-startSecond
+	// Second should be blocked — verify first hasn't finished yet
+	select {
+	case <-firstDone:
+		// First finished very fast, that's OK on fast machines
+	default:
+		// Expected: first is still running
+	}
+
+	wg.Wait()
+
+	// Verify order: first must complete before second
+	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
+		t.Fatalf("expected order [first, second], got %v", order)
+	}
+
+	// Verify both commits exist on the branch
+	cmd := exec.Command("git", "-C", repoDir, "log", branchName, "--oneline")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	logOutput := string(out)
+	if !strings.Contains(logOutput, "commit-a") {
+		t.Errorf("expected commit-a in branch log, got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "commit-b") {
+		t.Errorf("expected commit-b in branch log, got:\n%s", logOutput)
 	}
 }

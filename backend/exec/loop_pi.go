@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/pi"
 	"kanban/backend/stream"
@@ -494,20 +493,8 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		task.Output = "Pi Coding Agent was aborted"
 	} else if task.AutoCommit {
 		// Commit changes
-		summary := task.ChangeSummary
-		if summary == "" {
-			summary = task.Title
-		}
-		commitMsg := fmt.Sprintf("%s\n\n%s\n\nCo-authored-by: %s", task.Title, summary, client.ModelName())
-		te.gitRun(worktreePath, "add", "-A")
-		unstageNewBinaryFilesInDir(worktreePath)
-		te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
-		// Merge into origin branch if auto_merge is enabled
-		if task.AutoMerge {
-			if err := te.MergeBranch(projectID, task.ID, task); err != nil {
-				log.Printf("[auto-commit] task=%s merge failed: %v", task.ID, err)
-			}
-		}
+		commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+		te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
 		task.ExecutionState = "completed"
 		task.Status = "done"
 		if te.sandboxMgr != nil {

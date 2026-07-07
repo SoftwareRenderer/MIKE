@@ -33,6 +33,7 @@ type TaskExecutor struct {
 	appStreamMgr *stream.AppStreamManager
 	worktreeMgr  *git.WorktreeManager
 	sandboxMgr   *sandboxmgr.SandboxManager
+	commitQueue  *CommitQueue
 	gate         *ConcurrencyGate
 	taskMu       sync.Mutex
 	tasks        map[string]*executionState
@@ -79,13 +80,14 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, commitQueue *CommitQueue) *TaskExecutor {
 	te := &TaskExecutor{
 		store:        store,
 		configStore:  configStore,
 		appStreamMgr: appStreamMgr,
 		worktreeMgr:  worktreeMgr,
 		sandboxMgr:   sandboxMgr,
+		commitQueue:  commitQueue,
 		gate:         NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
@@ -840,6 +842,24 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
 	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts)
+}
+
+// CommitAndMerge commits worktree changes and optionally merges the task branch.
+// Operations are serialized per project via the commit queue to prevent git race conditions.
+func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) {
+	release := te.commitQueue.Acquire(projectID)
+	defer release()
+
+	te.gitRun(worktreePath, "add", "-A")
+	unstageNewBinaryFilesInDir(worktreePath)
+	te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
+
+	if autoMerge {
+		task, _ := te.store.GetTaskByTaskID(taskID)
+		if err := te.MergeBranch(projectID, taskID, task); err != nil {
+			log.Printf("[auto-commit] task=%s merge failed: %v", taskID, err)
+		}
+	}
 }
 
 // mergeBranch merges the task's branch into the target branch.

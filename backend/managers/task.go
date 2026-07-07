@@ -509,27 +509,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 // generateCommitMessage builds a commit message from task title, summary, and model.
 // If task.ChangeSummary is empty, generates one via LLM from conversation + diff.
 func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) string {
-	modelName := task.ModelName
-	if modelName == "" {
-		modelName = "unknown model"
-	}
-
-	diffStat, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-	if diffStat == "" {
-		diffStat = "no diff available"
-	}
-	taskMsgs, _ := h.store.GetTaskMessages(taskID, task.CurrentThreadID)
-	var conversation []types.ChatMessage
-	for _, m := range taskMsgs {
-		content := m.Content
-		if m.ReasoningContent != "" {
-			content = m.ReasoningContent + "\n" + m.Content
-		}
-		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-	}
-	commitMsg := h.executor.GenerateCommitMessage(taskID, diffStat, exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3)))
-
-	return fmt.Sprintf("%s\n\nCo-authored-by: %s", commitMsg, modelName)
+	return h.executor.GenerateCommitMessageForTask(taskID, task)
 }
 
 // resolveGitAuthor returns the effective git author name/email.
