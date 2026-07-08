@@ -45,9 +45,9 @@
         formatToolArgs?: (toolName: string, args: Record<string, unknown>) => string;
         onCopy?: () => void;
         onDelete?: () => void;
-        onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
-        onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
-        onEdit?: (messageId: string, newContent: string) => void;
+        onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
+        onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
+        onEdit?: (messageId: string, newContent: string) => Promise<void>;
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
@@ -195,6 +195,7 @@
     }
 
     let isEditing = $state(false);
+    let isSubmitting = $state(false);
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
     let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
@@ -378,18 +379,22 @@
         editAttachments = [];
     }
 
-    function submitEdit() {
+    async function submitEdit() {
         if (editContent.trim() && messageId) {
-            if (onEdit) {
-                onEdit(messageId, editContent.trim());
-            } else if (isFirstUserMessage) {
-                onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
-            } else if (isLastUserMessage && onSend) {
-                onSend(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
-            } else {
-                onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
+            isSubmitting = true;
+            try {
+                if (onEdit) {
+                    await onEdit(messageId, editContent.trim());
+                } else if (isFirstUserMessage) {
+                    await onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
+                } else if (isLastUserMessage && onSend) {
+                    await onSend(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
+                } else {
+                    await onFork?.(messageId, content, editContent.trim(), editAttachments.length > 0 ? editAttachments : undefined);
+                }
+            } finally {
+                isEditing = false;
             }
-            isEditing = false;
         }
     }
 
@@ -422,7 +427,7 @@
         }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            submitEdit();
+            if (!isSubmitting) submitEdit();
         } else if (e.key === 'Escape') {
             e.preventDefault();
             cancelEdit();
@@ -467,8 +472,10 @@
                             </svg>
                         </button>
                         <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
-                        <button class="btn-edit-submit" onclick={submitEdit} title="{isFirstUserMessage && taskStatus === 'backlog' ? 'Save changes' : 'Send'}">
-                            {#if isFirstUserMessage && taskStatus === 'backlog'}
+                        <button class="btn-edit-submit" onclick={submitEdit} disabled={isSubmitting} title="{isFirstUserMessage && taskStatus === 'backlog' ? 'Save changes' : 'Send'}">
+                            {#if isSubmitting}
+                                <span class="spinner-inline"></span>
+                            {:else if isFirstUserMessage && taskStatus === 'backlog'}
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="20 6 9 17 4 12"/>
                                 </svg>
@@ -561,17 +568,21 @@
                     <textarea
                         bind:this={textareaEl}
                         bind:value={editContent}
-                        onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
+                        onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isSubmitting) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
                         rows="5"
                         aria-label="Edit message content"
                     ></textarea>
                     <div class="edit-actions">
                         <button class="btn-edit-cancel" onclick={cancelEdit} title="Cancel editing">Cancel</button>
-                        <button class="btn-edit-submit" onclick={submitEdit} title="Save changes">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <polyline points="20 6 9 17 4 12"/>
-                            </svg>
-                            Save
+                        <button class="btn-edit-submit" onclick={submitEdit} disabled={isSubmitting} title="Save changes">
+                            {#if isSubmitting}
+                                <span class="spinner-inline"></span>
+                            {:else}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                                Save
+                            {/if}
                         </button>
                     </div>
                 </div>
@@ -730,13 +741,19 @@
             <textarea
                 bind:this={mobileEditTextarea}
                 bind:value={editContent}
-                onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
+                onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isSubmitting) { e.preventDefault(); submitEdit(); } else if (e.key === 'Escape') { cancelEdit(); } }}
                 rows="8"
                 aria-label="Edit message content"
             ></textarea>
             <div class="edit-modal-footer">
                 <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>Cancel</button>
-                <button type="button" class="edit-save-btn" onclick={submitEdit}>Save</button>
+                <button type="button" class="edit-save-btn" onclick={submitEdit} disabled={isSubmitting}>
+                    {#if isSubmitting}
+                        <span class="spinner-inline"></span>
+                    {:else}
+                        Save
+                    {/if}
+                </button>
             </div>
         </div>
     </dialog>
@@ -1192,6 +1209,20 @@
     .btn-edit-submit:hover {
         opacity: 0.85;
     }
+    .btn-edit-submit:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+    .spinner-inline {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .cursor-blink {
         display: inline-block;
         width: 2px;
@@ -1302,6 +1333,10 @@
     }
     .edit-save-btn:hover {
         opacity: 0.85;
+    }
+    .edit-save-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
     }
 
 

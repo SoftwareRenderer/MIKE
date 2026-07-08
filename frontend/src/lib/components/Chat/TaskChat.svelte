@@ -281,11 +281,11 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (idx === 0) return; // first message cannot be deleted
         handleDeleteRequest(entry.id, entries.length - idx);
     }
-    function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
-        handleEditFork(msgId, origContent, newContent, atts);
+    async function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        await handleEditFork(msgId, origContent, newContent, atts);
     }
-    function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
-        handleEditSend(msgId, origContent, newContent, atts);
+    async function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        await handleEditSend(msgId, origContent, newContent, atts);
     }
     async function handleMsgEdit(msgId: string, newContent: string) {
         await updateTaskMessage(projectId, taskId, msgId, newContent);

@@ -66,8 +66,8 @@
         onRetryConnect: () => void;
         onThreadSwitch: (threadId: string) => Promise<void>;
         onMsgDelete: (entry: ChatEntry) => void;
-        onMsgFork: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => void;
-        onMsgSend: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => void;
+        onMsgFork: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
+        onMsgSend: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onMsgEdit: (msgId: string, newContent: string) => Promise<void>;
         onRegenerate: (entryId: string) => Promise<void>;
         onNavigateTask: (targetTaskId: string) => void;
