@@ -42,7 +42,8 @@ const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
 const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
 const AUTH_FILE = '/tmp/kanban-test-auth.json';
-const KANBAN_BIN = path.join(PROJECT_ROOT, 'kanban');
+const KANBAN_BIN = 'go';
+const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
@@ -59,7 +60,7 @@ async function setup(): Promise<void> {
     // 4. Start fresh kanban server with test database
     console.log('[global-setup] Starting test kanban server...');
     // Use setsid to start server in a new session (truly independent of this process)
-    kanbanServer = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB], {
+    kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '-db-path', TEST_DB], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
@@ -135,7 +136,7 @@ async function setup(): Promise<void> {
 
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');
-    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, '-db-path', TEST_DB_ISOLATED], {
+    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '-db-path', TEST_DB_ISOLATED], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
