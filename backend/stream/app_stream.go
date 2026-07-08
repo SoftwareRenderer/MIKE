@@ -971,17 +971,24 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"untracked_n":     len(diffResult.Untracked),
 				"untracked_lines": untrackedLines,
 				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
+				"removed_files":   nil,
+				"staged_paths":    filterInternalPathsFromList(diffResult.StagedPaths),
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
 			client.writeMu.Unlock()
 
 		// Send manifest for detail view (per-file metadata, no diff content)
+		stagedSet := make(map[string]struct{}, len(diffResult.StagedPaths))
+		for _, p := range diffResult.StagedPaths {
+			stagedSet[p] = struct{}{}
+		}
 		files := make(map[string]map[string]any)
 		for path, f := range diffResult.Tracked {
 			if isInternalFile(path) {
 				continue
 			}
+			_, isStaged := stagedSet[path]
 			entry := map[string]any{
 				"hash":        git.ComputeFileHash(f),
 				"type":        "tracked",
@@ -990,6 +997,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"truncated":   f.Truncated,
 				"origAdded":   f.OrigAdded,
 				"origRemoved": f.OrigRemoved,
+				"staged":      isStaged,
 			}
 			if f.FileSize != nil {
 				entry["file_size"] = *f.FileSize

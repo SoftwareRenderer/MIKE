@@ -430,6 +430,7 @@
         if (previousTaskId && taskId !== previousTaskId) {
             // Task changed — reload diff and reset state
             diffTracker.hash = null;
+            diffTracker.stagedPathsKey = '';
             diffFileCache = {};
             untrackedCache = {};
             diffFileHashes = {};
@@ -698,7 +699,7 @@
     // Delta events are only processed after the initial load completes to prevent
     // stale fetchChangedFiles responses from overwriting fresh delta data.
     // Plain object (not $state) to avoid re-triggering $effect on writes.
-    let diffTracker = { hash: null as string | null };
+    let diffTracker = { hash: null as string | null, stagedPathsKey: '' };
     // Per-file hash tracker for incremental updates
     let diffFileHashes = $state<Record<string, string>>({});
     // Gate: delta processing only starts after the initial load is fully done.
@@ -706,15 +707,23 @@
     $effect(() => {
         const stat = diffStatsMap[task.id];
         const currentHash = stat?.hash || null;
+        const stagedPaths = stat?.staged_paths;
+        // Serialize staged_paths for change detection (sorted for determinism).
+        // Tracked separately from hash because staged_paths can change without
+        // the diff hash changing (e.g., git add then git reset of same content).
+        const stagedKey = stagedPaths ? [...stagedPaths].sort().join('\n') : '';
+        const hashChanged = currentHash !== diffTracker.hash;
+        const stagedChanged = stagedKey !== diffTracker.stagedPathsKey;
+
         // Skip processing while loadDiff() is in progress. The full reload will
         // provide authoritative data; delta events during a reload would corrupt
         // the cache by replacing fetched rows with empty metadata.
         if (diffLoading) return;
-        if (currentHash !== diffTracker.hash) {
+
+        if (hashChanged) {
             diffTracker.hash = currentHash;
             const fileHashes = stat?.file_hashes;
             const removedFiles = stat?.removed_files || [];
-            const stagedPaths = stat?.staged_paths;
 
             // Remove deleted files from cache
             if (removedFiles.length > 0) {
@@ -737,22 +746,25 @@
                 untrackedCache = {};
                 diffFileHashes = {};
                 diffInitialLoaded = false;
+                diffTracker.stagedPathsKey = '';
                 return;
             }
 
-            // Update staged status in-place
-            if (stagedPaths) {
-                const stagedSet = new Set(stagedPaths);
+            // Update staged status in-place.
+            // stagedPaths can be null (no files staged) — always update to stay in sync.
+            if (Object.keys(diffFileCache).length > 0) {
+                const stagedSet = stagedPaths ? new Set(stagedPaths) : new Set();
                 const updated: Record<string, DiffFile> = {};
                 for (const [path, entry] of Object.entries(diffFileCache)) {
                     updated[path] = { ...entry, staged: stagedSet.has(path) };
                 }
                 diffFileCache = updated as Record<string, DiffFile>;
                 diffCacheVersion++;
+                diffTracker.stagedPathsKey = stagedKey;
+            }
 
-                if (!fileHashes || Object.keys(fileHashes).length === 0) {
-                    return;
-                }
+            if (!fileHashes || Object.keys(fileHashes).length === 0) {
+                return;
             }
 
             // Delta fetch for changed files
@@ -762,6 +774,17 @@
                 const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
                 fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
             }
+        } else if (stagedChanged && Object.keys(diffFileCache).length > 0) {
+            // staged_paths changed without hash change — update staged flags only.
+            // stagedPaths can be null (no files staged) — empty Set means all files get staged:false.
+            diffTracker.stagedPathsKey = stagedKey;
+            const stagedSet = stagedPaths ? new Set(stagedPaths) : new Set();
+            const updated: Record<string, DiffFile> = {};
+            for (const [path, entry] of Object.entries(diffFileCache)) {
+                updated[path] = { ...entry, staged: stagedSet.has(path) };
+            }
+            diffFileCache = updated as Record<string, DiffFile>;
+            diffCacheVersion++;
         }
     });
 
@@ -858,12 +881,12 @@
             // Mark initial load complete — delta processing can now start.
             diffInitialLoaded = true;
             // Apply any pending staged_paths from a WebSocket broadcast that
-            // arrived during the load (the effect was blocked by !diffInitialLoaded).
+            // arrived during the load (the effect was blocked by diffLoading).
             // This must happen BEFORE syncing the tracker, otherwise the effect
             // would skip processing (currentHash === diffTracker.hash).
             const stat = diffStatsMap[task.id];
-            if (stat?.staged_paths && Object.keys(diffFileCache).length > 0) {
-                const stagedSet = new Set(stat.staged_paths);
+            if (stat && Object.keys(diffFileCache).length > 0) {
+                const stagedSet = stat.staged_paths ? new Set(stat.staged_paths) : new Set();
                 const updated: Record<string, DiffFile> = {};
                 for (const [path, entry] of Object.entries(diffFileCache)) {
                     updated[path] = { ...entry, staged: stagedSet.has(path) };
@@ -874,6 +897,8 @@
             // Sync tracker with current store value so a pending WebSocket
             // diffStats event doesn't trigger a redundant re-fetch.
             diffTracker.hash = stat?.hash || null;
+            const sp = stat?.staged_paths;
+            diffTracker.stagedPathsKey = sp ? [...sp].sort().join('\n') : '';
         }
     }
 
@@ -919,8 +944,11 @@
         for (const [path, entry] of Object.entries(manifest)) {
             // Skip blank untracked files (no content to fetch)
             if (entry.type === 'untracked' && (entry.line_count ?? 0) === 0) continue;
-            // Skip if hash unchanged and rows already cached
-            if (oldHashes && oldHashes[path] === entry.hash && diffFileCache[path]?.rows && diffFileCache[path].rows.length > 0) continue;
+            // Skip if hash unchanged, rows already cached, and staged status matches.
+            // Staged status can change without content changing (git add/reset).
+            const cachedEntry = diffFileCache[path];
+            const stagedMatch = cachedEntry?.staged === (entry.staged ?? false);
+            if (oldHashes && oldHashes[path] === entry.hash && cachedEntry?.rows && cachedEntry.rows.length > 0 && stagedMatch) continue;
             // Skip if file transitioned from untracked → tracked with same content.
             // Content is identical (all additions), so convert cached lines to rows locally.
             if (entry.type === 'tracked' && untrackedCache[path] && diffFileCache[path]?.rows && diffFileCache[path].rows.length > 0) {
@@ -942,7 +970,7 @@
                     if (data.rows) {
                         updatedDiff[path] = { path, rows: enrichRowsWithInlineSegments(data.rows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded };
+                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, staged: entry.staged ?? false };
                         updatedUntracked[path] = true;
                     } else if (data.isBinary || data.fileSize) {
                         // Binary/large file — no rows but has metadata
