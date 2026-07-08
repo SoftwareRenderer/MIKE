@@ -58,12 +58,7 @@
     }
 
     // --- Drag-and-drop for board overview ---
-    let draggedTaskId: string | null = $state(null);
     let sectionDragState = $state<Map<string, { isOver: boolean; isRejected: boolean }>>(new Map());
-
-    function handleDragStart(taskId: string) {
-        draggedTaskId = taskId;
-    }
 
     /** Walk up the ancestor chain to check if any ancestor is In Progress. */
     function hasAncestorInProgress(task: Task): boolean {
@@ -112,7 +107,6 @@
         if (!task || task.status === targetStatus) return;
         if (!canDrop(taskId, targetStatus)) {
             showToast('Cannot move to Backlog: parent task is In Progress', 'error');
-            draggedTaskId = null;
             return;
         }
         try {
@@ -130,7 +124,6 @@
             console.error('Failed to move task:', err);
             showToast('Failed to move task: ' + String(err), 'error');
         }
-        draggedTaskId = null;
     }
 
     async function handleClearDone(count: number) {

@@ -86,7 +86,7 @@ function toPlain<T>(value: T): T {
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 /** Open (or create) the kanban-storage IndexedDB database. */
-export function openDB(): Promise<IDBDatabase> {
+function openDB(): Promise<IDBDatabase> {
     if (dbPromise) return dbPromise;
 
     dbPromise = new Promise((resolve, reject) => {
@@ -308,11 +308,6 @@ export async function saveUnsavedFiles(projectId: string, paths: string[]): Prom
     return dbPut(STORE_UNSAVED_FILES, projectId, paths);
 }
 
-/** Remove unsaved files entry for a project. */
-export async function clearUnsavedFiles(projectId: string): Promise<void> {
-    return dbDelete(STORE_UNSAVED_FILES, projectId);
-}
-
 // ─── Explorer layout (IndexedDB: explorer-layout store) ─────────────────────
 
 export interface ExplorerLayout {
@@ -356,13 +351,6 @@ export async function loadCollapsedTasks(): Promise<Set<string>> {
 /** Save collapsed task IDs. */
 export async function saveCollapsedTasks(ids: Set<string>): Promise<void> {
     return dbPut(STORE_COLLAPSED_TASKS, KEY_IDS, [...ids]);
-}
-
-/** Remove collapsed state for a specific task. */
-export async function clearCollapsedTask(taskId: string): Promise<void> {
-    const collapsed = await loadCollapsedTasks();
-    collapsed.delete(taskId);
-    await saveCollapsedTasks(collapsed);
 }
 
 // ─── Collapsed board sections (IndexedDB: collapsed-sections store) ─────────
@@ -435,11 +423,6 @@ export async function loadAppSetting<T>(key: string, defaultValue: T): Promise<T
 /** Save an app setting by key. */
 export async function saveAppSetting<T>(key: string, value: T): Promise<void> {
     return dbPut(STORE_APP_SETTINGS, key, value);
-}
-
-/** Clear an app setting by key. */
-export async function clearAppSetting(key: string): Promise<void> {
-    return dbDelete(STORE_APP_SETTINGS, key);
 }
 
 // ─── Collapsed diff files (IndexedDB: collapsed-diff-files store) ────────────
@@ -605,19 +588,4 @@ export async function getBoardCache<T>(key: string): Promise<T | null> {
     return entry ? (entry.data as T) : null;
 }
 
-/** Get the age of a cached entry in ms. Returns `Infinity` if not cached. */
-export async function getCacheAge(key: string): Promise<number> {
-    const entry = await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key);
-    if (!entry) return Infinity;
-    return Date.now() - entry.cachedAt;
-}
 
-/** Remove a board cache entry. */
-export async function clearBoardCache(key: string): Promise<void> {
-    return dbDelete(STORE_BOARD_CACHE, key);
-}
-
-/** Remove all board cache entries for a project (board + related task data). */
-export async function clearProjectCache(projectId: string): Promise<void> {
-    await dbDelete(STORE_BOARD_CACHE, boardCacheKey(projectId));
-}

@@ -199,10 +199,6 @@
         sandboxMounts = sandboxMounts.filter((_, i) => i !== index);
     }
 
-    function getDockerfileName(path: string): string {
-        return path.split('/').pop() || path;
-    }
-
     async function handleRebuild() {
         if (!sandboxDockerfilePath || building) return;
         building = true;

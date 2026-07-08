@@ -77,12 +77,6 @@ export async function getDiffFile(projectId: string, taskId: string, path: strin
     return res.json();
 }
 
-/** Fetch the content of a single untracked file from the cached diff. (legacy) */
-export async function getUntrackedFileContent(projectId: string, taskId: string, path: string): Promise<string[]> {
-    const data = await getDiffFile(projectId, taskId, path);
-    return data.lines || [];
-}
-
 /** Reset a task's worktree to a specific commit. Queued when offline. */
 export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
     if (getOfflineStatus()) {

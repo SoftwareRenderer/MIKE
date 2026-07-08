@@ -29,6 +29,7 @@ export type { QueuedAction, ActionType } from './queue';
 
 // -- Projects --
 export {
+    getProject,
     getProjects,
     getProjectCounts,
     getProjectStats,
@@ -37,10 +38,10 @@ export {
     updateProject,
     buildSandboxImage,
     buildSandboxImageStream,
+    validateForwardPorts,
     deleteProject,
     getBoard,
     reorderTasks,
-    isFromCache,
 } from './projects';
 
 // -- Tasks --
@@ -95,8 +96,8 @@ export {
     getTaskDiff,
     getTaskCommits,
     getDiffFile,
-    getUntrackedFileContent,
     resetWorktree,
+    stageFile,
     getGitLogFull,
     getCommitDiff,
     getGitBranches,

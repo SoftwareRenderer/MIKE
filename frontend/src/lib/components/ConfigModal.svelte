@@ -182,13 +182,6 @@ import { slide } from 'svelte/transition';
         providers[idx].expanded = !providers[idx].expanded;
     }
 
-    function handleProviderHeaderKeydown(e: KeyboardEvent, idx: number) {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            toggleProvider(idx);
-        }
-    }
-
     async function testProviderConnection(idx: number) {
         const p = providers[idx];
         p.testingConnection = true;
