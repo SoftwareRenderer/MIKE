@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -303,11 +304,12 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		}
 
 		taskForLabel, _ := te.store.GetTaskByTaskID(taskID)
-		branchPrefix := ""
+		branchName := ""
 		if taskForLabel != nil && taskForLabel.Branch != "" {
-			branchPrefix = "On " + taskForLabel.Branch + ": "
+			branchName = taskForLabel.Branch
 		}
-		label := branchPrefix + te.GenerateCommitMessage(taskID, diffStat, turnText)
+		commitMsg := te.GenerateCommitMessage(taskID, diffStat, turnText)
+		label := git.StashMessageForCheckpoint(taskID, branchName, commitMsg)
 
 		// Check for cancellation before git operations
 		select {

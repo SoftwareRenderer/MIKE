@@ -2,10 +2,13 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"kanban/backend/git"
 	"kanban/backend/types"
 )
 
@@ -1383,4 +1386,230 @@ func TestTaskDeleteKeepsActiveTaskBranches(t *testing.T) {
 	if strings.TrimSpace(string(out)) == "" {
 		t.Error("active task branch should be kept after other task is deleted")
 	}
+}
+
+// TestTaskDeleteCleansStashes verifies that deleting a task removes all
+// kanban-labeled stash entries from the project's git repo.
+func TestTaskDeleteCleansStashes(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a real git repo
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "stash-cleanup-test", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create kanban-labeled stash entries (simulating stale stashes from crashes)
+	// Need working tree changes for git stash push to work
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID, "thread-abc"))
+
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("b\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForFork(taskID, "thread-def"))
+
+	// Also create a stash for a different task — should NOT be removed
+	otherTaskID := "other-task-xyz"
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("c\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(otherTaskID, "thread-ghi"))
+
+	// Verify stashes exist
+	stashList := gitListStashes(t, tmpDir)
+	if len(stashList) != 3 {
+		t.Fatalf("expected 3 stashes before delete, got %d: %v", len(stashList), stashList)
+	}
+
+	// Delete the task
+	deleteReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	deleteRR := testResponseAuth(t, s, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	// Verify our task's stashes are gone but the other task's stash remains
+	stashList = gitListStashes(t, tmpDir)
+	for _, subject := range stashList {
+		if strings.Contains(subject, taskID) {
+			t.Errorf("stash for deleted task %s should be gone, found: %s", taskID, subject)
+		}
+	}
+	foundOther := false
+	for _, subject := range stashList {
+		if strings.Contains(subject, otherTaskID) {
+			foundOther = true
+			break
+		}
+	}
+	if !foundOther {
+		t.Errorf("stash for other task %s should remain, got: %v", otherTaskID, stashList)
+	}
+}
+
+// TestTaskDeleteCleansStashes_NoBranch verifies stash cleanup runs even when
+// the task has no branch (created but never started).
+func TestTaskDeleteCleansStashes_NoBranch(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "stash-cleanup-nobranch", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task (no branch — never started)
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create kanban-labeled stash entries (simulating stale stashes)
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID, "thread-abc"))
+
+	// Verify stash exists
+	stashList := gitListStashes(t, tmpDir)
+	if len(stashList) != 1 {
+		t.Fatalf("expected 1 stash before delete, got %d: %v", len(stashList), stashList)
+	}
+
+	// Delete the task (has no branch)
+	deleteReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	deleteRR := testResponseAuth(t, s, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	// Verify stash is gone
+	stashList = gitListStashes(t, tmpDir)
+	if len(stashList) != 0 {
+		t.Errorf("expected 0 stashes after delete, got %d: %v", len(stashList), stashList)
+	}
+}
+
+// TestTaskDeleteCleansCheckpointStashes verifies that checkpoint-style stashes
+// (created via git stash create + stash store) are also cleaned up on task deletion.
+func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "stash-cleanup-checkpoint", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task and start it (create branch)
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create a branch and update the task (simulating task start)
+	branchName := "task/" + taskID
+	mustRunGit(t, tmpDir, "branch", branchName)
+	task, _ := s.store.GetTask(projID, taskID)
+	task.Branch = branchName
+	s.store.UpdateTask(task)
+
+	// Create checkpoint-style stashes with kanban-labeled messages.
+	// This is how the executor saves worktree state during execution.
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint1\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	hash1 := mustRunGitOutput(t, tmpDir, "stash", "create")
+	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName, "checkpoint 1"), hash1)
+
+	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint2\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "change.txt")
+	hash2 := mustRunGitOutput(t, tmpDir, "stash", "create")
+	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName, "checkpoint 2"), hash2)
+
+	// Verify stashes exist
+	stashList := gitListStashes(t, tmpDir)
+	if len(stashList) < 2 {
+		t.Fatalf("expected at least 2 stashes before delete, got %d: %v", len(stashList), stashList)
+	}
+
+	// Delete the task
+	deleteReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	deleteRR := testResponseAuth(t, s, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("delete task: expected 204, got %d %s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	// Verify checkpoint stashes are gone (matched by task ID in kanban-checkpoint label)
+	stashList = gitListStashes(t, tmpDir)
+	for _, subject := range stashList {
+		if strings.Contains(subject, taskID) {
+			t.Errorf("checkpoint stash for task %s should be gone, found: %s", taskID, subject)
+		}
+	}
+}
+
+// gitListStashes returns the list of stash subjects from a git repo.
+// Uses %gs (reflog subject) which shows the actual stash message.
+func gitListStashes(t *testing.T, dir string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "stash", "list", "--format=%gs")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil // no stashes
+	}
+	var subjects []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			subjects = append(subjects, line)
+		}
+	}
+	return subjects
 }

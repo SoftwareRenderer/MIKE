@@ -757,15 +757,11 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.worktreeMgr != nil && taskErr == nil {
 		if task.Branch != "" {
 			h.boardStreamMgr.UnwatchWorktree(taskID)
-			// Clean up stash entries belonging to this task
-			_ = h.worktreeMgr.DropStashEntriesForBranch(task.ProjectID, task.Branch)
-			_ = h.worktreeMgr.DropStashEntriesForTask(task.ProjectID, task.ID)
 			if err := h.worktreeMgr.RemoveWorktree(task.ProjectID, taskID, task.Branch); err != nil {
 				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
 			}
 		}
 		// Clean up fork thread branches (thread/<threadID>) before DB CASCADE deletes thread rows.
-		// Runs even when task.Branch is empty (e.g., task was created but never started).
 		threads, _ := h.store.GetThreadsByTask(taskID)
 		for _, th := range threads {
 			if th.GitBranch != "" {
@@ -784,6 +780,23 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		if taskErr == nil {
 			projectID = task.ProjectID
 			_ = h.store.DeleteTask(task.ProjectID, taskID)
+		}
+	}
+	// Clean up stash entries for all branches associated with this task.
+	// A task may have stashes on its original branch (task/<taskID>), its current
+	// branch (which may be a fork), and thread branches (thread/<threadID>).
+	// Runs after DB delete so it works even when the initial task lookup failed.
+	if h.worktreeMgr != nil && projectID != "" {
+		_ = h.worktreeMgr.DropStashEntriesForTask(projectID, taskID)
+		// Also clean branch-labeled stashes (non-kanban stashes from agent operations).
+		var branchesToClean []string
+		originalBranch := fmt.Sprintf("task/%s", taskID)
+		branchesToClean = append(branchesToClean, originalBranch)
+		if taskErr == nil && task.Branch != "" && task.Branch != originalBranch {
+			branchesToClean = append(branchesToClean, task.Branch)
+		}
+		for _, branch := range branchesToClean {
+			_ = h.worktreeMgr.DropStashEntriesForBranch(projectID, branch)
 		}
 	}
 	// Prune any orphaned git branches (task/*, thread/*) that no longer have

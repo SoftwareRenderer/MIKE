@@ -195,6 +195,18 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// mustRunGitOutput runs a git command and returns its stdout, failing on error.
+func mustRunGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %s: %v", args, string(out), err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // createTestTask creates a task via the API and returns its ID.
 func createTestTask(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()

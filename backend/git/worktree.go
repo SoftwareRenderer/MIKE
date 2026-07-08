@@ -417,7 +417,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	// Kanban stash messages: "kanban-switch-{taskID}-{threadID}" or "kanban-fork-{taskID}-{threadID}"
 	// Task IDs contain hyphens, so we match against all known active task IDs.
 	for _, p := range projects {
-		stashListOut, err := wm.gitRunOutput(p.Path, "stash", "list", "--format=%gd%x00%s")
+		stashListOut, err := wm.gitRunOutput(p.Path, "stash", "list", "--format=%gd%x00%gs")
 		if err != nil {
 			continue // no stash list, skip
 		}
@@ -432,15 +432,19 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				continue
 			}
 			subject := parts[1]
-			// Check if this is a kanban-labeled stash belonging to an active task
-			if !strings.HasPrefix(subject, "kanban-switch-") && !strings.HasPrefix(subject, "kanban-fork-") {
+			// Check if this is a kanban-labeled stash belonging to an active task.
+			// %gs gives "On <branch>: <message>", so use Contains to find kanban labels.
+			if !strings.Contains(subject, "kanban-switch-") &&
+				!strings.Contains(subject, "kanban-fork-") &&
+				!strings.Contains(subject, "kanban-checkpoint-") {
 				continue
 			}
 			// Try matching against all active task IDs
 			belongsToActiveTask := false
 			for taskID := range activeSet {
-				if strings.HasPrefix(subject, "kanban-switch-"+taskID+"-") ||
-					strings.HasPrefix(subject, "kanban-fork-"+taskID+"-") {
+				if strings.Contains(subject, "kanban-switch-"+taskID+"-") ||
+					strings.Contains(subject, "kanban-fork-"+taskID+"-") ||
+					strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") {
 					belongsToActiveTask = true
 					break
 				}
@@ -1245,7 +1249,7 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 	wm.GetProjectStashMu(projectID).Lock()
 	defer wm.GetProjectStashMu(projectID).Unlock()
 
-	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%s")
+	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%gs")
 	if err != nil {
 		return nil // no stash, nothing to clean
 	}
@@ -1261,8 +1265,11 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 			continue
 		}
 		subject := parts[1]
-		if !strings.HasPrefix(subject, "kanban-switch-"+taskID+"-") &&
-			!strings.HasPrefix(subject, "kanban-fork-"+taskID+"-") {
+		// %gs gives reflog subject "On <branch>: <message>" for all stash types.
+		// Match kanban-labeled stashes: switch, fork, and checkpoint.
+		if !strings.Contains(subject, "kanban-switch-"+taskID+"-") &&
+			!strings.Contains(subject, "kanban-fork-"+taskID+"-") &&
+			!strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") {
 			continue
 		}
 		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
@@ -1292,13 +1299,17 @@ func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchNam
 	wm.GetProjectStashMu(projectID).Lock()
 	defer wm.GetProjectStashMu(projectID).Unlock()
 
-	// List stash entries with their subjects
-	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%s")
+	// List stash entries with their reflog subjects.
+	// %gs gives two formats:
+	// "On <branch>: <message>" — from `stash push -m` and `stash store -m`
+	// "WIP on <branch>: <hash> <msg>" — from `stash push` without -m
+	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%gs")
 	if err != nil {
 		return nil // no stash, nothing to clean
 	}
 
-	branchPrefix := "On " + branchName + ":"
+	// Match on " <branch>:" to cover both formats above.
+	branchMarker := " " + branchName + ":"
 	// Find stash indices that belong to this branch (newest first)
 	var dropIndices []int
 	for line := range strings.SplitSeq(listOut, "\n") {
@@ -1311,7 +1322,7 @@ func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchNam
 			continue
 		}
 		subject := parts[1]
-		if !strings.HasPrefix(subject, branchPrefix) {
+		if !strings.Contains(subject, branchMarker) {
 			continue
 		}
 		// Extract index from stash@{N}
@@ -2043,16 +2054,14 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 	if err != nil {
 		return headRef, nil
 	}
-	// Stash entries from `git stash create` + `git stash store` have subject:
-	// "WIP on <branch>: <hash> <message>" (commit subject)
-	// Stash entries from `git stash push` have subject:
-	// "On <branch>: <message>" (stash message)
-	// Match either format.
-	wipPrefix := "WIP on " + task.Branch + ":"
-	onPrefix := "On " + task.Branch + ":"
+	// %gs gives two formats:
+	// "On <branch>: <message>" — from `stash push -m` and `stash store -m`
+	// "WIP on <branch>: <hash> <msg>" — from `stash push` without -m
+	// Match on " <branch>:" to cover both.
+	branchMarker := " " + task.Branch + ":"
 
-	// List stash entries with subject: newest first (stash@{0}, stash@{1}, ...)
-	listOut, err := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%gd%x00%H%x00%s")
+	// List stash entries with reflog subject: newest first (stash@{0}, stash@{1}, ...)
+	listOut, err := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%gd%x00%H%x00%gs")
 	if err != nil {
 		return headRef, nil
 	}
@@ -2073,7 +2082,7 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 		if len(parts) > 2 {
 			subject = parts[2]
 		}
-		if !strings.HasPrefix(subject, wipPrefix) && !strings.HasPrefix(subject, onPrefix) {
+		if !strings.Contains(subject, branchMarker) {
 			continue // skip entries from other branches
 		}
 		branchEntries = append(branchEntries, strings.TrimSpace(parts[1]))
@@ -2118,9 +2127,10 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
         return "", fmt.Errorf("stash push: %w", err)
     }
     // Find our stash entry by searching the list for our message.
+    // %gs gives "On <branch>: <message>", so use Contains to match.
     // This is more robust than assuming stash@{0} because other tasks
     // (or stale entries from crashes) may have pushed their own stashes.
-    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%s")
+    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
     if err != nil {
         return "", fmt.Errorf("stash list: %w", err)
     }
@@ -2133,7 +2143,7 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
         if len(parts) < 3 {
             continue
         }
-        if parts[2] == message {
+        if strings.Contains(parts[2], message) {
             return parts[1], nil // return the commit hash
         }
     }
@@ -2183,6 +2193,13 @@ func StashMessageForSwitch(taskID, threadID string) string {
 // StashMessageForFork generates a unique stash message for a thread fork.
 func StashMessageForFork(taskID, threadID string) string {
     return fmt.Sprintf("kanban-fork-%s-%s", taskID, threadID)
+}
+
+// StashMessageForCheckpoint generates a stash message for an execution checkpoint.
+// Format: "On <branch>: kanban-checkpoint-<taskID> <msg>"
+// The task ID in the message allows cleanup during task deletion.
+func StashMessageForCheckpoint(taskID, branch, msg string) string {
+    return fmt.Sprintf("On %s: kanban-checkpoint-%s %s", branch, taskID, msg)
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)

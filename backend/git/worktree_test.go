@@ -1857,3 +1857,102 @@ index abc1234..def5678 100644
 		}
 	}
 }
+
+func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create some stash entries with kanban-labeled messages
+	writeFile(t, repoDir, "changed.txt", "content A\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(taskID, "thread-1"))
+
+	writeFile(t, repoDir, "changed.txt", "content B\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForFork(taskID, "thread-2"))
+
+	// Also create a stash for a different (non-existent) task — should be left alone
+	writeFile(t, repoDir, "changed.txt", "content C\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	otherTaskID := "other-task-id"
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(otherTaskID, "thread-3"))
+
+	// Verify all three stashes exist
+	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if !strings.Contains(listOut, "kanban-switch-"+taskID) {
+		t.Errorf("expected switch stash for task %s, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-fork-"+taskID) {
+		t.Errorf("expected fork stash for task %s, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-switch-"+otherTaskID) {
+		t.Errorf("expected switch stash for other task, got:\n%s", listOut)
+	}
+
+	// Drop stashes for our task
+	err := wm.DropStashEntriesForTask("test-project", taskID)
+	if err != nil {
+		t.Fatalf("DropStashEntriesForTask: %v", err)
+	}
+
+	// Verify our task's stashes are gone but the other task's stash remains
+	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if strings.Contains(listOut, taskID) {
+		t.Errorf("stashes for task %s should be gone, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, otherTaskID) {
+		t.Error("stash for other task should remain")
+	}
+
+	// Clean up
+	_ = wm.gitRun(repoDir, "stash", "clear")
+}
+
+func TestDropStashEntriesForBranch_RemovesMatchingStashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	branchName := "task/" + taskID
+
+	// Create a branch and stash while on it (mimics real usage).
+	// Git auto-generates subject "On <branch>: WIP on <branch>: <commit-msg>".
+	runGit(t, repoDir, "branch", branchName)
+	runGit(t, repoDir, "checkout", branchName)
+	writeFile(t, repoDir, "changed.txt", "content A\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u") // no -m, so git uses auto subject
+
+	// Switch to master and create another stash (different branch prefix)
+	runGit(t, repoDir, "checkout", "master")
+	writeFile(t, repoDir, "changed.txt", "content B\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u")
+
+	// Verify both stashes exist (git auto-generates "WIP on <branch>: ...")
+	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if !strings.Contains(listOut, branchName) {
+		t.Errorf("expected stash mentioning branch %s, got:\n%s", branchName, listOut)
+	}
+
+	// Drop stashes for our branch
+	err := wm.DropStashEntriesForBranch("test-project", branchName)
+	if err != nil {
+		t.Fatalf("DropStashEntriesForBranch: %v", err)
+	}
+
+	// Verify our branch's stash is gone but the master stash remains
+	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if strings.Contains(listOut, branchName) {
+		t.Errorf("stash for branch %s should be gone, got:\n%s", branchName, listOut)
+	}
+	if !strings.Contains(listOut, "master") {
+		t.Errorf("stash for master branch should remain, got:\n%s", listOut)
+	}
+
+	// Clean up
+	_ = wm.gitRun(repoDir, "stash", "clear")
+}
