@@ -1,0 +1,131 @@
+/* Shared utility styles — imported via :global() in components */
+
+
+/* Close button — used in modals, dialogs, overlays */
+.close-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    line-height: 1;
+}
+.close-btn:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-3);
+}
+
+/* Modal overlay — full-screen backdrop */
+.overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+/* Modal base — shared container styles. Override width/max-width per component. */
+.modal {
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    width: 640px;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Modal header — title + close button */
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+.modal-header h2,
+.modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* Modal body — scrollable content area */
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Modal footer / dialog actions */
+.modal-footer,
+.dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 16px 20px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+/* Small buttons — add/remove/toggle */
+.btn-small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    cursor: pointer;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    transition: all 0.15s ease;
+}
+.btn-small:hover {
+    background: var(--color-surface-3);
+}
+
+/* Add button — green accent */
+.btn-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    cursor: pointer;
+    border: none;
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--color-accent);
+    transition: all 0.15s ease;
+}
+.btn-add:hover {
+    background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* Remove button — red accent */
+.btn-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.btn-remove:hover {
+    background: var(--color-surface-3);
+    color: var(--color-status-red);
+}

@@ -87,6 +87,78 @@ export interface Thread {
     created_at: string;
 }
 
+export interface ChatEntry {
+    id: string;
+    role: string;
+    content: string;
+    mergeLabel?: string;
+    isError?: boolean;
+    reasoningContent?: string;
+    hasReasoning?: boolean;
+    isStreaming?: boolean;
+    threadId?: string;
+    attachments?: Array<{ mimeType: string; data: string }>;
+    toolCalls?: Array<{
+        toolId: string;
+        toolName: string;
+        displayName?: string;
+        args: Record<string, unknown>;
+        raw_args?: string;
+        sandbox?: boolean;
+        path?: string;
+        result?: string;
+        resultTruncated?: boolean;
+        originalLines?: number;
+        originalBytes?: number;
+        messageId?: string;
+        success?: boolean;
+        duration?: number;
+        isPending?: boolean;
+        bytesWritten?: number;
+    }>;
+    toolCall?: {
+        toolName: string;
+        displayName?: string;
+        args: Record<string, unknown>;
+        raw_args?: string;
+        result?: string;
+        success?: boolean;
+        duration?: number;
+        isPending?: boolean;
+    };
+    error?: {
+        code: string;
+        message: string;
+    };
+    stats?: {
+        model_name: string;
+        prompt_tokens: number;
+        predicted_tokens: number;
+        prompt_ms: number;
+        predicted_ms: number;
+        duration: number;
+    };
+    createdAt?: string;
+    queued?: boolean;
+}
+
+export type DiffData = {
+    files?: Record<string, {
+        hash: string;
+        type: string;
+        added?: number;
+        removed?: number;
+        truncated?: boolean;
+        origAdded?: number;
+        origRemoved?: number;
+        line_count?: number;
+        file_size?: number;
+        is_binary?: boolean;
+        staged?: boolean;
+    }>;
+    short_stat?: string;
+};
+
 export interface Board {
     tasks: Task[];
 }

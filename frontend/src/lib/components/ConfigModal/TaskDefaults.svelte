@@ -44,18 +44,12 @@
         <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" />
     </div>
 
-    <div class="field-row">
-        <div class="option-label-group">
-            <label class="field-label-inline" for="default-max-failed">Max failed turns</label>
-            <button type="button" class="help-icon" aria-label="Stop task after this many consecutive LLM failures">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                </svg>
-            </button>
+    <div class="toggle-field">
+        <div class="toggle-label-group">
+            <label class="toggle-label" for="default-max-failed">Max failed turns</label>
+            <span class="toggle-desc">Stop task after this many consecutive LLM failures</span>
         </div>
-        <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" aria-describedby="max-failed-help" />
-        <span id="max-failed-help" class="sr-only">Stop task after this many consecutive LLM failures</span>
+        <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
     </div>
 </fieldset>
 
@@ -112,35 +106,6 @@
         font-weight: 500;
         color: var(--color-accent);
     }
-    .field-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 0;
-    }
-    .option-label-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .field-label-inline {
-        font-size: 0.8125rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .help-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: var(--color-surface-3);
-        border: none;
-        color: var(--color-text-tertiary);
-        cursor: help;
-        font-size: 0.6875rem;
-    }
     .option-input {
         width: 60px;
         padding: 4px 8px;
@@ -149,16 +114,5 @@
         background: var(--color-surface-2);
         color: var(--color-text-primary);
         font-size: 0.8125rem;
-    }
-    .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border-width: 0;
     }
 </style>

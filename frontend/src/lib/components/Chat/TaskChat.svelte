@@ -1,79 +1,26 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
-    import type { StreamEvent, StreamEventType, Provider, Thread } from '$lib/types';
+    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
-import { board as boardStore, config as configStore, showToast, showConfirm, commitDialog as commitDialogStore, selectedTask } from '$lib/store';
+import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
+import { showToast, showConfirm } from '$lib/stores/dialogs';
+import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
+import { StreamState } from '$lib/services/stream-state.svelte';
+import { createStreamHandler } from '$lib/services/stream-handler';
+    import { useCheckpointTracker } from '$lib/composables/use-checkpoint-tracker.svelte';
+    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, getCheckpointEntryCheckpointState as getCheckpointEntryCheckpointStateUtil, computeLastUserMessageIds, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
-    import { formatToolArgs } from '$lib/utils/toolArgs';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    export interface ChatEntry {
-        id: string;
-        role: string;
-        content: string;
-        mergeLabel?: string; // label for merge_resolution cards
-        isError?: boolean; // true for merge error cards
-        reasoningContent?: string;
-        hasReasoning?: boolean; // true if message has reasoning (even if content is suppressed)
-        isStreaming?: boolean;
-        threadId?: string;
-        attachments?: Array<{ mimeType: string; data: string }>;
-        toolCalls?: Array<{
-            toolId: string;
-            toolName: string;
-            displayName?: string;
-            args: Record<string, unknown>;
-            raw_args?: string;
-            sandbox?: boolean;
-            path?: string;
-            result?: string;
-            resultTruncated?: boolean; // true if backend truncated the result
-            originalLines?: number; // original line count before truncation
-            originalBytes?: number; // original byte count before truncation
-            messageId?: string; // tool_call message ID for fetching full result
-            success?: boolean;
-            duration?: number;
-            isPending?: boolean;
-            bytesWritten?: number;
-        }>;
-        toolCall?: {
-            toolName: string;
-            displayName?: string;
-            args: Record<string, unknown>;
-            raw_args?: string;
-            result?: string;
-            success?: boolean;
-            duration?: number;
-            isPending?: boolean;
-        };
-        error?: {
-            code: string;
-            message: string;
-        };
-        stats?: {
-            model_name: string;
-            prompt_tokens: number;
-            predicted_tokens: number;
-            prompt_ms: number;
-            predicted_ms: number;
-            duration: number;
-        };
-        createdAt?: string;
-        queued?: boolean; // true if message is queued (sent while offline)
-    }
-
-    type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
-
     let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
 
-    let entries: ChatEntry[] = $state([]);
     let connected = $state(false);
     let connecting = $state(true);
     let scrollEl: HTMLElement | null = null;
@@ -147,12 +94,24 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         return p ? isAgentProvider(p) : false;
     });
 
-    let currentAssistantId: string | null = $state(null);
-    let activeToolCalls = $state<Map<string, { entryId: string }>>(new Map());
-    // Track ALL processed tool IDs (including completed ones) to prevent
-    // agent_end from creating duplicate tool calls in different entries.
-    // Use a plain variable (not $state) to avoid reactivity resetting the Set.
-    let processedToolIds = new Set<string>();
+    // Stream state — managed by StreamState service (reactive via $state())
+    let stream = new StreamState();
+    // Shorthand accessors for template use
+    let entries = $derived(stream.state.entries);
+    let currentAssistantId = $derived(stream.state.currentAssistantId);
+    let activeToolCalls = $derived(stream.state.activeToolCalls);
+    let processedToolIds = $derived(stream.state.processedToolIds);
+    let pendingCheckpoints = $derived(stream.state.pendingCheckpoints);
+    let checkpointLabels = $derived(stream.state.checkpointLabels);
+    let checkpointCommitHashes = $derived(stream.state.checkpointCommitHashes);
+    let checkpointHashesVersion = $derived(stream.state.checkpointHashesVersion);
+    let awaitingResponse = $derived(stream.state.awaitingResponse);
+    let queuePosition = $derived(stream.state.queuePosition);
+    let queueEstimatedWait = $derived(stream.state.queueEstimatedWait);
+    let promptProgress = $derived(stream.state.promptProgress);
+    let contextState = $derived(stream.state.contextState);
+    let streamTokenCount = $derived(stream.state.streamTokenCount);
+    let lastPromptTokens = $derived(stream.state.lastPromptTokens);
 
     let lastSentMessage: string | null = $state(null);
     let isStarting = $state(false);
@@ -171,14 +130,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
 
-    // Pending file checkpoints — set of assistant message IDs awaiting git commit
-    let pendingCheckpoints = $state(new Set<string>());
-    // Completed checkpoint labels — message_id -> label
-    let checkpointLabels = $state(new Map<string, string>());
-    // Completed checkpoint commit hashes — message_id -> commit_hash
-    let checkpointCommitHashes = $state(new Map<string, string>());
-    let checkpointHashesVersion = $state(0); // incremented when hashes change for reactivity
-
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
     let streamingIds = getStreamingContext();
@@ -186,26 +137,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
-
-    // awaitingResponse: true between sending a message and receiving the first token/tool_call.
-    // Shows a spinner so the user knows the LLM is being contacted.
-    let awaitingResponse = $state(false);
-
-    // Queue state — set when a task is waiting for a concurrency gate slot.
-    let queuePosition = $state(0);
-    let queueEstimatedWait = $state(0);
-
-    // Prompt processing progress (0-100) from llama.cpp's return_progress.
-    // Shown in the "Awaiting LLM provider" spinner while prompt is being processed.
-    let promptProgress = $state(0);
-
-    // Context usage tracking
-    let contextState = $state({ used: 0, limit: 0 });
-
-    // Hybrid token counting: frontend counts per-token for smooth display,
-    // backend stats events correct accuracy, complete event provides final count.
-    let streamTokenCount = $state(0);
-    let lastPromptTokens = $state(0);
 
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
@@ -229,30 +160,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         entries[entries.length - 1].role === 'user'
     );
 
-    // Set of user message IDs that have no assistant/tool_call entry after them.
-    // Used to determine whether to show "Send" or "New Thread" in the edit form.
-    let lastUserMessageIds = $derived(new Set((() => {
-        const ids = new Set<string>();
-        let lastUserId: string | null = null;
-        for (const e of entries) {
-            if (e.role === 'user') {
-                lastUserId = e.id;
-            } else if (lastUserId && (e.toolCalls || e.role === 'assistant')) {
-                // An assistant/tool_call entry exists — the user message has a response (or one is in progress)
-                lastUserId = null;
-            }
-        }
-        // If there's a trailing user message with no assistant after it, add it
-        if (lastUserId) ids.add(lastUserId);
-        return ids;
-    })()));
+    // Set of user message IDs with no assistant response after them.
+    let lastUserMessageIds = $derived(computeLastUserMessageIds(entries));
 
     // Precomputed per-entry metadata — avoids O(n²) lookups inside {#each}.
-    interface EntryMeta {
-        cpState: { isPending: boolean; commitLabel?: string; commitHash?: string } | null;
-        cpThread: Thread | null;
-        isLastUserMessage: boolean;
-    }
     let entryMetas = $derived(((() => {
         const metas: EntryMeta[] = new Array(entries.length);
         const streaming = isLoading;
@@ -260,8 +171,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             const entry = entries[i];
             metas[i] = entry.role === 'user'
                 ? {
-                    cpState: getCheckpointEntryCheckpointState(i),
-                    cpThread: threads.length > 0 ? getCheckpointThreads(entry, i === 0) : null,
+                    cpState: getCheckpointEntryCheckpointStateUtil(i, entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes),
+                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, threads.find(t => t.is_active), i === 0) : null,
                     isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
                 }
                 : { cpState: null, cpThread: null, isLastUserMessage: false };
@@ -335,592 +246,95 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         history.pushState({ task: taskId }, '', url.toString());
     }
 
-    function ensureAssistantEntry(): ChatEntry {
-        if (currentAssistantId) {
-            const entry = entries.find(e => e.id === currentAssistantId);
-            if (entry) return entry;
-        }
-        const id = genId();
-        currentAssistantId = id;
-        const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString() };
-        entries = [...entries, entry];
-        return entry;
+    /** Reset stream state before loading a new thread's messages. */
+    function resetStreamState() {
+        stream.closeCurrentAssistant();
+        stream.state.activeToolCalls.clear();
+        stream.state.processedToolIds.clear();
+        stream.state.entries = [];
+        stream.state.currentAssistantId = null;
+        stream.state.streamTokenCount = 0;
+        stream.state.awaitingResponse = false;
     }
 
-    function closeCurrentAssistant() {
-        if (currentAssistantId) {
-            const entry = entries.find(e => e.id === currentAssistantId);
-            if (entry) entry.isStreaming = false;
-            currentAssistantId = null;
+    /** Merge an updated task into the board store. */
+    function mergeTaskIntoBoard(updated: any) {
+        boardStore.update(b => {
+            if (!b) return b;
+            const existing = b.tasks.find(t => t.id === taskId);
+            const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
+            return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
+        });
+    }
+
+    /** Send a message via the API with tracking state. Returns false on failure. */
+    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>): Promise<boolean> {
+        lastSentMessage = msg;
+        stream.state.awaitingResponse = true;
+        try {
+            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
+            return true;
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
+            stream.state.awaitingResponse = false;
+            return false;
         }
     }
 
-    /** Mark this task as actively streaming tokens. */
     function markStreaming() {
         streamingIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
     }
 
-    /** Mark this task as no longer streaming. */
     function markNotStreaming() {
         streamingIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
-        queuePosition = 0;
-        queueEstimatedWait = 0;
-        streamTokenCount = 0;
-        contextState.used = lastPromptTokens;
-        promptProgress = 0;
+        stream.state.queuePosition = 0;
+        stream.state.queueEstimatedWait = 0;
+        stream.state.streamTokenCount = 0;
+        stream.state.contextState.used = stream.state.lastPromptTokens;
+        stream.state.promptProgress = 0;
     }
 
-    /** Clear the "awaiting LLM" spinner — first response from provider has arrived. */
-    function clearAwaiting() {
-        if (awaitingResponse) awaitingResponse = false;
-        promptProgress = 0;
-    }
+    // Stream event handler — delegated to service
+    const _handleStreamEvent = createStreamHandler(stream, {
+        genId,
+        scroll,
+        markStreaming,
+        markNotStreaming,
+        onRefreshDiff: (data) => onRefreshDiff?.(data),
+        onThreadSwitch: () => onThreadSwitch?.(),
+        loadHistory,
+        updateActiveThread,
+        updateThreadUrl,
+        createTaskMessage,
+    });
 
+    /** Wrapper around stream handler with component-specific echo logic. */
     function handleEvent(event: StreamEvent) {
-        switch (event.type) {
-            case 'token': {
-                if (suppressEvents) break;
-                clearAwaiting();
-                markStreaming();
-                // First token of a new turn — reset counter
-                if (!currentAssistantId) {
-                    streamTokenCount = 0;
-                }
-                streamTokenCount++;
-                contextState.used = lastPromptTokens + streamTokenCount;
-                const data = event.data as { text: string };
-                const entry = ensureAssistantEntry();
-                if (!currentAssistantId) currentAssistantId = entry.id;
-                entry.content += data.text;
-                scroll();
-                break;
-            }
-            case 'reasoning': {
-                if (suppressEvents) break;
-                clearAwaiting();
-                // First reasoning chunk of a new turn — reset counter
-                if (!currentAssistantId) {
-                    streamTokenCount = 0;
-                }
-                streamTokenCount++;
-                contextState.used = lastPromptTokens + streamTokenCount;
-                const data = event.data as { text: string };
-                const entry = ensureAssistantEntry();
-                entry.reasoningContent = (entry.reasoningContent || '') + data.text;
-                scroll();
-                break;
-            }
-            case 'tool_call': {
-                if (suppressEvents) break;
-                clearAwaiting();
-                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string };
-                // Skip incomplete tool call deltas (empty tool_id from streaming fragments)
-                if (!data.tool_id || data.tool_id === '') {
-                    break;
-                }
-                // Note: we do NOT block on processedToolIds here — streaming updates
-                // for the same tool_id must pass through so raw_args can grow.
-                // processedToolIds is only checked when creating a NEW tool call below.
-                // Attach tool call to the current assistant entry, or fall back to
-                // the last existing assistant entry (e.g., agent_end sends tool_call
-                // events after the streaming assistant was already closed).
-                let entry = currentAssistantId
-                    ? entries.find(e => e.id === currentAssistantId) || null
-                    : null;
-                if (!entry) {
-                    // Find last assistant entry to merge tool calls into
-                    for (let i = entries.length - 1; i >= 0; i--) {
-                        if (entries[i].role === 'assistant') {
-                            entry = entries[i];
+        // Handle user_message echo before delegating to stream handler
+        if (event.type === 'user_message') {
+            const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
+            if (lastSentMessage === data.content) {
+                lastSentMessage = null;
+                isRegenerating = false;
+                if (data.id) {
+                    for (let i = stream.state.entries.length - 1; i >= 0; i--) {
+                        if (stream.state.entries[i].role === 'user' && stream.state.entries[i].content === data.content) {
+                            stream.state.entries[i].id = data.id;
+                            if (data.thread_id) stream.state.entries[i].threadId = data.thread_id;
+                            if (data.attachments) stream.state.entries[i].attachments = data.attachments;
                             break;
                         }
                     }
                 }
-                if (!entry) {
-                    entry = ensureAssistantEntry();
-                }
-                // If the LLM sent the tool name as text content before the tool call,
-                // clear it in-place to avoid a blank bubble
-                if (entry.content.trim() === data.tool_name && !entry.reasoningContent) {
-                    entry.content = '';
-                }
-                if (!entry.toolCalls) entry.toolCalls = [];
-                // Dedup: if a tool_call with this tool_id already exists (from buffer replay
-                // of an earlier streaming delta), replace it with a new object so the
-                // keyed $each in ChatMessage detects the change and re-renders ToolCall.
-                const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
-                if (existing) {
-                    // Skip updates for completed tool calls (agent_end duplicates after tool_result).
-                    if (!existing.isPending && existing.result !== undefined) {
-                        break;
-                    }
-                    // Accumulate raw_args_delta (incremental streaming update) or
-                    // replace with full raw_args (first frame / buffer replay).
-                    const newRawArgs = data.raw_args_delta
-                        ? (existing.raw_args || '') + data.raw_args_delta
-                        : data.raw_args;
-                    const updated = { ...existing,
-                        toolName: data.tool_name,
-                        displayName: data.tool_display_name,
-                        args: data.args || {},
-                        raw_args: newRawArgs,
-                        sandbox: data.sandbox,
-                        path: data.path,
-                    };
-                    // Don't re-enable isStreaming for deduped tool calls (e.g., from agent_end).
-                    // The entry may have already been closed by the tool_result handler.
-                    entry.toolCalls = entry.toolCalls.map(tc =>
-                        tc.toolId === data.tool_id ? updated : tc
-                    );
-                } else if (processedToolIds.has(data.tool_id)) {
-                    // Tool ID was already processed (agent_end duplicate) — skip.
-                    break;
-                } else {
-                    // Mark as processed so agent_end duplicates are caught above.
-                    processedToolIds.add(data.tool_id);
-                    const ci = entry.content.length;
-                    const ri = (entry.reasoningContent || '').length;
-                    // Create new array reference so $derived in ChatMessage recomputes.
-                    // Svelte 5 tracks array references, not in-place mutations.
-                    entry.toolCalls = [...(entry.toolCalls || []), {
-                        toolId: data.tool_id,
-                        toolName: data.tool_name,
-                        displayName: data.tool_display_name,
-                        args: data.args || {},
-                        raw_args: data.raw_args,
-                        sandbox: data.sandbox,
-                        path: data.path,
-                        isPending: true,
-                        contentIndex: ci,
-                        reasoningIndex: ri
-                    }];
-                    // Only set isStreaming for NEW tool calls (during active streaming).
-                    // Deduped tool calls from agent_end should not re-enable the cursor.
-                    entry.isStreaming = true;
-                    activeToolCalls.set(data.tool_id, { entryId: entry.id });
-                }
-                scroll();
-                break;
-            }
-            case 'tool_result': {
-                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
-                const ref = activeToolCalls.get(data.tool_id);
-                activeToolCalls.delete(data.tool_id);
-                let updated = false;
-                if (ref) {
-                    const entry = entries.find(e => e.id === ref.entryId);
-                    if (entry && entry.toolCalls) {
-                        const tc = entry.toolCalls.find(t => t.toolId === data.tool_id);
-                        if (tc) {
-                            tc.result = data.output;
-                            tc.success = data.success;
-                            tc.duration = data.duration;
-                            tc.isPending = false;
-                            if (data.args) tc.args = data.args;
-                            if (data.raw_args) tc.raw_args = data.raw_args;
-                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                            if (data.path) tc.path = data.path;
-                            updated = true;
-                        }
-                    }
-                }
-                // Fallback: search all entries for a pending tool call with this tool_id.
-                // This handles the case where the tool call was loaded from DB (after page refresh)
-                // and is not yet in activeToolCalls.
-                if (!updated) {
-                    for (const entry of entries) {
-                        if (entry.toolCalls) {
-                            const tc = entry.toolCalls.find(t => t.toolId === data.tool_id && t.isPending);
-                            if (tc) {
-                                tc.result = data.output;
-                                tc.success = data.success;
-                                tc.duration = data.duration;
-                                tc.isPending = false;
-                                if (data.args) tc.args = data.args;
-                                if (data.raw_args) tc.raw_args = data.raw_args;
-                                if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                                if (data.path) tc.path = data.path;
-                                updated = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                // All tool results for this turn are done — close the assistant entry
-                // so the next turn's reasoning/tool calls go into a new entry.
-                // The server will now make another LLM call — show the awaiting spinner.
-                if (activeToolCalls.size === 0) {
-                    closeCurrentAssistant();
-                    awaitingResponse = true;
-                }
-                scroll();
-                break;
-            }
-            case 'tool_progress': {
-                const data = event.data as { tool_id?: string; bytes_written: number; path?: string };
-                // Update the matching pending tool call with bytes written and path
-                for (const entry of entries) {
-                    if (entry.toolCalls) {
-                        for (const tc of entry.toolCalls) {
-                            if (tc.isPending && (!data.tool_id || tc.toolId === data.tool_id)) {
-                                tc.bytesWritten = data.bytes_written;
-                                if (data.path) tc.path = data.path;
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-            case 'tool_output': {
-                // Streaming output from a running tool (e.g., bash stdout/stderr).
-                // Append to the pending tool call's result so the UI updates in real-time.
-                const data = event.data as { tool_id: string; text: string };
-                for (const entry of entries) {
-                    if (entry.toolCalls) {
-                        for (const tc of entry.toolCalls) {
-                            if (tc.isPending && tc.toolId === data.tool_id) {
-                                tc.result = (tc.result || '') + data.text;
-                            }
-                        }
-                    }
-                }
-                scroll();
-                break;
-            }
-            case 'user_message': {
-                const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
-                // If this is an echo of a message we just sent, update the frontend entry's ID with the backend ID
-                if (lastSentMessage === data.content) {
-                    lastSentMessage = null;
-                    isRegenerating = false;
-                    if (data.id) {
-                        // Find the last user entry (our optimistic message) and update its ID
-                        for (let i = entries.length - 1; i >= 0; i--) {
-                            if (entries[i].role === 'user' && entries[i].content === data.content) {
-                                entries[i].id = data.id;
-                                if (data.thread_id) entries[i].threadId = data.thread_id;
-                                if (data.attachments) entries[i].attachments = data.attachments;
-                                break;
-                            }
-                        }
-                    }
-                    break;
-                }
-                // Dedup: if this message has a backend ID that already exists in entries
-                // (e.g., from sync buffer replaying a message already loaded via loadHistory), skip
-                if (data.id && entries.some(e => e.id === data.id)) {
-                    break;
-                }
-                closeCurrentAssistant();
-                entries = [...entries, { id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
-                break;
-            }
-            case 'complete': {
-                markNotStreaming();
-                awaitingResponse = false;
-                const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
-                // Update streaming assistant entry ID with the real backend ID (for checkpoint hash matching)
-                // Must happen BEFORE closeCurrentAssistant() which clears currentAssistantId
-                if (data.assistant_message_id && currentAssistantId) {
-                    const entry = entries.find(e => e.id === currentAssistantId);
-                    if (entry && entry.id !== data.assistant_message_id) {
-                        // Only update if no other entry already has this ID (avoids duplicate keys)
-                        if (!entries.some(e => e.id === data.assistant_message_id)) {
-                            entry.id = data.assistant_message_id;
-                        }
-                    }
-                }
-                closeCurrentAssistant();
-                // Safety net: clear isStreaming on ALL assistant entries.
-                // For Pi, the tool_result handler may have already closed the current entry,
-                // leaving currentAssistantId=null. But a stale entry (e.g., from a split
-                // caused by closeCurrentAssistant during tool results) might still have
-                // isStreaming=true. Clear all to ensure the blinking cursor disappears.
-                for (const e of entries) {
-                    if (e.role === 'assistant' && e.isStreaming) {
-                        e.isStreaming = false;
-                    }
-                }
-                // Store total context (prompt + predicted) for context usage display.
-                // prompt_tokens = input sent to LLM, predicted_tokens = output generated.
-                // Total context consumed = both, since output becomes part of history for next turn.
-                if (data.prompt_tokens !== undefined) {
-                    lastPromptTokens = data.prompt_tokens + (data.predicted_tokens || 0);
-                    contextState.used = lastPromptTokens;
-                }
-                // Attach stats to the last assistant entry
-                const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
-                if (lastAssistant && data.predicted_tokens !== undefined) {
-                    lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
-                }
-                // Force scroll to bottom after all state changes settle.
-                // Multiple re-renders happen (cursor disappears, stats appear, tool results finalize).
-                // Double requestAnimationFrame in scroll() ensures the final DOM is measured.
-                scroll(true);
-                break;
-            }
-            case 'error': {
-                clearAwaiting();
-                markNotStreaming();
-                closeCurrentAssistant();
-                isRegenerating = false;
-                connected = false;
-                const data = event.data as { message: string; code?: string };
-                const code = data.code || 'error';
-                // Skip ws_error from createTaskStream's onerror — the onclose handler
-                // will show a more descriptive "Connection lost" message instead
-                if (code === 'ws_error') {
-                    break;
-                }
-                // Skip "Task stopped" — the status badge already reflects the change
-                if (code === 'stopped') {
-                    break;
-                }
-                const message = data.message || 'An error occurred';
-                const entry: ChatEntry = {
-                    id: genId(),
-                    role: 'error',
-                    content: message,
-                    isStreaming: false,
-                    error: { code, message },
-                    createdAt: new Date().toISOString(),
-                };
-                entries = [...entries, entry];
-                // Persist to backend (except ws_disconnected which is ephemeral)
-                if (code !== 'ws_disconnected') {
-                    createTaskMessage(projectId, taskId, 'error', `[${code}] ${message}`).catch(() => {});
-                }
-                break;
-            }
-            case 'status': {
-                const data = event.data as { state: string; activity?: string };
-                if (data.state === 'pulling_image') {
-                    // Image is being pulled — show ephemeral system message (not persisted)
-                    const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
-                    entries = [...entries, { id: genId(), role: 'system', content: `Pulling ${imgName}...`, isStreaming: false, createdAt: new Date().toISOString() }];
-                } else if (data.state === 'building_image') {
-                    // Image is being built — show ephemeral system message (not persisted)
-                    entries = [...entries, { id: genId(), role: 'system', content: 'Building sandbox image from Dockerfile...', isStreaming: false, createdAt: new Date().toISOString() }];
-                } else if (data.state === 'starting_container') {
-                    // Container is being created/started — show ephemeral system message (not persisted)
-                    entries = [...entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
-                } else if (data.state === 'running') {
-                    // A new executor is starting (e.g., lazy-start after user follow-up).
-                    // Clear pending tool calls and streaming state from any previous executor
-                    // to avoid mixing tool call deltas from concurrent executors.
-                    // Only close current assistant if it's empty (stale entry), not if it has content (active streaming).
-                    if (currentAssistantId) {
-                        const entry = entries.find(e => e.id === currentAssistantId);
-                        if (!entry || (!entry.content && !entry.reasoningContent)) {
-                            closeCurrentAssistant();
-                        }
-                    }
-                    activeToolCalls.clear();
-                    // Don't clear processedToolIds here — Pi can send multiple
-                    // status:running events (e.g., extension_ui_request) within a turn.
-                    // Clearing here would lose tool IDs and cause agent_end duplicates.
-                    // Remove assistant entries with only pending tool calls (no text AND no reasoning).
-                    // Entries with reasoning content should be kept even if they have no text content.
-                    entries = entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
-                    // Mark task as streaming so badge updates on board view
-                    markStreaming();
-                    // Gate acquired — task is no longer queued. Clear stale queue position.
-                    queuePosition = 0;
-                    queueEstimatedWait = 0;
-                    // Keep awaitingResponse until first token/tool_call (clearAwaiting handles it).
-                } else if (data.state === 'cancelled') {
-                    // Response was cancelled by new user message — clear streaming state.
-                    closeCurrentAssistant();
-                    activeToolCalls.clear();
-                    processedToolIds.clear(); // Cancel means turn is over, safe to clear
-                    entries = entries.filter(e => !e.isStreaming);
-                    markNotStreaming();
-                    awaitingResponse = false;
-                } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
-                    // Executor finished — clear streaming state.
-                    // Do NOT call closeCurrentAssistant() here — Pi sends status "idle"
-                    // BEFORE the tool_call/tool_result events from agent_end. Calling
-                    // closeCurrentAssistant() would clear currentAssistantId, causing
-                    // the subsequent tool_call events to create a new empty assistant
-                    // entry (with isStreaming=true / blue cursor) instead of merging
-                    // into the existing entry. Let the 'complete' event handle that.
-                    markNotStreaming();
-                    awaitingResponse = false;
-                }
-                break;
-            }
-            case 'build_progress': {
-                const data = event.data as { line: string };
-                // Append build/pull progress line as ephemeral system message (not persisted)
-                if (data.line) {
-                    entries = [...entries, { id: genId(), role: 'system', content: data.line, isStreaming: false, createdAt: new Date().toISOString() }];
-                }
-                break;
-            }
-            case 'hint': {
-                const data = event.data as { content: string; created_at: string };
-                // Loop-detection hint — show as a system message in real-time
-                if (data.content) {
-                    entries = [...entries, { id: genId(), role: 'system', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
-                }
-                break;
-            }
-            case 'stats': {
-                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number };
-                // Sync frontend counter with backend count for accuracy.
-                // Update lastPromptTokens from the backend's prompt_tokens (accurate per-turn baseline).
-                // This ensures context usage is correct across tool call turns (no complete event between them).
-                if (data.prompt_tokens !== undefined && data.prompt_tokens > 0) {
-                    lastPromptTokens = data.prompt_tokens;
-                }
-                if (data.predicted_tokens !== streamTokenCount) {
-                    streamTokenCount = data.predicted_tokens;
-                    contextState.used = lastPromptTokens + streamTokenCount;
-                }
-                // Update real-time stats on the current streaming assistant entry
-                if (currentAssistantId) {
-                    const entry = entries.find(e => e.id === currentAssistantId);
-                    if (entry) {
-                        entry.stats = {
-                            model_name: data.model_name,
-                            prompt_tokens: data.prompt_tokens ?? entry.stats?.prompt_tokens ?? 0,
-                            predicted_tokens: data.predicted_tokens,
-                            prompt_ms: entry.stats?.prompt_ms ?? 0,
-                            predicted_ms: data.predicted_ms,
-                            duration: entry.stats?.duration ?? 0,
-                        };
-                    }
-                }
-                break;
-            }
-            case 'diff_changed': {
-                const data = event.data as DiffData;
-                onRefreshDiff?.(data);
-                break;
-            }
-            case 'thread_switch': {
-                // Thread was switched (possibly from another tab or API call)
-                const data = event.data as { thread_id: string; task_id: string };
-                updateActiveThread(data.thread_id);
-                updateThreadUrl(data.thread_id);
-                onThreadSwitch?.();
-                // Skip loadHistory during regenerate to avoid clobbering the
-                // optimistic user message entry before the echo arrives.
-                // loadHistory will be called after the LLM response completes.
-                if (!isRegenerating) {
-                    // Clear streaming state to prevent old thread's entries from leaking
-                    closeCurrentAssistant();
-                    activeToolCalls.clear();
-                    processedToolIds.clear();
-                    entries = [];
-                    currentAssistantId = null;
-                    streamTokenCount = 0;
-                    awaitingResponse = false;
-                    loadHistory(true);
-                }
-                break;
-            }
-            case 'queue': {
-                const data = event.data as { position: number; estimated_wait_seconds: number };
-                queuePosition = data.position || 0;
-                queueEstimatedWait = data.estimated_wait_seconds || 0;
-                // Keep awaitingResponse visible while queued
-                if (queuePosition > 0) {
-                    awaitingResponse = true;
-                }
-                break;
-            }
-            case 'prompt_progress': {
-                // Prompt processing progress from llama.cpp (0-100%).
-                // Shown in the "Awaiting LLM provider" message while the prompt is being processed.
-                const data = event.data as { total: number; cache: number; processed: number; time_ms: number };
-                if (data.total > 0) {
-                    // Actual progress = tokens processed / total tokens
-                    // (cache tokens are instant, so processed includes cached + newly processed)
-                    promptProgress = Math.round((data.processed / data.total) * 100);
-                }
-                break;
-            }
-            case 'summarization': {
-                const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
-                // Dedup: skip if this message ID already exists
-                if (data.id && entries.some(e => e.id === data.id)) {
-                    break;
-                }
-                entries = [...entries, {
-                    id: data.id || genId(),
-                    role: 'summarization',
-                    content: data.summary || 'Context was summarized to free space',
-                    isStreaming: false,
-                    createdAt: data.created_at || new Date().toISOString(),
-                    stats: data.model_name ? {
-                        model_name: data.model_name,
-                        prompt_tokens: data.prompt_tokens ?? 0,
-                        predicted_tokens: data.predicted_tokens ?? 0,
-                        prompt_ms: data.prompt_ms ?? 0,
-                        predicted_ms: data.predicted_ms ?? 0,
-                        duration: (data.prompt_ms ?? 0) + (data.predicted_ms ?? 0),
-                    } : undefined,
-                }];
-                break;
-            }
-            case 'merge_resolution': {
-                const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string; is_error?: boolean };
-                const content = data.content || 'Merged';
-                const label = data.label || (content.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
-                entries = [...entries, {
-                    id: data.id || genId(),
-                    role: 'merge_resolution',
-                    content,
-                    mergeLabel: label,
-                    isError: data.is_error || false,
-                    isStreaming: false,
-                    createdAt: data.created_at || new Date().toISOString(),
-                }];
-                break;
-            }
-            case 'git_checkpoint_pending': {
-                const data = event.data as { message_id: string };
-                const pending = new Set(pendingCheckpoints);
-                pending.add(data.message_id);
-                pendingCheckpoints = pending;
-                break;
-            }
-            case 'git_checkpoint_complete': {
-                const data = event.data as { message_id: string; commit_hash: string; label: string };
-                const pending = new Set(pendingCheckpoints);
-                pending.delete(data.message_id);
-                pendingCheckpoints = pending;
-                if (data.label) {
-                    const labels = new Map(checkpointLabels);
-                    labels.set(data.message_id, data.label);
-                    checkpointLabels = labels;
-                }
-                if (data.commit_hash) {
-                    const hashes = new Map(checkpointCommitHashes);
-                    hashes.set(data.message_id, data.commit_hash);
-                    // Also store by entry ID so lookup works regardless of timing
-                    // Use currentAssistantId if available, otherwise find last assistant entry with tool calls
-                    let entryId = currentAssistantId;
-                    if (!entryId) {
-                        for (let i = entries.length - 1; i >= 0; i--) {
-                            const entry = entries[i];
-                            if (entry && entry.role === 'assistant' && entry.toolCalls && entry.toolCalls.length > 0) {
-                                entryId = entry.id;
-                                break;
-                            }
-                        }
-                    }
-                    if (entryId) {
-                        hashes.set(entryId, data.commit_hash);
-                    }
-                    checkpointCommitHashes = hashes;
-                    checkpointHashesVersion++; // trigger reactive update
-                }
-                break;
+                return;
             }
         }
-        scroll();
+        // Handle error event side effects (isRegenerating, connected)
+        if (event.type === 'error') {
+            isRegenerating = false;
+            connected = false;
+        }
+        _handleStreamEvent(event, suppressEvents, projectId, taskId);
     }
 
     /** Update providers from the config store (reacts to settings changes). */
@@ -948,105 +362,26 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
     function updateContextLimit() {
         const provider = providers.find(p => p.url === selectedUrl);
         if (!provider) {
-            contextState.limit = 0;
+            stream.state.contextState.limit = 0;
             return;
         }
         const model = provider.models.find((m: { name: string }) => m.name === selectedModel);
-        contextState.limit = (model as { context_window?: number })?.context_window || 0;
+        stream.state.contextState.limit = (model as { context_window?: number })?.context_window || 0;
     }
 
     async function loadHistory(scrollAfter = false) {
         try {
             const messages = await getTaskMessages(projectId, taskId);
-            // Restore checkpoint commit hashes from persisted messages
-            const hashes = new Map<string, string>();
-            for (const m of messages) {
-                if (m.git_commit_hash) {
-                    hashes.set(m.id, m.git_commit_hash);
-                }
-            }
-            checkpointCommitHashes = hashes;
+            // Build entries from DB messages using shared utility
+            const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(messages);
+            stream.state.checkpointCommitHashes = checkpointHashes;
 
-            // Build entries from DB messages
-            const dbEntries = messages.filter(m => m.role !== 'title').map(m => {
-                const base = { threadId: m.thread_id || undefined };
-                // Restore error entries from persisted data
-                if (m.role === 'error') {
-                    const content = m.content || '';
-                    const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
-                    const code = match ? match[1] : 'error';
-                    const message = match ? match[2] : content;
-                    // Skip "Task stopped" errors — the status badge reflects the change
-                    if (code === 'stopped') return null;
-                    return {
-                        ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
-                        error: { code, message },
-                    };
-                }
-                // Restore tool call entries from persisted data — merged into preceding assistant entry
-                if (m.role === 'tool_call' && m.tool_calls) {
-                    const tc = JSON.parse(m.tool_calls);
-                    const result = m.tool_result ? JSON.parse(m.tool_result) : null;
-                    const isPending = !result;
-                    return {
-                        ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
-                        toolCalls: [{
-                            toolId: tc.tool_id || m.id,
-                            toolName: tc.tool_name,
-                            displayName: tc.tool_display_name,
-                            args: tc.args ?? {},
-                            raw_args: tc.raw_args,
-                            sandbox: tc.sandbox,
-                            result: result?.output,
-                            resultTruncated: m.result_truncated,
-                            originalLines: result?.original_lines,
-                            originalBytes: result?.original_bytes,
-                            messageId: m.id, // tool_call message ID for fetching full result
-                            success: result?.success ?? true,
-                            duration: result?.duration,
-                            isPending,
-                        }],
-                    };
-                }
-                // Parse attachments if present
-                let parsedAttachments: Array<{ mimeType: string; data: string }> | undefined;
-                if (m.attachments) {
-                    try {
-                        const atts = typeof m.attachments === 'string' ? JSON.parse(m.attachments) : m.attachments;
-                        if (Array.isArray(atts)) parsedAttachments = atts;
-                    } catch { /* ignore parse errors */ }
-                }
-                const entry: Partial<ChatEntry> = {
-                    ...base, id: m.id, role: m.role, content: m.content, reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning, attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
-                };
-                if (m.role === 'merge_resolution') {
-                    const isErr = m.content?.includes('Merge failed');
-                    (entry as ChatEntry).mergeLabel = isErr ? 'Merge failed' : (m.content?.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
-                    (entry as ChatEntry).isError = isErr || false;
-                }
-                return {
-                    ...entry,
-                    stats: m.model_name ? {
-                        model_name: m.model_name,
-                        prompt_tokens: m.prompt_tokens ?? 0,
-                        predicted_tokens: m.predicted_tokens ?? 0,
-                        prompt_ms: m.prompt_ms ?? 0,
-                        predicted_ms: m.predicted_ms ?? 0,
-                        duration: m.duration ?? 0,
-                    } : undefined,
-                };
-            });
-            // Filter out null entries (e.g., skipped "stopped" errors)
-            const validDbEntries = dbEntries.filter((e: ChatEntry | null): e is ChatEntry => e !== null);
-            // Merge toolCalls entries into the preceding assistant entry
-            const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries as ChatEntry[]);
             // Merge with existing entries (e.g., from buffer replay).
             // DB entries have backend UUIDs; buffer entries have random genId() IDs.
             // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
             const dbIds = new Set(messages.map(m => m.id));
             const existingNonDb = entries.filter(e => !dbIds.has(e.id));
             // Collect tool_ids from DB entries to deduplicate buffer entries.
-            // Buffer replay may create duplicate tool call entries (random IDs vs DB UUIDs).
             const dbToolIds = new Set<string>();
             for (const e of mergedDbEntries) {
                 if (e.toolCalls) {
@@ -1062,7 +397,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
                 }
                 return true;
             });
-            entries = [...mergedDbEntries, ...dedupedNonDb];
+            stream.state.entries = [...mergedDbEntries, ...dedupedNonDb];
             // Remove entries with pending tool calls from non-running tasks.
             // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
             // For stopped/completed tasks, pending calls are stale leftovers.
@@ -1073,8 +408,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             // Use total context (prompt + predicted) to reflect full window consumed.
             const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
             if (lastAssistant?.stats) {
-                lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-                contextState.used = lastPromptTokens;
+                stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
+                stream.state.contextState.used = stream.state.lastPromptTokens;
             }
             // After replacing entries, the DOM re-renders and scroll state may be lost.
             // Scroll to bottom on the next frame.
@@ -1092,29 +427,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         }
     }
 
-    function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[] {
-        // DB ordering: assistant(text+reasoning) → tool_call → assistant(response to tool) → tool_call...
-        // Merge each tool-call-only entry into the preceding assistant entry
-        // so tool calls appear below the assistant's reasoning/text in the UI.
-        const merged: ChatEntry[] = [];
-        for (const entry of allEntries) {
-            if (entry.toolCalls && entry.toolCalls.length > 0 && !entry.content) {
-                // This is a tool-call-only entry — merge into preceding assistant
-                const prev = merged[merged.length - 1];
-                if (prev && prev.role === 'assistant') {
-                    if (!prev.toolCalls) prev.toolCalls = [];
-                    prev.toolCalls.push(...entry.toolCalls);
-                } else {
-                    // No preceding assistant entry, keep as-is
-                    merged.push(entry);
-                }
-            } else {
-                merged.push(entry);
-            }
-        }
-        return merged;
-    }
-
     async function loadThreads() {
         try {
             threads = await getTaskThreads(projectId, taskId);
@@ -1126,97 +438,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             threads = [];
         }
     }
-
-    /** Get the thread whose label should be shown at a given checkpoint.
-     * Finds the most specific (deepest) ancestor of the active thread whose
-     * fork point is at or before the message time.
-     * When requireOptions is true, only returns a thread if 2+ threads are
-     * relevant at this checkpoint (used for the first message to avoid
-     * showing a divider with no switch options). */
-    function getCheckpointThreads(entry: ChatEntry, requireOptions = false): Thread | null {
-        if (!threads.length) return null;
-        const entryTime = entry.createdAt;
-        if (!entryTime) return null;
-
-        const activeThread = threads.find(t => t.is_active);
-        if (!activeThread) return null;
-
-        // Walk from active thread up to root. Return first (most specific) ancestor
-        // whose checkpoint is at or before the entry time.
-        const threadMap = new Map(threads.map(t => [t.id, t]));
-        let current: Thread = activeThread;
-        let checkpointThread: Thread | null = null;
-
-        while (true) {
-            const ct = current.checkpoint_message_time;
-            // No checkpoint (root/Main), zero/epoch, or checkpoint <= entry → qualifies
-            if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
-                checkpointThread = current;
-                break;
-            }
-            // This thread's fork point is after the entry; try parent
-            const parent = threadMap.get(current.parent_thread_id || '');
-            if (!parent) return null; // fallback to null
-            current = parent;
-        }
-
-        // For the first message, only show checkpoint if there are actual switch options
-        if (requireOptions) {
-            let relevantCount = 0;
-            for (const t of threads) {
-                const ct = t.checkpoint_message_time;
-                if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
-                    relevantCount++;
-                }
-            }
-            if (relevantCount < 2) return null;
-        }
-
-        return checkpointThread;
-    }
-
-    /** Get the checkpoint pending/label state for the checkpoint divider before a user message.
-     * Looks at the next assistant entry (with tool calls or hash) after the given entry index,
-     * since the checkpoint is created after tool calls in the same turn.
-     * Falls back to walking backward if no forward entry has a checkpoint.
-     * Returns { isPending, commitLabel, commitHash } or null if no checkpoint state to show. */
-    function getCheckpointEntryCheckpointState(entryIdx: number): { isPending: boolean; commitLabel?: string; commitHash?: string } | null {
-        // First: look forward to find the next assistant entry with tool calls or a checkpoint hash
-        // (checkpoint is created after tool calls, so hash is on the assistant msg in the same turn)
-        for (let i = entryIdx + 1; i < entries.length; i++) {
-            const next = entries[i];
-            if (next.role === 'assistant') {
-                const hasToolCalls = next.toolCalls && next.toolCalls.length > 0;
-                const hasHash = checkpointCommitHashes.has(next.id);
-                if (hasToolCalls || hasHash) {
-                    return {
-                        isPending: pendingCheckpoints.has(next.id),
-                        commitLabel: checkpointLabels.get(next.id),
-                        commitHash: checkpointCommitHashes.get(next.id) || undefined,
-                    };
-                }
-                break; // found the turn's assistant entry, no checkpoint
-            }
-        }
-        // Fallback: walk backward to find the last assistant entry with tool calls or a checkpoint hash
-        for (let i = entryIdx - 1; i >= 0; i--) {
-            const prev = entries[i];
-            if (prev.role === 'assistant') {
-                const hasToolCalls = prev.toolCalls && prev.toolCalls.length > 0;
-                const hasHash = checkpointCommitHashes.has(prev.id);
-                if (hasToolCalls || hasHash) {
-                    return {
-                        isPending: pendingCheckpoints.has(prev.id),
-                        commitLabel: checkpointLabels.get(prev.id),
-                        commitHash: checkpointCommitHashes.get(prev.id) || undefined,
-                    };
-                }
-            }
-            if (prev.role === 'user') break; // stop at previous user message
-        }
-        return null;
-    }
-
 
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
     function updateActiveThread(threadId: string) {
@@ -1235,15 +456,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = switched.id;
             // Clear streaming state before loading new thread's messages.
-            // loadHistory() merges DB entries with existing non-DB entries,
-            // so old thread's streaming entries would leak into the new thread.
-            closeCurrentAssistant();
-            activeToolCalls.clear();
-                    processedToolIds.clear();
-            entries = [];
-            currentAssistantId = null;
-            streamTokenCount = 0;
-            awaitingResponse = false;
+            resetStreamState();
             // Load messages for the new thread immediately (don't wait for WS event)
             await loadHistory(true);
             // Notify parent to refresh the diff panel for the new thread
@@ -1267,13 +480,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
             // Clear streaming state before loading new thread's messages.
-            closeCurrentAssistant();
-            activeToolCalls.clear();
-                    processedToolIds.clear();
-            entries = [];
-            currentAssistantId = null;
-            streamTokenCount = 0;
-            awaitingResponse = false;
+            resetStreamState();
             // Load messages for the new thread immediately
             await loadHistory(true);
             // Notify parent to refresh the diff panel for the new forked thread
@@ -1353,22 +560,17 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (isLoading) {
             entries = entries.filter(e => !e.isStreaming);
             if (currentAssistantId) {
-                currentAssistantId = null;
+                stream.state.currentAssistantId = null;
             }
-            activeToolCalls.clear();
-                    processedToolIds.clear();
+            stream.state.activeToolCalls.clear();
+                    stream.state.processedToolIds.clear();
             markNotStreaming();
         }
         // If task is in Done, move it back to In Progress before sending
         if (taskStatus === 'done') {
             try {
                 const updated = await moveTask(projectId, taskId, 'in_progress');
-                boardStore.update(b => {
-                    if (!b) return b;
-                    const existing = b.tasks.find(t => t.id === taskId);
-                    const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-                });
+                mergeTaskIntoBoard(updated);
             } catch (e) {
                 showToast(String(e));
                 return;
@@ -1379,19 +581,12 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         // Add message optimistically with current thread context
         const entryId = genId();
         const isOfflineNow = getOfflineStatus();
-        entries = [...entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
-        // Don't pre-create — let the first token/tool_call event create the assistant entry
-        lastSentMessage = msg;
+        stream.state.entries = [...entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
         // Send with model info for lazy-start
-        awaitingResponse = true;
-        try {
-            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
-        } catch (e) {
-            // Send failed — show error, remove optimistic message
-            const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
+        if (!await sendWithTracking(msg, attachments)) {
+            const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
             entries = entries.filter(e => !(e.role === 'user' && e.content === msg));
-            entries = [...entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
-            awaitingResponse = false;
+            stream.state.entries = [...entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
             return;
         }
         scroll();
@@ -1407,8 +602,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         // This ensures the context bar reflects the correct usage for the new provider.
         const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
         if (lastAssistant?.stats) {
-            lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-            contextState.used = lastPromptTokens;
+            stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
+            stream.state.contextState.used = stream.state.lastPromptTokens;
         }
         // Update task with new model/provider
         modelUpdatePending = true;
@@ -1473,18 +668,10 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         // Trim local entries: keep everything up to and including the last user message
         const userIdx = entries.findIndex(e => e.id === lastUser.id);
         entries = entries.slice(0, userIdx + 1);
-        // Don't pre-create — let the first token/tool_call event create the assistant entry
-        // Re-send the user message to trigger a new LLM response
-        lastSentMessage = lastUser.content;
         isRegenerating = true;
-        awaitingResponse = true;
-        try {
-            await sendTaskMessage(projectId, taskId, lastUser.content, selectedModel, selectedUrl, undefined, selectedReasoningEffort || undefined);
-        } catch (e) {
-            const errorMsg = e instanceof Error ? e.message : 'Failed to regenerate';
-            showToast(errorMsg);
+        if (!await sendWithTracking(lastUser.content)) {
+            showToast('Failed to regenerate');
             isRegenerating = false;
-            awaitingResponse = false;
             return;
         }
         scroll();
@@ -1508,11 +695,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         if (lastEntry && lastEntry.role === 'assistant') {
             try {
                 const updated = await startTask(projectId, taskId);
-                boardStore.update(b => {
-                    if (!b) return b;
-                    const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-                });
+                mergeTaskIntoBoard(updated);
             } catch (e) {
                 showToast(String(e), 'error');
             }
@@ -1522,19 +705,15 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         // Prompt is already in entries (loaded from DB at task creation)
         // Don't pre-create assistant entry — let the first token/tool_call event create it
         lastSentMessage = taskPrompt;
-        awaitingResponse = true;
+        stream.state.awaitingResponse = true;
         scroll();
         try {
             const updated = await startTask(projectId, taskId);
-            boardStore.update(b => {
-                if (!b) return b;
-                const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
-                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-            });
+            mergeTaskIntoBoard(updated);
         } catch (e) {
             showToast(String(e), 'error');
             isStarting = false;
-            awaitingResponse = false;
+            stream.state.awaitingResponse = false;
             return;
         }
         isStarting = false;
@@ -1542,18 +721,15 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
     async function handleStop() {
         markNotStreaming();
-        awaitingResponse = false;
-        // Save the streaming assistant ID before closeCurrentAssistant() clears it
+        stream.state.awaitingResponse = false;
+        // Save the streaming assistant ID before clearing
         const streamingId = currentAssistantId;
-        closeCurrentAssistant();
-        // Remove the streaming assistant entry (incomplete response) and entries with
-        // pending tool calls so they don't leak through loadHistory's merge.
-        // loadHistory preserves non-DB entries, and streaming entries have random
-        // genId() IDs that aren't in the DB.
+        stream.closeCurrentAssistant();
+        // Remove the streaming assistant entry and entries with pending tool calls.
         entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
         // Clear active tool calls (immediate UI update)
-        activeToolCalls.clear();
-                    processedToolIds.clear();
+        stream.state.activeToolCalls.clear();
+        stream.state.processedToolIds.clear();
         try {
             await stopTask(projectId, taskId);
         } catch (e) {
@@ -1595,11 +771,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             } else {
                 updated = await moveTask(projectId, taskId, 'done');
             }
-            boardStore.update(b => {
-                if (!b) return b;
-                const merged = (updated as any).queued ? { ...$boardStore?.tasks.find(t => t.id === taskId)!, ...updated } : updated;
-                return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-            });
+            mergeTaskIntoBoard(updated);
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
         } catch (e) {
@@ -1688,19 +860,12 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
             // Clear streaming state before loading new thread's messages.
-            closeCurrentAssistant();
-            activeToolCalls.clear();
-                    processedToolIds.clear();
-            entries = [];
-            currentAssistantId = null;
-            streamTokenCount = 0;
+            resetStreamState();
             // Load messages for the new thread
             await loadHistory(true);
             updateThreadUrl(forked.id);
             onThreadSwitch?.();
-            lastSentMessage = newContent;
-            awaitingResponse = true;
-            await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
+            await sendWithTracking(newContent, attachments);
         } catch (e) {
             showToast(String(e));
         }
@@ -1720,7 +885,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 
         if (isLoading || disabled) return;
         entries = entries.slice(0, idx);
-        closeCurrentAssistant();
+        stream.closeCurrentAssistant();
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
             threads = await getTaskThreads(projectId, taskId);
@@ -1736,10 +901,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             return;
         }
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
-        entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        lastSentMessage = newContent;
-        awaitingResponse = true;
-        await sendTaskMessage(projectId, taskId, newContent, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
+        stream.state.entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
+        await sendWithTracking(newContent, attachments);
         scroll();
     }
 
@@ -1903,7 +1066,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             if (taskStatus === 'in_progress') {
                 const lastEntry = entries[entries.length - 1];
                 if (lastEntry?.role === 'user') {
-                    awaitingResponse = true;
+                    stream.state.awaitingResponse = true;
                 }
             }
         })();
@@ -2000,8 +1163,6 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         {scrollEl}
         onScrollElChange={(el) => scrollEl = el}
     />
-
-
     {#if showStartButton}
         <StartPanel
             {providers}
@@ -2048,8 +1209,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}
             selectedReasoningEffort={selectedReasoningEffort}
-            contextUsed={contextState.used}
-            contextLimit={contextState.limit}
+            contextUsed={stream.state.contextState.used}
+            contextLimit={stream.state.contextState.limit}
             planMode={planMode}
             projectId={projectId}
             taskId={taskId}

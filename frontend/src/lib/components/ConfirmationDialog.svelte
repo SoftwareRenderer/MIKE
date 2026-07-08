@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { confirmation, type ConfirmOptions } from '$lib/store';
+    import { confirmation, type ConfirmOptions } from '$lib/stores/dialogs';
 
     let open = $state(false);
     let title = $state('');

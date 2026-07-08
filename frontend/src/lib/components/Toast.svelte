@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { toast } from '$lib/store';
+    import { toast } from '$lib/stores/dialogs';
 
     let visible = $state(false);
     let message = $state('');

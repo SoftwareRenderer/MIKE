@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import type { ProjectStats, ModelStats } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
-    import { showStats } from '$lib/store';
+    import { showStats } from '$lib/stores/ui';
     import { createFocusTrap } from '$lib/a11y';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
@@ -208,50 +208,21 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    @import '$lib/styles/shared.css';
+
+    :global(.overlay) {
         z-index: 300;
+        background: rgba(0, 0, 0, 0.5);
     }
-    .modal {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
+    :global(.modal) {
         width: 90vw;
         max-width: 860px;
         max-height: 80dvh;
-        display: flex;
-        flex-direction: column;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
     .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         padding: 14px 20px;
-        border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
-    }
-    .modal-header h2 {
-        font-size: 1rem;
-        font-weight: 600;
-    }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        font-size: 1.25rem;
-        cursor: pointer;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-    }
-    .close-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
     }
     .modal-body {
         padding: 20px;

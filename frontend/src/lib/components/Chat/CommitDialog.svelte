@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { commitDialog, type CommitDialogOptions } from '$lib/store';
+    import { commitDialog, type CommitDialogOptions } from '$lib/stores/dialogs';
 
     let open = $state(false);
     let streaming = $state(false);

@@ -1,15 +1,19 @@
 <script lang="ts">
     import type { Task, Provider } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { get } from 'svelte/store';
-    import { selectedTask, showCardDetail, board as boardStore, config as configStore, showConfirm, showToast, selectedProject, commitDialog as commitDialogStore } from '$lib/store';
+    import { selectedTask, board as boardStore, config as configStore, selectedProject } from '$lib/stores/app';
+import { showCardDetail } from '$lib/stores/ui';
+import { showConfirm, showToast } from '$lib/stores/dialogs';
+import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
-    import { showEditTask, editTaskData } from '$lib/store';
+    import { showEditTask, editTaskData } from '$lib/stores/app';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
@@ -133,14 +137,7 @@
         if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); }
     }
 
-    let isMobile = $derived(false);
-
-    $effect(() => {
-        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
-        check();
-        window.addEventListener('resize', check);
-        return () => window.removeEventListener('resize', check);
-    });
+    const { isMobile } = useIsMobile();
 
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingIdsContext).has(task.id);

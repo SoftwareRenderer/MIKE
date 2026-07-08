@@ -3,7 +3,7 @@
     import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
-    import { showConfirm } from '$lib/store';
+    import { showConfirm } from '$lib/stores/dialogs';
     import type { PortForward, AssignedPort, SandboxMount } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -760,23 +760,12 @@
         color: var(--color-text-primary);
     }
 
-    .close-btn {
+    @import '$lib/styles/shared.css';
+
+    :global(.close-btn) {
         width: 28px;
         height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-secondary);
         font-size: 1rem;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-    }
-
-    .close-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
     }
 
     .locked-notice {

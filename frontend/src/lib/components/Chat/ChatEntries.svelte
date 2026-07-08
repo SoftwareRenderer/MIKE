@@ -1,15 +1,10 @@
 <script lang="ts">
-    import type { Thread } from '$lib/types';
-    import type { ChatEntry } from './TaskChat.svelte';
+    import type { Thread, ChatEntry } from '$lib/types';
+    import type { EntryMeta } from '$lib/utils/chat-entries';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
+    import QueueIndicator from './QueueIndicator.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
-
-    interface EntryMeta {
-        cpThread: Thread | null;
-        cpState: { isPending: boolean; commitLabel?: string; commitHash?: string } | null;
-        isLastUserMessage: boolean;
-    }
 
     let {
         entries,
@@ -198,10 +193,12 @@
         {/each}
     {/if}
     {#if awaitingResponse && connected}
-        <div class="awaiting-llm">
-            <span class="spinner"></span>
-            <span>{queuePosition > 0 ? `Awaiting ${isAgentSelected() ? 'agent' : 'LLM provider'} — position ${queuePosition} in queue, ~${queueEstimatedWait}s` : promptProgress > 0 ? `Awaiting ${isAgentSelected() ? 'agent' : 'LLM provider'}... Processing Prompt: ${promptProgress}%` : `Awaiting ${isAgentSelected() ? 'agent' : 'LLM provider'}...`}</span>
-        </div>
+        <QueueIndicator
+            {queuePosition}
+            {queueEstimatedWait}
+            {promptProgress}
+            {isAgentSelected}
+        />
     {/if}
     </div>
 </div>
@@ -269,15 +266,6 @@
         animation: spin 0.6s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .awaiting-llm {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        font-size: 0.8125rem;
-        color: var(--color-text-tertiary);
-    }
-
     /* Error entry styles */
     .error-entry {
         padding: 6px 0;

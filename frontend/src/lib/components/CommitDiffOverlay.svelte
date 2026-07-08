@@ -535,25 +535,16 @@ import { slide } from 'svelte/transition';
         opacity: 0.3;
         cursor: default;
     }
-    .close-btn {
+    @import '$lib/styles/shared.css';
+
+    :global(.close-btn) {
         width: 24px;
         height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        background: transparent;
-        color: var(--color-text-secondary);
         border-radius: 4px;
-        cursor: pointer;
         padding: 0;
         flex-shrink: 0;
     }
-    .close-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .close-btn:focus-visible {
+    :global(.close-btn:focus-visible) {
         outline: 2px solid var(--color-accent);
         outline-offset: 1px;
     }

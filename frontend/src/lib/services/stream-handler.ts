@@ -1,0 +1,364 @@
+import type { StreamEvent } from '$lib/types';
+import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
+import type { StreamState } from './stream-state.svelte';
+
+type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
+
+/** External callbacks the component must provide. */
+export interface StreamHandlerCallbacks {
+    genId: () => string;
+    scroll: (force?: boolean) => void;
+    markStreaming: () => void;
+    markNotStreaming: () => void;
+    onRefreshDiff: (data: DiffData) => void;
+    onThreadSwitch: () => void;
+    loadHistory: (scrollAfter: boolean) => void;
+    updateActiveThread: (threadId: string) => void;
+    updateThreadUrl: (threadId: string) => void;
+    createTaskMessage: (projectId: string, taskId: string, role: string, content: string) => Promise<void>;
+}
+
+/**
+ * Factory function that creates a stream event handler.
+ * Plain TypeScript — no Svelte runes, unit-testable.
+ *
+ * Usage:
+ *   const stream = new StreamState();
+ *   const handleEvent = createStreamHandler(stream, { genId, scroll, ... });
+ *   // In WebSocket onmessage: handleEvent(event);
+ */
+export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallbacks) {
+    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, createTaskMessage } = cb;
+    const s = stream.state;
+
+    function ensureAssistantEntry(): ChatEntry {
+        return stream.ensureAssistantEntry(genId);
+    }
+
+    return function handleEvent(event: StreamEvent, suppressEvents: boolean, projectId: string, taskId: string) {
+        switch (event.type) {
+            case 'token': {
+                if (suppressEvents) break;
+                stream.clearAwaiting();
+                markStreaming();
+                if (!s.currentAssistantId) s.streamTokenCount = 0;
+                s.streamTokenCount++;
+                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                const data = event.data as { text: string };
+                const entry = ensureAssistantEntry();
+                if (!s.currentAssistantId) s.currentAssistantId = entry.id;
+                entry.content += data.text;
+                scroll();
+                break;
+            }
+            case 'reasoning': {
+                if (suppressEvents) break;
+                stream.clearAwaiting();
+                if (!s.currentAssistantId) s.streamTokenCount = 0;
+                s.streamTokenCount++;
+                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                const data = event.data as { text: string };
+                const entry = ensureAssistantEntry();
+                entry.reasoningContent = (entry.reasoningContent || '') + data.text;
+                scroll();
+                break;
+            }
+            case 'tool_call': {
+                if (suppressEvents) break;
+                stream.clearAwaiting();
+                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string };
+                if (!data.tool_id || data.tool_id === '') break;
+
+                let entry = s.currentAssistantId ? s.entries.find(e => e.id === s.currentAssistantId) || null : null;
+                if (!entry) {
+                    for (let i = s.entries.length - 1; i >= 0; i--) {
+                        if (s.entries[i].role === 'assistant') { entry = s.entries[i]; break; }
+                    }
+                }
+                if (!entry) entry = ensureAssistantEntry();
+
+                if (entry.content.trim() === data.tool_name && !entry.reasoningContent) entry.content = '';
+                if (!entry.toolCalls) entry.toolCalls = [];
+
+                const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
+                if (existing) {
+                    if (!existing.isPending && existing.result !== undefined) break;
+                    const newRawArgs = data.raw_args_delta ? (existing.raw_args || '') + data.raw_args_delta : data.raw_args;
+                    const updated = { ...existing, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args || {}, raw_args: newRawArgs, sandbox: data.sandbox, path: data.path };
+                    entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id ? updated : tc);
+                } else if (s.processedToolIds.has(data.tool_id)) {
+                    break;
+                } else {
+                    s.processedToolIds.add(data.tool_id);
+                    const ci = entry.content.length;
+                    const ri = (entry.reasoningContent || '').length;
+                    entry.toolCalls = [...(entry.toolCalls || []), {
+                        toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
+                        args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
+                        isPending: true, contentIndex: ci, reasoningIndex: ri,
+                    }];
+                    entry.isStreaming = true;
+                    s.activeToolCalls.set(data.tool_id, { entryId: entry.id });
+                }
+                scroll();
+                break;
+            }
+            case 'tool_result': {
+                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
+                const ref = s.activeToolCalls.get(data.tool_id);
+                s.activeToolCalls.delete(data.tool_id);
+                let updated = false;
+                if (ref) {
+                    const entry = s.entries.find(e => e.id === ref.entryId);
+                    if (entry?.toolCalls) {
+                        const tc = entry.toolCalls.find(t => t.toolId === data.tool_id);
+                        if (tc) {
+                            tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
+                            if (data.args) tc.args = data.args;
+                            if (data.raw_args) tc.raw_args = data.raw_args;
+                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                            if (data.path) tc.path = data.path;
+                            updated = true;
+                        }
+                    }
+                }
+                if (!updated) {
+                    for (const entry of s.entries) {
+                        if (entry.toolCalls) {
+                            const tc = entry.toolCalls.find(t => t.toolId === data.tool_id && t.isPending);
+                            if (tc) {
+                                tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
+                                if (data.args) tc.args = data.args;
+                                if (data.raw_args) tc.raw_args = data.raw_args;
+                                if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                                if (data.path) tc.path = data.path;
+                                updated = true; break;
+                            }
+                        }
+                    }
+                }
+                if (s.activeToolCalls.size === 0) {
+                    stream.closeCurrentAssistant();
+                    s.awaitingResponse = true;
+                }
+                scroll();
+                break;
+            }
+            case 'tool_progress': {
+                const data = event.data as { tool_id?: string; bytes_written: number; path?: string };
+                for (const entry of s.entries) {
+                    if (entry.toolCalls) {
+                        for (const tc of entry.toolCalls) {
+                            if (tc.isPending && (!data.tool_id || tc.toolId === data.tool_id)) {
+                                tc.bytesWritten = data.bytes_written;
+                                if (data.path) tc.path = data.path;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            case 'tool_output': {
+                const data = event.data as { tool_id: string; text: string };
+                for (const entry of s.entries) {
+                    if (entry.toolCalls) {
+                        for (const tc of entry.toolCalls) {
+                            if (tc.isPending && tc.toolId === data.tool_id) {
+                                tc.result = (tc.result || '') + data.text;
+                            }
+                        }
+                    }
+                }
+                scroll();
+                break;
+            }
+            case 'user_message': {
+                const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
+                // Echo handling is done in component (lastSentMessage check)
+                if (data.id && s.entries.some(e => e.id === data.id)) break;
+                stream.closeCurrentAssistant();
+                s.entries = [...s.entries, { id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
+                break;
+            }
+            case 'complete': {
+                markNotStreaming();
+                s.awaitingResponse = false;
+                const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
+                if (data.assistant_message_id && s.currentAssistantId) {
+                    const entry = s.entries.find(e => e.id === s.currentAssistantId);
+                    if (entry && entry.id !== data.assistant_message_id && !s.entries.some(e => e.id === data.assistant_message_id)) {
+                        entry.id = data.assistant_message_id;
+                    }
+                }
+                stream.closeCurrentAssistant();
+                for (const e of s.entries) {
+                    if (e.role === 'assistant' && e.isStreaming) e.isStreaming = false;
+                }
+                if (data.prompt_tokens !== undefined) {
+                    s.lastPromptTokens = data.prompt_tokens + (data.predicted_tokens || 0);
+                    s.contextState.used = s.lastPromptTokens;
+                }
+                const lastAssistant = [...s.entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
+                if (lastAssistant && data.predicted_tokens !== undefined) {
+                    lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
+                }
+                scroll(true);
+                break;
+            }
+            case 'error': {
+                stream.clearAwaiting();
+                markNotStreaming();
+                stream.closeCurrentAssistant();
+                const data = event.data as { message: string; code?: string };
+                const code = data.code || 'error';
+                if (code === 'ws_error' || code === 'stopped') break;
+                const message = data.message || 'An error occurred';
+                const entry: ChatEntry = { id: genId(), role: 'error', content: message, isStreaming: false, error: { code, message }, createdAt: new Date().toISOString() };
+                s.entries = [...s.entries, entry];
+                if (code !== 'ws_disconnected') {
+                    createTaskMessage(projectId, taskId, 'error', `[${code}] ${message}`).catch(() => {});
+                }
+                break;
+            }
+            case 'status': {
+                const data = event.data as { state: string; activity?: string };
+                if (data.state === 'pulling_image') {
+                    const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: `Pulling ${imgName}...`, isStreaming: false, createdAt: new Date().toISOString() }];
+                } else if (data.state === 'building_image') {
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Building sandbox image from Dockerfile...', isStreaming: false, createdAt: new Date().toISOString() }];
+                } else if (data.state === 'starting_container') {
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
+                } else if (data.state === 'running') {
+                    if (s.currentAssistantId) {
+                        const entry = s.entries.find(e => e.id === s.currentAssistantId);
+                        if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
+                    }
+                    s.activeToolCalls.clear();
+                    s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
+                    markStreaming();
+                    s.queuePosition = 0;
+                    s.queueEstimatedWait = 0;
+                } else if (data.state === 'cancelled') {
+                    stream.closeCurrentAssistant();
+                    s.activeToolCalls.clear();
+                    s.processedToolIds.clear();
+                    s.entries = s.entries.filter(e => !e.isStreaming);
+                    markNotStreaming();
+                    s.awaitingResponse = false;
+                } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
+                    markNotStreaming();
+                    s.awaitingResponse = false;
+                }
+                break;
+            }
+            case 'build_progress': {
+                const data = event.data as { line: string };
+                if (data.line) {
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: data.line, isStreaming: false, createdAt: new Date().toISOString() }];
+                }
+                break;
+            }
+            case 'hint': {
+                const data = event.data as { content: string; created_at: string };
+                if (data.content) {
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                }
+                break;
+            }
+            case 'stats': {
+                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number };
+                if (data.prompt_tokens !== undefined && data.prompt_tokens > 0) s.lastPromptTokens = data.prompt_tokens;
+                if (data.predicted_tokens !== s.streamTokenCount) {
+                    s.streamTokenCount = data.predicted_tokens;
+                    s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                }
+                if (s.currentAssistantId) {
+                    const entry = s.entries.find(e => e.id === s.currentAssistantId);
+                    if (entry) {
+                        entry.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens ?? entry.stats?.prompt_tokens ?? 0, predicted_tokens: data.predicted_tokens, prompt_ms: entry.stats?.prompt_ms ?? 0, predicted_ms: data.predicted_ms, duration: entry.stats?.duration ?? 0 };
+                    }
+                }
+                break;
+            }
+            case 'diff_changed': {
+                onRefreshDiff(event.data as DiffData);
+                break;
+            }
+            case 'thread_switch': {
+                const data = event.data as { thread_id: string; task_id: string };
+                updateActiveThread(data.thread_id);
+                updateThreadUrl(data.thread_id);
+                onThreadSwitch();
+                stream.resetStreaming();
+                s.entries = [];
+                s.streamTokenCount = 0;
+                loadHistory(true);
+                break;
+            }
+            case 'queue': {
+                const data = event.data as { position: number; estimated_wait_seconds: number };
+                s.queuePosition = data.position || 0;
+                s.queueEstimatedWait = data.estimated_wait_seconds || 0;
+                if (s.queuePosition > 0) s.awaitingResponse = true;
+                break;
+            }
+            case 'prompt_progress': {
+                const data = event.data as { total: number; cache: number; processed: number; time_ms: number };
+                if (data.total > 0) s.promptProgress = Math.round((data.processed / data.total) * 100);
+                break;
+            }
+            case 'summarization': {
+                const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
+                if (data.id && s.entries.some(e => e.id === data.id)) break;
+                s.entries = [...s.entries, {
+                    id: data.id || genId(), role: 'summarization', content: data.summary || 'Context was summarized to free space',
+                    isStreaming: false, createdAt: data.created_at || new Date().toISOString(),
+                    stats: data.model_name ? { model_name: data.model_name, prompt_tokens: data.prompt_tokens ?? 0, predicted_tokens: data.predicted_tokens ?? 0, prompt_ms: data.prompt_ms ?? 0, predicted_ms: data.predicted_ms ?? 0, duration: (data.prompt_ms ?? 0) + (data.predicted_ms ?? 0) } : undefined,
+                }];
+                break;
+            }
+            case 'merge_resolution': {
+                const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string; is_error?: boolean };
+                const content = data.content || 'Merged';
+                const label = data.label || (content.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
+                s.entries = [...s.entries, { id: data.id || genId(), role: 'merge_resolution', content, mergeLabel: label, isError: data.is_error || false, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                break;
+            }
+            case 'git_checkpoint_pending': {
+                const data = event.data as { message_id: string };
+                const pending = new Set(s.pendingCheckpoints);
+                pending.add(data.message_id);
+                s.pendingCheckpoints = pending;
+                break;
+            }
+            case 'git_checkpoint_complete': {
+                const data = event.data as { message_id: string; commit_hash: string; label: string };
+                const pending = new Set(s.pendingCheckpoints);
+                pending.delete(data.message_id);
+                s.pendingCheckpoints = pending;
+                if (data.label) {
+                    const labels = new Map(s.checkpointLabels);
+                    labels.set(data.message_id, data.label);
+                    s.checkpointLabels = labels;
+                }
+                if (data.commit_hash) {
+                    const hashes = new Map(s.checkpointCommitHashes);
+                    hashes.set(data.message_id, data.commit_hash);
+                    let entryId = s.currentAssistantId;
+                    if (!entryId) {
+                        for (let i = s.entries.length - 1; i >= 0; i--) {
+                            const entry = s.entries[i];
+                            if (entry && entry.role === 'assistant' && entry.toolCalls && entry.toolCalls.length > 0) { entryId = entry.id; break; }
+                        }
+                    }
+                    if (entryId) hashes.set(entryId, data.commit_hash);
+                    s.checkpointCommitHashes = hashes;
+                    s.checkpointHashesVersion++;
+                }
+                break;
+            }
+        }
+        scroll();
+    };
+}

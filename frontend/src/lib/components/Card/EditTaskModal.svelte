@@ -158,48 +158,21 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    @import '$lib/styles/shared.css';
+
+    :global(.overlay) {
         z-index: 100;
+        background: rgba(0,0,0,0.5);
     }
-    .modal {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
+    :global(.modal) {
         width: 440px;
-        max-width: 90vw;
-        max-height: 90vh;
-        overflow-y: auto;
         box-shadow: 0 12px 40px rgba(0,0,0,0.3);
     }
     .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         padding: 14px 18px;
-        border-bottom: 1px solid var(--color-border);
     }
     .modal-header h2 {
         font-size: 0.9375rem;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        margin: 0;
-    }
-    .close-btn {
-        font-size: 1.125rem;
-        color: var(--color-text-secondary);
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 2px 4px;
-        line-height: 1;
-    }
-    .close-btn:hover {
         color: var(--color-text-primary);
     }
     .modal-body {

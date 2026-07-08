@@ -155,24 +155,12 @@ Sandbox Isolation is enabled for this project
         color: var(--color-text-primary);
     }
 
-    .close-btn {
+    @import '$lib/styles/shared.css';
+
+    :global(.close-btn) {
         width: 28px;
         height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-secondary);
         font-size: 1rem;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s, color 0.15s;
-    }
-
-    .close-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
     }
 
     .panel-body {

@@ -181,14 +181,15 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    @import '$lib/styles/shared.css';
+
+    :global(.overlay) {
         z-index: 1100;
+    }
+    :global(.close-btn) {
+        width: 28px;
+        height: 28px;
+        font-size: 1rem;
     }
     .browser {
         background: var(--color-surface-1);
@@ -211,23 +212,6 @@
     .browser-header h2 {
         font-size: 1rem;
         font-weight: 600;
-        color: var(--color-text-primary);
-    }
-    .close-btn {
-        width: 28px;
-        height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-secondary);
-        font-size: 1rem;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-    }
-    .close-btn:hover {
-        background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .browser-body {

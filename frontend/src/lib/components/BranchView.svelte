@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiff } from '$lib/api';
     import { toHomeRelative } from '$lib/utils/path';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import type { GitCommit, GitLogResponse } from '$lib/types';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
@@ -109,7 +110,7 @@
     });
 
     // Mobile layout
-    let isMobile = $state(false);
+    const { isMobile } = useIsMobile();
     let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
     let editorFullscreen = $state(false);
     let diffFullscreen = $state(false);
@@ -365,14 +366,13 @@
         if (activeResize) e.preventDefault();
     }
 
-    function checkMobile() {
-        const wasMobile = isMobile;
-        isMobile = window.matchMedia('(max-width: 768px)').matches;
-        if (isMobile && !wasMobile) {
+    $effect(() => {
+        const mobile = isMobile;
+        if (mobile) {
             activeTab = 'files';
             splitRatio = 0.75;
         }
-    }
+    });
 
     function getFolderName(path: string): string {
         const parts = path.split('/');
@@ -382,12 +382,10 @@
     onMount(() => {
         loadCommits();
         loadBranches();
-        checkMobile();
         // If a file is already open, switch to editor tab
         if (selectedFilePath) {
             activeTab = 'editor';
         }
-        window.addEventListener('resize', checkMobile);
         window.addEventListener('keydown', handleKeydown);
         document.addEventListener('mousemove', handlePointerMove);
         document.addEventListener('mouseup', handlePointerUp);
@@ -397,7 +395,6 @@
     });
 
     onDestroy(() => {
-        window.removeEventListener('resize', checkMobile);
         window.removeEventListener('keydown', handleKeydown);
         document.removeEventListener('mousemove', handlePointerMove);
         document.removeEventListener('mouseup', handlePointerUp);
@@ -692,21 +689,11 @@
         flex: 1;
     }
 
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
+    @import '$lib/styles/shared.css';
+
+    :global(.close-btn) {
         padding: 6px;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
         flex-shrink: 0;
-    }
-    .close-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
     }
 
     .terminal-btn {

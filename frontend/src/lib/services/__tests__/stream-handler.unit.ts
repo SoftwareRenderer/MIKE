@@ -1,0 +1,183 @@
+import { describe, it, expect, vi } from 'vitest';
+import { StreamState } from '$lib/services/stream-state.svelte';
+import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
+
+function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
+    return {
+        genId: vi.fn(() => `id-${Math.random().toString(36).slice(2, 8)}`),
+        scroll: vi.fn(),
+        markStreaming: vi.fn(),
+        markNotStreaming: vi.fn(),
+        onRefreshDiff: vi.fn(),
+        onThreadSwitch: vi.fn(),
+        loadHistory: vi.fn(),
+        updateActiveThread: vi.fn(),
+        updateThreadUrl: vi.fn(),
+        createTaskMessage: vi.fn(async () => {}),
+        ...overrides,
+    };
+}
+
+describe('StreamState', () => {
+    it('starts with empty state', () => {
+        const s = new StreamState();
+        expect(s.state.entries).toEqual([]);
+        expect(s.state.currentAssistantId).toBeNull();
+        expect(s.state.awaitingResponse).toBe(false);
+    });
+
+    it('ensureAssistantEntry creates a new entry', () => {
+        const s = new StreamState();
+        const entry = s.ensureAssistantEntry(() => 'test-id');
+        expect(entry.id).toBe('test-id');
+        expect(entry.role).toBe('assistant');
+        expect(s.state.entries.length).toBe(1);
+    });
+
+    it('closeCurrentAssistant sets isStreaming to false', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'test-id');
+        s.closeCurrentAssistant();
+        expect(s.state.entries[0].isStreaming).toBe(false);
+        expect(s.state.currentAssistantId).toBeNull();
+    });
+
+    it('reset clears all state', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'test-id');
+        s.state.awaitingResponse = true;
+        s.state.queuePosition = 5;
+        s.reset();
+        expect(s.state.entries).toEqual([]);
+        expect(s.state.awaitingResponse).toBe(false);
+        expect(s.state.queuePosition).toBe(0);
+    });
+});
+
+describe('createStreamHandler', () => {
+    function setup() {
+        const cb = makeCallbacks();
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { cb, stream, handleEvent };
+    }
+
+    it('token event creates assistant entry and appends content', () => {
+        const { cb, stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        expect(stream.state.entries.length).toBe(1);
+        expect(stream.state.entries[0].content).toBe('Hello');
+        expect(cb.markStreaming).toHaveBeenCalled();
+    });
+
+    it('reasoning event appends to reasoningContent', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning', data: { text: 'Let me think' } }, false, 'p1', 't1');
+        expect(stream.state.entries[0].reasoningContent).toBe('Let me think');
+    });
+
+    it('tool_call event creates tool call entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: { path: 'foo.ts' } } }, false, 'p1', 't1');
+        const entry = stream.state.entries[0];
+        expect(entry.toolCalls).toHaveLength(1);
+        expect(entry.toolCalls![0].toolId).toBe('tc1');
+        expect(entry.toolCalls![0].isPending).toBe(true);
+    });
+
+    it('tool_result event resolves pending tool call', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'file content', duration: 100 } }, false, 'p1', 't1');
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('file content');
+        expect(tc.isPending).toBe(false);
+        expect(tc.success).toBe(true);
+    });
+
+    it('complete event closes assistant and sets stats', () => {
+        const { cb, stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hi' } }, false, 'p1', 't1');
+        handleEvent({ type: 'complete', data: { state: 'idle', model_name: 'gpt-4', prompt_tokens: 100, predicted_tokens: 10, prompt_ms: 200, predicted_ms: 100, duration: 300, assistant_message_id: 'backend-id' } }, false, 'p1', 't1');
+        expect(stream.state.entries[0].isStreaming).toBe(false);
+        expect(stream.state.entries[0].stats).toBeDefined();
+        expect(cb.markNotStreaming).toHaveBeenCalled();
+    });
+
+    it('error event creates error entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'error', data: { message: 'Something failed', code: 'api_error' } }, false, 'p1', 't1');
+        const entry = stream.state.entries.find(e => e.role === 'error');
+        expect(entry).toBeDefined();
+        expect(entry!.content).toBe('Something failed');
+    });
+
+    it('error event skips ws_error and stopped codes', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'error', data: { message: 'ws error', code: 'ws_error' } }, false, 'p1', 't1');
+        handleEvent({ type: 'error', data: { message: 'stopped', code: 'stopped' } }, false, 'p1', 't1');
+        expect(stream.state.entries.filter(e => e.role === 'error')).toHaveLength(0);
+    });
+
+    it('queue event updates queue position', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'queue', data: { position: 3, estimated_wait_seconds: 30 } }, false, 'p1', 't1');
+        expect(stream.state.queuePosition).toBe(3);
+        expect(stream.state.queueEstimatedWait).toBe(30);
+        expect(stream.state.awaitingResponse).toBe(true);
+    });
+
+    it('stats event updates token count', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'stats', data: { model_name: 'gpt-4', prompt_tokens: 500, predicted_tokens: 50, predicted_ms: 200 } }, false, 'p1', 't1');
+        expect(stream.state.streamTokenCount).toBe(50);
+        expect(stream.state.lastPromptTokens).toBe(500);
+    });
+
+    it('git_checkpoint_pending adds to pending set', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'git_checkpoint_pending', data: { message_id: 'msg-1' } }, false, 'p1', 't1');
+        expect(stream.state.pendingCheckpoints.has('msg-1')).toBe(true);
+    });
+
+    it('git_checkpoint_complete removes from pending and adds hash', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'git_checkpoint_pending', data: { message_id: 'msg-1' } }, false, 'p1', 't1');
+        handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'msg-1', commit_hash: 'abc123', label: 'Checkpoint 1' } }, false, 'p1', 't1');
+        expect(stream.state.pendingCheckpoints.has('msg-1')).toBe(false);
+        expect(stream.state.checkpointLabels.get('msg-1')).toBe('Checkpoint 1');
+        expect(stream.state.checkpointCommitHashes.get('msg-1')).toBe('abc123');
+    });
+
+    it('suppressEvents skips token events', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, true, 'p1', 't1');
+        expect(stream.state.entries.length).toBe(0);
+    });
+
+    it('diff_changed calls onRefreshDiff callback', () => {
+        const { cb, handleEvent } = setup();
+        handleEvent({ type: 'diff_changed', data: { files: {} } }, false, 'p1', 't1');
+        expect(cb.onRefreshDiff).toHaveBeenCalled();
+    });
+
+    it('tool_call dedup via processedToolIds', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        // Duplicate tool_call with same ID should be skipped
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        expect(stream.state.entries[0].toolCalls).toHaveLength(1);
+    });
+
+    it('status:running clears pending tool calls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        // Entry with only pending tool calls should be removed
+        expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
+    });
+});

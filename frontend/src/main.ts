@@ -1,7 +1,7 @@
 import './app.css';
 import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
-import { pwaInstallPrompt, pwaInstalled } from './lib/store';
+import { pwaInstallPrompt, pwaInstalled } from './lib/stores/app';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)

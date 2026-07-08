@@ -1,10 +1,13 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig, selectedTask, showConfirm, showToast, showEditTask, editTaskData as editTaskDataStore } from '$lib/store';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, selectedTask, showEditTask, editTaskData as editTaskDataStore } from '$lib/stores/app';
+import { showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig } from '$lib/stores/ui';
+import { showConfirm, showToast } from '$lib/stores/dialogs';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 import kanbanIcon from '$lib/assets/icons/kanban.svg';
@@ -119,7 +122,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let showCardDetailVal = $state(false);
     let showSandboxConfigVal = $state(false);
     let showEditTaskVal = $state(false);
-    let editTaskDataVal: import('$lib/store').EditTaskData | null = $state(null);
+    let editTaskDataVal: import('$lib/stores/app').EditTaskData | null = $state(null);
     let showFileBrowserVal = $state(false);
     let showBranchViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
@@ -131,7 +134,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let selectedTaskVal: Task | null = $state(null);
     let creatingChildOfVal: string | null = $state(null);
     let mobileMenuOpen = $state(false);
-    let isMobile = $derived(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
     let servingFromCache = $state(false);
@@ -139,12 +141,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
-    $effect(() => {
-        const check = () => isMobile = window.matchMedia('(max-width: 768px)').matches;
-        check();
-        window.addEventListener('resize', check);
-        return () => window.removeEventListener('resize', check);
-    });
+    const { isMobile } = useIsMobile();
 
     // Sync Svelte 4 stores → local $state (single subscription, no onMount needed)
     $effect(() => {

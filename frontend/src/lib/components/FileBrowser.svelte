@@ -274,13 +274,9 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    @import '$lib/styles/shared.css';
+
+    :global(.overlay) {
         z-index: 300;
     }
     .browser {
@@ -304,11 +300,6 @@
     .browser-header h2 {
         font-size: 1rem;
         font-weight: 600;
-    }
-    .close-btn {
-        font-size: 1.125rem;
-        color: var(--color-text-secondary);
-        padding: 4px;
     }
     .browser-body {
         flex: 1;

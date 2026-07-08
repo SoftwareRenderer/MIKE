@@ -131,6 +131,9 @@ npx playwright test --grep "should edit message"
 # With UI for debugging
 npx playwright test --ui
 
+# Frontend unit tests (vitest, ~1s)
+cd frontend && npm test
+
 # All Go unit tests (~60s, parallel)
 go test ./backend/... -count=1 -parallel 8
 ```
@@ -162,6 +165,17 @@ Both servers share a mock LLM on port 9999. Test DBs, worktrees (`/tmp/kanban-te
 ```bash
 ./kanban &
 ```
+
+### Frontend Unit Tests
+- Run: `cd frontend && npm test` (vitest, jsdom, ~1s, ~49 tests)
+- Test files: `src/**/*.unit.ts` — colocated in `__tests__/` directories under `src/lib/`
+- Framework: `vitest` + `@testing-library/svelte`
+- Config: `frontend/vitest.config.ts` (jsdom environment, `$lib` alias)
+- Test modules:
+  - `src/lib/services/__tests__/` — reactive services (`DiffCache`, `StreamState`, `StreamHandler`)
+  - `src/lib/utils/__tests__/` — pure utility functions (`format-time.ts`)
+- Use `.svelte.ts` extension for any test file importing modules that use Svelte 5 compiler macros (`$state`, `$derived`, `$effect`)
+- Tests are deterministic — no external dependencies (LLM, network, server)
 
 ### Go Unit Tests
 - Run: `go test ./backend/... -count=1 -parallel 8` (~60s, ~560 tests)
@@ -285,6 +299,30 @@ All functions are **async** (return `Promise`).
 - Use `$derived()` for computed values (NOT `by()`)
 - Use `$props()` for component props
 - Svelte 4 stores: import `get` from `svelte/store` for `.get()` calls
+
+### Service Reactivity (`.svelte.ts`)
+Svelte 5 runes work inside classes in `.svelte.ts` files — no version bumper or `$effect` sync needed.
+
+**Pattern:**
+```ts
+// $lib/services/my-cache.svelte.ts
+class MyCache {
+    state = $state({ items: [] as Item[], loading: false });
+    addItem(item: Item) { this.state.items = [...this.state.items, item]; }
+}
+```
+```svelte
+<!-- Component -->
+<script lang="ts">
+    const cache = new MyCache();
+    // Read cache.state directly — Svelte tracks deep changes automatically
+</script>
+{#each cache.state.items as item}...
+```
+
+**Why:** `$state()` provides deep proxy-based reactivity. Assigning `this.state.items = [...newItems]` notifies any component reading `cache.state.items`. No manual `version` counter, `_bump()`, or `$effect` mirror needed.
+
+**Directory conventions:** `$lib/services/` for plain TS classes/factories, `$lib/composables/` for reactive helpers, `$lib/utils/` for pure functions.
 
 ### WebSocket Protocol
 - Client sends: `{"type": "user_message", "data": {"content": "..."}}`

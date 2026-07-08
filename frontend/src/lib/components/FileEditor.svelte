@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, unmount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { showToast } from '$lib/store';
+    import { showToast } from '$lib/stores/dialogs';
 
     // CodeMirror
     import { EditorView } from 'codemirror';

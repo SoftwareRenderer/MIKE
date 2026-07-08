@@ -4,7 +4,8 @@
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { WebglAddon } from '@xterm/addon-webgl';
-    import { showTerminal, selectedProject, selectedTask } from '$lib/store';
+    import { selectedProject, selectedTask } from '$lib/stores/app';
+import { showTerminal } from '$lib/stores/ui';
     import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
@@ -817,12 +818,10 @@
         align-items: center;
         gap: 2px;
     }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
+    @import '$lib/styles/shared.css';
+
+    :global(.close-btn) {
         font-size: 1rem;
-        cursor: pointer;
         padding: 2px 6px;
     }
     .copy-btn {
@@ -834,7 +833,7 @@
         display: flex;
         align-items: center;
     }
-    .close-btn:hover {
+    :global(.close-btn:hover) {
         color: var(--color-text-primary);
     }
     .terminal-container {

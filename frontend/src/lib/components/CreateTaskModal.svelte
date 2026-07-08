@@ -3,7 +3,8 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
-    import { config as configStore, showCreateTask, board as boardStore, selectedProject } from '$lib/store';
+    import { config as configStore, board as boardStore, selectedProject } from '$lib/stores/app';
+import { showCreateTask } from '$lib/stores/ui';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -409,39 +410,16 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    @import '$lib/styles/shared.css';
+
+    :global(.overlay) {
         z-index: 100;
     }
-    .modal {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
+    :global(.modal) {
         width: 480px;
-        max-width: 90vw;
-        max-height: 90vh;
-        overflow-y: auto;
     }
     .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         padding: 16px 20px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .modal-header h2 {
-        font-size: 1rem;
-        font-weight: 600;
-    }
-    .close-btn {
-        font-size: 1.125rem;
-        color: var(--color-text-secondary);
-        padding: 4px;
     }
     .modal-body {
         padding: 20px;

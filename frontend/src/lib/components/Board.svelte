@@ -2,7 +2,9 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
-    import { board as boardStore, showConfirm, showToast, selectedTask, showCardDetail, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/store';
+    import { board as boardStore, selectedTask, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
+import { showCardDetail } from '$lib/stores/ui';
+import { showConfirm, showToast } from '$lib/stores/dialogs';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
 
