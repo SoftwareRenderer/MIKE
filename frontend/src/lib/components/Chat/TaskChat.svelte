@@ -1989,6 +1989,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
         onDismissError={handleDismissError}
         onRetryConnect={handleRetryConnect}
         onThreadSwitch={handleThreadSwitch}
+        isSwitching={threadSwitching}
         onMsgDelete={handleMsgDelete}
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}

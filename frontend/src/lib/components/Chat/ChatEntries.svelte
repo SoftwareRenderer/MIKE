@@ -34,6 +34,7 @@
         onDismissError,
         onRetryConnect,
         onThreadSwitch,
+        isSwitching,
         onMsgDelete,
         onMsgFork,
         onMsgSend,
@@ -65,6 +66,7 @@
         onDismissError: (messageId: string) => Promise<void>;
         onRetryConnect: () => void;
         onThreadSwitch: (threadId: string) => Promise<void>;
+        isSwitching?: boolean;
         onMsgDelete: (entry: ChatEntry) => void;
         onMsgFork: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onMsgSend: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
@@ -109,6 +111,7 @@
                         threads={threads}
                         activeThreadId={meta.cpThread?.id || ''}
                         onSwitch={onThreadSwitch}
+                        isSwitching={isSwitching}
                         isPending={meta.cpState?.isPending || false}
                         commitLabel={meta.cpState?.commitLabel || undefined}
                         commitHash={meta.cpState?.commitHash || meta.cpThread?.checkpoint_commit_hash || undefined}

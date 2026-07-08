@@ -189,17 +189,13 @@ async function setup(): Promise<void> {
 }
 
 async function teardown(): Promise<void> {
-    // 1. Stop mock LLM server
-    try { execSync('lsof -ti:' + MOCK_PORT + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
-    console.log('[global-teardown] Mock LLM server stopped');
-
-    // 2. Stop isolated kanban server
-    try { execSync('lsof -ti:' + KANBAN_PORT_ISOLATED + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
-    console.log('[global-teardown] Isolated kanban server stopped');
-
-    // 3. Stop test kanban server
-    try { execSync('lsof -ti:' + KANBAN_PORT + ' | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
-    console.log('[global-teardown] Test kanban server stopped');
+    console.error('[teardown] ENTRY');
+    // Stop all test servers.
+    for (const port of [MOCK_PORT, KANBAN_PORT_ISOLATED, KANBAN_PORT]) {
+        console.error(`[teardown] killing port ${port}...`);
+        killPort(port);
+        console.error(`[teardown] port ${port} stopped`);
+    }
 
     // 4. Clean up orphaned sandbox containers
     try {
@@ -266,15 +262,31 @@ function ensureTestRepo(): void {
     }
 }
 
-function cleanupStaleState(): void {
-    // Remove stale lock file from interrupted runs
-    try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
-    // Kill stale mock LLM processes
-    try { execSync('pkill -f "mock-llm" 2>/dev/null || true'); } catch { /* ignore */ }
-    // Kill stale kanban on port 3000 (will be restarted)
-    try { execSync('lsof -ti:3000 | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
-    // Kill stale kanban on port 3001 (isolated server)
-    try { execSync('lsof -ti:3001 | xargs kill 2>/dev/null || true'); } catch { /* ignore */ }
+/** Kill all processes listening on a given port (non-blocking, no shell). */
+function killPort(port: number): void {
+    try {
+        const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', timeout: 3000 }).trim();
+        if (!output) return;
+        const myPid = String(process.pid);
+        for (const pid of output.split('\n')) {
+            const p = pid.trim();
+            if (p === myPid) continue; // don't kill ourselves
+            try { process.kill(parseInt(p), 'SIGTERM'); } catch { /* ignore */ }
+        }
+    } catch { /* no processes on this port */ }
+}
+
+function cleanupStaleState(keepLockFile: boolean): void {
+    if (!keepLockFile) {
+        // Remove stale lock file from interrupted runs
+        try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+    }
+    // Kill stale processes on test ports.
+    // NOTE: Uses lsof + process.kill (no shell pipeline) to avoid the shell
+    // being matched by pkill -f and killing itself.
+    for (const port of [MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]) {
+        killPort(port);
+    }
     // Clean up stale test DB/worktrees
     try { fs.unlinkSync(TEST_DB); } catch { /* ignore */ }
     try { fs.unlinkSync(TEST_DB_ISOLATED); } catch { /* ignore */ }
@@ -457,19 +469,17 @@ function deleteRequest(url: string): Promise<any> {
 }
 
 export default async function main(): Promise<void> {
-    // Always clean stale state first (from interrupted runs)
-    // This must run BEFORE the lock file check, otherwise a stale lock
-    // file causes teardown to run, which kills servers but doesn't restart them.
-    cleanupStaleState();
-
-    // If lock file exists, we're in teardown phase (setup already ran)
-    // Otherwise, we're in setup phase
+    // Check teardown phase BEFORE cleanup (cleanup removes the lock file)
     const isTeardown = fs.existsSync(LOCK_FILE);
 
     if (isTeardown) {
+        // Clean stale state from interrupted runs (but keep lock file for teardown)
+        cleanupStaleState(true);
         await teardown();
         try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     } else {
+        // Clean stale state from previous interrupted runs
+        cleanupStaleState(false);
         await setup();
     }
 }

@@ -413,6 +413,59 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		}
 	}
 
+	// Clean up stale kanban stash entries for tasks that no longer exist.
+	// Kanban stash messages: "kanban-switch-{taskID}-{threadID}" or "kanban-fork-{taskID}-{threadID}"
+	// Task IDs contain hyphens, so we match against all known active task IDs.
+	for _, p := range projects {
+		stashListOut, err := wm.gitRunOutput(p.Path, "stash", "list", "--format=%gd%x00%s")
+		if err != nil {
+			continue // no stash list, skip
+		}
+		var dropIndices []int
+		for line := range strings.SplitSeq(stashListOut, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\x00", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			subject := parts[1]
+			// Check if this is a kanban-labeled stash belonging to an active task
+			if !strings.HasPrefix(subject, "kanban-switch-") && !strings.HasPrefix(subject, "kanban-fork-") {
+				continue
+			}
+			// Try matching against all active task IDs
+			belongsToActiveTask := false
+			for taskID := range activeSet {
+				if strings.HasPrefix(subject, "kanban-switch-"+taskID+"-") ||
+					strings.HasPrefix(subject, "kanban-fork-"+taskID+"-") {
+					belongsToActiveTask = true
+					break
+				}
+			}
+			if !belongsToActiveTask {
+				if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
+					if idx, err := strconv.Atoi(match[1]); err == nil {
+						dropIndices = append(dropIndices, idx)
+					}
+				}
+			}
+		}
+		// Drop from highest to lowest (git renumbers after each drop)
+		wm.GetProjectStashMu(p.ID).Lock()
+		for i := len(dropIndices) - 1; i >= 0; i-- {
+			if dryRun {
+				log.Printf("[gc] would drop stale stash entry stash@{%d} in project %s", dropIndices[i], p.Name)
+			} else {
+				log.Printf("[gc] dropping stale stash entry stash@{%d} in project %s", dropIndices[i], p.Name)
+				_ = wm.gitRun(p.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
+			}
+		}
+		wm.GetProjectStashMu(p.ID).Unlock()
+	}
+
 	if dryRun {
 		log.Printf("[gc] dry-run complete: %d orphaned worktrees would be removed", removed)
 	} else {
@@ -669,6 +722,16 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 		return "", fmt.Errorf("git status: %w", err)
 	}
 	return out, nil
+}
+
+// HasWorktreeChanges returns true if the worktree has uncommitted changes
+// (modified, staged, or untracked files). Uses git status --porcelain.
+func (wm *WorktreeManager) HasWorktreeChanges(taskID string) bool {
+	out, err := wm.GitStatus(taskID)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) != ""
 }
 
 // UntrackedFile holds the path and content lines for an untracked (new) file.
@@ -1170,6 +1233,53 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 }
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
+// DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
+// Matches messages like "kanban-switch-{taskID}-*" and "kanban-fork-{taskID}-*".
+// Called during task deletion to clean up stale stash entries.
+func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+
+	wm.GetProjectStashMu(projectID).Lock()
+	defer wm.GetProjectStashMu(projectID).Unlock()
+
+	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%s")
+	if err != nil {
+		return nil // no stash, nothing to clean
+	}
+
+	var dropIndices []int
+	for line := range strings.SplitSeq(listOut, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x00", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		subject := parts[1]
+		if !strings.HasPrefix(subject, "kanban-switch-"+taskID+"-") &&
+			!strings.HasPrefix(subject, "kanban-fork-"+taskID+"-") {
+			continue
+		}
+		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
+			if idx, err := strconv.Atoi(match[1]); err == nil {
+				dropIndices = append(dropIndices, idx)
+			}
+		}
+	}
+
+	// Drop from highest index to lowest (git renumbers after each drop)
+	for i := len(dropIndices) - 1; i >= 0; i-- {
+		_ = wm.gitRun(project.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
+	}
+
+	return nil
+}
+
 // DropStashEntriesForBranch removes stash entries that belong to the given branch.
 // Stash entries are labeled with the branch name (e.g., "On task/abc-def-ghi: label").
 func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
@@ -1997,6 +2107,82 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool {
 	_, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", branchName)
 	return err == nil
+}
+
+// PushStash pushes worktree changes as a stash with a labeled message and
+// returns the commit hash of the stash entry. Searches the stash list by
+// message to find the correct entry, avoiding the fragile stash@{0} assumption.
+// The caller must hold the project stash mutex.
+func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
+    if err := wm.gitRun(repoPath, "stash", "push", "-u", "-m", message); err != nil {
+        return "", fmt.Errorf("stash push: %w", err)
+    }
+    // Find our stash entry by searching the list for our message.
+    // This is more robust than assuming stash@{0} because other tasks
+    // (or stale entries from crashes) may have pushed their own stashes.
+    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%s")
+    if err != nil {
+        return "", fmt.Errorf("stash list: %w", err)
+    }
+    for line := range strings.SplitSeq(listOut, "\n") {
+        line = strings.TrimSpace(line)
+        if line == "" {
+            continue
+        }
+        parts := strings.SplitN(line, "\x00", 3)
+        if len(parts) < 3 {
+            continue
+        }
+        if parts[2] == message {
+            return parts[1], nil // return the commit hash
+        }
+    }
+    // Fallback: if message match fails (e.g., git reformatted the message),
+    // use stash@{0} as a last resort. The mutex serializes operations so
+    // our push should be at the top.
+    hash, _ := wm.gitRunOutput(repoPath, "rev-parse", "stash@{0}")
+    return strings.TrimSpace(hash), nil
+}
+
+// DropStashByHash drops a stash entry identified by its commit hash.
+// Searches the stash list to find the matching entry and drops it by index.
+// The caller must hold the project stash mutex.
+func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
+    if hash == "" {
+        return nil
+    }
+    hash = strings.TrimSpace(hash)
+    // List stash entries and find the one matching our hash
+    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H")
+    if err != nil {
+        return nil // no stash list, nothing to drop
+    }
+    for line := range strings.SplitSeq(listOut, "\n") {
+        line = strings.TrimSpace(line)
+        if line == "" {
+            continue
+        }
+        parts := strings.SplitN(line, "\x00", 2)
+        if len(parts) < 2 {
+            continue
+        }
+        entryHash := strings.TrimSpace(parts[1])
+        if entryHash == hash || strings.HasPrefix(entryHash, hash) {
+            return wm.gitRun(repoPath, "stash", "drop", parts[0])
+        }
+    }
+    // Fallback: try dropping stash@{0} if hash match fails
+    return wm.gitRun(repoPath, "stash", "drop", "stash@{0}")
+}
+
+// StashMessageForSwitch generates a unique stash message for a thread switch.
+func StashMessageForSwitch(taskID, threadID string) string {
+    return fmt.Sprintf("kanban-switch-%s-%s", taskID, threadID)
+}
+
+// StashMessageForFork generates a unique stash message for a thread fork.
+func StashMessageForFork(taskID, threadID string) string {
+    return fmt.Sprintf("kanban-fork-%s-%s", taskID, threadID)
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)

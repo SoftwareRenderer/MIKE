@@ -757,8 +757,9 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.worktreeMgr != nil && taskErr == nil {
 		if task.Branch != "" {
 			h.boardStreamMgr.UnwatchWorktree(taskID)
-			// Clean up stash entries belonging to this task's branch
+			// Clean up stash entries belonging to this task
 			_ = h.worktreeMgr.DropStashEntriesForBranch(task.ProjectID, task.Branch)
+			_ = h.worktreeMgr.DropStashEntriesForTask(task.ProjectID, task.ID)
 			if err := h.worktreeMgr.RemoveWorktree(task.ProjectID, taskID, task.Branch); err != nil {
 				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
 			}

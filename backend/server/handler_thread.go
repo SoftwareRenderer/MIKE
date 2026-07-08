@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/types"
 )
 
@@ -159,8 +160,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		_ = s.executor.StopTask(taskID)
 	}
 	// Save worktree state and switch to target thread's branch.
-	// Uses git stash push + rev-parse to save worktree as a commit hash per-thread,
-	// avoiding ambiguous stash list lookups.
+	// Uses labeled stash push + list search to save worktree as a commit hash per-thread.
+	// Message includes task+thread IDs so we can find the correct stash even if
+	// other entries (from crashes or concurrent tasks) are in the stash list.
 	if task.Branch != "" {
 		oldThreadID := task.CurrentThreadID
 		if oldThreadID != "" && oldThreadID != req.ThreadID {
@@ -170,19 +172,23 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 				oldBranch = task.Branch
 			}
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
-			// Stash push/rev-parse/drop touches .git/refs/stash which is shared
-			// across all worktrees in the project. Serialize with the shared stash mutex.
-			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("switch-%s", taskID))
-			stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
-			stashHash = strings.TrimSpace(stashHash)
-			if stashHash != "" {
-				_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
+			// Only stash if there are actual changes — skip the mutex + git commands
+			// when the worktree is already clean.
+			if s.executor.WorktreeMgr().HasWorktreeChanges(taskID) {
+				// Stash push/drop touches .git/refs/stash which is shared across all
+				// worktrees in the project. Serialize with the shared stash mutex.
+				worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
+				s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
+				stashMsg := git.StashMessageForSwitch(taskID, oldThreadID)
+				stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
+				if stashHash != "" {
+					_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)
+				}
+				s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
+				if stashHash != "" {
+					_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
+				}
 			}
-			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
-		if stashHash != "" {
-			_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
-		}
 		}
 		// Checkout target thread's branch (or task's original branch if none)
 		targetBranch := thread.GitBranch
@@ -283,22 +289,26 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if branchPoint == "" {
 		branchPoint = task.BaseRef
 	}
-	// Save current worktree state before forking. Uses git stash push + rev-parse
-	// to capture worktree as a commit hash saved to source thread metadata.
+	// Save current worktree state before forking. Uses labeled stash push + list
+	// search to capture worktree as a commit hash saved to the CURRENT thread.
+	// Must save to CurrentThreadID (not FromThreadID) because the worktree belongs
+	// to the currently active thread. Forking from an inactive thread should not
+	// overwrite that inactive thread's already-saved stash hash.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
-		// Stash push/rev-parse/drop touches .git/refs/stash which is shared
-		// across all worktrees in the project. Serialize with the shared stash mutex.
-		s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "push", "-u", "-m", fmt.Sprintf("fork-%s", taskID))
-		stashHash, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "rev-parse", "stash@{0}")
-		stashHash = strings.TrimSpace(stashHash)
-		if stashHash != "" {
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "stash", "drop", "stash@{0}")
-		}
-		s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
-		if stashHash != "" {
-			_ = s.store.UpdateThreadWorktreeStashHash(req.FromThreadID, stashHash)
+		// Only stash if there are actual changes.
+		if s.executor.WorktreeMgr().HasWorktreeChanges(taskID) {
+			worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
+			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
+			stashMsg := git.StashMessageForFork(taskID, task.CurrentThreadID)
+			stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
+			if stashHash != "" {
+				_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)
+			}
+			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
+			if stashHash != "" {
+				_ = s.store.UpdateThreadWorktreeStashHash(task.CurrentThreadID, stashHash)
+			}
 		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)

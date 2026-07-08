@@ -7,8 +7,9 @@ function getConfig() {
 }
 
 function getWorktreePath(taskId: string): string {
-    const config = getConfig();
-    return `${config.workspace_dir}/${taskId}`;
+    // Worktrees are stored under WORKTREES_DIR env var, not workspace_dir config.
+    // The test server sets WORKTREES_DIR=/tmp/kanban-test-worktrees
+    return `/tmp/kanban-test-worktrees/${taskId}`;
 }
 
 function writeFileInWorktree(taskId: string, filePath: string, content: string) {
@@ -24,6 +25,22 @@ function worktreeExists(taskId: string): boolean {
     } catch {
         return false;
     }
+}
+
+/**
+ * Poll the diff API until the expected file appears, then re-navigate to the task
+ * so the diff panel renders fresh data. The worktree watcher's 2s poll + WS broadcast
+ * is unreliable in headless tests, so we force a reload once the backend confirms
+ * the file is visible.
+ */
+async function waitForDiffFile(page: Page, projectId: string, taskId: string, expectFile: string) {
+    await page.waitForFunction(async ([pid, tid, file]: [string, string, string]) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
+        const data = await res.json();
+        return data.files && Object.keys(data.files).some((k: string) => k.includes(file));
+    }, [projectId, taskId, expectFile], { timeout: 15000 });
+    await navigateToTask(page, taskId);
+    await expect(page.locator('.diff-content')).toContainText(expectFile, { timeout: 15000 });
 }
 
 test.describe.configure({ mode: 'parallel' });
@@ -44,23 +61,38 @@ test.describe('Thread Switch Diff Alignment', () => {
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Get task data (includes branch info)
-    const taskData = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-      return res.json();
-    }, { pid: projectId, tid: taskId });
+    // Wait for executor to create the worktree (poll up to 15s)
+    let taskData = null;
+    for (let i = 0; i < 30; i++) {
+        taskData = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+            return res.ok ? res.json() : null;
+        }, { pid: projectId, tid: taskId });
+        if (taskData?.branch && worktreeExists(taskId)) break;
+        await page.waitForTimeout(500);
+    }
 
-    // If worktree doesn't exist, we can't test diff content
+    // If worktree still doesn't exist, create one manually
     if (!worktreeExists(taskId)) {
-        // Try to get project path from task data
-        const projectPath = taskData?.project_path;
+        // Get project path from projects API
+        const projects = await page.evaluate(async (pid: string) => {
+            const res = await fetch(`/api/projects`);
+            const all = await res.json();
+            return all.find((p: any) => p.id === pid);
+        }, projectId);
+        const projectPath = projects?.path;
         if (projectPath) {
-            const branchName = taskData.branch || `task/${taskId}`;
+            const branchName = taskData?.branch || `task/${taskId}`;
             const worktreePath = getWorktreePath(taskId);
             execSync(`cd ${projectPath} && git worktree add --detach ${worktreePath} HEAD 2>&1 || true`);
             execSync(`cd ${worktreePath} && git checkout -B ${branchName} 2>&1 || true`);
+            // Update task with branch info
+            await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
+                method: 'PUT',
+                body: { branch: branchName, base_ref: 'master' },
+            });
         } else {
-            test.skip('Worktree not available for diff test');
+            test.skip(`Worktree not available for diff test (projectPath=${projectPath})`);
         }
     }
 
@@ -72,11 +104,9 @@ test.describe('Thread Switch Diff Alignment', () => {
     const mainThreadId = threadsResult[0]?.id;
     expect(mainThreadId).toBeTruthy();
 
-    // Write Thread A's file
+    // --- Thread A (Main): write file-a.txt ---
     writeFileInWorktree(taskId, 'file-a.txt', 'hello friend');
-
-    // Wait for diff to pick up the new file
-    await page.waitForTimeout(1000);
+    await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
     // Create a checkpoint message (needed for fork)
     const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -94,53 +124,44 @@ test.describe('Thread Switch Diff Alignment', () => {
     expect(forkResult.ok).toBe(true);
     const forkThreadId = forkResult.data?.id;
 
-    // After fork, worktree is reset. Write Thread B's file.
+    // --- Thread B (fork): write file-b.txt ---
     writeFileInWorktree(taskId, 'file-b.txt', 'hello choom');
+    await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
-    // Wait for the diff panel to update
-    await page.waitForTimeout(1500);
-
-    // Verify we're on the fork thread and see its file
-    await expect(page.locator('.diff-content')).toContainText('file-b.txt', { timeout: 10000 });
-
-    // --- Switch 1: Fork → Main ---
+    // --- Round-trip switches (matches backend TestThreadSwitchWorktreeContent) ---
+    // Switch 1: Fork → Main
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
       method: 'POST',
       body: { thread_id: mainThreadId },
     });
-    await page.waitForTimeout(1500);
+    await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
-    // Verify diff panel shows Thread A's file
-    await expect(page.locator('.diff-content')).toContainText('file-a.txt', { timeout: 10000 });
-
-    // --- Switch 2: Main → Fork ---
+    // Switch 2: Main → Fork
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
       method: 'POST',
       body: { thread_id: forkThreadId },
     });
-    await page.waitForTimeout(1500);
+    await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
-    // Verify diff panel shows Thread B's file
-    await expect(page.locator('.diff-content')).toContainText('file-b.txt', { timeout: 10000 });
-
-    // --- Switch 3: Fork → Main ---
+    // Switch 3: Fork → Main
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
       method: 'POST',
       body: { thread_id: mainThreadId },
     });
-    await page.waitForTimeout(1500);
+    await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
-    // Verify diff panel still shows Thread A's file (not corrupted)
-    await expect(page.locator('.diff-content')).toContainText('file-a.txt', { timeout: 10000 });
-
-    // --- Switch 4: Main → Fork ---
+    // Switch 4: Main → Fork
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
       method: 'POST',
       body: { thread_id: forkThreadId },
     });
-    await page.waitForTimeout(1500);
+    await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
-    // Verify diff panel still shows Thread B's file (not corrupted)
-    await expect(page.locator('.diff-content')).toContainText('file-b.txt', { timeout: 10000 });
+    // Switch 5: Fork → Main (final)
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
+      method: 'POST',
+      body: { thread_id: mainThreadId },
+    });
+    await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
   });
 });

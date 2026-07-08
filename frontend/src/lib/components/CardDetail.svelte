@@ -825,7 +825,14 @@
     type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
 
     function updateDiff(data: DiffData) {
-        if (!data.files || Object.keys(data.files).length === 0) return;
+        if (!data.files || Object.keys(data.files).length === 0) {
+            // Empty diff — clear all caches so stale files from a previous
+            // thread don't persist when the current thread has no changes.
+            diffFileCache = {};
+            untrackedCache = {};
+            diffFileHashes = {};
+            return;
+        }
         const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
         const newCache: Record<string, DiffFile> = {};
         const newUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
@@ -877,8 +884,27 @@
             controller.abort();
         }
         diffAbortControllers = {};
+        // Clear caches so stale files from a previous thread don't persist
+        // when the new thread has an empty or smaller diff.
+        // updateDiff returns early on empty manifest, leaving old entries.
+        diffFileCache = {};
+        untrackedCache = {};
+        diffFileHashes = {};
+        diffInitialLoaded = false;
         // Bump generation so any delta fetches that already started will discard results
         diffLoadGen++;
+        // Reset tracker so stale WebSocket events for the old thread don't
+        // block processing of the new thread's diff stats.
+        // Without this, diffTracker.hash stays at the old thread's hash,
+        // and the next WS event with the SAME hash (from worktree watcher
+        // catching up) is silently skipped.
+        diffTracker.hash = null;
+        diffTracker.stagedPathsKey = '';
+        // Clear stale diff stats for this task so the $effect processes
+        // the next WS event as a fresh hash change.
+        const newStats = { ...diffStatsMap };
+        delete newStats[task.id];
+        taskDiffStats.set(newStats);
         // Reset overlay and comparison state
         checkpointDiffOpen = false;
         checkpointDiffHash = '';

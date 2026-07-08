@@ -143,7 +143,7 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "edit_file",
 				DisplayName: "Edit",
-				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Each oldText must match exactly (whitespace, indentation)",
 				Parameters: map[string]any{
 					"type":       "object",
 					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),

@@ -1041,6 +1041,136 @@ func TestResetWorktreeTo_StashHash(t *testing.T) {
 	}
 }
 
+// TestPushStash_MessageBased verifies that PushStash returns the correct hash
+// by searching the stash list by message, even when other stale entries exist.
+func TestPushStash_MessageBased(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+	_ = repoDir
+	branchName := "task/" + taskID
+	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	t.Cleanup(func() { _ = wm.RemoveWorktree("test-project", taskID, branchName) })
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+
+	// Create a stale stash entry (simulates a crash leftover)
+	writeFile(t, worktreePath, "stale.txt", "stale content\n")
+	_ = wm.gitRun(worktreePath, "add", "-A")
+	_ = wm.gitRun(worktreePath, "commit", "-m", "initial")
+	writeFile(t, worktreePath, "stale.txt", "modified stale\n")
+	_ = wm.gitRun(worktreePath, "stash", "push", "-u", "-m", "stale-entry-from-crash")
+
+	// Write a new file for our stash
+	writeFile(t, worktreePath, "new.txt", "new content\n")
+
+	// Use PushStash with a unique message
+	msg := StashMessageForSwitch(taskID, "main-thread")
+	hash, err := wm.PushStash(worktreePath, msg)
+	if err != nil {
+		t.Fatalf("PushStash: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("PushStash returned empty hash")
+	}
+
+	// Verify the hash is valid
+	resolved, err := wm.gitRunOutput(worktreePath, "rev-parse", hash)
+	if err != nil {
+		t.Fatalf("hash %q is not a valid git ref: %v", hash, err)
+	}
+	resolved = strings.TrimSpace(resolved)
+	if resolved != hash && !strings.HasPrefix(resolved, hash) {
+		t.Fatalf("hash mismatch: expected %q, got %q", hash, resolved)
+	}
+
+	// Drop by hash (should find our entry, not the stale one)
+	err = wm.DropStashByHash(worktreePath, hash)
+	if err != nil {
+		t.Fatalf("DropStashByHash: %v", err)
+	}
+
+	// Verify our stash is gone but stale entry remains
+	listOut, _ := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%s")
+	if strings.Contains(listOut, msg) {
+		t.Error("stash entry should have been dropped")
+	}
+	// Clean up stale entry
+	_ = wm.gitRun(worktreePath, "stash", "clear")
+}
+
+// TestPushStash_MultipleEntries verifies correct hash selection when multiple
+// kanban stash entries exist for different tasks/threads.
+func TestPushStash_MultipleEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+	_ = repoDir
+	branchName := "task/" + taskID
+	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	t.Cleanup(func() { _ = wm.RemoveWorktree("test-project", taskID, branchName) })
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+
+	// Create initial commit so stash works
+	writeFile(t, worktreePath, "base.txt", "base\n")
+	_ = wm.gitRun(worktreePath, "add", "-A")
+	_ = wm.gitRun(worktreePath, "commit", "-m", "initial")
+
+	// Push first stash (thread A)
+	writeFile(t, worktreePath, "file-a.txt", "content A\n")
+	msgA := StashMessageForSwitch(taskID, "thread-a")
+	hashA, err := wm.PushStash(worktreePath, msgA)
+	if err != nil {
+		t.Fatalf("PushStash A: %v", err)
+	}
+	if hashA == "" {
+		t.Fatal("PushStash A returned empty hash")
+	}
+
+	// Push second stash (thread B)
+	writeFile(t, worktreePath, "file-b.txt", "content B\n")
+	msgB := StashMessageForSwitch(taskID, "thread-b")
+	hashB, err := wm.PushStash(worktreePath, msgB)
+	if err != nil {
+		t.Fatalf("PushStash B: %v", err)
+	}
+	if hashB == "" {
+		t.Fatal("PushStash B returned empty hash")
+	}
+
+	// Hashes should be different
+	if hashA == hashB {
+		t.Fatal("expected different hashes for different stash entries")
+	}
+
+	// Drop B by hash — should not affect A
+	err = wm.DropStashByHash(worktreePath, hashB)
+	if err != nil {
+		t.Fatalf("DropStashByHash B: %v", err)
+	}
+
+	// Verify A still exists
+	listOut, _ := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%s")
+	if !strings.Contains(listOut, msgA) {
+		t.Error("stash entry A should still exist after dropping B")
+	}
+	if strings.Contains(listOut, msgB) {
+		t.Error("stash entry B should have been dropped")
+	}
+
+	// Clean up
+	_ = wm.gitRun(worktreePath, "stash", "clear")
+}
+
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

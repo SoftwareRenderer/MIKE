@@ -7,13 +7,14 @@
         threads: Thread[];
         activeThreadId: string;
         onSwitch?: (threadId: string) => void;
+        isSwitching?: boolean;
         isPending?: boolean;
         commitLabel?: string;
         commitHash?: string;
         onViewChanges?: (commitHash: string) => void;
     }
 
-    let { timestamp, threadId, threads, activeThreadId, onSwitch, isPending = false, commitLabel, commitHash, onViewChanges }: Props = $props();
+    let { timestamp, threadId, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, onViewChanges }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint
     let relevantThreads = $derived(threads.filter(t => {
@@ -34,7 +35,7 @@
     }
 
     function handleSwitch(threadId: string) {
-        if (threadId !== activeThreadId) {
+        if (threadId !== activeThreadId && !isSwitching) {
             onSwitch?.(threadId);
         }
         showMenu = false;
@@ -104,10 +105,14 @@
                 <button
                     class="thread-menu-item"
                     class:active={thread.is_active}
+                    disabled={isSwitching}
                     onclick={() => handleSwitch(thread.id)}
                     role="menuitem"
                 >
                     <span class="thread-name">{thread.name}</span>
+                    {#if isSwitching}
+                        <span class="switch-spinner"></span>
+                    {/if}
                 </button>
             {/each}
         </div>
@@ -240,7 +245,20 @@
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         color: var(--color-accent);
     }
+    .thread-menu-item:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
     .thread-name {
         font-weight: 500;
+    }
+    .switch-spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: checkpoint-spin 0.6s linear infinite;
     }
 </style>

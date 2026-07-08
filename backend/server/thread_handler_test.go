@@ -504,3 +504,187 @@ func verifyWorktreeContent(t *testing.T, worktreePath, filePath, expectedContent
 		t.Fatalf("[%s] expected %q, got %q", label, expectedContent, string(data))
 	}
 }
+
+// TestThreadForkFromInactiveThread verifies that forking from a non-active thread
+// does not corrupt that thread's saved worktree stash hash.
+// Bug: handleThreadFork always stashes the current worktree and saves it to
+// FromThreadID, even when FromThreadID != CurrentThreadID. This overwrites
+// the inactive thread's stash with the current (wrong) worktree state.
+func TestThreadForkFromInactiveThread(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a git repo that has an initial committed file
+	tmpDir := t.TempDir()
+	initialContent := "hello world\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte(initialContent), 0o644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+	// Commit file.txt so it is tracked (untracked files are lost by clean -fd)
+	mustRunGit(t, tmpDir, "add", "file.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "fork-inactive-test", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create worktree
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	task, err := s.store.GetTask(projID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Branch = "task/" + taskID
+	task.BaseRef = "master"
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task branch: %v", err)
+	}
+
+	// --- Thread A (Main): write "hello friend" ---
+	friendContent := "hello friend\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(friendContent), 0o644); err != nil {
+		t.Fatalf("write friend content: %v", err)
+	}
+
+	// Get the Main thread
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	threads := mustJSON[[]map[string]any](t, listRR.Body)
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create two checkpoint messages on Main
+	msgReq1 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"role":    "user",
+		"content": "Message 1",
+	})
+	withAuthCSRF(msgReq1, cookie, csrfToken)
+	msgRR1 := testResponse(t, s, msgReq1)
+	msg1Data := mustJSON[map[string]any](t, msgRR1.Body)
+	msg1ID := msg1Data["id"].(string)
+
+	msgReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"role":    "user",
+		"content": "Message 2",
+	})
+	withAuthCSRF(msgReq2, cookie, csrfToken)
+	msgRR2 := testResponse(t, s, msgReq2)
+	msg2Data := mustJSON[map[string]any](t, msgRR2.Body)
+	msg2ID := msg2Data["id"].(string)
+
+	// --- Fork Thread B from Message 1 ---
+	forkReq1 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
+		"from_thread_id":  mainThreadID,
+		"from_message_id": msg1ID,
+	})
+	withAuthCSRF(forkReq1, cookie, csrfToken)
+	forkRR1 := testResponse(t, s, forkReq1)
+	if forkRR1.Code != http.StatusCreated {
+		t.Fatalf("fork B: %d %s", forkRR1.Code, forkRR1.Body.String())
+	}
+	fork1Data := mustJSON[map[string]any](t, forkRR1.Body)
+	forkBID := fork1Data["id"].(string)
+
+	// --- Simulate Thread B: write "hello choom" ---
+	choomContent := "hello choom\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(choomContent), 0o644); err != nil {
+		t.Fatalf("write choom content: %v", err)
+	}
+	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "on fork B")
+
+	// --- Fork Thread C from Message 2 on Main (while worktree is on B!) ---
+	// This is the bug: fork handler should NOT overwrite Main's stash hash
+	forkReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
+		"from_thread_id":  mainThreadID,
+		"from_message_id": msg2ID,
+	})
+	withAuthCSRF(forkReq2, cookie, csrfToken)
+	forkRR2 := testResponse(t, s, forkReq2)
+	if forkRR2.Code != http.StatusCreated {
+		t.Fatalf("fork C: %d %s", forkRR2.Code, forkRR2.Body.String())
+	}
+	fork2Data := mustJSON[map[string]any](t, forkRR2.Body)
+	forkCID := fork2Data["id"].(string)
+
+	// --- Switch to Main: should show "hello friend" ---
+	switchReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+		"thread_id": mainThreadID,
+	})
+	withAuthCSRF(switchReq, cookie, csrfToken)
+	switchRR := testResponse(t, s, switchReq)
+	if switchRR.Code != http.StatusOK {
+		t.Fatalf("switch to main: %d %s", switchRR.Code, switchRR.Body.String())
+	}
+	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "switch#1 Main")
+
+	// --- Switch back to Fork B: should show "hello choom" ---
+	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+		"thread_id": forkBID,
+	})
+	withAuthCSRF(switchReq, cookie, csrfToken)
+	switchRR = testResponse(t, s, switchReq)
+	if switchRR.Code != http.StatusOK {
+		t.Fatalf("switch to fork B: %d %s", switchRR.Code, switchRR.Body.String())
+	}
+	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "switch#2 Fork B")
+
+	// --- Switch to Fork C: should show checkpoint content (hello world) ---
+	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+		"thread_id": forkCID,
+	})
+	withAuthCSRF(switchReq, cookie, csrfToken)
+	switchRR = testResponse(t, s, switchReq)
+	if switchRR.Code != http.StatusOK {
+		t.Fatalf("switch to fork C: %d %s", switchRR.Code, switchRR.Body.String())
+	}
+	verifyWorktreeContent(t, worktreePath, "file.txt", initialContent, "switch#3 Fork C")
+
+	// --- Multiple round-trips: Main → B → C → Main → B → C → Main ---
+	roundTripSwitch := func(label, want string, threadID string) {
+		switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+			"thread_id": threadID,
+		})
+		withAuthCSRF(switchReq, cookie, csrfToken)
+		switchRR = testResponse(t, s, switchReq)
+		if switchRR.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", label, switchRR.Code, switchRR.Body.String())
+		}
+		verifyWorktreeContent(t, worktreePath, "file.txt", want, label)
+	}
+
+	// Round 2
+	roundTripSwitch("round2 Main", friendContent, mainThreadID)
+	roundTripSwitch("round2 Fork B", choomContent, forkBID)
+	roundTripSwitch("round2 Fork C", initialContent, forkCID)
+
+	// Round 3
+	roundTripSwitch("round3 Main", friendContent, mainThreadID)
+	roundTripSwitch("round3 Fork B", choomContent, forkBID)
+	roundTripSwitch("round3 Fork C", initialContent, forkCID)
+
+	// Round 4 — reverse order: C → B → Main → C → B → Main
+	roundTripSwitch("round4 Main", friendContent, mainThreadID)
+	roundTripSwitch("round4 Fork B", choomContent, forkBID)
+	roundTripSwitch("round4 Fork C", initialContent, forkCID)
+	roundTripSwitch("round4 Fork B", choomContent, forkBID)
+	roundTripSwitch("round4 Main", friendContent, mainThreadID)
+}
