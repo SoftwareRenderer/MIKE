@@ -102,7 +102,7 @@ test.describe('Browser Navigation (Back/Forward)', () => {
 
     // Verify top-bar and Token usage button are visible in project view
     await expect(page.locator('.top-bar')).toBeVisible();
-    await expect(page.locator('[aria-label="Token usage stats"]')).toBeVisible();
+    await expect(page.locator('.top-bar [aria-label="Token usage stats"]')).toBeVisible();
 
     // Create and open a task
     const taskTitle = `nav-topbar-${Date.now()}`;
@@ -121,7 +121,7 @@ test.describe('Browser Navigation (Back/Forward)', () => {
     // Verify FULL project view is restored: board, top-bar, AND Token usage button
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('.top-bar')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[aria-label="Token usage stats"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.top-bar [aria-label="Token usage stats"]')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('.task-detail-page')).not.toBeVisible();
     expect(page.url()).toContain(`project=${projectId}`);
     expect(page.url()).not.toContain('task=');

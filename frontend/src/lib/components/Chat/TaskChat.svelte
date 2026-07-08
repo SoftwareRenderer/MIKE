@@ -1276,6 +1276,8 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
             awaitingResponse = false;
             // Load messages for the new thread immediately
             await loadHistory(true);
+            // Notify parent to refresh the diff panel for the new forked thread
+            onThreadSwitch?.();
             // Update URL with the new fork's thread ID
             updateThreadUrl(forked.id);
             // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.

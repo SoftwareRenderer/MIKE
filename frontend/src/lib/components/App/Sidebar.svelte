@@ -37,15 +37,14 @@
 <aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
     <div class="sidebar-header">
         <h2 class:collapsed={!isMobile && collapsed}>Projects</h2>
-        {#if isMobile}
-            <button class="toggle-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
-        {:else}
-            <button class="toggle-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
-        {/if}
+        <!-- Mobile close button (hidden on desktop via CSS) -->
+        <button class="toggle-btn mobile-close-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
+        <!-- Desktop collapse toggle (hidden on mobile via CSS) -->
+        <button class="toggle-btn desktop-collapse-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
     </div>
     <nav class="project-list" aria-label="Projects">
         {#each projects as p (p.id)}
@@ -106,7 +105,7 @@
             <button class="add-project-btn" onclick={onAddProject} aria-label="Add Project" title="Add Project">+ Add Project</button>
         {/if}
     </nav>
-    {#if isMobile}
+    <!-- Mobile sidebar menu (hidden on desktop via CSS) -->
     <div class="sidebar-menu">
         <button class="sidebar-menu-item" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -124,7 +123,6 @@
             Settings
         </button>
     </div>
-    {/if}
 </aside>
 
 <style>
@@ -187,6 +185,18 @@
     .toggle-btn:hover {
         background: var(--color-surface-2);
         color: var(--color-text-primary);
+    }
+    /* Mobile close button — hidden on desktop */
+    .mobile-close-btn {
+        display: none;
+    }
+    /* Desktop collapse toggle — shown by default */
+    .desktop-collapse-btn {
+        display: flex;
+    }
+    /* Sidebar menu — hidden on desktop, shown on mobile */
+    .sidebar-menu {
+        display: none;
     }
     .project-list {
         flex: 1;
@@ -375,6 +385,18 @@
         /* Mobile: no shrink, remove button always visible */
         .project-item-content {
             min-width: 0;
+        }
+        /* Show mobile close button, hide desktop collapse toggle */
+        .mobile-close-btn {
+            display: flex;
+        }
+        .desktop-collapse-btn {
+            display: none;
+        }
+        /* Show sidebar menu on mobile */
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
         }
     }
 </style>

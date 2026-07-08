@@ -697,6 +697,9 @@
     let diffFileHashes = $state<Record<string, string>>({});
     // Gate: delta processing only starts after the initial load is fully done.
     let diffInitialLoaded = $state(false);
+    // Generation counter — incremented on each full loadDiff(). Delta fetches capture
+    // the current generation and skip cache writes if a newer load has started.
+    let diffLoadGen = $state(0);
 
     /** Serialize staged_paths for deterministic change detection. */
     function stagedPathsKey(paths: string[] | null | undefined): string {
@@ -865,8 +868,23 @@
 
     let diffLoading = $state(false);
 
+    /** Reload the full diff. Aborts in-flight delta fetches and resets overlay state.
+     * Used after thread switch or task change to ensure a clean slate. */
     async function loadDiff() {
         if (!task || task.status === 'backlog' || diffLoading) return;
+        // Abort any in-flight delta fetches so they don't overwrite the fresh load
+        for (const controller of Object.values(diffAbortControllers)) {
+            controller.abort();
+        }
+        diffAbortControllers = {};
+        // Bump generation so any delta fetches that already started will discard results
+        diffLoadGen++;
+        // Reset overlay and comparison state
+        checkpointDiffOpen = false;
+        checkpointDiffHash = '';
+        editingFile = null;
+        diffFrom = '';
+        diffTo = 'working';
         diffLoading = true;
         try {
             await Promise.all([loadCommits(), loadDiffForMode()]);
@@ -988,6 +1006,9 @@
     /** Fetch changed files directly (no manifest fetch). Used for delta updates. */
     async function fetchDeltaFiles(changedHashes: Record<string, string>, oldHashes?: Record<string, string>, stagedSet?: Set<string>) {
         if (!task) return;
+        // Capture current generation — if a full loadDiff() starts during this delta,
+        // the generation will bump and we'll discard our results to avoid stale overwrites.
+        const gen = diffLoadGen;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, { fileSize?: number; truncated?: boolean; origAdded?: number; loading?: boolean }> = {};
         const fetches: Promise<void>[] = [];
@@ -1037,6 +1058,9 @@
             })());
         }
         await Promise.all(fetches);
+        // Discard results if a full loadDiff() started while we were fetching.
+        // The generation counter was bumped by loadDiff(), so our data is stale.
+        if (gen !== diffLoadGen) return;
         // Merge, preserving any newer staged values that arrived while fetches were in-flight.
         const currentStaged = new Map(Object.entries(diffFileCache).map(([p, f]) => [p, f.staged]));
         diffFileCache = { ...diffFileCache, ...updatedDiff };
@@ -1152,10 +1176,8 @@
             onDelete={handleDelete}
         />
 
-        <!-- Mobile Tab Bar -->
-        {#if isMobile}
-            <MobileTabBar activeTab={activeTab} onTabChange={(tab: 'context' | 'chat' | 'diff') => { activeTab = tab; onActiveTabChange?.(tab); }} />
-        {/if}
+        <!-- Mobile Tab Bar (always rendered, visibility controlled by CSS media query) -->
+        <MobileTabBar activeTab={activeTab} onTabChange={(tab: 'context' | 'chat' | 'diff') => { activeTab = tab; onActiveTabChange?.(tab); }} />
 
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
@@ -1387,17 +1409,31 @@
         display: none;
     }
 
+    /* Mobile tab bar — hidden on desktop, shown on mobile via media query */
+    :global(.mobile-tab-bar) {
+        display: none !important;
+    }
+
     @media (max-width: 768px) {
-        .column-context {
+        :global(.mobile-tab-bar) {
+            display: flex !important;
+        }
+        /* On mobile: hide all columns by default, only show the non-hidden (active) one */
+        .column {
+            display: none;
+        }
+        .column:not(.hidden) {
+            display: flex;
+            flex: 0 0 100% !important;
+            min-width: 100% !important;
+            width: 100% !important;
+        }
+        .column-context:not(.hidden) {
+            display: block;
             border-right: none;
         }
         .column-chat {
             border-right: none;
-        }
-        .column:not(.hidden) {
-            flex: 0 0 100% !important;
-            min-width: 100% !important;
-            width: 100% !important;
         }
     }
 
