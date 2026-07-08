@@ -742,35 +742,30 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
-    let hasChanges = $derived(!!diffStats?.hash && (diffStats.files || 0) > 0);
+    let hasStagedChanges = $derived((diffStats?.staged_paths || []).length > 0);
 
     async function handleCommitAndDone() {
         if (isCommitting || disabled) return;
         isCommitting = true;
         try {
-            let updated;
-            if (hasChanges) {
-                // Open dialog — it will stream the commit message from the backend
-                const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    commitDialogStore.set({
-                        streaming: true,
-                        message: '',
-                        confirmText: 'Commit and move to Done',
-                        cancelText: 'Cancel',
-                        projectId,
-                        taskId,
-                        _resolve: resolve,
-                    });
+            // Open dialog — it will stream the commit message from the backend
+            const confirmedMessage = await new Promise<string | null>((resolve) => {
+                commitDialogStore.set({
+                    streaming: true,
+                    message: '',
+                    confirmText: 'Commit and move to Done',
+                    cancelText: 'Cancel',
+                    projectId,
+                    taskId,
+                    _resolve: resolve,
                 });
-                if (!confirmedMessage) {
-                    return; // User cancelled
-                }
-                updated = await commitAndDone(projectId, taskId, confirmedMessage);
-                // Clear stale diff stats immediately so the button updates right away
-                taskDiffStatsStore.update(map => { delete map[taskId]; return { ...map }; });
-            } else {
-                updated = await moveTask(projectId, taskId, 'done');
+            });
+            if (!confirmedMessage) {
+                return; // User cancelled
             }
+            const updated = await commitAndDone(projectId, taskId, confirmedMessage);
+            // Clear stale diff stats immediately so the button updates right away
+            taskDiffStatsStore.update(map => { delete map[taskId]; return { ...map }; });
             mergeTaskIntoBoard(updated);
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
@@ -784,6 +779,20 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                 delete copy[projectId];
                 return copy;
             });
+        }
+    }
+
+    async function handleMoveToDone() {
+        if (isCommitting || disabled) return;
+        isCommitting = true;
+        try {
+            const updated = await moveTask(projectId, taskId, 'done');
+            mergeTaskIntoBoard(updated);
+            await loadHistory();
+        } catch (e) {
+            showToast(String(e));
+        } finally {
+            isCommitting = false;
         }
     }
 
@@ -1187,7 +1196,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {isStarting}
             {isCommitting}
             {disabled}
-            {hasChanges}
+            hasStagedChanges={hasStagedChanges}
             {queueStatus}
             {providers}
             {selectedModel}
@@ -1196,6 +1205,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {onMoveTask}
             onStartTask={handleStartTask}
             onCommitAndDone={handleCommitAndDone}
+            onMoveToDone={handleMoveToDone}
             onModelSelect={handleModelSelect}
         />
         {#if !showRestartButton}

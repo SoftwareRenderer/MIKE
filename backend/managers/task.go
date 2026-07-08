@@ -677,7 +677,6 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		if commitMsg == "" {
 			commitMsg = h.generateCommitMessage(taskID, task)
 		}
-		_ = h.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
 

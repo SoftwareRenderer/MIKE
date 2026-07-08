@@ -143,4 +143,38 @@ describe('DiffCache', () => {
         expect(DiffCache.stagedPathsKey(undefined)).toBe('');
         expect(DiffCache.stagedPathsKey([])).toBe('');
     });
+
+    it('setTask updates projectId and taskId for subsequent API calls', () => {
+        const apis = makeApis();
+        const cache = new DiffCache(apis, 'proj-1', 'task-1');
+        cache.setTask('proj-2', 'task-2');
+        // Verify subsequent stageFile uses new IDs
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+        };
+        cache.stageFile('a.ts', true, () => {});
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', true);
+    });
+
+    it('setTask does not affect already-queued API calls', async () => {
+        let resolveDiff: (value: unknown) => void;
+        const apis = makeApis({
+            getTaskDiff: vi.fn(async () => new Promise(resolve => { resolveDiff = resolve; })),
+        });
+        const cache = new DiffCache(apis, 'proj-1', 'task-1');
+        const loadPromise = cache.loadDiff(() => {});
+        // Switch task while loadDiff is in flight
+        cache.setTask('proj-2', 'task-2');
+        // Resolve the original diff
+        resolveDiff!({ files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0, staged: false } } });
+        await loadPromise;
+        // Original call used old IDs
+        expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1');
+        // Subsequent calls use new IDs
+        cache.state.files = {
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
+        };
+        cache.stageFile('b.ts', true, () => {});
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'b.ts', true);
+    });
 });

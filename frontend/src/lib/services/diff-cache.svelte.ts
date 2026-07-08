@@ -463,4 +463,10 @@ export class DiffCache {
         this.fileHashes = {};
         this.initialLoaded = false;
     }
+
+    /** Update the task ID and project ID — called when switching tasks. */
+    setTask(projectId: string, taskId: string) {
+        this._projectId = projectId;
+        this._taskId = taskId;
+    }
 }

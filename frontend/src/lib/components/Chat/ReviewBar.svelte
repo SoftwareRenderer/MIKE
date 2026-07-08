@@ -9,7 +9,7 @@
         isStarting,
         isCommitting,
         disabled,
-        hasChanges,
+        hasStagedChanges,
         queueStatus,
         providers,
         selectedModel,
@@ -18,6 +18,7 @@
         onMoveTask,
         onStartTask,
         onCommitAndDone,
+        onMoveToDone,
         onModelSelect,
     }: {
         taskStatus: string;
@@ -26,7 +27,7 @@
         isStarting: boolean;
         isCommitting: boolean;
         disabled: boolean;
-        hasChanges: boolean;
+        hasStagedChanges: boolean;
         queueStatus: string | null;
         providers: Provider[];
         selectedModel: string;
@@ -35,6 +36,7 @@
         onMoveTask?: (status: string) => void;
         onStartTask: () => Promise<void>;
         onCommitAndDone: () => Promise<void>;
+        onMoveToDone: () => Promise<void>;
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => Promise<void>;
     } = $props();
 </script>
@@ -70,20 +72,24 @@
                     Resume
                 {/if}
             </button>
-        {:else}
-            <button class="btn-commit-done" class:has-changes={hasChanges} onclick={onCommitAndDone} disabled={isCommitting || disabled} title={hasChanges ? 'Commit changes and move task to Done' : 'Move to Done'}>
+        {:else if hasStagedChanges}
+            <button class="btn-commit-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
                 {#if queueStatus === 'queued'}
                     <span class="spinner-inline"></span> In queue...
                 {:else if queueStatus === 'processing' || isCommitting}
-                    <span class="spinner-inline"></span> {hasChanges ? 'Committing...' : 'Moving...'}
+                    <span class="spinner-inline"></span> Committing...
                 {:else}
-                    {#if hasChanges}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        Commit and move to Done
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        Move to Done
-                    {/if}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Commit and move to Done
+                {/if}
+            </button>
+        {:else}
+            <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting || disabled} title="Move task to Done">
+                {#if isCommitting}
+                    <span class="spinner-inline"></span> Moving...
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Move to Done
                 {/if}
             </button>
         {/if}
