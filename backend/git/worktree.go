@@ -569,10 +569,23 @@ func (wm *WorktreeManager) GitShortstat(taskID, baseRef string) (string, error) 
 		target = baseRef
 	}
 
-	// Tracked file changes (line counts — changes when content changes)
-	trackedOut, err := wm.gitRunOutput(worktreePath, "diff", target, "--shortstat")
-	if err != nil {
-		return "", fmt.Errorf("git diff --shortstat: %w", err)
+	// Use HEAD as baseline when working tree is dirty to capture deletions
+	// of files created after baseRef (git diff baseRef misses them).
+	statusOut, statusErr := wm.gitRunOutput(worktreePath, "status", "--porcelain", "--untracked-files=no")
+	workingTreeClean := statusErr != nil || len(strings.TrimSpace(statusOut)) == 0
+	if !workingTreeClean {
+		target = "HEAD"
+	}
+
+	// Tracked file changes (line counts — changes when content changes).
+	// git diff exits 1 when changes exist — output is still valid.
+	trackedOut, trackedErr := wm.gitRunOutput(worktreePath, "diff", target, "--shortstat")
+	if trackedErr != nil {
+		if exitErr, ok := trackedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Changes exist, trackedOut has the shortstat output — continue
+		} else {
+			return "", fmt.Errorf("git diff --shortstat: %w", trackedErr)
+		}
 	}
 
 	// Untracked files: list path + size to detect new/modified/deleted untracked files.
@@ -695,6 +708,7 @@ type TrackedDiffFile struct {
 	FileSize  *int64    `json:"fileSize,omitempty"`  // set for binary/large files
 	IsBinary  bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
 	IsNew     bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
+	IsDeleted bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
 	Truncated bool      `json:"truncated,omitempty"`
 	OrigAdded int       `json:"origAdded,omitempty"`
 	OrigRemoved int     `json:"origRemoved,omitempty"`
@@ -967,6 +981,12 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			}
 			continue
 		}
+		if strings.HasPrefix(line, "deleted file mode ") {
+			if current != nil {
+				current.IsDeleted = true
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
 			continue
 		}
@@ -1040,9 +1060,9 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 
 	// Enrich with truncation metadata + annotation data
 	for path, f := range files {
-		if len(f.Rows) == 0 && f.FileSize == nil && !f.IsNew {
-			// Skip files with no diff content, but preserve new files
-			// (a new blank file has a diff header but no hunk rows).
+		if len(f.Rows) == 0 && f.FileSize == nil && !f.IsNew && !f.IsDeleted {
+			// Skip files with no diff content, but preserve new/deleted files
+			// (a new or deleted blank file has a diff header but no hunk rows).
 			delete(files, path)
 			continue
 		}
@@ -1246,18 +1266,33 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		}
 
 		// Get tracked file diff.
-		// "git diff target" = working tree vs target (includes both staged and unstaged).
-		// If working tree is clean (all changes committed), fall back to committed changes.
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
-		if err != nil {
-			return nil, fmt.Errorf("git diff: %w", err)
-		}
-		// If working tree is clean, fall back to committed changes (HEAD vs target).
-		// This handles forked threads where changes are committed as snapshots.
-		if len(strings.TrimSpace(diffOut)) == 0 {
+		// Two sources of changes:
+		//   1. Working-tree changes (uncommitted): git diff HEAD
+		//   2. Committed changes (since target): git diff target..HEAD
+		// We always check for working-tree changes first. When the working tree is
+		// dirty, using HEAD as baseline ensures deletions of post-target files are
+		// captured (git diff target misses them — file absent on both sides).
+		statusOut, statusErr := wm.gitRunOutput(worktreePath, "status", "--porcelain", "--untracked-files=no")
+		workingTreeClean := statusErr != nil || len(strings.TrimSpace(statusOut)) == 0
+
+		if workingTreeClean {
+			// Working tree is clean — show committed changes since target.
+			// This handles forked threads where changes are committed as snapshots.
 			diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", target))
 			if err != nil {
 				return nil, fmt.Errorf("git diff: %w", err)
+			}
+		} else {
+			// Working tree is dirty — use HEAD as baseline to capture all
+			// working-tree changes (modifications, additions, deletions).
+			// git diff HEAD exits 1 when changes exist — output is still valid.
+			diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+					// Changes exist, diffOut has the output — continue
+				} else {
+					return nil, fmt.Errorf("git diff: %w", err)
+				}
 			}
 		}
 		shortStat = shortStatFromDiff(diffOut)

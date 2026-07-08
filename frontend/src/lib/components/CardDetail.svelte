@@ -704,14 +704,31 @@
     let diffFileHashes = $state<Record<string, string>>({});
     // Gate: delta processing only starts after the initial load is fully done.
     let diffInitialLoaded = $state(false);
+
+    /** Serialize staged_paths for deterministic change detection. */
+    function stagedPathsKey(paths: string[] | null | undefined): string {
+        return paths ? [...paths].sort().join('\n') : '';
+    }
+
+    /** Update staged flags on every cached file to match the given staged_paths list. */
+    function applyStagedPaths(paths: string[] | null | undefined) {
+        if (Object.keys(diffFileCache).length === 0) return;
+        const stagedSet = paths ? new Set(paths) : new Set();
+        const updated: Record<string, DiffFile> = {};
+        for (const [path, entry] of Object.entries(diffFileCache)) {
+            updated[path] = { ...entry, staged: stagedSet.has(path) };
+        }
+        diffFileCache = updated as Record<string, DiffFile>;
+        diffCacheVersion++;
+    }
+
     $effect(() => {
         const stat = diffStatsMap[task.id];
         const currentHash = stat?.hash || null;
         const stagedPaths = stat?.staged_paths;
-        // Serialize staged_paths for change detection (sorted for determinism).
         // Tracked separately from hash because staged_paths can change without
         // the diff hash changing (e.g., git add then git reset of same content).
-        const stagedKey = stagedPaths ? [...stagedPaths].sort().join('\n') : '';
+        const stagedKey = stagedPathsKey(stagedPaths);
         const hashChanged = currentHash !== diffTracker.hash;
         const stagedChanged = stagedKey !== diffTracker.stagedPathsKey;
 
@@ -750,18 +767,9 @@
                 return;
             }
 
-            // Update staged status in-place.
-            // stagedPaths can be null (no files staged) — always update to stay in sync.
-            if (Object.keys(diffFileCache).length > 0) {
-                const stagedSet = stagedPaths ? new Set(stagedPaths) : new Set();
-                const updated: Record<string, DiffFile> = {};
-                for (const [path, entry] of Object.entries(diffFileCache)) {
-                    updated[path] = { ...entry, staged: stagedSet.has(path) };
-                }
-                diffFileCache = updated as Record<string, DiffFile>;
-                diffCacheVersion++;
-                diffTracker.stagedPathsKey = stagedKey;
-            }
+            // Update staged status (stagedPaths can be null — means no files staged).
+            applyStagedPaths(stagedPaths);
+            diffTracker.stagedPathsKey = stagedKey;
 
             if (!fileHashes || Object.keys(fileHashes).length === 0) {
                 return;
@@ -774,17 +782,10 @@
                 const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
                 fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
             }
-        } else if (stagedChanged && Object.keys(diffFileCache).length > 0) {
+        } else if (stagedChanged) {
             // staged_paths changed without hash change — update staged flags only.
-            // stagedPaths can be null (no files staged) — empty Set means all files get staged:false.
+            applyStagedPaths(stagedPaths);
             diffTracker.stagedPathsKey = stagedKey;
-            const stagedSet = stagedPaths ? new Set(stagedPaths) : new Set();
-            const updated: Record<string, DiffFile> = {};
-            for (const [path, entry] of Object.entries(diffFileCache)) {
-                updated[path] = { ...entry, staged: stagedSet.has(path) };
-            }
-            diffFileCache = updated as Record<string, DiffFile>;
-            diffCacheVersion++;
         }
     });
 
@@ -885,20 +886,13 @@
             // This must happen BEFORE syncing the tracker, otherwise the effect
             // would skip processing (currentHash === diffTracker.hash).
             const stat = diffStatsMap[task.id];
-            if (stat && Object.keys(diffFileCache).length > 0) {
-                const stagedSet = stat.staged_paths ? new Set(stat.staged_paths) : new Set();
-                const updated: Record<string, DiffFile> = {};
-                for (const [path, entry] of Object.entries(diffFileCache)) {
-                    updated[path] = { ...entry, staged: stagedSet.has(path) };
-                }
-                diffFileCache = updated;
-                diffCacheVersion++;
+            if (stat) {
+                applyStagedPaths(stat.staged_paths);
             }
             // Sync tracker with current store value so a pending WebSocket
             // diffStats event doesn't trigger a redundant re-fetch.
             diffTracker.hash = stat?.hash || null;
-            const sp = stat?.staged_paths;
-            diffTracker.stagedPathsKey = sp ? [...sp].sort().join('\n') : '';
+            diffTracker.stagedPathsKey = stagedPathsKey(stat?.staged_paths);
         }
     }
 

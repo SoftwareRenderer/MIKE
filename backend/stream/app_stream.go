@@ -971,7 +971,6 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"untracked_n":     len(diffResult.Untracked),
 				"untracked_lines": untrackedLines,
 				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
-				"removed_files":   nil,
 				"staged_paths":    filterInternalPathsFromList(diffResult.StagedPaths),
 			})
 			client.writeMu.Lock()
