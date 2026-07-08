@@ -874,6 +874,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     async function handleEditSend(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
+        if (!newContent.trim() && (!attachments || attachments.length === 0)) return;
 
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {

@@ -22,6 +22,7 @@
     let textareaEl: HTMLTextAreaElement | null = $state(null);
     let editAttachments = $state<Array<{ mimeType: string; data: string }>>(attachments ? [...attachments] : []);
     let editFileInput: HTMLInputElement | null = $state(null);
+    let canSubmit = $derived(editContent.trim().length > 0 || editAttachments.length > 0);
 
     // @ file mention state
     let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
@@ -150,7 +151,7 @@
         }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (!isSubmitting) onSubmit?.(editContent, editAttachments);
+            if (!isSubmitting && canSubmit) onSubmit?.(editContent.trim(), editAttachments);
         } else if (e.key === 'Escape') {
             e.preventDefault();
             onCancel?.();
@@ -207,7 +208,7 @@
             </svg>
         </button>
         <button class="btn-edit-cancel" onclick={onCancel} title="Cancel editing">Cancel</button>
-        <button class="btn-edit-submit" onclick={() => onSubmit?.(editContent, editAttachments)} disabled={isSubmitting} title={submitLabel()}>
+        <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel()}>
             {#if isSubmitting}
                 <span class="spinner-inline"></span>
             {:else if submitIcon() === 'check'}
