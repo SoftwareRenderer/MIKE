@@ -1076,17 +1076,28 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 
 var wordRe = regexp.MustCompile(`\S+`)
 
-// buildMessagesFromDB loads all persisted messages. LLM context is assembled via buildLLMContext.
+// buildMessagesFromDB loads persisted messages and builds the system prompt.
+// The most recent summary is injected into the system prompt.
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
 	cwd := worktreePath
 	if sandboxEnabled {
 		cwd = "/home/sandbox/" + projectName
 	}
+
+	// Extract most recent summary for the system prompt.
+	var summary string
+	for i := len(taskMsgs) - 1; i >= 0; i-- {
+		if taskMsgs[i].Role == "summarization" {
+			summary = taskMsgs[i].Content
+			break
+		}
+	}
+
 	var systemPrompt string
 	if task.PlanMode {
-		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, true)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, true)
 	} else {
-		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, false)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, false)
 	}
 
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
@@ -1094,7 +1105,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	for _, m := range taskMsgs {
 		switch m.Role {
 		case "summarization":
-			// Keep as-is with role "summarization" — buildLLMContext formats it for the LLM
+			// buildLLMContext filters these out (summary is in system prompt)
 			messages = append(messages, types.ChatMessage{Role: "summarization", Content: m.Content})
 		case "user":
 			if m.Attachments != "" {

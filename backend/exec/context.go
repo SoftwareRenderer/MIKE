@@ -80,68 +80,16 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, serverURL
 	}, nil
 }
 
-// buildLLMContext assembles the context sent to the LLM.
-// With a summary: [system, summary, last-3-turns-before, all-after].
-// Without a summary: returns all messages unchanged.
+// buildLLMContext filters out summarization messages (summary is in system prompt)
+// and passes all other messages through unchanged.
 func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
-	// Find most recent summary.
-	summaryIdx := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "summarization" {
-			summaryIdx = i
-			break
-		}
-	}
-	if summaryIdx < 0 {
-		return messages // no summary, use all messages
-	}
-
-	// Group messages before summary into turns, keep last 3.
-	var allTurns [][]types.ChatMessage
-	var currentTurn []types.ChatMessage
-	for i := 1; i < summaryIdx; i++ {
-		if messages[i].Role == "system" {
+	var result []types.ChatMessage
+	for _, m := range messages {
+		if m.Role == "summarization" {
 			continue
 		}
-		if messages[i].Role == "user" && len(currentTurn) > 0 {
-			allTurns = append(allTurns, currentTurn)
-			currentTurn = nil
-		}
-		currentTurn = append(currentTurn, messages[i])
+		result = append(result, m)
 	}
-	if len(currentTurn) > 0 {
-		allTurns = append(allTurns, currentTurn)
-	}
-
-	// Keep last 3.
-	var recentTurns [][]types.ChatMessage
-	if len(allTurns) > 3 {
-		recentTurns = allTurns[len(allTurns)-3:]
-	} else {
-		recentTurns = allTurns
-	}
-
-	// Flatten.
-	var preSummary []types.ChatMessage
-	for _, turn := range recentTurns {
-		preSummary = append(preSummary, turn...)
-	}
-
-	// Messages after summary.
-	var postSummary []types.ChatMessage
-	for i := summaryIdx + 1; i < len(messages); i++ {
-		if messages[i].Role != "system" {
-			postSummary = append(postSummary, messages[i])
-		}
-	}
-
-	// Assemble final context.
-	result := []types.ChatMessage{
-		messages[0], // system prompt
-		{Role: "assistant", Content: "[Context summary: " + messages[summaryIdx].Content + "]"},
-	}
-	result = append(result, preSummary...)
-	result = append(result, postSummary...)
 	return result
 }
 

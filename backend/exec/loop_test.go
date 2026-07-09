@@ -1410,26 +1410,36 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 	}
 	result := buildLLMContext(messages)
 
-	// Expected: system + summary + 2 pre-summary turns + 2 post-summary = 8
-	if len(result) != 8 {
-		t.Fatalf("expected 8 messages, got %d: %v", len(result), func() []string {
-			var s []string
-			for _, m := range result {
-				s = append(s, m.Role+":"+m.Content[:min(len(m.Content), 20)])
-			}
-			return s
-		}())
+	// Summary is in system prompt; summarization messages are filtered out.
+	// All other messages pass through: system + 2 old turns + 2 new = 7
+	if len(result) != 7 {
+		t.Fatalf("expected 7 messages, got %d", len(result))
 	}
-	if result[0].Role != "system" {
-		t.Errorf("expected system at [0], got %s", result[0].Role)
+	// No summarization role in output
+	for _, m := range result {
+		if m.Role == "summarization" {
+			t.Error("summarization messages should be filtered out")
+		}
 	}
-	if result[1].Role != "assistant" || !strings.HasPrefix(result[1].Content, "[Context summary: ") {
-		t.Errorf("expected formatted summary at [1], got %s: %q", result[1].Role, result[1].Content)
+	// All non-summarization messages preserved in order
+	expected := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "old message 1"},
+		{Role: "assistant", Content: "old response 1"},
+		{Role: "user", Content: "old message 2"},
+		{Role: "assistant", Content: "old response 2"},
+		{Role: "user", Content: "new message"},
+		{Role: "assistant", Content: "new response"},
+	}
+	for i, exp := range expected {
+		if result[i].Role != exp.Role || result[i].Content != exp.Content {
+			t.Errorf("message[%d] mismatch: got %s:%q, want %s:%q", i, result[i].Role, result[i].Content, exp.Role, exp.Content)
+		}
 	}
 }
 
-func TestBuildLLMContext_SkipsOldMessagesBeyond3Turns(t *testing.T) {
-	// 5 turns before summary, only last 3 should appear.
+func TestBuildLLMContext_KeepsAllMessagesExceptSummarization(t *testing.T) {
+	// All non-summarization messages are kept (no 3-turn limit).
 	var messages []types.ChatMessage
 	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
 	for i := 1; i <= 5; i++ {
@@ -1441,21 +1451,27 @@ func TestBuildLLMContext_SkipsOldMessagesBeyond3Turns(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// Count how many "old message" entries appear
-	oldCount := 0
-	for _, m := range result {
-		if strings.Contains(m.Content, "old message") {
-			oldCount++
+	// All 12 non-summarization messages should be present (13 - 1 summarization)
+	if len(result) != 12 {
+		t.Fatalf("expected 11 messages, got %d", len(result))
+	}
+	// All old messages should be present (no truncation)
+	for i := 1; i <= 5; i++ {
+		found := false
+		for _, m := range result {
+			if m.Content == fmt.Sprintf("old message %d", i) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'old message %d' in context", i)
 		}
 	}
-	// Should be exactly 3.
-	if oldCount != 3 {
-		t.Errorf("expected 3 old messages in context, got %d", oldCount)
-	}
-	// The oldest (message 1, 2) should NOT appear
+	// No summarization in output
 	for _, m := range result {
-		if strings.Contains(m.Content, "old message 1") || strings.Contains(m.Content, "old message 2") {
-			t.Errorf("old message beyond 3-turn window should not appear: %q", m.Content)
+		if m.Role == "summarization" {
+			t.Error("summarization messages should be filtered out")
 		}
 	}
 }
@@ -1481,7 +1497,11 @@ func TestBuildLLMContext_WithToolCalls(t *testing.T) {
 	}
 	result := buildLLMContext(messages)
 
-	// Tool calls included in pre-summary turns.
+	// Tool calls and all messages pass through; summarization filtered.
+	// Expected: system + user + assistant(tool) + tool + user = 5
+	if len(result) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(result))
+	}
 	hasToolCall := false
 	hasToolResult := false
 	for _, m := range result {

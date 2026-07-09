@@ -14,6 +14,7 @@ type PromptData struct {
 	PlanMode     bool
 	Tools        []ToolInfo
 	AgentsMd     string // contents of AGENTS.md from worktree root, empty if not found
+	Summary      string // prior conversation summary
 }
 
 // ToolInfo holds the name and description of a tool for rendering in prompts.
@@ -154,6 +155,7 @@ func ValidateTemplates() ([]string, error) {
 		Tools: []ToolInfo{
 			{Name: "test_tool", Description: "test description"},
 		},
+		Summary: "Previous work: implemented authentication system.",
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
