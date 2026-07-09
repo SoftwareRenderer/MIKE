@@ -63,7 +63,11 @@ func NewSandboxManager() *SandboxManager {
 	sm.available = sm.checkAvailable()
 	if sm.available {
 		log.Println("[sandbox] gVisor available, sandboxing enabled")
-		sm.cleanupStaleContainers()
+		// Skip cleanup if SANDBOX_SKIP_STARTUP_CLEANUP is set (e.g. during tests
+		// where TestMain handles cleanup once to avoid races between parallel tests).
+		if os.Getenv("SANDBOX_SKIP_STARTUP_CLEANUP") == "" {
+			sm.cleanupStaleContainers()
+		}
 	} else {
 		log.Println("[sandbox] gVisor not available (runsc not found), sandboxing disabled")
 	}
@@ -84,8 +88,7 @@ func (sm *SandboxManager) cleanupStaleContainers() {
 		return
 	}
 	for _, name := range names {
-		_, rmErr := sm.podmanExec("rm", "-f", name)
-		if rmErr != nil {
+		if rmErr := sm.removeContainer(name); rmErr != nil {
 			log.Printf("[sandbox] startup: failed to remove stale container %s: %v", name, rmErr)
 		} else {
 			log.Printf("[sandbox] startup: removed stale container %s", name)
@@ -222,9 +225,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 	if exists {
 		// Clean up stale container from a previous server run
 		log.Printf("[sandbox] task=%s removing stale container %s", taskID, containerName)
-		rmOut, rmErr := sm.podmanExec("rm", "-f", containerName)
-		if rmErr != nil {
-			return fmt.Errorf("remove stale container %s: %w (%s)", containerName, rmErr, rmOut), nil
+		if rmErr := sm.removeContainer(containerName); rmErr != nil {
+			return fmt.Errorf("remove stale container %s: %w", containerName, rmErr), nil
 		}
 	}
 
@@ -958,6 +960,46 @@ func (sm *SandboxManager) ImageReadyForProject(projectName string) bool {
 	imageName := ProjectImageName(projectName)
 	_, err := sm.podmanExec("image", "exists", imageName)
 	return err == nil
+}
+
+// removeContainer force-removes a container, handling overlay filesystem issues
+// that can block normal podman rm -f in rootless mode. If the first attempt fails
+// due to stale overlay merged directory contents, it cleans them and retries.
+func (sm *SandboxManager) removeContainer(name string) error {
+	_, err := sm.podmanExec("rm", "-f", name)
+	if err == nil {
+		return nil
+	}
+	// Overlay merged dirs can have stale files that block rm -f.
+	// Clean them and retry.
+	sm.cleanOverlayMergedDirs()
+	_, err = sm.podmanExec("rm", "-f", name)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("podman rm -f %s: %w", name, err)
+}
+
+// cleanOverlayMergedDirs removes stale files from podman overlay merged directories.
+// In rootless mode these are not real mount points — just directories that can
+// accumulate stale files when containers are killed abruptly.
+func (sm *SandboxManager) cleanOverlayMergedDirs() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	overlayBase := filepath.Join(home, ".local", "share", "containers", "storage", "overlay")
+	entries, err := os.ReadDir(overlayBase)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		mergedDir := filepath.Join(overlayBase, entry.Name(), "merged")
+		files, _ := os.ReadDir(mergedDir)
+		for _, f := range files {
+			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
+		}
+	}
 }
 
 // containerExists checks if a container with the given name exists.

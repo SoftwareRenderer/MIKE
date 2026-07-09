@@ -50,6 +50,10 @@ func testServer(t *testing.T) *Server {
 		}
 	})
 
+	// Disable sandbox startup cleanup to prevent removing containers from
+	// parallel sandbox package tests (they manage their own cleanup via TestMain).
+	os.Setenv("SANDBOX_SKIP_STARTUP_CLEANUP", "1")
+
 	s, err := NewServer(dbPath, worktreesDir, nil)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)

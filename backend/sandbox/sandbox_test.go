@@ -5,10 +5,72 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/backend/types"
 )
+
+// TestMain runs cleanup of stale containers before the test suite starts.
+// This handles the case where a previous interrupted test run left containers
+// behind with overlay filesystem issues that prevent normal podman rm -f.
+// It also disables the per-NewSandboxManager cleanup to avoid races when
+// tests run in parallel (each test creates its own SandboxManager).
+func TestMain(m *testing.M) {
+	cleanupStaleTestContainers()
+	// Disable per-instance cleanup in NewSandboxManager() to prevent tests
+	// from removing each other's containers when running in parallel.
+	os.Setenv("SANDBOX_SKIP_STARTUP_CLEANUP", "1")
+	code := m.Run()
+	cleanupStaleTestContainers()
+	os.Exit(code)
+}
+
+// cleanupStaleTestContainers removes all kanban-sandbox-* containers,
+// handling overlay filesystem issues that can block normal podman rm -f.
+func cleanupStaleTestContainers() {
+	out, err := exec.Command("podman", "ps", "-a",
+		"--filter", "name=kanban-sandbox-",
+		"--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		return
+	}
+	names := strings.Fields(strings.TrimSpace(string(out)))
+	if len(names) == 0 {
+		return
+	}
+	for _, name := range names {
+		_, rmErr := exec.Command("podman", "rm", "-f", name).CombinedOutput()
+		if rmErr != nil {
+			// Overlay merged dirs can have stale files that block rm -f.
+			// Try cleaning them and retrying.
+			cleanOverlayMergedDirs()
+			_, _ = exec.Command("podman", "rm", "-f", name).CombinedOutput()
+		}
+	}
+}
+
+// cleanOverlayMergedDirs removes stale files from podman overlay merged directories.
+// In rootless mode these are not real mount points — just directories that can
+// accumulate stale files when containers are killed abruptly.
+func cleanOverlayMergedDirs() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	overlayBase := filepath.Join(home, ".local", "share", "containers", "storage", "overlay")
+	entries, err := os.ReadDir(overlayBase)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		mergedDir := filepath.Join(overlayBase, entry.Name(), "merged")
+		files, _ := os.ReadDir(mergedDir)
+		for _, f := range files {
+			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
+		}
+	}
+}
 
 // findAgentBinary locates the sandbox-bridge binary for tests.
 // Checks KANBAN_AGENT_PATH env var, then project root, then build directory.
