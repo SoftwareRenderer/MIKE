@@ -19,6 +19,7 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/prompts"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/term"
@@ -699,8 +700,32 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// Reload task — MergeBranch may have set merge conflict flag
 	task, _ = h.store.GetTask(projectID, taskID)
 	if task.HasMergeConflict {
+		// Already resolving a merge conflict — don't add duplicate messages
+		if task.ExecutionState == "running" {
+			log.Printf("[commit-and-done] task=%s already resolving merge conflict, skipping", taskID)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			httputil.JSONResponse(w, http.StatusOK, task)
+			return
+		}
 		// Merge conflict — trigger LLM to resolve via user message (handleLazyStart)
 		log.Printf("[commit-and-done] task=%s merge conflict detected, triggering LLM resolution", taskID)
+
+		// Get conflicted files for the prompt
+		worktreePath, _ := h.worktreeMgr.WorktreePath(taskID)
+		conflictedFiles := exec.GetConflictedFiles(worktreePath)
+
+		// Render merge conflict prompt template
+		userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+			TaskBranch:      task.Branch,
+			TargetBranch:    task.BaseRef,
+			TaskTitle:       task.Title,
+			TaskDescription: task.Prompt,
+			ConflictedFiles: conflictedFiles,
+		})
+		if pErr != nil {
+			log.Printf("[commit-and-done] task=%s failed to render merge conflict prompt: %v", taskID, pErr)
+			userContent = "Resolve the merge conflicts and complete the task"
+		}
 
 		// Persist system message in chat
 		h.store.CreateTaskMessage(&types.TaskMessage{
@@ -712,8 +737,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 			CreatedAt: time.Now().UTC(),
 		})
 
-		// Persist user message — triggers handleLazyStart which injects conflict context
-		userContent := "Resolve the merge conflicts and complete the task"
+		// Persist user message with conflict context
 		h.store.CreateTaskMessage(&types.TaskMessage{
 			ID:        uuid.New().String(),
 			TaskID:    taskID,

@@ -83,7 +83,7 @@ type MergeConflictData struct {
 	TargetBranch    string
 	TaskTitle       string
 	TaskDescription string
-	ConflictedFiles string // comma-separated list of conflicted file paths
+	ConflictedFiles []string // list of conflicted file paths
 }
 
 // RenderMergeConflictPrompt renders the merge conflict resolution prompt.

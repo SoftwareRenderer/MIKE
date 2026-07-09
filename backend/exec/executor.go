@@ -872,15 +872,16 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	}
 	task = execSetup.task
 
-	// If task has a merge conflict, prepend conflict context to the initial content
-	if task.HasMergeConflict {
-		conflictedFiles := getConflictedFiles(execSetup.worktreePath)
+	// If task has a merge conflict and the content is not already a conflict prompt,
+	// prepend conflict context (covers sync-merge path where no user message was persisted).
+	if task.HasMergeConflict && !strings.Contains(content, "merge conflict occurred") {
+		conflictedFiles := GetConflictedFiles(execSetup.worktreePath)
 		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
 			TargetBranch:    task.BaseRef,
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
-			ConflictedFiles: strings.Join(conflictedFiles, ", "),
+			ConflictedFiles: conflictedFiles,
 		})
 		if pErr != nil {
 			log.Printf("[lazy-start] task=%s failed to render merge conflict prompt: %v", taskID, pErr)
@@ -1004,7 +1005,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 	task.HasMergeConflict = true
 	te.logSystemMessage(taskID, task.CurrentThreadID,
-		fmt.Sprintf("Conflicts detected when syncing %s into task branch. The merge is in progress — resolve the conflicted files, then run `git add -A`, `git commit`, and `git merge --continue`.", targetBranch))
+		fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	// Keep merge in progress — do NOT abort. LLM will resolve with file tools.
 	return nil

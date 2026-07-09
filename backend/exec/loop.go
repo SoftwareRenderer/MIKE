@@ -879,13 +879,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
 							// Merge conflict — inject resolution prompt and continue the loop
-							conflictedFiles := getConflictedFiles(worktreePath)
+							conflictedFiles := GetConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      task.Branch,
 								TargetBranch:    task.BaseRef,
 								TaskTitle:       task.Title,
 								TaskDescription: task.Prompt,
-								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+								ConflictedFiles: conflictedFiles,
 							})
 							if pErr != nil {
 								log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
@@ -916,13 +916,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
 							// Still conflicted — re-inject prompt and continue
-							conflictedFiles := getConflictedFiles(worktreePath)
+							conflictedFiles := GetConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      task.Branch,
 								TargetBranch:    task.BaseRef,
 								TaskTitle:       task.Title,
 								TaskDescription: task.Prompt,
-								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+								ConflictedFiles: conflictedFiles,
 							})
 							if pErr != nil {
 								log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
@@ -1102,21 +1102,49 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			default:
 			}
 
-			// If task has a merge conflict and the merge is no longer in progress,
-			// the LLM resolved the conflicts. Re-attempt the final merge.
-			if task.HasMergeConflict && !isMergeInProgress(worktreePath) {
-				log.Printf("[merge] task=%s conflicts resolved by LLM, attempting final merge", task.ID)
+			// If task has a merge conflict, the LLM resolved it by editing files.
+			// Backend commits the resolution and continues the merge.
+			if task.HasMergeConflict {
+				log.Printf("[merge] task=%s LLM finished resolving conflicts, committing resolution", task.ID)
 				task.ExecutionState = "idle"
 				_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
+
+				// Stage only the conflicted files (not all changes — user may have unstaged files)
+				conflictedFiles := GetConflictedFiles(worktreePath)
+				commitOK := true
+				if len(conflictedFiles) > 0 {
+					addArgs := append([]string{"add"}, conflictedFiles...)
+					if err := te.gitRun(worktreePath, addArgs...); err != nil {
+						log.Printf("[merge] task=%s git add failed: %v", task.ID, err)
+						commitOK = false
+					}
+				}
+				if commitOK {
+					if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+						log.Printf("[merge] task=%s git commit failed: %v", task.ID, err)
+						commitOK = false
+					}
+				}
+				if commitOK {
+					if err := te.gitRun(worktreePath, "merge", "--continue"); err != nil {
+						log.Printf("[merge] task=%s git merge --continue failed: %v", task.ID, err)
+						commitOK = false
+					} else {
+						log.Printf("[merge] task=%s conflict resolution committed", task.ID)
+					}
+				}
+
 				task, _ = te.store.GetTaskByTaskID(task.ID)
+				_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
+
+				// Re-attempt the final merge (task branch into target)
 				if mergeErr := te.MergeBranch(projectID, task.ID, task); mergeErr != nil {
 					log.Printf("[merge] task=%s final merge failed: %v", task.ID, mergeErr)
 				} else {
 					log.Printf("[merge] task=%s final merge succeeded", task.ID)
 				}
 				task, _ = te.store.GetTaskByTaskID(task.ID)
-				// Clear merge conflict flag — LLM resolved it
-				_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
+
 				// If merge succeeded, auto-complete
 				if task.AutoCommit {
 					task.ExecutionState = "completed"

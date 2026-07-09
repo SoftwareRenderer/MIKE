@@ -3,13 +3,17 @@ A merge conflict occurred when merging "{{ .TaskBranch }}" into "{{ .TargetBranc
 Task title: {{ .TaskTitle }}
 Task description: {{ .TaskDescription }}
 
-Resolve the conflicted files using your tools (read, edit, write_file), then run:
-	git add -A && git commit -m 'Resolve merge conflicts' && git merge --continue
+Resolve the conflicted files using your tools (read, edit, write_file).
+You do NOT have access to git — just edit the files to resolve the conflicts.
+The backend will commit and continue the merge automatically after you finish.
 
 {{- if .ConflictedFiles }}
-Conflicted files: {{ .ConflictedFiles }}
+Conflicted files:
+{{ range .ConflictedFiles }}
+- {{ . }}
+{{ end }}
 {{- end }}
 
 When resolving, analyze the intent behind each side's changes. Combine both sides when their changes are independent or compatible. If the two sides express genuinely conflicting intent (e.g., one adds a feature the other removes), ask the user which approach to take before proceeding.
 
-After the merge succeeds, call task_complete.
+After resolving all conflicted files, call task_complete.

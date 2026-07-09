@@ -46,7 +46,8 @@ func isMergeInProgress(dir string) bool {
 // getConflictedFiles returns a deduplicated list of files with merge conflicts.
 // Uses git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA) and falls back
 // to git diff --diff-filter=U (catches binary conflicts and renames).
-func getConflictedFiles(dir string) []string {
+// GetConflictedFiles returns a list of files with merge conflicts in the given directory.
+func GetConflictedFiles(dir string) []string {
 	seen := make(map[string]struct{})
 	var files []string
 
@@ -119,7 +120,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetB
 		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD): %w", ErrNotAMergeConflict)
 	}
 
-	conflictedFiles := getConflictedFiles(dir)
+	conflictedFiles := GetConflictedFiles(dir)
 
 	// No conflicted files found — try git merge --continue (git may have auto-resolved)
 	if len(conflictedFiles) == 0 {

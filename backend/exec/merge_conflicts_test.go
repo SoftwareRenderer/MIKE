@@ -90,7 +90,7 @@ func TestGetConflictedFiles_DetectsUUConflicts(t *testing.T) {
 	cmd.Dir = tmpDir
 	_ = cmd.Run()
 
-	files := getConflictedFiles(tmpDir)
+	files := GetConflictedFiles(tmpDir)
 	if len(files) != 1 || files[0] != "file.txt" {
 		t.Fatalf("expected [file.txt], got %v", files)
 	}
@@ -130,7 +130,7 @@ func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
 	cmd.Dir = tmpDir
 	_ = cmd.Run()
 
-	files := getConflictedFiles(tmpDir)
+	files := GetConflictedFiles(tmpDir)
 	if len(files) != 2 {
 		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
 	}
@@ -156,7 +156,7 @@ func TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts(t *testing.T) {
 	runGit(t, tmpDir, "add", "file.txt")
 	runGit(t, tmpDir, "commit", "-m", "Initial")
 
-	files := getConflictedFiles(tmpDir)
+	files := GetConflictedFiles(tmpDir)
 	if len(files) != 0 {
 		t.Fatalf("expected no files, got %v", files)
 	}

@@ -43,7 +43,7 @@ func TestRenderMergeConflictPrompt(t *testing.T) {
 		TargetBranch:    "main",
 		TaskTitle:       "Add feature",
 		TaskDescription: "Implement the feature",
-		ConflictedFiles: "src/main.go, src/util.go",
+		ConflictedFiles: []string{"src/main.go", "src/util.go"},
 	}
 
 	prompt, err := RenderMergeConflictPrompt(data)
@@ -98,7 +98,7 @@ func TestRenderMergeConflictPrompt_EmptyConflictedFiles(t *testing.T) {
 		TargetBranch:    "main",
 		TaskTitle:       "Add feature",
 		TaskDescription: "Implement the feature",
-		ConflictedFiles: "",
+		ConflictedFiles: nil,
 	}
 
 	prompt, err := RenderMergeConflictPrompt(data)

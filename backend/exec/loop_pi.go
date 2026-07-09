@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/pi"
 	"kanban/backend/prompts"
@@ -456,36 +457,37 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					// No queued messages — check if auto-commit/merge is needed.
 					// Perform merge inside the event loop so Pi can resolve conflicts with tools.
 					if task.AutoCommit {
-						// If task is has merge conflict state, Pi may have just resolved it.
-						// Check if the merge is still in progress.
+						// If task has a merge conflict, Pi resolved it by editing files.
+						// Backend commits the resolution and continues the merge.
 						if task.HasMergeConflict {
-							if !isMergeInProgress(worktreePath) {
-								// Pi resolved the conflict and continued the merge
-								log.Printf("[pi] task=%s merge conflict resolved by Pi", task.ID)
-								_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
-								task.ExecutionState = "idle"
-								_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
-							} else {
-								// Still in conflict — prompt Pi again
-								conflictedFiles := getConflictedFiles(worktreePath)
-								prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-									TaskBranch:      task.Branch,
-									TargetBranch:    task.BaseRef,
-									TaskTitle:       task.Title,
-									TaskDescription: task.Prompt,
-									ConflictedFiles: strings.Join(conflictedFiles, ", "),
-								})
-								if pErr != nil {
-									log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							log.Printf("[pi] task=%s Pi finished resolving conflicts, committing resolution", task.ID)
+							// Stage only the conflicted files (not all changes — user may have unstaged files)
+							conflictedFiles := GetConflictedFiles(worktreePath)
+							commitOK := true
+							if len(conflictedFiles) > 0 {
+								addArgs := append([]string{"add"}, conflictedFiles...)
+								if err := te.gitRun(worktreePath, addArgs...); err != nil {
+									log.Printf("[pi] task=%s git add failed: %v", task.ID, err)
+									commitOK = false
 								}
-								log.Printf("[pi] task=%s merge still conflicted, re-prompting Pi", task.ID)
-								err := client.Prompt(ctx, prompt)
-								if err != nil {
-									log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
-									agentEnded = true
-								}
-								break
 							}
+							if commitOK {
+								if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+									log.Printf("[pi] task=%s git commit failed: %v", task.ID, err)
+									commitOK = false
+								}
+							}
+							if commitOK {
+								if err := te.gitRun(worktreePath, "merge", "--continue"); err != nil {
+									log.Printf("[pi] task=%s git merge --continue failed: %v", task.ID, err)
+									commitOK = false
+								} else {
+									log.Printf("[pi] task=%s conflict resolution committed", task.ID)
+								}
+							}
+							_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
+							task.ExecutionState = "idle"
+							_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 						}
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
@@ -493,13 +495,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
 							// Merge conflict — prompt Pi to resolve with tools
-							conflictedFiles := getConflictedFiles(worktreePath)
+							conflictedFiles := GetConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      task.Branch,
 								TargetBranch:    task.BaseRef,
 								TaskTitle:       task.Title,
 								TaskDescription: task.Prompt,
-								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+								ConflictedFiles: conflictedFiles,
 							})
 							if pErr != nil {
 								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
@@ -529,13 +531,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
 							// Still conflicted — prompt Pi again
-							conflictedFiles := getConflictedFiles(worktreePath)
+							conflictedFiles := GetConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      task.Branch,
 								TargetBranch:    task.BaseRef,
 								TaskTitle:       task.Title,
 								TaskDescription: task.Prompt,
-								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+								ConflictedFiles: conflictedFiles,
 							})
 							if pErr != nil {
 								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
