@@ -651,8 +651,8 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 
 	// Verify task is in merge_conflict state
 	subtaskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
-	if subtaskFromDB.ExecutionState != "merge_conflict" {
-		t.Fatalf("expected execution_state=merge_conflict, got %q", subtaskFromDB.ExecutionState)
+	if !subtaskFromDB.HasMergeConflict {
+		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
 
 	// Verify the parent branch was NOT modified (sync merge is in progress, not committed)

@@ -91,7 +91,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "task_complete",
 				DisplayName: "Done",
-				Description: "Signal that the task is complete.",
+				Description: "If the task is complete, use this tool.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

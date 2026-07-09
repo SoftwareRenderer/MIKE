@@ -696,9 +696,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
 	}
 
-	// Reload task — MergeBranch may have entered merge_conflict state
+	// Reload task — MergeBranch may have set merge conflict flag
 	task, _ = h.store.GetTask(projectID, taskID)
-	if task.ExecutionState == "merge_conflict" {
+	if task.HasMergeConflict {
 		// Merge conflict — trigger LLM to resolve via user message (handleLazyStart)
 		log.Printf("[commit-and-done] task=%s merge conflict detected, triggering LLM resolution", taskID)
 

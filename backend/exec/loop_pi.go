@@ -456,12 +456,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					// No queued messages — check if auto-commit/merge is needed.
 					// Perform merge inside the event loop so Pi can resolve conflicts with tools.
 					if task.AutoCommit {
-						// If task is in merge_conflict state, Pi may have just resolved it.
+						// If task is has merge conflict state, Pi may have just resolved it.
 						// Check if the merge is still in progress.
-						if task.ExecutionState == "merge_conflict" {
+						if task.HasMergeConflict {
 							if !isMergeInProgress(worktreePath) {
 								// Pi resolved the conflict and continued the merge
 								log.Printf("[pi] task=%s merge conflict resolved by Pi", task.ID)
+								_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
 								task.ExecutionState = "idle"
 								_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 							} else {
@@ -488,9 +489,9 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						}
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
-						// Reload task — CommitAndMerge may have entered merge_conflict state
+						// Reload task — CommitAndMerge may have set merge conflict flag
 						task, _ = te.store.GetTaskByTaskID(task.ID)
-						if task.ExecutionState == "merge_conflict" {
+						if task.HasMergeConflict {
 							// Merge conflict — prompt Pi to resolve with tools
 							conflictedFiles := getConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
@@ -520,13 +521,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
 						te.store.UpdateTask(task)
 						agentEnded = true
-					} else if task.ExecutionState == "merge_conflict" {
-						// Task was in merge_conflict state (e.g., from HandleCommitAndDone).
+					} else if task.HasMergeConflict {
+						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// User already clicked "Commit and move to done" — proceed with merge.
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, true)
 						task, _ = te.store.GetTaskByTaskID(task.ID)
-						if task.ExecutionState == "merge_conflict" {
+						if task.HasMergeConflict {
 							// Still conflicted — prompt Pi again
 							conflictedFiles := getConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{

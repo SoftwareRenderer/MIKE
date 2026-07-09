@@ -875,9 +875,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if task.AutoCommit {
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
-						// Reload task — CommitAndMerge may have entered merge_conflict state
+						// Reload task — CommitAndMerge may have set merge conflict flag
 						task, _ = te.store.GetTaskByTaskID(task.ID)
-						if task.ExecutionState == "merge_conflict" {
+						if task.HasMergeConflict {
 							// Merge conflict — inject resolution prompt and continue the loop
 							conflictedFiles := getConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
@@ -908,13 +908,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(task.ID)
 						}
-					} else if task.ExecutionState == "merge_conflict" {
-						// Task was in merge_conflict state (e.g., from HandleCommitAndDone).
+					} else if task.HasMergeConflict {
+						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// User already clicked "Commit and move to done" — proceed with merge.
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, true)
 						task, _ = te.store.GetTaskByTaskID(task.ID)
-						if task.ExecutionState == "merge_conflict" {
+						if task.HasMergeConflict {
 							// Still conflicted — re-inject prompt and continue
 							conflictedFiles := getConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
@@ -1102,9 +1102,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			default:
 			}
 
-			// If task was in merge_conflict and the merge is no longer in progress,
+			// If task has a merge conflict and the merge is no longer in progress,
 			// the LLM resolved the conflicts. Re-attempt the final merge.
-			if task.ExecutionState == "merge_conflict" && !isMergeInProgress(worktreePath) {
+			if task.HasMergeConflict && !isMergeInProgress(worktreePath) {
 				log.Printf("[merge] task=%s conflicts resolved by LLM, attempting final merge", task.ID)
 				task.ExecutionState = "idle"
 				_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
@@ -1115,8 +1115,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					log.Printf("[merge] task=%s final merge succeeded", task.ID)
 				}
 				task, _ = te.store.GetTaskByTaskID(task.ID)
-				// If merge succeeded and task is no longer in merge_conflict, auto-complete
-				if task.ExecutionState != "merge_conflict" && task.AutoCommit {
+				// Clear merge conflict flag — LLM resolved it
+				_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
+				// If merge succeeded, auto-complete
+				if task.AutoCommit {
 					task.ExecutionState = "completed"
 					task.Status = "done"
 					if te.sandboxMgr != nil {

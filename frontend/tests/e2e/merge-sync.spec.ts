@@ -139,12 +139,12 @@ test.describe.serial('Merge Sync', () => {
       body: { status: 'in_progress' },
     });
 
-    // Simulate merge_conflict state via direct DB update (for UI testing)
+    // Simulate merge conflict via direct DB update (for UI testing)
     await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ execution_state: 'merge_conflict' }),
+        body: JSON.stringify({ has_merge_conflict: true }),
       });
       return res.ok;
     }, { pid: projectId, tid: taskId });

@@ -149,8 +149,8 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 
 	// Verify task is in merge_conflict state
 	taskFromDB, _ := te.store.GetTaskByTaskID(taskID)
-	if taskFromDB.ExecutionState != "merge_conflict" {
-		t.Fatalf("expected execution_state=merge_conflict, got %q", taskFromDB.ExecutionState)
+	if !taskFromDB.HasMergeConflict {
+		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
 
 	// Verify merge is still in progress (MERGE_HEAD exists)

@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch_tip                   TEXT DEFAULT NULL,
     output                       TEXT,
     execution_state              TEXT NOT NULL DEFAULT 'idle',
+    has_merge_conflict           INTEGER NOT NULL DEFAULT 0,
     llama_server_url             TEXT NOT NULL DEFAULT '',
     model_name                   TEXT NOT NULL DEFAULT '',
     max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
@@ -269,6 +270,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
+	// Separate merge conflict flag so execution_state can stay "running"
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (
@@ -486,11 +489,11 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoMerge, subtasksAutoMerge, planMode, titleGenerating int
+	var autoCommit, autoMerge, subtasksAutoMerge, planMode, titleGenerating, hasMergeConflict int
 	var createdAt, updatedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, branchTip, changeSummary, assignedPortsJSON sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
-		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.ExecutionState,
+		&t.SessionID, &t.Branch, &baseRef, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
 		&autoCommit, &autoMerge, &subtasksAutoMerge, &planMode, &parentTaskID, &titleGenerating, &currentThreadID, &changeSummary, &createdAt, &updatedAt, &assignedPortsJSON)
 	if err != nil {
@@ -500,6 +503,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.AutoMerge = i2b(autoMerge)
 	t.SubtasksAutoMerge = i2b(subtasksAutoMerge)
 	t.PlanMode = i2b(planMode)
+	t.HasMergeConflict = i2b(hasMergeConflict)
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)
 	t.CurrentThreadID = currentThreadID.String

@@ -142,11 +142,12 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingIdsContext).has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
+        const hasConflict = ($boardStore?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
-        if (state === 'merge_conflict') return { text: 'Agent resolving', color: 'var(--color-status-orange)' };
+        if (hasConflict) return { text: 'Agent resolving', color: 'var(--color-status-orange)' };
         return null;
     });
 
@@ -431,7 +432,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     // Pause/Resume for In Progress column
     // Derive liveExecutionState from boardStore so it updates reactively
     // when WebSocket broadcasts a board refresh. Falls back to task prop.
-    const STOPPED_STATES = ['stopped', 'paused', 'failed', 'merge_conflict'];
+    const STOPPED_STATES = ['stopped', 'failed'];
     let liveExecutionState = $derived(
         $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state
     );

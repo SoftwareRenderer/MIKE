@@ -58,6 +58,7 @@ export interface Task {
     branch?: string;
     output?: string;
     execution_state: string;
+    has_merge_conflict: boolean;
     llama_server_url?: string;
     model_name?: string;
     reasoning_effort?: string;
