@@ -354,16 +354,16 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			// Direct execution (no sandbox) with streaming output.
 			c := exec.CommandContext(ctx, "bash", "-c", cmd)
 			c.Dir = worktreePath
-			stdout, err := c.StdoutPipe()
-			if err != nil {
-				return fmt.Sprintf("Failed: %v", err), false
+			stdout, pipeErr := c.StdoutPipe()
+			if pipeErr != nil {
+				return fmt.Sprintf("Failed: %v", pipeErr), false
 			}
-			stderr, err := c.StderrPipe()
-			if err != nil {
-				return fmt.Sprintf("Failed: %v", err), false
+			stderr, pipeErr := c.StderrPipe()
+			if pipeErr != nil {
+				return fmt.Sprintf("Failed: %v", pipeErr), false
 			}
-			if err := c.Start(); err != nil {
-				return fmt.Sprintf("Failed: %v", err), false
+			if startErr := c.Start(); startErr != nil {
+				return fmt.Sprintf("Failed: %v", startErr), false
 			}
 			// Read stdout and stderr concurrently, stream output line by line.
 			var buf bytes.Buffer
@@ -387,6 +387,10 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			wg.Wait()
 			out = buf.String()
 		}
+
+		// Strip ANSI escape codes from output so the LLM sees clean text
+		// and the frontend displays without garbled sequences.
+		out = stripANSI(out)
 
 		if err != nil {
 			return fmt.Sprintf("Failed: %v\n%s", err, out), false
@@ -607,4 +611,49 @@ func pluralS(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+// stripANSI removes ANSI escape sequences from terminal output.
+// Handles CSI (\x1b[...m), OSC (\x1b]...\x07), and single-byte escapes (\x1bH).
+// CSI final bytes are in range 0x40–0x7E (@ through ~).
+func stripANSI(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' {
+			i++
+			if i < len(s) && s[i] == '[' {
+				// CSI sequence — skip parameters/intermediates until final byte (>= 0x40)
+				i++
+				for i < len(s) && s[i] < '@' {
+					i++
+				}
+				if i < len(s) {
+					i++ // skip the final byte
+				}
+			} else if i < len(s) && s[i] == ']' {
+				// OSC sequence — skip until ST (\x1b\\ or \x07)
+				i++
+				for i < len(s) {
+					if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+						i += 2
+						break
+					}
+					if s[i] == '\x07' {
+						i++
+						break
+					}
+					i++
+				}
+			} else {
+				// Other single-byte escape: \x1bA, \x1bH, \x1bM, etc.
+				i++ // skip the next byte too
+			}
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	return buf.String()
 }

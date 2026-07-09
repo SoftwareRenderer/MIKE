@@ -660,6 +660,209 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 	}
 }
 
+func TestExecuteTool_Bash_ANSIStripping(t *testing.T) {
+	dir := t.TempDir()
+	te := &TaskExecutor{}
+
+	// printf with ANSI color codes (bold, foreground, background, reset)
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "printf '\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10\n'",
+		"timeout": float64(5),
+	}, dir, &types.Task{}, &executionState{}, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+	// ANSI codes should be stripped
+	if strings.Contains(result, "\x1b") {
+		t.Errorf("expected no ANSI escape codes in output, got %q", result)
+	}
+	if !strings.Contains(result, "RUN") {
+		t.Errorf("expected 'RUN' in output, got %q", result)
+	}
+	if !strings.Contains(result, "v4.1.10") {
+		t.Errorf("expected 'v4.1.10' in output, got %q", result)
+	}
+}
+
+func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
+	dir := t.TempDir()
+	te := &TaskExecutor{}
+
+	// Command that fails and outputs ANSI codes (use \\x1b so bash printf interprets them)
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "printf '\\x1b[31mERROR\\x1b[0m something failed\\n'; exit 1",
+		"timeout": float64(5),
+	}, dir, &types.Task{}, &executionState{}, nil)
+	if ok {
+		t.Fatalf("expected failure, got success: %s", result)
+	}
+	// Even in error output, ANSI should be stripped
+	if strings.Contains(result, "\x1b") {
+		t.Errorf("expected no ANSI escape codes in error output, got %q", result)
+	}
+	if !strings.Contains(result, "ERROR") {
+		t.Errorf("expected 'ERROR' in output, got %q", result)
+	}
+}
+
+// --- stripANSI Tests ---
+
+func TestStripANSI_Empty(t *testing.T) {
+	got := stripANSI("")
+	if got != "" {
+		t.Errorf("stripANSI(\"\") = %q, want \"\"", got)
+	}
+}
+
+func TestStripANSI_NoANSI(t *testing.T) {
+	got := stripANSI("hello world\nline two")
+	if got != "hello world\nline two" {
+		t.Errorf("stripANSI() = %q, want unchanged", got)
+	}
+}
+
+func TestStripANSI_BoldAndColor(t *testing.T) {
+	// \x1b[1m = bold, \x1b[31m = red, \x1b[0m = reset
+	got := stripANSI("\x1b[1m\x1b[31mERROR\x1b[0m")
+	want := "ERROR"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_VitestStyle(t *testing.T) {
+	// Real-world example: \x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10
+	got := stripANSI("\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10")
+	want := " RUN  v4.1.10"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_MultipleLines(t *testing.T) {
+	got := stripANSI("\x1b[32mPASS\x1b[0m test1\n\x1b[31mFAIL\x1b[0m test2\nplain line")
+	want := "PASS test1\nFAIL test2\nplain line"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_OSCSequence(t *testing.T) {
+	// OSC sequence: \x1b]0;Terminal Title\x07
+	got := stripANSI("\x1b]0;My Title\x07hello")
+	want := "hello"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_OSCWithST(t *testing.T) {
+	// OSC with \x1b\\ string terminator
+	got := stripANSI("\x1b]0;Title\x1b\\hello")
+	want := "hello"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_SingleByteEscape(t *testing.T) {
+	// \x1bH = home cursor, \x1bM = reverse index
+	got := stripANSI("\x1bH\x1bMstart")
+	want := "start"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_TrailingEscape(t *testing.T) {
+	// Escape sequence at end of string with no final byte
+	got := stripANSI("hello\x1b[31")
+	want := "hello"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_BareEscape(t *testing.T) {
+	// Just an ESC character at end
+	got := stripANSI("hello\x1b")
+	want := "hello"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_CursorMovement(t *testing.T) {
+	// \x1b[2A = cursor up 2, \x1b[10C = cursor forward 10
+	got := stripANSI("\x1b[2Aline1\x1b[10Cline2")
+	want := "line1line2"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_MixedContent(t *testing.T) {
+	got := stripANSI("\x1b[1;34mnpm\x1b[0m run \x1b[1mtest\x1b[0m\n\x1b[32m✓\x1b[0m passed\n\x1b[33m⚠\x1b[0m warning")
+	want := "npm run test\n✓ passed\n⚠ warning"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_PreserveSpecialChars(t *testing.T) {
+	// Non-ANSI special characters should be preserved
+	got := stripANSI("tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea")
+	want := "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_ComplexCSI(t *testing.T) {
+	// CSI with intermediate bytes: \x1b[38;5;196m (256-color red)
+	got := stripANSI("\x1b[38;5;196mred\x1b[0m")
+	want := "red"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_24BitColor(t *testing.T) {
+	// \x1b[38;2;255;128;0m (24-bit RGB)
+	got := stripANSI("\x1b[38;2;255;128;0morange\x1b[0m")
+	want := "orange"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_BackgroundColor(t *testing.T) {
+	// \x1b[48;5;27m (256-color background)
+	got := stripANSI("\x1b[48;5;27mhighlighted\x1b[0m")
+	want := "highlighted"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_EraseLine(t *testing.T) {
+	// \x1b[2K = erase entire line
+	got := stripANSI("\x1b[2Kprogress: 50%")
+	want := "progress: 50%"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
+func TestStripANSI_CarriageReturn(t *testing.T) {
+	// ANSI codes mixed with carriage returns (common in progress bars)
+	got := stripANSI("\x1b[2K\r\x1b[32m✓\x1b[0m done")
+	want := "\r✓ done"
+	if got != want {
+		t.Errorf("stripANSI() = %q, want %q", got, want)
+	}
+}
+
 func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 	te := &TaskExecutor{}
 
