@@ -103,6 +103,10 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     // Derived arrays for DiffViewer (sorted, split by staged status)
     let stagedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path]));
     let unstagedFiles = $derived(Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path]));
+    // Authoritative staged-changes count from DiffCache (source of truth).
+    // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
+    // when the user stages/unstages files (optimistic update before WS catch-up).
+    let hasStagedChanges = $derived(stagedFiles.length > 0);
     let stagedUntracked = $derived([] as { path: string; fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean; file: DiffFile }[]);
     let unstagedUntracked = $derived(Object.entries(diffCache.state.untracked).map(([path, meta]) => ({
         path,
@@ -576,6 +580,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                             taskStatus={task.status}
                             taskExecutionState={task.execution_state}
                             taskTitle={task.title}
+                            hasStagedChanges={hasStagedChanges}
                             onRefreshDiff={(data) => {
                                 // Skip update while loadDiff() is in progress to prevent
                                 // WS diff_changed events from overwriting the cache with

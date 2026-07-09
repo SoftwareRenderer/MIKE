@@ -19,7 +19,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
 
     let connected = $state(false);
     let connecting = $state(true);
@@ -763,7 +763,11 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
-    let hasStagedChanges = $derived((diffStats?.staged_paths || []).length > 0);
+    // Prefer the prop from CardDetail (computed from DiffCache, the source of truth).
+    // Falls back to WebSocket store for backward compat (e.g., Card.svelte usage).
+    let hasStagedChanges = $derived(
+        hasStagedChangesProp ?? (diffStats?.staged_paths || []).length > 0
+    );
 
     async function handleCommitAndDone() {
         if (isCommitting || disabled) return;
@@ -785,8 +789,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                 return; // User cancelled
             }
             const updated = await commitAndDone(projectId, taskId, confirmedMessage);
-            // Clear stale diff stats immediately so the button updates right away
-            taskDiffStatsStore.update(map => { delete map[taskId]; return { ...map }; });
             mergeTaskIntoBoard(updated);
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
