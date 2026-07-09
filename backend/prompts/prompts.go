@@ -10,6 +10,7 @@ import (
 // PromptData holds the variables passed to system prompt templates.
 type PromptData struct {
 	WorktreePath string
+	CurrentDate  string // e.g. "2025-07-08"
 	PlanMode     bool
 	Tools        []ToolInfo
 	AgentsMd     string // contents of AGENTS.md from worktree root, empty if not found
@@ -148,6 +149,7 @@ func ValidateTemplates() ([]string, error) {
 	// Dry-run render with minimal data to catch execution errors
 	data := PromptData{
 		WorktreePath: "/tmp/test",
+		CurrentDate:  "2025-01-01",
 		PlanMode:     true,
 		Tools: []ToolInfo{
 			{Name: "test_tool", Description: "test description"},

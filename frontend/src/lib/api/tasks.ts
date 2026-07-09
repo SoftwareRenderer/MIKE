@@ -200,9 +200,9 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
     return updateTaskMessageRaw(projectId, taskId, messageId, content);
 }
 
-/** Manually trigger context summarization for a task. */
-export async function summarizeTask(projectId: string, taskId: string): Promise<{ summary: string; old_count: number; new_count: number }> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/summarize`, { method: 'POST' });
+/** Manually trigger context summarization for a task. Pass an AbortSignal to allow cancellation. */
+export async function summarizeTask(projectId: string, taskId: string, signal?: AbortSignal): Promise<{ summary: string; old_count: number; new_count: number }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/summarize`, { method: 'POST', signal });
     if (!res.ok) throw await apiError(res, 'Failed to summarize task');
     return res.json();
 }

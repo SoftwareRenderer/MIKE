@@ -3,11 +3,11 @@
         used?: number;
         limit?: number;
         onSummarize?: () => void;
+        onSummarizeCancel?: () => void;
+        isSummarizing?: boolean;
     }
 
-    let { used = 0, limit = 0, onSummarize }: Props = $props();
-
-    let isSummarizing = $state(false);
+    let { used = 0, limit = 0, onSummarize, onSummarizeCancel, isSummarizing = false }: Props = $props();
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
     let isWarning = $derived(percentage >= 60 && percentage < 80);
@@ -27,13 +27,12 @@
     }
 
     async function handleClick() {
-        if (!onSummarize || isSummarizing) return;
-        isSummarizing = true;
-        try {
-            await onSummarize();
-        } finally {
-            isSummarizing = false;
+        if (!onSummarize) return;
+        if (isSummarizing) {
+            onSummarizeCancel?.();
+            return;
         }
+        await onSummarize();
     }
 </script>
 
@@ -43,9 +42,8 @@
         class="context-usage"
         class:clickable={!!onSummarize}
         class:summarizing={isSummarizing}
-        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize ? '\nClick to summarize context' : ''}"
+        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
         onclick={handleClick}
-        disabled={isSummarizing}
     >
         {#if isSummarizing}
             <span class="spinner"></span>
@@ -57,6 +55,7 @@
         <span class="usage-text" class:warning={isWarning} class:danger={isDanger}>
             {#if isSummarizing}
                 Summarizing...
+                <span class="cancel-icon" aria-hidden="true">✕</span>
             {:else if limit > 0}
                 {formatTokens(used)} / {formatTokens(limit)} · {percentage}%
             {:else}
@@ -113,6 +112,13 @@
     }
     .usage-text.danger {
         color: var(--color-status-red);
+    }
+    .cancel-icon {
+        margin-left: 4px;
+        color: var(--color-status-red);
+        font-size: 0.85rem;
+        font-weight: bold;
+        line-height: 1;
     }
     .spinner {
         width: 10px;

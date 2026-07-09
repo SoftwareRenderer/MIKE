@@ -50,13 +50,19 @@ export function registerSetOffline(fn: (offline: boolean) => void): void {
     _setOfflineStatus = fn;
 }
 
-/** Wrapper around fetch that includes credentials (cookies) and CSRF token on every request. */
-export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+/** Wrapper around fetch that includes credentials (cookies) and CSRF token on every request.
+ * If init.signal is provided, it is used directly (no default timeout). */
+export async function apiFetch(url: string, init?: RequestInit & { signal?: AbortSignal }): Promise<Response> {
     const headers = new Headers(init?.headers);
     // Skip CSRF for login endpoint (public)
     if (!url.includes('/api/auth/login')) {
         const token = await ensureCsrfToken();
         if (token) headers.set('X-CSRF-Token', token);
+    }
+    if (init?.signal) {
+        // External signal provided — use it directly (caller manages timeout/cancel)
+        const res = await fetch(url, { ...init, credentials: 'include', headers, signal: init.signal });
+        return res;
     }
     // Add timeout to prevent hanging requests when server is unreachable
     const controller = new AbortController();

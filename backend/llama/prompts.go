@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"kanban/backend/prompts"
 	"kanban/backend/types"
@@ -42,6 +43,7 @@ func buildSystemPrompt(worktreePath string, planMode bool) string {
 
 	data := prompts.PromptData{
 		WorktreePath: worktreePath,
+		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
 		PlanMode:     planMode,
 		Tools:        toolInfos,
 		AgentsMd:     agentsMd,

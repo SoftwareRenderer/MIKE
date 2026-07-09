@@ -630,6 +630,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     }
 
+    let isSummarizing = $state(false);
+    let summarizeController: AbortController | null = null;
+
     async function handleSummarize() {
         const confirmed = await showConfirm({
             title: 'Compress Context',
@@ -639,16 +642,34 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             variant: 'default',
         });
         if (!confirmed) return;
+        summarizeController = new AbortController();
+        isSummarizing = true;
         try {
-            const result = await summarizeTask(projectId, taskId);
+            const result = await summarizeTask(projectId, taskId, summarizeController.signal);
             // Update context usage after summarization
             // The WebSocket 'summarization' event will add the checkpoint entry
             // and the next token event will refresh the usage count
             console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
         } catch (e: any) {
+            if (e?.name === 'AbortError') return; // cancelled by user, no error
             console.error('Failed to summarize:', e);
             showToast(e?.message || 'Failed to summarize context', 'error');
+        } finally {
+            isSummarizing = false;
+            summarizeController = null;
         }
+    }
+
+    async function handleSummarizeCancel() {
+        const confirmed = await showConfirm({
+            title: 'Cancel Summarization',
+            message: 'Summarization is in progress. Cancel it?',
+            confirmText: 'Cancel',
+            cancelText: 'Keep Running',
+            variant: 'default',
+        });
+        if (!confirmed) return;
+        summarizeController?.abort();
     }
 
     async function handleRegenerate(entryId: string) {
@@ -1232,6 +1253,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             onModelSelect={handleModelSelect}
             onPlanModeToggle={handlePlanModeToggle}
             onSummarize={handleSummarize}
+            onSummarizeCancel={handleSummarizeCancel}
+            isSummarizing={isSummarizing}
         />
         {/if}
         </div>

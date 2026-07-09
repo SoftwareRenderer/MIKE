@@ -65,9 +65,8 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, systemPro
 	}
 
 	// Non-streaming summarization request.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx := context.Background()
 	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, 32768)
-	cancel()
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
