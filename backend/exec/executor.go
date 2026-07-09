@@ -117,21 +117,51 @@ func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn fu
 	return fn()
 }
 
+// ChatCompletionOpts holds optional parameters for ChatCompletion.
+type ChatCompletionOpts struct {
+	MaxTokens       *int          // MaxTokens caps the response. nil = server default (no cap).
+	ReasoningEffort string        // ReasoningEffort overrides the default ("off"). "" = provider default.
+	Thinking        *ThinkingOpts // Thinking sets reasoning params directly, overriding ReasoningEffort.
+}
+
+// ThinkingOpts sets reasoning/thinking parameters for the LLM API request.
+type ThinkingOpts struct {
+	BudgetTokens  int    // -1 = disabled, >0 = token budget (auto-enforces control)
+	BudgetMessage string // message when budget exhausted
+}
+
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
-// The caller passes messages and gets a result — queue management is fully transparent.
-// Optional maxTokens overrides the default (128); use 0 for server default.
-func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, maxTokens ...int) (*types.ChatUsage, string, error) {
-	tokens := 128
-	if len(maxTokens) > 0 {
-		tokens = maxTokens[0]
+func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error) {
+	var tokens *int
+	reasoningEffort := "off"
+	var thinking *llama.ThinkingParams
+	if opts != nil {
+		tokens = opts.MaxTokens
+		if opts.ReasoningEffort != "" {
+			reasoningEffort = opts.ReasoningEffort
+		}
+		if opts.Thinking != nil {
+			thinking = &llama.ThinkingParams{
+				BudgetTokens:  opts.Thinking.BudgetTokens,
+				BudgetMessage: opts.Thinking.BudgetMessage,
+			}
+		}
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := llama.NewLlamaClient(serverURL, modelName, "off", apiKey)
+	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	var usage *types.ChatUsage
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error
-		usage, text, err = client.ChatCompletion(ctx, messages, tokens)
+		if tokens != nil && thinking != nil {
+			usage, text, err = client.ChatCompletion(ctx, messages, *tokens, thinking)
+		} else if tokens != nil {
+			usage, text, err = client.ChatCompletion(ctx, messages, *tokens)
+		} else if thinking != nil {
+			usage, text, err = client.ChatCompletion(ctx, messages, thinking)
+		} else {
+			usage, text, err = client.ChatCompletion(ctx, messages)
+		}
 		return err
 	})
 	return usage, text, err
@@ -275,7 +305,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 		{Role: "user", Content: prompt},
 	}
 
-	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages)
+	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages, nil)
 	if err != nil {
 		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
 		return deepest[0].ID
@@ -477,21 +507,21 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 
 // taskExecSetup holds the shared state prepared for task execution.
 type taskExecSetup struct {
-	task                    *types.Task
-	project                 *types.Project
-	worktreePath            string
-	serverURL               string
-	modelName               string
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	userMsgChan             chan stream.UserMessage
-	summarizeCh             chan chan error // channel for manual summarization requests
-	initialContent          string   // user message content for lazy-start (empty for normal start)
-	sandboxEnabled          bool
-	networkIsolation        bool
-	baseImage               string
-	sandboxDockerfilePath   string
-	memoryLimit             int
+	task                  *types.Task
+	project               *types.Project
+	worktreePath          string
+	serverURL             string
+	modelName             string
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	userMsgChan           chan stream.UserMessage
+	summarizeCh           chan chan error // channel for manual summarization requests
+	initialContent        string          // user message content for lazy-start (empty for normal start)
+	sandboxEnabled        bool
+	networkIsolation      bool
+	baseImage             string
+	sandboxDockerfilePath string
+	memoryLimit           int
 }
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
@@ -643,20 +673,20 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
-		task:                task,
-		project:             project,
-		worktreePath:        worktreePath,
-		serverURL:           serverURL,
-		modelName:           modelName,
-		ctx:                 ctx,
-		cancel:              cancel,
-		userMsgChan:         userMsgChan,
-		summarizeCh:         summarizeCh,
-		sandboxEnabled:      project.SandboxEnabled,
-		networkIsolation:    project.SandboxNetworkIsolation,
-		baseImage:           project.SandboxImage,
+		task:                  task,
+		project:               project,
+		worktreePath:          worktreePath,
+		serverURL:             serverURL,
+		modelName:             modelName,
+		ctx:                   ctx,
+		cancel:                cancel,
+		userMsgChan:           userMsgChan,
+		summarizeCh:           summarizeCh,
+		sandboxEnabled:        project.SandboxEnabled,
+		networkIsolation:      project.SandboxNetworkIsolation,
+		baseImage:             project.SandboxImage,
 		sandboxDockerfilePath: project.SandboxDockerfilePath,
-		memoryLimit:         project.SandboxMemoryLimit,
+		memoryLimit:           project.SandboxMemoryLimit,
 	}, nil
 }
 
@@ -1185,5 +1215,3 @@ func slugifyBranchName(title string) string {
 	}
 	return out
 }
-
-

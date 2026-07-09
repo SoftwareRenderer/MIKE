@@ -98,6 +98,22 @@ func toAPIMessages(messages []types.ChatMessage) []map[string]any {
 	return result
 }
 
+// defaultBudgetMessage is sent to the model when the reasoning budget is exhausted.
+const defaultBudgetMessage = "... I'm over thinking. Answering now."
+
+// setThinkingParams adds reasoning/thinking parameters to the request body.
+func setThinkingParams(reqBody map[string]any, t *ThinkingParams) {
+	reqBody["thinking_budget_tokens"] = t.BudgetTokens
+	if t.BudgetTokens > 0 {
+		reqBody["reasoning_control"] = true
+	}
+	msg := t.BudgetMessage
+	if msg == "" {
+		msg = defaultBudgetMessage
+	}
+	reqBody["reasoning_budget_message"] = msg
+}
+
 // ChatStream sends a chat completion request with streaming.
 func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
 	if c.baseURL == "" {
@@ -123,6 +139,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
 		}
+	} else {
+		// Explicitly disable reasoning (server may enable it by default)
+		reqBody["thinking_budget_tokens"] = 0
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -219,12 +238,30 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	return usage, scanner.Err()
 }
 
+// ThinkingParams holds reasoning/thinking parameters for the LLM API.
+type ThinkingParams struct {
+	BudgetTokens  int
+	BudgetMessage string
+}
+
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
 // Used for simple queries like title generation where streaming is not needed.
 // Optional maxTokens sets max_tokens in the request; omit to use server default.
-func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, maxTokens ...int) (*types.ChatUsage, string, error) {
+// Optional thinking overrides reasoning params; nil uses client's reasoningEffort.
+func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, opts ...any) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
 		return nil, "", fmt.Errorf("llama server URL not configured")
+	}
+
+	var maxTokens int
+	var thinking *ThinkingParams
+	for _, o := range opts {
+		switch v := o.(type) {
+		case int:
+			maxTokens = v
+		case *ThinkingParams:
+			thinking = v
+		}
 	}
 
 	url := c.baseURL + "/chat/completions"
@@ -235,14 +272,19 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		"stream":      false,
 		"tool_choice": "none",
 	}
-	if len(maxTokens) > 0 {
-		reqBody["max_tokens"] = maxTokens[0]
+	if maxTokens > 0 {
+		reqBody["max_tokens"] = maxTokens
 	}
-	if c.reasoningEffort != "off" {
+	if thinking != nil {
+		setThinkingParams(reqBody, thinking)
+	} else if c.reasoningEffort != "off" {
 		if budget, ok := reasoningEffortTokens[c.reasoningEffort]; ok {
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
 		}
+	} else {
+		// Explicitly disable reasoning (server may enable it by default)
+		reqBody["thinking_budget_tokens"] = 0
 	}
 
 	data, err := json.Marshal(reqBody)

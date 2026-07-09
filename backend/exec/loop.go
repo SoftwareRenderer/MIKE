@@ -438,7 +438,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if switched.contextWindow != nil {
 						lc.contextWindow = switched.contextWindow
 					}
-					lc.detector.reset() // clear text window — responses from old model shouldn't be compared
+					lc.detector.reset() // model changed, clear stale text window
 					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, lc.contextWindow)
 				}
 			}
@@ -1062,8 +1062,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Auto-summarize if context is approaching the window limit.
 		if lc.contextWindow != nil {
 			if shouldSummarize(lc.messages, *lc.contextWindow) {
-				lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, lc.systemPrompt, serverURL, activeModel, nil)
-				lc.detector.reset() // clear stale text window after context compression
+				lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, serverURL, activeModel, nil)
+				lc.detector.reset() // context changed, clear stale text window
 			}
 		}
 
@@ -1075,8 +1075,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case resultCh := <-summarizeCh:
 			// Manual summarization request from HandleSummarize
 			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
-			lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, lc.systemPrompt, serverURL, activeModel, resultCh)
-			lc.detector.reset() // clear stale text window after context compression
+			lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, serverURL, activeModel, resultCh)
+			lc.detector.reset() // context changed, clear stale text window
 			continue
 		case um := <-userMsgChan:
 			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)

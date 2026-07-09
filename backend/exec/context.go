@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"kanban/backend/git"
 	"kanban/backend/prompts"
@@ -48,7 +47,7 @@ func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 
 // summarizeContext produces a compact summary of the conversation history.
 // Sends a non-streaming chat completion. Does not modify the messages slice.
-func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, systemPrompt, serverURL, modelName, previousSummary string) (summarizeResult, error) {
+func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
 	oldLen := len(messages)
 
 	chatHistory := formatChatHistory(messages, previousSummary != "")
@@ -64,9 +63,9 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, systemPro
 		{Role: "system", Content: summarizePrompt},
 	}
 
-	// Non-streaming summarization request.
+	// Non-streaming, with reasoning enabled.
 	ctx := context.Background()
-	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, 32768)
+	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, &ChatCompletionOpts{ReasoningEffort: ""})
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
@@ -391,9 +390,9 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 
 	labelMessages := buildCommitMessages(diffStat, turnText)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, 512)
+	ctx := context.Background()
+	maxTokens := 128
+	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens})
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return fallback

@@ -402,15 +402,14 @@ func (s *Server) generateThreadName(task *types.Task, content string) string {
 
 	// Try LLM generation if config is available
 	if task.LlamaServerURL != "" && task.ModelName != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		ctx := context.Background()
 
 		messages := []types.ChatMessage{
 			{Role: "system", Content: "You are a thread name generator. Given a user message, generate a very short, descriptive thread label (max 30 characters, no quotes). Return only the label, nothing else."},
 			{Role: "user", Content: trimmed},
 		}
 
-		_, name, err := s.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages)
+		_, name, err := s.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, nil)
 		if err == nil && strings.TrimSpace(name) != "" {
 			name = strings.TrimSpace(name)
 			if len(name) > 35 {

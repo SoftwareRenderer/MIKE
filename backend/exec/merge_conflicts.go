@@ -65,15 +65,14 @@ func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targe
 		return "", fmt.Errorf("render merge conflict prompt: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "You are an expert developer resolving git merge conflicts. Output the fully resolved file contents and a summary."},
 		{Role: "user", Content: prompt},
 	}
 
-	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages)
+	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages, &ChatCompletionOpts{ReasoningEffort: ""})
 	if err != nil {
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}

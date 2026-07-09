@@ -811,8 +811,7 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 // On failure or timeout, it keeps the existing (first-line) title.
 func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		ctx := context.Background()
 
 		// Get LLM config from the task itself
 		task, err := h.store.GetTask(projectID, taskID)
@@ -827,7 +826,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			{Role: "user", Content: prompt},
 		}
 
-		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages)
+		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, nil)
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)

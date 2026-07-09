@@ -110,9 +110,9 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 
 // applySummarization runs summarization, appends the summary message, and broadcasts the event.
 // All existing messages are preserved. LLM context is assembled via buildLLMContext.
-func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID string, messages []types.ChatMessage, systemPrompt, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
+func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
 	prevSummary := extractPrevSummary(messages)
-	sumResult, err := te.summarizeContext(messages, systemPrompt, serverURL, modelName, prevSummary)
+	sumResult, err := te.summarizeContext(messages, serverURL, modelName, prevSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)
 		if resultCh != nil {
