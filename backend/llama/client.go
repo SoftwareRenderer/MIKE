@@ -142,6 +142,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	} else {
 		// Explicitly disable reasoning (server may enable it by default)
 		reqBody["thinking_budget_tokens"] = 0
+		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -285,6 +286,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	} else {
 		// Explicitly disable reasoning (server may enable it by default)
 		reqBody["thinking_budget_tokens"] = 0
+		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
 
 	data, err := json.Marshal(reqBody)

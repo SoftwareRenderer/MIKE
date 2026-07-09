@@ -119,15 +119,9 @@ func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn fu
 
 // ChatCompletionOpts holds optional parameters for ChatCompletion.
 type ChatCompletionOpts struct {
-	MaxTokens       *int          // MaxTokens caps the response. nil = server default (no cap).
-	ReasoningEffort string        // ReasoningEffort overrides the default ("off"). "" = provider default.
-	Thinking        *ThinkingOpts // Thinking sets reasoning params directly, overriding ReasoningEffort.
-}
-
-// ThinkingOpts sets reasoning/thinking parameters for the LLM API request.
-type ThinkingOpts struct {
-	BudgetTokens  int    // -1 = disabled, >0 = token budget (auto-enforces control)
-	BudgetMessage string // message when budget exhausted
+	MaxTokens       *int              // MaxTokens caps the response. nil = server default (no cap).
+	ReasoningEffort string            // ReasoningEffort overrides the default ("off"). "" = provider default.
+	Thinking        *llama.ThinkingParams // Thinking sets reasoning params directly, overriding ReasoningEffort.
 }
 
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
@@ -140,12 +134,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 		if opts.ReasoningEffort != "" {
 			reasoningEffort = opts.ReasoningEffort
 		}
-		if opts.Thinking != nil {
-			thinking = &llama.ThinkingParams{
-				BudgetTokens:  opts.Thinking.BudgetTokens,
-				BudgetMessage: opts.Thinking.BudgetMessage,
-			}
-		}
+		thinking = opts.Thinking
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
@@ -1089,15 +1078,15 @@ var wordRe = regexp.MustCompile(`\S+`)
 
 // buildMessagesFromDB loads all persisted messages. LLM context is assembled via buildLLMContext.
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
-	promptPath := worktreePath
+	cwd := worktreePath
 	if sandboxEnabled {
-		promptPath = "/home/sandbox/" + projectName
+		cwd = "/home/sandbox/" + projectName
 	}
 	var systemPrompt string
 	if task.PlanMode {
-		systemPrompt = llama.BuildPlanModeSystemPrompt(promptPath)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, true)
 	} else {
-		systemPrompt = llama.BuildSystemPrompt(promptPath)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, false)
 	}
 
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}

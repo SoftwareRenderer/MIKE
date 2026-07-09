@@ -11,16 +11,8 @@ import (
 )
 
 // BuildSystemPrompt creates the system prompt for task execution.
-func BuildSystemPrompt(worktreePath string) string {
-	return buildSystemPrompt(worktreePath, false)
-}
-
-// BuildPlanModeSystemPrompt creates the system prompt for plan-mode task execution.
-func BuildPlanModeSystemPrompt(worktreePath string) string {
-	return buildSystemPrompt(worktreePath, true)
-}
-
-func buildSystemPrompt(worktreePath string, planMode bool) string {
+// worktreePath is used to read AGENTS.md; cwd is shown as the working directory in the prompt.
+func BuildSystemPrompt(worktreePath, cwd string, planMode bool) string {
 	var tools []types.ChatTool
 	if planMode {
 		tools = GetPlanModeToolDefinitions()
@@ -42,7 +34,7 @@ func buildSystemPrompt(worktreePath string, planMode bool) string {
 	}
 
 	data := prompts.PromptData{
-		WorktreePath: worktreePath,
+		WorktreePath: cwd,
 		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
 		PlanMode:     planMode,
 		Tools:        toolInfos,

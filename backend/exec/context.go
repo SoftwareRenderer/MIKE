@@ -392,7 +392,7 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 
 	ctx := context.Background()
 	maxTokens := 128
-	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens})
+	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return fallback
