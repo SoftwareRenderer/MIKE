@@ -727,25 +727,15 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 			userContent = "Resolve the merge conflicts and complete the task"
 		}
 
-		// Enable auto_merge so the task can complete after conflict resolution.
-		// Without it, the agent resolves conflicts but the task stays stuck in Review.
-		autoMergeWasDisabled := !task.AutoMerge
-		if autoMergeWasDisabled {
-			task.AutoMerge = true
-			task.AutoCommit = true // prerequisite for auto_merge
-		}
-
-		// Persist system message in chat
-		systemMsg := "Merge conflict detected during commit — resolving with agent"
-		if autoMergeWasDisabled {
-			systemMsg += ". Enabled auto_merge so the task can complete after resolution."
-		}
+		// Persist system message in chat.
+		// The executor loop's HasMergeConflict path handles the post-resolution
+		// merge (stage resolved files, commit, pop stash, MergeBranch, mark done).
 		h.store.CreateTaskMessage(&types.TaskMessage{
 			ID:        uuid.New().String(),
 			TaskID:    taskID,
 			ThreadID:  task.CurrentThreadID,
 			Role:      "system",
-			Content:   systemMsg,
+			Content:   "Merge conflict detected during commit — resolving with agent",
 			CreatedAt: time.Now().UTC(),
 		})
 

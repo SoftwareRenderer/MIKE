@@ -1625,11 +1625,12 @@ func getTask(t *testing.T, s *Server, projectID string, taskID string) map[strin
 	return mustJSON[map[string]any](t, rr.Body)
 }
 
-// TestCommitAndDoneMergeConflictEnablesAutoMerge verifies that when a merge
-// conflict is detected during commit-and-done, the task's auto_merge is
-// automatically enabled so the task can complete after the agent resolves
-// the conflict.
-func TestCommitAndDoneMergeConflictEnablesAutoMerge(t *testing.T) {
+// TestCommitAndDoneMergeConflictTriggersResolution verifies that when a merge
+// conflict is detected during commit-and-done, the task is moved to in_progress
+// with the merge conflict flag set, and the original auto_merge/auto_commit
+// settings are preserved (the executor loop's HasMergeConflict path handles
+// the post-resolution merge).
+func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 	s := testServer(t)
 
 	// Create a project with a real git repo
@@ -1716,14 +1717,12 @@ func TestCommitAndDoneMergeConflictEnablesAutoMerge(t *testing.T) {
 		t.Fatalf("expected status=in_progress, got %s", commitResult["status"])
 	}
 
-	// Verify auto_merge was enabled
-	if commitResult["auto_merge"] != true {
-		t.Fatalf("expected auto_merge=true after merge conflict, got %v", commitResult["auto_merge"])
+	// Verify auto_merge/auto_commit are preserved (not modified)
+	if commitResult["auto_merge"] != false {
+		t.Fatalf("expected auto_merge=false (unchanged), got %v", commitResult["auto_merge"])
 	}
-
-	// Verify auto_commit was also enabled (prerequisite for auto_merge)
-	if commitResult["auto_commit"] != true {
-		t.Fatalf("expected auto_commit=true after merge conflict, got %v", commitResult["auto_commit"])
+	if commitResult["auto_commit"] != false {
+		t.Fatalf("expected auto_commit=false (unchanged), got %v", commitResult["auto_commit"])
 	}
 
 	// Verify has_merge_conflict is set
@@ -1732,10 +1731,9 @@ func TestCommitAndDoneMergeConflictEnablesAutoMerge(t *testing.T) {
 	}
 }
 
-// TestCommitAndDoneMergeConflictNoChangeWhenAutoMergeAlreadyEnabled verifies
-// that when auto_merge is already enabled, commit-and-done with a merge conflict
-// does not change the setting (idempotent).
-func TestCommitAndDoneMergeConflictNoChangeWhenAutoMergeAlreadyEnabled(t *testing.T) {
+// TestCommitAndDoneMergeConflictPreservesAutoMerge verifies that when auto_merge
+// is already enabled, commit-and-done with a merge conflict preserves the setting.
+func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1810,19 +1808,24 @@ func TestCommitAndDoneMergeConflictNoChangeWhenAutoMergeAlreadyEnabled(t *testin
 
 	commitResult := mustJSON[map[string]any](t, commitRR.Body)
 
-	// Verify auto_merge stays true (no change needed)
+	// Verify auto_merge stays true (preserved, not modified)
 	if commitResult["auto_merge"] != true {
-		t.Fatalf("expected auto_merge=true, got %v", commitResult["auto_merge"])
+		t.Fatalf("expected auto_merge=true (preserved), got %v", commitResult["auto_merge"])
 	}
 
 	// Verify task moved to in_progress
 	if commitResult["status"] != "in_progress" {
 		t.Fatalf("expected status=in_progress, got %s", commitResult["status"])
 	}
+
+	// Verify has_merge_conflict is set
+	if commitResult["has_merge_conflict"] != true {
+		t.Fatalf("expected has_merge_conflict=true, got %v", commitResult["has_merge_conflict"])
+	}
 }
 
 // TestCommitAndDoneMergeConflictSystemMessage verifies that the system message
-// in the chat notes that auto_merge was enabled.
+// in the chat notes the merge conflict and agent resolution.
 func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	s := testServer(t)
 
@@ -1901,15 +1904,15 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	for _, msg := range msgs {
 		if msg.Role == "system" && strings.Contains(msg.Content, "Merge conflict detected") {
 			foundSystemMsg = true
-			// Verify it mentions auto_merge being enabled
-			if !strings.Contains(msg.Content, "Enabled auto_merge") {
-				t.Fatalf("system message should mention auto_merge enabled, got: %s", msg.Content)
+			// Verify it mentions resolving with agent
+			if !strings.Contains(msg.Content, "resolving with agent") {
+				t.Fatalf("system message should mention resolving with agent, got: %s", msg.Content)
 			}
 			break
 		}
 	}
 
 	if !foundSystemMsg {
-		t.Fatal("expected system message about merge conflict with auto_merge note")
+		t.Fatal("expected system message about merge conflict resolution")
 	}
 }
