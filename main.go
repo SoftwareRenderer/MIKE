@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -22,38 +23,65 @@ func main() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-	// CLI flag for database path (highest priority)
-	dbPath := flag.String("db-path", "", "Path to the SQLite database file (default: $DATA_DIR/kanban.db or ./data/kanban.db)")
+
+	// CLI flags
+	port := flag.Int("port", 0, "Server listen port (default: $PORT or 3000)")
+	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $DATA_DIR or ./data)")
+	worktreesDir := flag.String("worktrees-dir", "", "Directory for git worktrees (default: $WORKTREES_DIR or ./worktrees)")
+	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $KANBAN_TLS")
+	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
+	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
 	flag.Parse()
 
-	// Determine data directory from env var or default
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
+	// Resolve effective values: flag > env var > default
+	// Port
+	effectivePort := *port
+	if effectivePort == 0 {
+		if v := os.Getenv("PORT"); v != "" {
+			fmt.Sscanf(v, "%d", &effectivePort)
+		}
+		if effectivePort == 0 {
+			effectivePort = 3000
+		}
 	}
 
-	// Determine database path: CLI flag > constructed from DATA_DIR
-	if *dbPath == "" {
-		*dbPath = filepath.Join(dataDir, "kanban.db")
+	// Data directory
+	effectiveDataDir := *dataDir
+	if effectiveDataDir == "" {
+		effectiveDataDir = os.Getenv("DATA_DIR")
+	}
+	if effectiveDataDir == "" {
+		effectiveDataDir = "./data"
 	}
 
-	worktreesDir := os.Getenv("WORKTREES_DIR")
-	if worktreesDir == "" {
-		worktreesDir = "./worktrees"
+	// Worktrees directory
+	effectiveWorktreesDir := *worktreesDir
+	if effectiveWorktreesDir == "" {
+		effectiveWorktreesDir = os.Getenv("WORKTREES_DIR")
+	}
+	if effectiveWorktreesDir == "" {
+		effectiveWorktreesDir = "./worktrees"
 	}
 
-	// Ensure worktrees directory exists
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+	// Database path (derived from data-dir)
+	dbPath := filepath.Join(effectiveDataDir, "kanban.db")
+
+	// Frontend dist
+	frontendDist := os.Getenv("FRONTEND_DIST")
+	if frontendDist == "" {
+		frontendDist = "./frontend/dist"
+	}
+
+	// Ensure directories exist
+	if err := os.MkdirAll(effectiveWorktreesDir, 0o755); err != nil {
 		log.Fatalf("Failed to create worktrees directory: %v", err)
 	}
-
-	// Ensure data directory exists
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(effectiveDataDir, 0o755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
 	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)
-	tracePath := filepath.Join(dataDir, "kanban.trace")
+	tracePath := filepath.Join(effectiveDataDir, "kanban.trace")
 	traceFile, err := os.Create(tracePath)
 	if err != nil {
 		log.Fatalf("Failed to create trace file: %v", err)
@@ -95,13 +123,21 @@ func main() {
 		}
 	}()
 
-	// Load TLS configuration (nil = plain HTTP)
-	tlsCfg, err := tls.Load(dataDir)
-	if err != nil {
-		log.Fatalf("Failed to load TLS config: %v", err)
+	// Load TLS configuration
+	// --no-tls flag or KANBAN_TLS=0 env var disables TLS
+	var tlsCfg *tls.Config
+	if *noTLS || os.Getenv("KANBAN_TLS") == "0" {
+		tlsCfg = tls.LoadDisabled()
+	} else {
+		tlsCfg, err = tls.LoadWithCert(effectiveDataDir, *tlsCert, *tlsKey)
+		if err != nil {
+			log.Fatalf("Failed to load TLS config: %v", err)
+		}
 	}
 
-	srv, err := server.NewServer(*dbPath, worktreesDir, tlsCfg)
+	addr := fmt.Sprintf(":%d", effectivePort)
+
+	srv, err := server.NewServer(dbPath, effectiveWorktreesDir, addr, frontendDist, tlsCfg)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

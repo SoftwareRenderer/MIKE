@@ -32,8 +32,8 @@ const FRONTEND_DIR = path.resolve(__dirname, '..');
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
-const TEST_DB = '/tmp/kanban-test.db';
-const TEST_DB_ISOLATED = '/tmp/kanban-test-isolated.db';
+const TEST_DATA_DIR = '/tmp/kanban-test-data';
+const TEST_DATA_DIR_ISOLATED = '/tmp/kanban-test-data-isolated';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
 const KANBAN_PORT = 3000;
 const KANBAN_PORT_ISOLATED = 3001;
@@ -60,7 +60,7 @@ async function setup(): Promise<void> {
     // 4. Start fresh kanban server with test database
     console.log('[global-setup] Starting test kanban server...');
     // Use setsid to start server in a new session (truly independent of this process)
-    kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '-db-path', TEST_DB], {
+    kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
@@ -136,9 +136,9 @@ async function setup(): Promise<void> {
 
     // 10. Start isolated kanban server (for config-modifying test suites)
     console.log('[global-setup] Starting isolated kanban server...');
-    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '-db-path', TEST_DB_ISOLATED], {
+    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, PORT: String(KANBAN_PORT_ISOLATED), KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
+        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
         stdio: 'ignore',
         detached: true,
     });
@@ -209,20 +209,20 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Warning: failed to clean up sandbox containers');
     }
 
-    // 5. Delete test database
+    // 5. Delete test data directory
     try {
-        fs.unlinkSync(TEST_DB);
-        console.log('[global-teardown] Test database deleted');
+        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+        console.log('[global-teardown] Test data directory deleted');
     } catch {
-        console.log('[global-teardown] Test database already gone');
+        console.log('[global-teardown] Test data directory already gone');
     }
 
-    // 6. Delete isolated test database
+    // 6. Delete isolated test data directory
     try {
-        fs.unlinkSync(TEST_DB_ISOLATED);
-        console.log('[global-teardown] Isolated test database deleted');
+        fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true });
+        console.log('[global-teardown] Isolated test data directory deleted');
     } catch {
-        console.log('[global-teardown] Isolated test database already gone');
+        console.log('[global-teardown] Isolated test data directory already gone');
     }
 
     // 7. Delete test worktrees directory
@@ -288,9 +288,9 @@ function cleanupStaleState(keepLockFile: boolean): void {
     for (const port of [MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]) {
         killPort(port);
     }
-    // Clean up stale test DB/worktrees
-    try { fs.unlinkSync(TEST_DB); } catch { /* ignore */ }
-    try { fs.unlinkSync(TEST_DB_ISOLATED); } catch { /* ignore */ }
+    // Clean up stale test data/worktrees
+    try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true }); } catch { /* ignore */ }
     try { fs.rmSync(TEST_WORKTREES, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 

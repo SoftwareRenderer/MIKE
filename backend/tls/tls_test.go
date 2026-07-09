@@ -6,18 +6,14 @@ import (
 	"testing"
 )
 
-func TestLoad_DefaultEnabled(t *testing.T) {
-	// TLS is enabled by default — should auto-generate certs
-	_clearTLS()
-	defer _restoreTLS()
-
+func TestLoadWithCert_DefaultAutoGenerate(t *testing.T) {
 	dataDir := t.TempDir()
-	cfg, err := Load(dataDir)
+	cfg, err := LoadWithCert(dataDir, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected non-nil config by default (TLS enabled)")
+		t.Fatal("expected non-nil config")
 	}
 
 	expectedCert := filepath.Join(dataDir, "tls", "kanban.crt")
@@ -26,31 +22,13 @@ func TestLoad_DefaultEnabled(t *testing.T) {
 	}
 }
 
-func TestLoad_ExplicitlyDisabled(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
-	os.Setenv("KANBAN_TLS", "0")
-
-	cfg, err := Load("/tmp/test-data")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg != nil {
-		t.Fatalf("expected nil config when KANBAN_TLS=0, got %+v", cfg)
-	}
-}
-
-func TestLoad_UserProvided(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
+func TestLoadWithCert_UserProvided(t *testing.T) {
 	// Create temp cert and key files
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")
 
-	// Write dummy content (not valid certs, but Load just checks existence)
+	// Write dummy content (not valid certs, but LoadWithCert just checks existence)
 	if err := os.WriteFile(certPath, []byte("dummy-cert"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +36,7 @@ func TestLoad_UserProvided(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	os.Setenv("KANBAN_TLS_CERT", certPath)
-	os.Setenv("KANBAN_TLS_KEY", keyPath)
-
-	cfg, err := Load("/tmp/test-data")
+	cfg, err := LoadWithCert("/tmp/test-data", certPath, keyPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,78 +51,31 @@ func TestLoad_UserProvided(t *testing.T) {
 	}
 }
 
-func TestLoad_UserProvided_MissingCert(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
-	os.Setenv("KANBAN_TLS_CERT", "/nonexistent/cert.pem")
-	os.Setenv("KANBAN_TLS_KEY", "/nonexistent/key.pem")
-
-	_, err := Load("/tmp/test-data")
+func TestLoadWithCert_UserProvided_MissingCert(t *testing.T) {
+	_, err := LoadWithCert("/tmp/test-data", "/nonexistent/cert.pem", "/nonexistent/key.pem")
 	if err == nil {
 		t.Fatal("expected error for missing cert file")
 	}
 }
 
-func TestLoad_UserProvided_MissingKey(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
+func TestLoadWithCert_UserProvided_MissingKey(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	if err := os.WriteFile(certPath, []byte("dummy-cert"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	os.Setenv("KANBAN_TLS_CERT", certPath)
-	os.Setenv("KANBAN_TLS_KEY", "/nonexistent/key.pem")
-
-	_, err := Load("/tmp/test-data")
+	_, err := LoadWithCert("/tmp/test-data", certPath, "/nonexistent/key.pem")
 	if err == nil {
 		t.Fatal("expected error for missing key file")
 	}
 }
 
-func TestLoad_AutoGenerate_Default(t *testing.T) {
-	// Auto-generate is the default behavior (no env var needed)
-	_clearTLS()
-	defer _restoreTLS()
-
-	dataDir := t.TempDir()
-	cfg, err := Load(dataDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("expected non-nil config (TLS enabled by default)")
-	}
-
-	expectedCert := filepath.Join(dataDir, "tls", "kanban.crt")
-	expectedKey := filepath.Join(dataDir, "tls", "kanban.key")
-	if cfg.CertFile != expectedCert {
-		t.Errorf("expected cert file %s, got %s", expectedCert, cfg.CertFile)
-	}
-	if cfg.KeyFile != expectedKey {
-		t.Errorf("expected key file %s, got %s", expectedKey, cfg.KeyFile)
-	}
-
-	// Verify files were created
-	if _, err := os.Stat(cfg.CertFile); os.IsNotExist(err) {
-		t.Error("cert file was not created")
-	}
-	if _, err := os.Stat(cfg.KeyFile); os.IsNotExist(err) {
-		t.Error("key file was not created")
-	}
-}
-
-func TestLoad_AutoGenerate_ReusesExisting(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
+func TestLoadWithCert_AutoGenerate_ReusesExisting(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// First call — generates certs
-	cfg1, err := Load(dataDir)
+	cfg1, err := LoadWithCert(dataDir, "", "")
 	if err != nil {
 		t.Fatalf("first load: %v", err)
 	}
@@ -159,7 +87,7 @@ func TestLoad_AutoGenerate_ReusesExisting(t *testing.T) {
 	}
 
 	// Second call — should reuse existing
-	cfg2, err := Load(dataDir)
+	cfg2, err := LoadWithCert(dataDir, "", "")
 	if err != nil {
 		t.Fatalf("second load: %v", err)
 	}
@@ -175,10 +103,7 @@ func TestLoad_AutoGenerate_ReusesExisting(t *testing.T) {
 	}
 }
 
-func TestLoad_UserProvided_TakesPrecedence(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
+func TestLoadWithCert_UserProvided_TakesPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")
@@ -190,17 +115,72 @@ func TestLoad_UserProvided_TakesPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// User-provided certs take precedence over auto-gen default
-	os.Setenv("KANBAN_TLS_CERT", certPath)
-	os.Setenv("KANBAN_TLS_KEY", keyPath)
-
-	cfg, err := Load(dir)
+	// User-provided paths take precedence over auto-gen
+	cfg, err := LoadWithCert(dir, certPath, keyPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.CertFile != certPath {
 		t.Errorf("expected user-provided cert path, got %s", cfg.CertFile)
 	}
+}
+
+func TestLoadDisabled(t *testing.T) {
+	cfg := LoadDisabled()
+	if cfg != nil {
+		t.Fatalf("expected nil config, got %+v", cfg)
+	}
+}
+
+func TestLoad_BackwardCompat_EnvVars(t *testing.T) {
+	_clearTLS()
+	defer _restoreTLS()
+
+	t.Run("KANBAN_TLS=0 disables TLS", func(t *testing.T) {
+		os.Setenv("KANBAN_TLS", "0")
+		defer os.Unsetenv("KANBAN_TLS")
+		cfg, err := Load("/tmp/test-data")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg != nil {
+			t.Fatalf("expected nil config when KANBAN_TLS=0, got %+v", cfg)
+		}
+	})
+
+	t.Run("KANBAN_TLS_CERT+KEY uses provided certs", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath := filepath.Join(dir, "cert.pem")
+		keyPath := filepath.Join(dir, "key.pem")
+		os.WriteFile(certPath, []byte("dummy-cert"), 0o644)
+		os.WriteFile(keyPath, []byte("dummy-key"), 0o600)
+
+		os.Setenv("KANBAN_TLS_CERT", certPath)
+		os.Setenv("KANBAN_TLS_KEY", keyPath)
+		defer func() {
+			os.Unsetenv("KANBAN_TLS_CERT")
+			os.Unsetenv("KANBAN_TLS_KEY")
+		}()
+
+		cfg, err := Load("/tmp/test-data")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.CertFile != certPath {
+			t.Errorf("expected cert file %s, got %s", certPath, cfg.CertFile)
+		}
+	})
+
+	t.Run("default auto-generates", func(t *testing.T) {
+		dataDir := t.TempDir()
+		cfg, err := Load(dataDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil config (TLS enabled by default)")
+		}
+	})
 }
 
 func TestGenerateSelfSignedCert(t *testing.T) {
@@ -240,7 +220,7 @@ func TestGenerateSelfSignedCert(t *testing.T) {
 	}
 }
 
-// -- helpers to save/restore TLS env vars --
+// -- helpers to save/restore TLS env vars (for backward compat tests) --
 
 var _savedTLS = make(map[string]string)
 

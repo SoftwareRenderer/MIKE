@@ -22,25 +22,13 @@ type Config struct {
 	KeyFile  string
 }
 
-// Load reads TLS configuration from environment variables.
+// LoadWithCert creates a TLS config with explicit certificate paths.
 //
-// TLS is enabled by default with auto-generated self-signed certificates.
+// If certFile and keyFile are both non-empty, they are used directly.
+// Otherwise, a self-signed certificate is auto-generated in dataDir/tls/.
 //
-// Priority:
-//  1. KANBAN_TLS_CERT + KANBAN_TLS_KEY — use user-provided cert/key files
-//  2. Default — auto-generate a self-signed cert in dataDir/tls/
-//  3. KANBAN_TLS=0 — explicitly disable TLS (plain HTTP)
-//
-// Returns nil only when TLS is explicitly disabled (KANBAN_TLS=0).
-func Load(dataDir string) (*Config, error) {
-	// Explicitly disable TLS
-	if os.Getenv("KANBAN_TLS") == "0" {
-		return nil, nil
-	}
-
-	certFile := os.Getenv("KANBAN_TLS_CERT")
-	keyFile := os.Getenv("KANBAN_TLS_KEY")
-
+// Returns a *Config (never nil). Use LoadDisabled() to disable TLS.
+func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	if certFile != "" && keyFile != "" {
 		// User-provided cert and key files
 		if _, err := os.Stat(certFile); err != nil {
@@ -73,6 +61,36 @@ func Load(dataDir string) (*Config, error) {
 	}
 
 	return &Config{CertFile: certPath, KeyFile: keyPath}, nil
+}
+
+// LoadDisabled returns nil to signal TLS should be disabled (plain HTTP).
+func LoadDisabled() *Config {
+	return nil
+}
+
+// Load reads TLS configuration from environment variables.
+//
+// TLS is enabled by default with auto-generated self-signed certificates.
+//
+// Priority:
+//  1. KANBAN_TLS_CERT + KANBAN_TLS_KEY — use user-provided cert/key files
+//  2. Default — auto-generate a self-signed cert in dataDir/tls/
+//  3. KANBAN_TLS=0 — explicitly disable TLS (plain HTTP)
+//
+// Returns nil only when TLS is explicitly disabled (KANBAN_TLS=0).
+//
+// Deprecated: Use LoadWithCert() or LoadDisabled() with explicit parameters.
+// This wrapper is kept for backward compatibility.
+func Load(dataDir string) (*Config, error) {
+	// Explicitly disable TLS
+	if os.Getenv("KANBAN_TLS") == "0" {
+		return nil, nil
+	}
+
+	certFile := os.Getenv("KANBAN_TLS_CERT")
+	keyFile := os.Getenv("KANBAN_TLS_KEY")
+
+	return LoadWithCert(dataDir, certFile, keyFile)
 }
 
 // generateSelfSignedCert creates a self-signed ECDSA certificate valid for localhost.

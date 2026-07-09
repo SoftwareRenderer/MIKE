@@ -39,6 +39,7 @@ type Server struct {
 	sandboxMgr     *sandbox.SandboxManager
 	mux            *http.ServeMux
 	addr           string
+	frontendDist   string
 	tlsConfig      *tls.Config
 
 	// worktreeMu serializes all git operations per task.
@@ -58,7 +59,8 @@ type Server struct {
 }
 
 // NewServer creates a new Server instance.
-func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error) {
+// addr is the listen address (e.g. ":3000"). frontendDist is the path to the frontend build output (empty to skip).
+func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Config) (*Server, error) {
 	store, err := store.NewStore(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("create store: %w", err)
@@ -74,15 +76,14 @@ func NewServer(dbPath, worktreesDir string, tlsCfg *tls.Config) (*Server, error)
 		cfg.WorkspaceDir = wtDir
 	}
 
-	addr := fmt.Sprintf(":%s", getEnv("PORT", "3000"))
-
 	s := &Server{
-		store:       store,
-		configStore: cfgStore,
-		addr:        addr,
-		tlsConfig:   tlsCfg,
-		worktreeMux: make(map[string]*sync.Mutex),
-		projectMux:  make(map[string]*sync.Mutex),
+		store:        store,
+		configStore:  cfgStore,
+		addr:         addr,
+		frontendDist: frontendDist,
+		tlsConfig:    tlsCfg,
+		worktreeMux:  make(map[string]*sync.Mutex),
+		projectMux:   make(map[string]*sync.Mutex),
 	}
 
 	// Create session manager — fails if KANBAN_PASSWORD is not set
@@ -172,9 +173,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.store.Close()
 }
 
-func getEnv(key, defaultValue string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultValue
-}

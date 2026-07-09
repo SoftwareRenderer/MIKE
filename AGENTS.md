@@ -60,11 +60,24 @@ curl -s http://localhost:3000/api/config
 
 TLS is **enabled by default** with auto-generated self-signed certificates.
 
-| Mode | Env Vars | Description |
-|------|----------|-------------|
+| Mode | Flag / Env Var | Description |
+|------|----------------|-------------|
 | **Default (HTTPS)** | (none) | Auto-generates self-signed cert in `data/tls/` on first startup |
-| **Custom certs** | `KANBAN_TLS_CERT=path` + `KANBAN_TLS_KEY=path` | Uses user-provided certificate and key files |
-| **Disable TLS** | `KANBAN_TLS=0` | Plain HTTP, no TLS |
+| **Custom certs** | `--tls-cert=path --tls-key=path` or `KANBAN_TLS_CERT` + `KANBAN_TLS_KEY` | Uses user-provided certificate and key files |
+| **Disable TLS** | `--no-tls` or `KANBAN_TLS=0` | Plain HTTP, no TLS |
+
+### CLI Flags
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--port` | `PORT` | `3000` | Server listen port |
+| `--data-dir` | `DATA_DIR` | `./data` | Data directory for DB, TLS certs, trace files |
+| `--worktrees-dir` | `WORKTREES_DIR` | `./worktrees` | Directory for git worktrees |
+| `--no-tls` | `KANBAN_TLS=0` | *(disabled)* | Disable TLS (plain HTTP) |
+| `--tls-cert` | `KANBAN_TLS_CERT` | *(auto-generated)* | Path to TLS certificate file |
+| `--tls-key` | `KANBAN_TLS_KEY` | *(auto-generated)* | Path to TLS private key file |
+
+CLI flags take priority over environment variables.
 
 - Self-signed certs are valid for `localhost`, `127.0.0.1`, and `::1` (1 year expiry)
 - Certs are reused across restarts (only generated once)
@@ -146,20 +159,20 @@ go test ./backend/... -count=1 -parallel 8
 **Before running e2e tests**: If a prior run was interrupted, clean stale state:
 ```bash
 lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
-rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test*.db
-rm -rf /tmp/kanban-test-worktrees
+rm -f /tmp/kanban-test-setup.lock
+rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
 ```
 Stale processes from interrupted runs hold ports open, and a stale lock file causes global-setup to run teardown instead of setup.
 
 ### Test Environment
 E2E tests run against **two dedicated test servers** with isolated databases, fully managed by `global-setup.ts`:
 
-| Server | Port | DB | Purpose |
-|--------|------|----|----------|
-| Main | 3000 | `/tmp/kanban-test.db` | Default test server (chromium project) |
-| Isolated | 3001 | `/tmp/kanban-test-isolated.db` | Config-modifying tests (isolated project) |
+| Server | Port | Data Dir | Purpose |
+|--------|------|----------|----------|
+| Main | 3000 | `/tmp/kanban-test-data` | Default test server (chromium project) |
+| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | Config-modifying tests (isolated project) |
 
-Both servers share a mock LLM on port 9999. Test DBs, worktrees (`/tmp/kanban-test-worktrees/`), and servers are fully torn down and rebuilt each run.
+Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kanban-test-worktrees/`), and servers are fully torn down and rebuilt each run.
 
 **Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
@@ -369,7 +382,7 @@ class MyCache {
 6. Check logs: server stdout or `/tmp/kanban.log`
 7. E2E tests passing? `cd frontend && npx playwright test`
 8. Go tests passing? `go test ./backend/... -count=1 -parallel 8`
-9. Stale test state? `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null && rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test*.db`
+9. Stale test state? `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null && rm -f /tmp/kanban-test-setup.lock && rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated`
 
 ### E2E Test Failures
 - **`ERR_CONNECTION_REFUSED`**: Stale processes from interrupted test runs hold ports. Run cleanup above. Check `lsof -i :3000` for conflicts.

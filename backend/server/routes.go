@@ -103,11 +103,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 
 	// Frontend
-	frontendDist := getEnv("FRONTEND_DIST", "./frontend/dist")
-	if _, err := os.Stat(frontendDist); err == nil {
-		sub, err := fs.Sub(os.DirFS(frontendDist), ".")
-		if err == nil {
-			s.mux.Handle("/", http.FileServer(noWriterToFS{http.FS(sub)}))
+	if s.frontendDist != "" {
+		if _, err := os.Stat(s.frontendDist); err == nil {
+			sub, err := fs.Sub(os.DirFS(s.frontendDist), ".")
+			if err == nil {
+				s.mux.Handle("/", http.FileServer(noWriterToFS{http.FS(sub)}))
+			}
 		}
 	}
 }
