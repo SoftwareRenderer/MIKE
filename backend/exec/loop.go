@@ -911,9 +911,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							}
 							if commitOK {
 								log.Printf("[merge] task=%s conflict resolution committed", task.ID)
-								// Restore user's unstaged changes (stashed during sync merge)
+								// Drop stale stash (contains LLM's pre-sync edits, already committed).
+								// Do NOT pop — that would re-apply old edits as unstaged changes.
 								te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
 								te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 							}
 							_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
@@ -1049,9 +1050,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 						if commitOK {
 							log.Printf("[merge] task=%s conflict resolution committed", task.ID)
-							// Restore user's unstaged changes (stashed during sync merge)
+							// Drop stale stash (contains LLM's pre-sync edits, already committed).
+							// Do NOT pop — that would re-apply old edits as unstaged changes.
 							te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-							_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+							_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
 							te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 						}
 						_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)

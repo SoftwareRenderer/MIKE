@@ -989,10 +989,14 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
 		te.logSystemMessage(taskID, task.CurrentThreadID,
 			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
-		// Pop stash — clean merge, safe to restore user's unstaged changes
+		// Pop stash — restore user's unstaged changes.
+		// If stash pop conflicts, drop it to avoid leaving markers.
 		if hadStash {
 			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+			if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop"); err != nil {
+				log.Printf("[sync-merge] task=%s stash pop failed, dropping stash: %v", taskID, err)
+				_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
+			}
 			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 		}
 		return nil
