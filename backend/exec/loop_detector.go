@@ -62,7 +62,7 @@ type loopDetector struct {
 	lastReadArgs     string        // raw args JSON of the most recent read-only call
 	lastReadTime     time.Time     // when the last read occurred
 	textWindow       []string      // recent text-only responses (content, trimmed)
-	hintCount        int           // total hints injected for this task
+	loopStreak       int           // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
 	phraseFired      bool          // phrase loop detected during current streaming response
 }
@@ -81,6 +81,7 @@ func (d *loopDetector) reset() {
 	d.lastReadArgs = ""
 	d.lastReadTime = time.Time{}
 	d.textWindow = d.textWindow[:0]
+	d.loopStreak = 0
 	d.phraseDet.reset()
 	d.phraseFired = false
 }
@@ -132,6 +133,9 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 			}
 		}
 	}
+
+	// No loop detected: reset consecutive loop counter
+	d.loopStreak = 0
 
 	return LoopNone, "", ""
 }

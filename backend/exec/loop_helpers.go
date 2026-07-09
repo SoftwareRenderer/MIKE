@@ -202,11 +202,14 @@ func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 	return types.ChatMessage{Role: "user", ContentParts: parts}
 }
 
-// handleLoopDetected processes a detected loop: checks if max hints are exhausted
-// (returns true if task should terminate), injects a hint message, and notifies the frontend.
+// handleLoopDetected processes a detected loop: increments the consecutive loop counter,
+// checks if max consecutive loops are reached (returns true if task should terminate),
+// injects a hint message, and notifies the frontend.
 // If target is non-empty, it is included in the hint (used for tool loops).
+// On valid turn (via recordTurn), loopStreak is reset to 0.
 func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID string, detector *loopDetector, loopType LoopType, target string, messages *[]types.ChatMessage) bool {
-	if detector.hintCount >= maxLoopHints {
+	detector.loopStreak++
+	if detector.loopStreak >= maxLoopHints {
 		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = "Model stuck in loop (max hints exhausted)"
@@ -217,15 +220,18 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	}
 
 	hint := buildHint(loopType, target)
-	log.Printf("[loop] task=%s detected loop type=%d (hint %d/%d), target=%s", taskID, loopType, detector.hintCount+1, maxLoopHints, target)
+	log.Printf("[loop] task=%s detected loop type=%d (streak %d/%d), target=%s", taskID, loopType, detector.loopStreak, maxLoopHints, target)
 	*messages = append(*messages, types.ChatMessage{Role: "system", Content: hint})
 	// Persist the hint as a visible system message so it appears in the chat UI
 	te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
 		Content: hint, CreatedAt: time.Now().UTC(),
 	})
-	detector.hintCount++
+	// Preserve loopStreak across hint cycles so consecutive loops accumulate.
+	// A valid turn (via recordTurn) resets it to 0.
+	streak := detector.loopStreak
 	detector.reset()
+	detector.loopStreak = streak
 	// Broadcast hint to frontend in real-time
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
 		"content":    hint,

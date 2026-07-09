@@ -252,6 +252,164 @@ func TestLoopDetector_ToolLoop(t *testing.T) {
 	}
 }
 
+// --- Rolling Window Tests ---
+
+func TestLoopDetector_LoopStreakIncrementsOnConsecutiveLoops(t *testing.T) {
+	d := newLoopDetector()
+
+	// Simulate handleLoopDetected: increments loopStreak, reset preserves it
+	simulateHint := func() {
+		d.loopStreak++
+		streak := d.loopStreak
+		d.reset()
+		d.loopStreak = streak
+	}
+
+	// 3 consecutive loops (no valid turns in between)
+	for i := 0; i < 3; i++ {
+		simulateHint()
+	}
+
+	// loopStreak should be 3
+	if d.loopStreak != 3 {
+		t.Errorf("expected loopStreak=3, got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_ValidTurnResetsLoopStreak(t *testing.T) {
+	d := newLoopDetector()
+
+	// Simulate 2 consecutive loop hints
+	d.loopStreak = 2
+
+	// A valid turn resets loopStreak to 0
+	args := map[string]string{"path": "src/other.go"}
+	argsJSON, _ := json.Marshal(args)
+	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
+	loopType, _, _ := d.recordTurn(tc, "")
+	if loopType != LoopNone {
+		t.Fatalf("expected LoopNone, got %v", loopType)
+	}
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after valid turn, got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
+	d := newLoopDetector()
+
+	// Simulate loop streak
+	d.loopStreak = 2
+
+	// Valid turn resets streak
+	args := map[string]string{"path": "src/other.go"}
+	argsJSON, _ := json.Marshal(args)
+	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
+	loopType, _, _ := d.recordTurn(tc, "")
+	if loopType != LoopNone {
+		t.Fatalf("expected LoopNone, got %v", loopType)
+	}
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after valid turn, got %d", d.loopStreak)
+	}
+
+	// A new loop starts fresh
+	args = map[string]string{"path": "src/main.go"}
+	argsJSON, _ = json.Marshal(args)
+	tc = []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
+	d.recordTurn(tc, "") // first read, valid (loopStreak stays 0)
+	loopType, _, _ = d.recordTurn(tc, "") // second read, loop
+	if loopType != LoopTool {
+		t.Fatal("expected LoopTool")
+	}
+	// handleLoopDetected increments
+	d.loopStreak++
+	if d.loopStreak != 1 {
+		t.Errorf("expected loopStreak=1 (fresh streak), got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_ResetClearsLoopStreak(t *testing.T) {
+	d := newLoopDetector()
+
+	// Manually set loopStreak
+	d.loopStreak = 2
+
+	// reset() clears loopStreak
+	d.reset()
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after reset, got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
+	d := newLoopDetector()
+
+	// Simulate 2 consecutive text loop hints
+	d.loopStreak = 2
+
+	// Valid text-only responses reset streak
+	validTexts := []string{
+		"The database migration completed successfully and all tables are now created with the correct schema definitions",
+		"I wrote comprehensive unit tests covering edge cases and boundary conditions for the authentication module",
+		"The deployment pipeline is configured with proper error handling and notification hooks for the staging environment",
+	}
+	for _, text := range validTexts {
+		loopType, _, _ := d.recordTurn(nil, text)
+		if loopType != LoopNone {
+			t.Fatalf("expected LoopNone, got %v", loopType)
+		}
+	}
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after valid text turns, got %d", d.loopStreak)
+	}
+}
+
+func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
+	e := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	proj := &types.Project{ID: "proj-streak", Name: "Streak Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := e.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{
+		ID: "task-streak", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
+		Status: "in_progress", ExecutionState: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := e.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	detector := newLoopDetector()
+	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
+
+	// First call — increments streak to 1, does NOT terminate, preserves streak
+	terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	if terminated {
+		t.Fatal("first loop should not terminate")
+	}
+	if detector.loopStreak != 1 {
+		t.Errorf("expected loopStreak=1, got %d", detector.loopStreak)
+	}
+
+	// Second call — increments streak to 2, does NOT terminate, preserves streak
+	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	if terminated {
+		t.Fatal("second loop should not terminate")
+	}
+	if detector.loopStreak != 2 {
+		t.Errorf("expected loopStreak=2, got %d", detector.loopStreak)
+	}
+
+	// Third call — increments streak to 3, terminates (>= maxLoopHints)
+	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	if !terminated {
+		t.Fatal("third loop should terminate (>= maxLoopHints)")
+	}
+}
+
 func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 	d := newLoopDetector()
 
@@ -1599,37 +1757,28 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	detector := newLoopDetector()
 	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
 
-	// First call — should NOT terminate (hint 1/3)
+	// First call — should NOT terminate (streak 1/3)
 	terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
 	if terminated {
 		t.Fatal("first hint should not terminate")
 	}
-	if detector.hintCount != 1 {
-		t.Errorf("expected hintCount=1, got %d", detector.hintCount)
+	if detector.loopStreak != 1 {
+		t.Errorf("expected loopStreak=1, got %d", detector.loopStreak)
 	}
 
-	// Second call — should NOT terminate (hint 2/3)
+	// Second call — should NOT terminate (streak 2/3)
 	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
 	if terminated {
 		t.Fatal("second hint should not terminate")
 	}
-	if detector.hintCount != 2 {
-		t.Errorf("expected hintCount=2, got %d", detector.hintCount)
+	if detector.loopStreak != 2 {
+		t.Errorf("expected loopStreak=2, got %d", detector.loopStreak)
 	}
 
-	// Third call — should NOT terminate (hint 3/3)
-	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
-	if terminated {
-		t.Fatal("third hint should not terminate")
-	}
-	if detector.hintCount != 3 {
-		t.Errorf("expected hintCount=3, got %d", detector.hintCount)
-	}
-
-	// Fourth call — SHOULD terminate (max hints exhausted)
+	// Third call — SHOULD terminate (streak 3 >= maxLoopHints)
 	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
 	if !terminated {
-		t.Fatal("fourth hint should terminate (max hints exhausted)")
+		t.Fatal("third hint should terminate (>= maxLoopHints)")
 	}
 
 	// Verify task was marked as failed
