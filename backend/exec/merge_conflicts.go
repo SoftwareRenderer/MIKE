@@ -91,7 +91,46 @@ func addIfNew(f string, seen map[string]struct{}, files *[]string) bool {
 	return true
 }
 
+// getAllConflictsResolved checks whether ALL conflicted files have been
+// resolved by running `git diff --check MERGE_HEAD -- <files>` and looking
+// for conflict marker warnings. This delegates detection to Git instead of
+// scanning file contents for marker strings.
+//
+// Returns true when every conflicted file is clean — git requires all
+// conflicts to be staged before a merge commit can be made, so partial
+// resolution is not sufficient.
+func GetAllConflictsResolved(dir string) bool {
+	conflictedFiles := GetConflictedFiles(dir)
+	if len(conflictedFiles) == 0 {
+		return true
+	}
+
+	// Check MERGE_HEAD exists (we should be in a merge state).
+	// If not, fall back to file-content scan.
+	mergeHeadCmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
+	mergeHeadCmd.Dir = dir
+	if mergeHeadCmd.Run() == nil {
+		// Use git diff --check to detect conflict markers.
+		// Compares working tree against MERGE_HEAD; any markers in the
+		// diff are reported as warnings and cause a non-zero exit code.
+		args := append([]string{"diff", "--check", "MERGE_HEAD", "--"}, conflictedFiles...)
+		cmd := osexec.Command("git", args...)
+		cmd.Dir = dir
+		return cmd.Run() == nil
+	}
+
+	// Fallback: scan file contents for markers (should not be reached in
+	// normal operation — MERGE_HEAD always exists during an active merge).
+	for _, f := range conflictedFiles {
+		if hasConflictMarkers(filepath.Join(dir, f)) {
+			return false
+		}
+	}
+	return true
+}
+
 // hasConflictMarkers checks if a file contains git merge conflict markers.
+// Kept as a fallback when MERGE_HEAD is unavailable.
 func hasConflictMarkers(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,21 +140,6 @@ func hasConflictMarkers(path string) bool {
 	return strings.Contains(content, "<<<<<<<") ||
 		strings.Contains(content, "=======") ||
 		strings.Contains(content, ">>>>>>>")
-}
-
-// GetAllConflictsResolved checks whether ALL conflicted files have been
-// resolved (no conflict markers remain in any of them). Returns true only
-// when every conflicted file is clean — git requires all conflicts to be
-// staged before a merge commit can be made, so partial resolution is not
-// sufficient.
-func GetAllConflictsResolved(dir string) bool {
-	conflictedFiles := GetConflictedFiles(dir)
-	for _, f := range conflictedFiles {
-		if hasConflictMarkers(filepath.Join(dir, f)) {
-			return false
-		}
-	}
-	return true
 }
 
 // GetResolvedConflictedFiles returns the conflicted files to stage for the

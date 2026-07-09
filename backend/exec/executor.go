@@ -1119,7 +1119,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	// Merge the task branch
 	mergeOut, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
-		// Merge conflict — try LLM resolution
+		// Merge conflict — detect, set flag for LLM resolution, then abort
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
@@ -1133,9 +1133,11 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
 				return fmt.Errorf("merge failed (not a conflict): %s", mergeDetail)
 			}
+			// Real merge conflict — set flag so HandleCommitAndDone triggers LLM resolution
+			_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 			_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
 			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
-			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
+			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
 		}
 	} else {
 		log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
@@ -1171,7 +1173,7 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 	// Merge the task branch
 	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
-		// Merge conflict — try LLM resolution
+		// Merge conflict — detect, set flag for LLM resolution, then abort
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
@@ -1183,9 +1185,11 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
 				return fmt.Errorf("merge failed in worktree (not a conflict): %s", mergeDetail)
 			}
+			// Real merge conflict — set flag so HandleCommitAndDone triggers LLM resolution
+			_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
 			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
-			return fmt.Errorf("merge failed and conflict resolution failed: %w", resolveErr)
+			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
 		}
 	} else {
 		log.Printf("[merge] task=%s merged %s into %s (in worktree) successfully", taskID, taskBranch, targetBranch)

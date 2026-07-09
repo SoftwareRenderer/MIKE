@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -526,13 +527,32 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// Pi resolved conflicts — commit resolution, finish sync merge,
 						// then attempt the final merge.
-						conflictedFiles := GetResolvedConflictedFiles(worktreePath)
 						commitOK := true
-						if len(conflictedFiles) > 0 {
-							addArgs := append([]string{"add"}, conflictedFiles...)
-							if err := te.gitRun(worktreePath, addArgs...); err != nil {
-								log.Printf("[pi] task=%s git add failed: %v", task.ID, err)
+						if isMergeInProgress(worktreePath) {
+							// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
+							// Stage the resolved conflicted files.
+							conflictedFiles := GetResolvedConflictedFiles(worktreePath)
+							if len(conflictedFiles) > 0 {
+								addArgs := append([]string{"add"}, conflictedFiles...)
+								if err := te.gitRun(worktreePath, addArgs...); err != nil {
+									log.Printf("[pi] task=%s git add failed: %v", task.ID, err)
+									commitOK = false
+								}
+							}
+						} else {
+							// Final-merge conflict: worktree has no MERGE_HEAD.
+							// Stage the LLM's file edits (it modified task branch to be merge-compatible).
+							checkCmd := exec.Command("git", "diff", "--quiet")
+							checkCmd.Dir = worktreePath
+							if checkCmd.Run() == nil {
+								log.Printf("[pi] task=%s no changes to commit for conflict resolution", task.ID)
 								commitOK = false
+							}
+							if commitOK {
+								if err := te.gitRun(worktreePath, "add", "-A"); err != nil {
+									log.Printf("[pi] task=%s git add -A failed: %v", task.ID, err)
+									commitOK = false
+								}
 							}
 						}
 						if commitOK {
