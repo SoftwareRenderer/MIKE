@@ -1956,3 +1956,140 @@ func TestDropStashEntriesForBranch_RemovesMatchingStashes(t *testing.T) {
 	// Clean up
 	_ = wm.gitRun(repoDir, "stash", "clear")
 }
+
+func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create sync-merge and auto-merge stash entries
+	writeFile(t, repoDir, "changed.txt", "sync content\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(taskID))
+
+	writeFile(t, repoDir, "changed.txt", "auto content\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForAutoMerge(taskID))
+
+	// Also create a stash for a different task — should be left alone
+	writeFile(t, repoDir, "changed.txt", "other content\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	otherTaskID := "other-task-id"
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(otherTaskID))
+
+	// Verify all three stashes exist
+	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+		t.Errorf("expected sync-merge stash for task %s, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-auto-merge-"+taskID) {
+		t.Errorf("expected auto-merge stash for task %s, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-sync-merge-"+otherTaskID) {
+		t.Errorf("expected sync-merge stash for other task, got:\n%s", listOut)
+	}
+
+	// Drop stashes for our task
+	err := wm.DropStashEntriesForTask("test-project", taskID)
+	if err != nil {
+		t.Fatalf("DropStashEntriesForTask: %v", err)
+	}
+
+	// Verify our task's stashes are gone but the other task's stash remains
+	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+		t.Errorf("sync-merge stash for task %s should be gone, got:\n%s", taskID, listOut)
+	}
+	if strings.Contains(listOut, "kanban-auto-merge-"+taskID) {
+		t.Errorf("auto-merge stash for task %s should be gone, got:\n%s", taskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-sync-merge-"+otherTaskID) {
+		t.Error("sync-merge stash for other task should remain")
+	}
+
+	// Clean up
+	_ = wm.gitRun(repoDir, "stash", "clear")
+}
+
+func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git integration test")
+	}
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Create a stale sync-merge stash for a task that does NOT exist in DB
+	staleTaskID := "stale-deleted-task"
+	writeFile(t, repoDir, "changed.txt", "stale sync\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(staleTaskID))
+
+	writeFile(t, repoDir, "changed.txt", "stale auto\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForAutoMerge(staleTaskID))
+
+	// Create an active sync-merge stash for the task that DOES exist in DB
+	writeFile(t, repoDir, "changed.txt", "active sync\n")
+	runGit(t, repoDir, "add", "changed.txt")
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(taskID))
+
+	// Verify all stashes exist
+	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if !strings.Contains(listOut, "kanban-sync-merge-"+staleTaskID) {
+		t.Errorf("expected stale sync-merge stash, got:\n%s", listOut)
+	}
+	if !strings.Contains(listOut, "kanban-auto-merge-"+staleTaskID) {
+		t.Errorf("expected stale auto-merge stash, got:\n%s", listOut)
+	}
+	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+		t.Errorf("expected active sync-merge stash, got:\n%s", listOut)
+	}
+
+	// Run GC
+	_, err := wm.GarbageCollect(false)
+	if err != nil {
+		t.Fatalf("GarbageCollect: %v", err)
+	}
+
+	// Verify stale stashes are gone but active stash remains
+	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
+	if strings.Contains(listOut, staleTaskID) {
+		t.Errorf("stale stashes for %s should be gone, got:\n%s", staleTaskID, listOut)
+	}
+	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+		t.Errorf("active sync-merge stash for %s should remain, got:\n%s", taskID, listOut)
+	}
+
+	// Clean up
+	_ = wm.gitRun(repoDir, "stash", "clear")
+	_ = s.Close()
+}
+
+func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
+	taskID := "test-task-id"
+
+	switchMsg := StashMessageForSwitch(taskID, "thread-1")
+	if switchMsg != "kanban-switch-"+taskID+"-thread-1" {
+		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "kanban-switch-"+taskID+"-thread-1")
+	}
+
+	forkMsg := StashMessageForFork(taskID, "thread-2")
+	if forkMsg != "kanban-fork-"+taskID+"-thread-2" {
+		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "kanban-fork-"+taskID+"-thread-2")
+	}
+
+	checkpointMsg := StashMessageForCheckpoint(taskID, "task/fix-bug", "fixed login")
+	if checkpointMsg != "On task/fix-bug: kanban-checkpoint-"+taskID+" fixed login" {
+		t.Errorf("StashMessageForCheckpoint = %q, want correct format", checkpointMsg)
+	}
+
+	syncMsg := StashMessageForSyncMerge(taskID)
+	if syncMsg != "kanban-sync-merge-"+taskID {
+		t.Errorf("StashMessageForSyncMerge = %q, want %q", syncMsg, "kanban-sync-merge-"+taskID)
+	}
+
+	autoMsg := StashMessageForAutoMerge(taskID)
+	if autoMsg != "kanban-auto-merge-"+taskID {
+		t.Errorf("StashMessageForAutoMerge = %q, want %q", autoMsg, "kanban-auto-merge-"+taskID)
+	}
+}

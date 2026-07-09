@@ -973,7 +973,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	// Stash any working tree changes in the worktree.
 	hadStash := false
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", "kanban sync-merge stash"); err == nil {
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", git.StashMessageForSyncMerge(taskID)); err == nil {
 		hadStash = true
 	}
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
@@ -1099,7 +1099,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	// Stash any working tree changes (serialized with shared stash mutex).
 	hadStash := false
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
+	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
 		hadStash = true
 	}
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
@@ -1151,7 +1151,7 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 	// Stash any working tree changes in the worktree (serialized with shared stash mutex).
 	hadStash := false
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", "kanban auto-merge stash"); err == nil {
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
 		hadStash = true
 	}
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()

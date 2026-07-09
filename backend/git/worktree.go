@@ -436,7 +436,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			// %gs gives "On <branch>: <message>", so use Contains to find kanban labels.
 			if !strings.Contains(subject, "kanban-switch-") &&
 				!strings.Contains(subject, "kanban-fork-") &&
-				!strings.Contains(subject, "kanban-checkpoint-") {
+				!strings.Contains(subject, "kanban-checkpoint-") &&
+				!strings.Contains(subject, "kanban-sync-merge-") &&
+				!strings.Contains(subject, "kanban-auto-merge-") {
 				continue
 			}
 			// Try matching against all active task IDs
@@ -444,7 +446,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			for taskID := range activeSet {
 				if strings.Contains(subject, "kanban-switch-"+taskID+"-") ||
 					strings.Contains(subject, "kanban-fork-"+taskID+"-") ||
-					strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") {
+					strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") ||
+					strings.Contains(subject, "kanban-sync-merge-"+taskID) ||
+					strings.Contains(subject, "kanban-auto-merge-"+taskID) {
 					belongsToActiveTask = true
 					break
 				}
@@ -1238,7 +1242,8 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
 // DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
-// Matches messages like "kanban-switch-{taskID}-*" and "kanban-fork-{taskID}-*".
+// Matches messages like "kanban-switch-{taskID}-*", "kanban-fork-{taskID}-*",
+// "kanban-checkpoint-{taskID} *", "kanban-sync-merge-{taskID}", and "kanban-auto-merge-{taskID}".
 // Called during task deletion to clean up stale stash entries.
 func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
 	project, err := wm.store.GetProject(projectID)
@@ -1266,10 +1271,12 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 		}
 		subject := parts[1]
 		// %gs gives reflog subject "On <branch>: <message>" for all stash types.
-		// Match kanban-labeled stashes: switch, fork, and checkpoint.
+		// Match kanban-labeled stashes: switch, fork, checkpoint, sync-merge, auto-merge.
 		if !strings.Contains(subject, "kanban-switch-"+taskID+"-") &&
 			!strings.Contains(subject, "kanban-fork-"+taskID+"-") &&
-			!strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") {
+			!strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") &&
+			!strings.Contains(subject, "kanban-sync-merge-"+taskID) &&
+			!strings.Contains(subject, "kanban-auto-merge-"+taskID) {
 			continue
 		}
 		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
@@ -2200,6 +2207,18 @@ func StashMessageForFork(taskID, threadID string) string {
 // The task ID in the message allows cleanup during task deletion.
 func StashMessageForCheckpoint(taskID, branch, msg string) string {
     return fmt.Sprintf("On %s: kanban-checkpoint-%s %s", branch, taskID, msg)
+}
+
+// StashMessageForSyncMerge generates a stash message for a sync-merge operation.
+// The task ID in the message allows cleanup during task deletion and GC.
+func StashMessageForSyncMerge(taskID string) string {
+    return fmt.Sprintf("kanban-sync-merge-%s", taskID)
+}
+
+// StashMessageForAutoMerge generates a stash message for an auto-merge operation.
+// The task ID in the message allows cleanup during task deletion and GC.
+func StashMessageForAutoMerge(taskID string) string {
+    return fmt.Sprintf("kanban-auto-merge-%s", taskID)
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
