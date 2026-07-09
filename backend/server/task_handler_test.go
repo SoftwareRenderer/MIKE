@@ -1613,3 +1613,303 @@ func gitListStashes(t *testing.T, dir string) []string {
 	}
 	return subjects
 }
+
+// Helper: get the full task as a map
+func getTask(t *testing.T, s *Server, projectID string, taskID string) map[string]any {
+	t.Helper()
+	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
+	}
+	return mustJSON[map[string]any](t, rr.Body)
+}
+
+// TestCommitAndDoneMergeConflictEnablesAutoMerge verifies that when a merge
+// conflict is detected during commit-and-done, the task's auto_merge is
+// automatically enabled so the task can complete after the agent resolves
+// the conflict.
+func TestCommitAndDoneMergeConflictEnablesAutoMerge(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a real git repo
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "conflict-auto-merge", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task with auto_merge=false
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
+		"prompt":           "test merge conflict auto merge",
+		"llama_server_url": "http://localhost:9999/v1",
+		"model_name":       "mock-model",
+		"auto_merge":       false,
+	})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Verify auto_merge is false
+	task := getTask(t, s, projID, taskID)
+	if task["auto_merge"] == true {
+		t.Fatal("auto_merge should be false initially")
+	}
+
+	// Create a branch for the task
+	branchName := "task/" + taskID
+	mustRunGit(t, tmpDir, "branch", branchName)
+
+	// Create a file on the task branch
+	mustRunGit(t, tmpDir, "checkout", branchName)
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
+	mustRunGit(t, tmpDir, "checkout", "master")
+
+	// Create a conflicting change on master
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+
+	// Create a worktree for the task at the path the worktree manager expects.
+	// WORKTREES_DIR env var is set by testServer and takes priority over config.
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+
+	// Verify worktree exists at the expected path
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Fatalf("worktree does not exist at %q: %v", wtPath, err)
+	}
+
+	// Update task with branch info
+	taskDB, _ := s.store.GetTask(projID, taskID)
+	taskDB.Branch = branchName
+	taskDB.BaseRef = "master"
+	s.store.UpdateTask(taskDB)
+
+	// Move task to review (required for commit)
+	moveTask(t, s, projID, taskID, "review")
+
+	// Commit-and-done — this will trigger a merge conflict during sync-merge
+	commitReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", nil)
+	commitRR := testResponseAuth(t, s, commitReq)
+	if commitRR.Code != http.StatusOK {
+		t.Fatalf("commit-and-done: %d %s", commitRR.Code, commitRR.Body.String())
+	}
+
+	commitResult := mustJSON[map[string]any](t, commitRR.Body)
+
+	// Verify the task was moved to in_progress (conflict resolution path)
+	if commitResult["status"] != "in_progress" {
+		t.Fatalf("expected status=in_progress, got %s", commitResult["status"])
+	}
+
+	// Verify auto_merge was enabled
+	if commitResult["auto_merge"] != true {
+		t.Fatalf("expected auto_merge=true after merge conflict, got %v", commitResult["auto_merge"])
+	}
+
+	// Verify auto_commit was also enabled (prerequisite for auto_merge)
+	if commitResult["auto_commit"] != true {
+		t.Fatalf("expected auto_commit=true after merge conflict, got %v", commitResult["auto_commit"])
+	}
+
+	// Verify has_merge_conflict is set
+	if commitResult["has_merge_conflict"] != true {
+		t.Fatalf("expected has_merge_conflict=true, got %v", commitResult["has_merge_conflict"])
+	}
+}
+
+// TestCommitAndDoneMergeConflictNoChangeWhenAutoMergeAlreadyEnabled verifies
+// that when auto_merge is already enabled, commit-and-done with a merge conflict
+// does not change the setting (idempotent).
+func TestCommitAndDoneMergeConflictNoChangeWhenAutoMergeAlreadyEnabled(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "conflict-auto-merge-already", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task with auto_merge=true
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
+		"prompt":           "test merge conflict auto merge already enabled",
+		"llama_server_url": "http://localhost:9999/v1",
+		"model_name":       "mock-model",
+		"auto_merge":       true,
+	})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Verify auto_merge is true
+	task := getTask(t, s, projID, taskID)
+	if task["auto_merge"] != true {
+		t.Fatal("auto_merge should be true initially")
+	}
+
+	// Create a branch for the task
+	branchName := "task/" + taskID
+	mustRunGit(t, tmpDir, "branch", branchName)
+
+	// Create a file on the task branch
+	mustRunGit(t, tmpDir, "checkout", branchName)
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
+	mustRunGit(t, tmpDir, "checkout", "master")
+
+	// Create a conflicting change on master
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+
+	// Create a worktree for the task
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+
+	// Update task with branch info
+	taskDB, _ := s.store.GetTask(projID, taskID)
+	taskDB.Branch = branchName
+	taskDB.BaseRef = "master"
+	s.store.UpdateTask(taskDB)
+
+	// Move task to review
+	moveTask(t, s, projID, taskID, "review")
+
+	// Commit-and-done — merge conflict path
+	commitReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", nil)
+	commitRR := testResponseAuth(t, s, commitReq)
+	if commitRR.Code != http.StatusOK {
+		t.Fatalf("commit-and-done: %d %s", commitRR.Code, commitRR.Body.String())
+	}
+
+	commitResult := mustJSON[map[string]any](t, commitRR.Body)
+
+	// Verify auto_merge stays true (no change needed)
+	if commitResult["auto_merge"] != true {
+		t.Fatalf("expected auto_merge=true, got %v", commitResult["auto_merge"])
+	}
+
+	// Verify task moved to in_progress
+	if commitResult["status"] != "in_progress" {
+		t.Fatalf("expected status=in_progress, got %s", commitResult["status"])
+	}
+}
+
+// TestCommitAndDoneMergeConflictSystemMessage verifies that the system message
+// in the chat notes that auto_merge was enabled.
+func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "conflict-system-msg", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task with auto_merge=false
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
+		"prompt":           "test system message",
+		"llama_server_url": "http://localhost:9999/v1",
+		"model_name":       "mock-model",
+		"auto_merge":       false,
+	})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create a branch for the task
+	branchName := "task/" + taskID
+	mustRunGit(t, tmpDir, "branch", branchName)
+
+	// Create a file on the task branch
+	mustRunGit(t, tmpDir, "checkout", branchName)
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
+	mustRunGit(t, tmpDir, "checkout", "master")
+
+	// Create a conflicting change on master
+	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
+	mustRunGit(t, tmpDir, "add", "shared.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+
+	// Create a worktree for the task
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+
+	// Update task with branch info
+	taskDB, _ := s.store.GetTask(projID, taskID)
+	taskDB.Branch = branchName
+	taskDB.BaseRef = "master"
+	s.store.UpdateTask(taskDB)
+
+	// Move task to review
+	moveTask(t, s, projID, taskID, "review")
+
+	// Commit-and-done — merge conflict path
+	commitReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", nil)
+	commitRR := testResponseAuth(t, s, commitReq)
+	if commitRR.Code != http.StatusOK {
+		t.Fatalf("commit-and-done: %d %s", commitRR.Code, commitRR.Body.String())
+	}
+
+	// Get task messages to verify system message content
+	msgs, err := s.store.GetTaskMessages(taskID, "")
+	if err != nil {
+		t.Fatalf("get task messages: %v", err)
+	}
+
+	// Find the system message about merge conflict
+	var foundSystemMsg bool
+	for _, msg := range msgs {
+		if msg.Role == "system" && strings.Contains(msg.Content, "Merge conflict detected") {
+			foundSystemMsg = true
+			// Verify it mentions auto_merge being enabled
+			if !strings.Contains(msg.Content, "Enabled auto_merge") {
+				t.Fatalf("system message should mention auto_merge enabled, got: %s", msg.Content)
+			}
+			break
+		}
+	}
+
+	if !foundSystemMsg {
+		t.Fatal("expected system message about merge conflict with auto_merge note")
+	}
+}
