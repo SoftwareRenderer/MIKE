@@ -107,13 +107,10 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	url := c.baseURL + "/chat/completions"
 
 	reqBody := map[string]any{
-		"model":            c.modelName,
-		"messages":         toAPIMessages(messages),
-		"stream":           true,
-		"temperature":      0.7,
-		"max_tokens":       8192,
-		"reasoning_format": "auto",
-		"return_progress":  true,
+		"model":           c.modelName,
+		"messages":        toAPIMessages(messages),
+		"stream":          true,
+		"return_progress": true,
 	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
@@ -121,19 +118,10 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	} else {
 		reqBody["tool_choice"] = "none"
 	}
-
 	if c.reasoningEffort != "off" {
-		budget, ok := reasoningEffortTokens[c.reasoningEffort]
-		if ok {
+		if budget, ok := reasoningEffortTokens[c.reasoningEffort]; ok {
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
-			reqBody["chat_template_kwargs"] = map[string]any{
-				"enable_thinking": true,
-			}
-		}
-	} else {
-		reqBody["chat_template_kwargs"] = map[string]any{
-			"enable_thinking": false,
 		}
 	}
 
@@ -233,39 +221,27 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
 // Used for simple queries like title generation where streaming is not needed.
-// Optional maxTokens overrides the default (128); use 0 for server default.
+// Optional maxTokens sets max_tokens in the request; omit to use server default.
 func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, maxTokens ...int) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
 		return nil, "", fmt.Errorf("llama server URL not configured")
 	}
 
 	url := c.baseURL + "/chat/completions"
-	tokens := 128
-	if len(maxTokens) > 0 {
-		tokens = maxTokens[0]
-	}
 
 	reqBody := map[string]any{
-		"model":            c.modelName,
-		"messages":         toAPIMessages(messages),
-		"stream":           false,
-		"temperature":      0.3,
-		"max_tokens":       tokens,
-		"tool_choice":      "none",
-		"reasoning_format": "auto",
+		"model":       c.modelName,
+		"messages":    toAPIMessages(messages),
+		"stream":      false,
+		"tool_choice": "none",
+	}
+	if len(maxTokens) > 0 {
+		reqBody["max_tokens"] = maxTokens[0]
 	}
 	if c.reasoningEffort != "off" {
-		budget, ok := reasoningEffortTokens[c.reasoningEffort]
-		if ok {
+		if budget, ok := reasoningEffortTokens[c.reasoningEffort]; ok {
 			reqBody["thinking_budget_tokens"] = budget
 			reqBody["reasoning_control"] = true
-			reqBody["chat_template_kwargs"] = map[string]any{
-				"enable_thinking": true,
-			}
-		}
-	} else {
-		reqBody["chat_template_kwargs"] = map[string]any{
-			"enable_thinking": false,
 		}
 	}
 
