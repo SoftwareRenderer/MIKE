@@ -16,6 +16,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
+	"kanban/backend/prompts"
 	sandboxmgr "kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/stream"
@@ -781,10 +782,10 @@ func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 	return false
 }
 
-// forwardUserMessage forwards a user message to the running executor or lazy-starts one.
+// ForwardUserMessage forwards a user message to the running executor or lazy-starts one.
 // If the requested executor type (llm vs pi) differs from the currently running executor,
 // it stops the old executor and lazy-starts a new one with the correct type.
-func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.UserMessage) {
+func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.UserMessage) {
 	requestedType := "llm"
 	if te.configStore.IsAgentProvider(um.ServerURL) {
 		requestedType = "pi"
@@ -870,6 +871,25 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	task = execSetup.task
+
+	// If task is in merge_conflict state, prepend conflict context to the initial content
+	if task.ExecutionState == "merge_conflict" {
+		conflictedFiles := getConflictedFiles(execSetup.worktreePath)
+		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+			TaskBranch:      task.Branch,
+			TargetBranch:    task.BaseRef,
+			TaskTitle:       task.Title,
+			TaskDescription: task.Prompt,
+			ConflictedFiles: strings.Join(conflictedFiles, ", "),
+		})
+		if pErr != nil {
+			log.Printf("[lazy-start] task=%s failed to render merge conflict prompt: %v", taskID, pErr)
+		}
+		conflictContext += "\nAfter resolving the merge, continue with the user's request."
+		content = conflictContext + "\n\n--- User message ---\n\n" + content
+		log.Printf("[lazy-start] task=%s merge_conflict state detected, injecting conflict context", taskID)
+	}
+
 	execSetup.initialContent = content // pass user message to executor
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -970,7 +990,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	}
 
 	// Merge target branch into task branch
-	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
+	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
 	if mergeErr == nil {
 		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
 		te.logSystemMessage(taskID, task.CurrentThreadID,
@@ -978,34 +998,15 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		return nil
 	}
 
-	// Merge conflict — try LLM resolution (prefer target/main's changes)
-	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, resolving with LLM", taskID, targetBranch, taskBranch)
+	// Merge conflict — enter merge_conflict state so the LLM loop (or HandleCommitAndDone)
+	// can trigger the agent to resolve via file tools.
+	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, entering merge_conflict state", taskID, targetBranch, taskBranch)
+	_ = te.store.UpdateTaskExecutionState(taskID, projectID, "merge_conflict")
+	task.ExecutionState = "merge_conflict"
 	te.logSystemMessage(taskID, task.CurrentThreadID,
-		fmt.Sprintf("Syncing %s into task branch — conflicts detected. Resolving with LLM...", targetBranch))
-
-	if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, taskBranch, targetBranch, "target_to_task", task, true); resolveErr != nil {
-		if errors.Is(resolveErr, ErrNotAMergeConflict) {
-			mergeDetail := strings.TrimSpace(mergeOut)
-			if mergeDetail == "" {
-				mergeDetail = mergeErr.Error()
-			}
-			log.Printf("[sync-merge] task=%s merge failed (not a conflict): %s", taskID, mergeDetail)
-			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
-			return fmt.Errorf("sync merge failed (not a conflict): %s", mergeDetail)
-		}
-
-		// LLM resolution failed — enter merge_conflict state for interactive resolution
-		log.Printf("[sync-merge] task=%s LLM resolution failed, entering merge_conflict state", taskID)
-		_ = te.store.UpdateTaskExecutionState(taskID, projectID, "merge_conflict")
-		task.ExecutionState = "merge_conflict"
-		te.logSystemMessage(taskID, task.CurrentThreadID,
-			fmt.Sprintf("Could not auto-resolve conflicts when syncing %s into task branch. The merge is in progress — review the conflicted files and resolve them, then click \"Complete Merge\".", targetBranch))
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		// Keep merge in progress — do NOT abort. LLM/user will resolve with file tools.
-		return nil
-	}
-
-	log.Printf("[sync-merge] task=%s conflicts resolved and committed", taskID)
+		fmt.Sprintf("Conflicts detected when syncing %s into task branch. The merge is in progress — resolve the conflicted files, then run `git add -A`, `git commit`, and `git merge --continue`.", targetBranch))
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+	// Keep merge in progress — do NOT abort. LLM will resolve with file tools.
 	return nil
 }
 

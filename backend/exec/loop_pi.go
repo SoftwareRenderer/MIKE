@@ -12,6 +12,7 @@ import (
 
 	"kanban/backend/llama"
 	"kanban/backend/pi"
+	"kanban/backend/prompts"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
@@ -452,8 +453,127 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 					}
 					// Don't set agentEnded — continue the event loop for the next turn
 				default:
-					// No queued messages — Pi is truly done
-					agentEnded = true
+					// No queued messages — check if auto-commit/merge is needed.
+					// Perform merge inside the event loop so Pi can resolve conflicts with tools.
+					if task.AutoCommit {
+						// If task is in merge_conflict state, Pi may have just resolved it.
+						// Check if the merge is still in progress.
+						if task.ExecutionState == "merge_conflict" {
+							if !isMergeInProgress(worktreePath) {
+								// Pi resolved the conflict and continued the merge
+								log.Printf("[pi] task=%s merge conflict resolved by Pi", task.ID)
+								task.ExecutionState = "idle"
+								_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
+							} else {
+								// Still in conflict — prompt Pi again
+								conflictedFiles := getConflictedFiles(worktreePath)
+								prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+									TaskBranch:      task.Branch,
+									TargetBranch:    task.BaseRef,
+									TaskTitle:       task.Title,
+									TaskDescription: task.Prompt,
+									ConflictedFiles: strings.Join(conflictedFiles, ", "),
+								})
+								if pErr != nil {
+									log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+								}
+								log.Printf("[pi] task=%s merge still conflicted, re-prompting Pi", task.ID)
+								err := client.Prompt(ctx, prompt)
+								if err != nil {
+									log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
+									agentEnded = true
+								}
+								break
+							}
+						}
+						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
+						// Reload task — CommitAndMerge may have entered merge_conflict state
+						task, _ = te.store.GetTaskByTaskID(task.ID)
+						if task.ExecutionState == "merge_conflict" {
+							// Merge conflict — prompt Pi to resolve with tools
+							conflictedFiles := getConflictedFiles(worktreePath)
+							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+								TaskBranch:      task.Branch,
+								TargetBranch:    task.BaseRef,
+								TaskTitle:       task.Title,
+								TaskDescription: task.Prompt,
+								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+							})
+							if pErr != nil {
+								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							}
+							log.Printf("[pi] task=%s merge conflict, prompting Pi to resolve", task.ID)
+							err := client.Prompt(ctx, prompt)
+							if err != nil {
+								log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
+								agentEnded = true
+							}
+							// Don't set agentEnded — continue the event loop for Pi to resolve
+							break
+						}
+						task.ExecutionState = "completed"
+						task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(task.ID)
+						}
+						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+						te.store.UpdateTask(task)
+						agentEnded = true
+					} else if task.ExecutionState == "merge_conflict" {
+						// Task was in merge_conflict state (e.g., from HandleCommitAndDone).
+						// User already clicked "Commit and move to done" — proceed with merge.
+						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, true)
+						task, _ = te.store.GetTaskByTaskID(task.ID)
+						if task.ExecutionState == "merge_conflict" {
+							// Still conflicted — prompt Pi again
+							conflictedFiles := getConflictedFiles(worktreePath)
+							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+								TaskBranch:      task.Branch,
+								TargetBranch:    task.BaseRef,
+								TaskTitle:       task.Title,
+								TaskDescription: task.Prompt,
+								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+							})
+							if pErr != nil {
+								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							}
+							log.Printf("[pi] task=%s merge still conflicted after commit, re-prompting Pi", task.ID)
+							err := client.Prompt(ctx, prompt)
+							if err != nil {
+								log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
+								agentEnded = true
+							}
+							break
+						}
+						task.ExecutionState = "completed"
+						task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(task.ID)
+						}
+						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+						te.store.UpdateTask(task)
+						agentEnded = true
+					} else if stopReason == "error" {
+						task.ExecutionState = "failed"
+						task.Status = "review"
+						task.Output = fmt.Sprintf("Pi Coding Agent ended with error (stopReason=%s)", stopReason)
+						te.store.UpdateTask(task)
+						agentEnded = true
+					} else if stopReason == "aborted" {
+						task.ExecutionState = "stopped"
+						task.Status = "review"
+						task.Output = "Pi Coding Agent was aborted"
+						te.store.UpdateTask(task)
+						agentEnded = true
+					} else {
+						task.ExecutionState = "awaiting_review"
+						task.Status = "review"
+						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+						te.store.UpdateTask(task)
+						agentEnded = true
+					}
 				}
 
 			case "response":
@@ -479,34 +599,16 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	duration := time.Since(startTime)
 	log.Printf("[pi] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
 
-	// Determine task state based on stop reason.
-	// Pi stop reasons: "stop", "length", "toolUse", "error", "aborted"
-	// Empty stopReason means agent_end had no assistant messages (edge case).
-	isError := stopReason == "error"
-	if isError {
+	// Reload task — state may have been set inside the event loop (agent_end handler).
+	// Only set state here if the loop exited abnormally (ctx cancelled, process exited).
+	task, _ = te.store.GetTaskByTaskID(task.ID)
+	if task.ExecutionState == "running" || task.ExecutionState == "idle" {
+		// Loop exited without agent_end setting state (e.g., process crash)
 		task.ExecutionState = "failed"
 		task.Status = "review"
-		task.Output = fmt.Sprintf("Pi Coding Agent ended with error (stopReason=%s)", stopReason)
-	} else if stopReason == "aborted" {
-		task.ExecutionState = "stopped"
-		task.Status = "review"
-		task.Output = "Pi Coding Agent was aborted"
-	} else if task.AutoCommit {
-		// Commit changes
-		commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
-		te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
-		task.ExecutionState = "completed"
-		task.Status = "done"
-		if te.sandboxMgr != nil {
-			_ = te.sandboxMgr.Stop(task.ID)
-		}
-		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
-	} else {
-		task.ExecutionState = "awaiting_review"
-		task.Status = "review"
-		task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+		task.Output = fmt.Sprintf("Pi Coding Agent process exited unexpectedly (stopReason=%s)", stopReason)
+		te.store.UpdateTask(task)
 	}
-	te.store.UpdateTask(task)
 
 	// Always broadcast complete event to clear streaming state on the frontend.
 	// The frontend's complete handler calls closeCurrentAssistant() which clears

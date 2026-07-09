@@ -1,50 +1,15 @@
-{{- if eq .Direction "target_to_task" -}}
-You are resolving merge conflicts when merging branch "{{ .TargetBranch }}" (target branch) into "{{ .TaskBranch }}" (task branch).
-
-The target branch has evolved independently with new commits. The task branch contains changes made to fulfill this task.
+A merge conflict occurred when merging "{{ .TaskBranch }}" into "{{ .TargetBranch }}".
 
 Task title: {{ .TaskTitle }}
 Task description: {{ .TaskDescription }}
 
-Conflict markers in each file:
-  - Above ======= (HEAD / "{{ .TaskBranch }}") = task branch — the changes made to fulfill the task
-  - Below ======= ("{{ .TargetBranch }}") = target branch — new changes from the target branch
+Resolve the conflicted files using your tools (read, edit, write_file), then run:
+	git add -A && git commit -m 'Resolve merge conflicts' && git merge --continue
 
-Resolution strategy:
-  1. Prefer the target branch's changes (below =======) — they represent the current state of the codebase
-  2. Incorporate task branch changes (above =======) where they don't conflict with the target
-  3. Adapt the task's changes to work with the target's new code (e.g., updated APIs, renamed types)
-  4. Only drop target changes when they truly conflict with the task's intent
-{{- else -}}
-You are resolving merge conflicts when merging branch "{{ .TaskBranch }}" (task branch) into "{{ .TargetBranch }}" (target branch).
+{{- if .ConflictedFiles }}
+Conflicted files: {{ .ConflictedFiles }}
+{{- end }}
 
-The task branch contains changes made to fulfill this task. The target branch has evolved independently.
+When resolving, analyze the intent behind each side's changes. Combine both sides when their changes are independent or compatible. If the two sides express genuinely conflicting intent (e.g., one adds a feature the other removes), ask the user which approach to take before proceeding.
 
-Task title: {{ .TaskTitle }}
-Task description: {{ .TaskDescription }}
-
-Conflict markers in each file:
-  - Above ======= (HEAD / "{{ .TargetBranch }}") = target branch — independent changes to preserve
-  - Below ======= ("{{ .TaskBranch }}") = task branch — the changes made to fulfill the task
-
-Resolution strategy:
-  1. Prefer the task branch's changes (below =======) — they fulfill the task
-  2. Incorporate target branch changes (above =======) where they don't conflict with the task
-  3. Only drop target changes when they truly conflict with the task's intent
-{{- end -}}
-
-Conflicted files:
-
-{{ .ConflictedFiles }}
-
-For each file, provide the fully resolved content WITHOUT any conflict markers. If any functionality was lost during resolution, note it in the summary.
-
-Output format: For each file, output:
-RESOLVE <filepath>
-<full resolved file content>
-END_RESOLVE
-
-Then output a summary:
-SUMMARY
-<Brief summary of changes made and any lost functionality>
-END_SUMMARY
+After the merge succeeds, call task_complete.

@@ -125,7 +125,7 @@ test.describe.serial('Merge Sync', () => {
     expect(finalTask.status).toBe('done');
   });
 
-  test('should show merge_conflict badge when sync merge conflicts and LLM fails', async ({ page }) => {
+  test('should show merge_conflict badge when sync merge conflicts', async ({ page }) => {
     // This test verifies the merge_conflict state UI.
     // We simulate the state directly via API since inducing a real conflict
     // requires specific git setup that's hard to do through the web API.
@@ -154,12 +154,8 @@ test.describe.serial('Merge Sync', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     // Check for the merge conflict badge on the card
-    // The badge should show "Resolving conflicts" with orange color
-    const badge = page.locator('.badge:has-text("Resolving conflicts")');
+    // The badge should show "Agent resolving" with orange color
+    const badge = page.locator('.badge:has-text("Agent resolving")');
     await expect(badge).toBeVisible({ timeout: 10000 });
-
-    // Check for the "Complete Merge" button in the review bar
-    const completeMergeBtn = page.locator('.btn-complete-merge');
-    await expect(completeMergeBtn).toBeVisible({ timeout: 10000 });
   });
 });

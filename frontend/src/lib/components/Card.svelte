@@ -146,7 +146,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
-        if (state === 'merge_conflict') return { text: 'Resolving conflicts', color: 'var(--color-status-orange)' };
+        if (state === 'merge_conflict') return { text: 'Agent resolving', color: 'var(--color-status-orange)' };
         return null;
     });
 

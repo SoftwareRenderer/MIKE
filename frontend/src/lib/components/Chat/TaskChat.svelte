@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, completeMerge, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
 import { showToast, showConfirm } from '$lib/stores/dialogs';
 import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
@@ -118,7 +118,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
-    let isCompletingMerge = $state(false);
+
     let threadSwitching = $state(false); // true while a thread switch is in-flight
     // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
     // For in_progress tasks, buffer events are legitimate and must be replayed.
@@ -819,21 +819,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     }
 
-    /** Called when the user clicks "Complete Merge" to finish a merge_conflict resolution. */
-    async function handleCompleteMerge() {
-        if (isCompletingMerge || disabled) return;
-        isCompletingMerge = true;
-        try {
-            const updated = await completeMerge(projectId, taskId);
-            mergeTaskIntoBoard(updated);
-            await loadHistory();
-            showToast('Merge completed successfully');
-        } catch (e) {
-            showToast('Complete merge failed: ' + String(e));
-        } finally {
-            isCompletingMerge = false;
-        }
-    }
 
     /** Called when the user clicks the delete button on a message.
      * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
@@ -1230,12 +1215,10 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
         <ReviewBar
             {taskStatus}
-            taskExecutionState={taskExecutionState}
             {showResumeButton}
             {showRestartButton}
             {isStarting}
             {isCommitting}
-            isCompletingMerge={isCompletingMerge}
             {disabled}
             hasStagedChanges={hasStagedChanges}
             {queueStatus}
@@ -1247,7 +1230,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             onStartTask={handleStartTask}
             onCommitAndDone={handleCommitAndDone}
             onMoveToDone={handleMoveToDone}
-            onCompleteMerge={handleCompleteMerge}
             onModelSelect={handleModelSelect}
         />
         {#if !showRestartButton}

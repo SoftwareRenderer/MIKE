@@ -4,12 +4,10 @@
 
     let {
         taskStatus,
-        taskExecutionState,
         showResumeButton,
         showRestartButton,
         isStarting,
         isCommitting,
-        isCompletingMerge,
         disabled,
         hasStagedChanges,
         queueStatus,
@@ -21,16 +19,13 @@
         onStartTask,
         onCommitAndDone,
         onMoveToDone,
-        onCompleteMerge,
         onModelSelect,
     }: {
         taskStatus: string;
-        taskExecutionState: string;
         showResumeButton: boolean;
         showRestartButton: boolean;
         isStarting: boolean;
         isCommitting: boolean;
-        isCompletingMerge: boolean;
         disabled: boolean;
         hasStagedChanges: boolean;
         queueStatus: string | null;
@@ -42,7 +37,6 @@
         onStartTask: () => Promise<void>;
         onCommitAndDone: () => Promise<void>;
         onMoveToDone: () => Promise<void>;
-        onCompleteMerge: () => Promise<void>;
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => Promise<void>;
     } = $props();
 </script>
@@ -99,26 +93,6 @@
                 {/if}
             </button>
         {/if}
-    </div>
-{/if}
-{#if taskExecutionState === 'merge_conflict'}
-    <div class="chat-review-bar">
-        <div class="merge-conflict-info">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            <span>Resolving merge conflicts — edit conflicted files, then click Complete Merge</span>
-        </div>
-        <button class="btn-complete-merge" onclick={onCompleteMerge} disabled={isCompletingMerge || disabled} title="Stage resolved files, commit, and complete the merge">
-            {#if isCompletingMerge}
-                <span class="spinner-inline"></span> Completing...
-            {:else}
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Complete Merge
-            {/if}
-        </button>
     </div>
 {/if}
 {#if showRestartButton}
@@ -233,36 +207,6 @@
         opacity: 0.85;
     }
     .btn-restart-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .merge-conflict-info {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-right: auto;
-        font-size: 0.8125rem;
-        color: var(--color-status-orange);
-    }
-    .btn-complete-merge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 7px 16px;
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
-        font-weight: 600;
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
-        border: 1.5px solid var(--color-status-orange);
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-complete-merge:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        opacity: 0.9;
-    }
-    .btn-complete-merge:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }

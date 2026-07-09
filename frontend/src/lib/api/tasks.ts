@@ -74,18 +74,6 @@ export async function commitAndDone(projectId: string, taskId: string, commitMes
     return commitAndDoneRaw(projectId, taskId, commitMessage);
 }
 
-/** Complete a merge that is stuck in merge_conflict state. */
-export async function completeMerge(projectId: string, taskId: string): Promise<Task> {
-    const response = await fetch(`/api/projects/${projectId}/tasks/${taskId}/complete-merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-        throw new Error(`Complete merge failed: ${response.statusText}`);
-    }
-    return response.json();
-}
-
 /** Get a preview of the commit message that would be used for commit-and-done. */
 export async function getCommitPreview(projectId: string, taskId: string): Promise<{ commit_message: string; author_name: string; author_email: string; merge_target: string }> {
     return getCommitPreviewRaw(projectId, taskId);

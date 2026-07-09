@@ -83,11 +83,10 @@ type MergeConflictData struct {
 	TargetBranch    string
 	TaskTitle       string
 	TaskDescription string
-	ConflictedFiles string
-	Direction       string // "task_to_target" or "target_to_task"
+	ConflictedFiles string // comma-separated list of conflicted file paths
 }
 
-// RenderMergeConflictPrompt renders the merge conflict resolution prompt from a template file.
+// RenderMergeConflictPrompt renders the merge conflict resolution prompt.
 func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
 	dir := promptDir()
 	path := filepath.Join(dir, "merge_conflict.tmpl")

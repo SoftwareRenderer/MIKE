@@ -72,7 +72,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview", s.taskHandler.HandleCommitPreview)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview/stream", s.taskHandler.HandleCommitPreviewStream)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/complete-merge", s.taskHandler.HandleCompleteMerge)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)
 
 	// Task messages

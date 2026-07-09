@@ -162,7 +162,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
 
 	// Forward to executor or lazy-start
-	te.forwardUserMessage(projectID, taskID, stream.UserMessage{
+	te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
 		Content:         req.Content,
 		ModelName:       req.ModelName,
 		ServerURL:       req.LlamaServerURL,

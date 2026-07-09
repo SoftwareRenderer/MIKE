@@ -14,6 +14,7 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/llama"
+	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -874,6 +875,71 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					if task.AutoCommit {
 						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
+						// Reload task — CommitAndMerge may have entered merge_conflict state
+						task, _ = te.store.GetTaskByTaskID(task.ID)
+						if task.ExecutionState == "merge_conflict" {
+							// Merge conflict — inject resolution prompt and continue the loop
+							conflictedFiles := getConflictedFiles(worktreePath)
+							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+								TaskBranch:      task.Branch,
+								TargetBranch:    task.BaseRef,
+								TaskTitle:       task.Title,
+								TaskDescription: task.Prompt,
+								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+							})
+							if pErr != nil {
+								log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							}
+							lc.detector.reset()
+							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID,
+								Role: "system", Content: "Merge conflict detected — resolving with tools",
+								CreatedAt: time.Now().UTC(),
+							})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+							lc.pendingToolCalls = nil
+							lc.assistantContent.Reset()
+							lc.reasoningContent.Reset()
+							continue
+						}
+						task.ExecutionState = "completed"
+						task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(task.ID)
+						}
+					} else if task.ExecutionState == "merge_conflict" {
+						// Task was in merge_conflict state (e.g., from HandleCommitAndDone).
+						// User already clicked "Commit and move to done" — proceed with merge.
+						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, true)
+						task, _ = te.store.GetTaskByTaskID(task.ID)
+						if task.ExecutionState == "merge_conflict" {
+							// Still conflicted — re-inject prompt and continue
+							conflictedFiles := getConflictedFiles(worktreePath)
+							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+								TaskBranch:      task.Branch,
+								TargetBranch:    task.BaseRef,
+								TaskTitle:       task.Title,
+								TaskDescription: task.Prompt,
+								ConflictedFiles: strings.Join(conflictedFiles, ", "),
+							})
+							if pErr != nil {
+								log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							}
+							lc.detector.reset()
+							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID,
+								Role: "system", Content: "Merge conflict detected — resolving with tools",
+								CreatedAt: time.Now().UTC(),
+							})
+							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+							lc.pendingToolCalls = nil
+							lc.assistantContent.Reset()
+							lc.reasoningContent.Reset()
+							continue
+						}
 						task.ExecutionState = "completed"
 						task.Status = "done"
 						if te.sandboxMgr != nil {
@@ -1035,6 +1101,43 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				continue
 			default:
 			}
+
+			// If task was in merge_conflict and the merge is no longer in progress,
+			// the LLM resolved the conflicts. Re-attempt the final merge.
+			if task.ExecutionState == "merge_conflict" && !isMergeInProgress(worktreePath) {
+				log.Printf("[merge] task=%s conflicts resolved by LLM, attempting final merge", task.ID)
+				task.ExecutionState = "idle"
+				_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
+				task, _ = te.store.GetTaskByTaskID(task.ID)
+				if mergeErr := te.MergeBranch(projectID, task.ID, task); mergeErr != nil {
+					log.Printf("[merge] task=%s final merge failed: %v", task.ID, mergeErr)
+				} else {
+					log.Printf("[merge] task=%s final merge succeeded", task.ID)
+				}
+				task, _ = te.store.GetTaskByTaskID(task.ID)
+				// If merge succeeded and task is no longer in merge_conflict, auto-complete
+				if task.ExecutionState != "merge_conflict" && task.AutoCommit {
+					task.ExecutionState = "completed"
+					task.Status = "done"
+					if te.sandboxMgr != nil {
+						_ = te.sandboxMgr.Stop(task.ID)
+					}
+					te.store.UpdateTask(task)
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+						"state": "completed", "summary": "Merge conflicts resolved and merged",
+						"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+						"cache_tokens": cacheTokens,
+						"prompt_ms": promptMs, "predicted_ms": predictedMs,
+						"model_name": activeModel, "duration": duration,
+					}})
+					if task.ParentTaskID != "" {
+						_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
+					}
+					return
+				}
+			}
+
 			task.Status = "review"
 			task.ExecutionState = "idle"
 			te.store.UpdateTask(task)

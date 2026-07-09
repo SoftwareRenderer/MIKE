@@ -61,9 +61,8 @@ func TestIsMergeInProgress_ReturnsFalseWhenNoMerge(t *testing.T) {
 	}
 }
 
-// TestGetConflictedFilesInDir_DetectsUUConflicts verifies that the primary
-// porcelain scan detects standard UU (both modified) conflicts.
-func TestGetConflictedFilesInDir_DetectsUUConflicts(t *testing.T) {
+// TestGetConflictedFiles_DetectsUUConflicts verifies that standard UU (both modified) conflicts are detected.
+func TestGetConflictedFiles_DetectsUUConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -91,7 +90,7 @@ func TestGetConflictedFilesInDir_DetectsUUConflicts(t *testing.T) {
 	cmd.Dir = tmpDir
 	_ = cmd.Run()
 
-	files := getConflictedFilesInDir(tmpDir)
+	files := getConflictedFiles(tmpDir)
 	if len(files) != 1 || files[0] != "file.txt" {
 		t.Fatalf("expected [file.txt], got %v", files)
 	}
@@ -99,9 +98,8 @@ func TestGetConflictedFilesInDir_DetectsUUConflicts(t *testing.T) {
 	runGit(t, tmpDir, "merge", "--abort")
 }
 
-// TestGetConflictedFilesInDir_DetectsMultipleConflicts verifies that
-// multiple conflicted files are all detected.
-func TestGetConflictedFilesInDir_DetectsMultipleConflicts(t *testing.T) {
+// TestGetConflictedFiles_DetectsMultipleConflicts verifies that multiple conflicted files are all detected.
+func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -132,7 +130,7 @@ func TestGetConflictedFilesInDir_DetectsMultipleConflicts(t *testing.T) {
 	cmd.Dir = tmpDir
 	_ = cmd.Run()
 
-	files := getConflictedFilesInDir(tmpDir)
+	files := getConflictedFiles(tmpDir)
 	if len(files) != 2 {
 		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
 	}
@@ -148,9 +146,8 @@ func TestGetConflictedFilesInDir_DetectsMultipleConflicts(t *testing.T) {
 	runGit(t, tmpDir, "merge", "--abort")
 }
 
-// TestGetConflictedFilesInDir_ReturnsEmptyWhenNoConflicts verifies that
-// no files are returned when there are no conflicts.
-func TestGetConflictedFilesInDir_ReturnsEmptyWhenNoConflicts(t *testing.T) {
+// TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts verifies that no files are returned when there are no conflicts.
+func TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -159,62 +156,7 @@ func TestGetConflictedFilesInDir_ReturnsEmptyWhenNoConflicts(t *testing.T) {
 	runGit(t, tmpDir, "add", "file.txt")
 	runGit(t, tmpDir, "commit", "-m", "Initial")
 
-	files := getConflictedFilesInDir(tmpDir)
-	if len(files) != 0 {
-		t.Fatalf("expected no files, got %v", files)
-	}
-}
-
-// TestGetConflictedFilesFallback_DetectsConflicts verifies that the fallback
-// git diff --diff-filter=U method detects conflicts.
-func TestGetConflictedFilesFallback_DetectsConflicts(t *testing.T) {
-	tmpDir := t.TempDir()
-	runGit(t, tmpDir, "init")
-	runGit(t, tmpDir, "config", "user.email", "test@test.com")
-	runGit(t, tmpDir, "config", "user.name", "Test")
-
-	// Create initial file
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644)
-	runGit(t, tmpDir, "add", "file.txt")
-	runGit(t, tmpDir, "commit", "-m", "Initial")
-
-	// Create conflicting branch
-	runGit(t, tmpDir, "checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nfeature change\nline 3\n"), 0o644)
-	runGit(t, tmpDir, "add", "file.txt")
-	runGit(t, tmpDir, "commit", "-m", "Feature")
-
-	// Conflicting change on master
-	runGit(t, tmpDir, "checkout", "master")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nmaster change\nline 3\n"), 0o644)
-	runGit(t, tmpDir, "add", "file.txt")
-	runGit(t, tmpDir, "commit", "-m", "Master")
-
-	// Start merge (will conflict)
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	_ = cmd.Run()
-
-	files := getConflictedFilesFallback(tmpDir)
-	if len(files) != 1 || files[0] != "file.txt" {
-		t.Fatalf("expected [file.txt], got %v", files)
-	}
-
-	runGit(t, tmpDir, "merge", "--abort")
-}
-
-// TestGetConflictedFilesFallback_ReturnsEmptyWhenNoConflicts verifies that
-// the fallback returns empty when there are no conflicts.
-func TestGetConflictedFilesFallback_ReturnsEmptyWhenNoConflicts(t *testing.T) {
-	tmpDir := t.TempDir()
-	runGit(t, tmpDir, "init")
-	runGit(t, tmpDir, "config", "user.email", "test@test.com")
-	runGit(t, tmpDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("initial\n"), 0o644)
-	runGit(t, tmpDir, "add", "file.txt")
-	runGit(t, tmpDir, "commit", "-m", "Initial")
-
-	files := getConflictedFilesFallback(tmpDir)
+	files := getConflictedFiles(tmpDir)
 	if len(files) != 0 {
 		t.Fatalf("expected no files, got %v", files)
 	}

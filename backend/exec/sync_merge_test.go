@@ -104,10 +104,10 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	}
 }
 
-// TestSyncTargetIntoTask_ConflictLLMFailed_EntersMergeConflictState verifies that
-// when a sync merge has conflicts and LLM resolution fails (no LLM available),
-// the task enters merge_conflict state and the merge is kept in progress.
-func TestSyncTargetIntoTask_ConflictLLMFailed_EntersMergeConflictState(t *testing.T) {
+// TestSyncTargetIntoTask_Conflict_EntersMergeConflictState verifies that
+// when a sync merge has conflicts, the task enters merge_conflict state
+// and the merge is kept in progress for the LLM to resolve.
+func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-conflict"
@@ -118,7 +118,7 @@ func TestSyncTargetIntoTask_ConflictLLMFailed_EntersMergeConflictState(t *testin
 		Prompt:         "Test prompt",
 		Status:         "in_progress",
 		Branch:         "task/conflict-branch",
-		LlamaServerURL: "", // No LLM configured — resolution will fail
+		LlamaServerURL: "",
 		ModelName:      "",
 	}
 	te.store.CreateTask(task)
@@ -141,7 +141,7 @@ func TestSyncTargetIntoTask_ConflictLLMFailed_EntersMergeConflictState(t *testin
 	runGit(t, repoDir, "add", "shared.txt")
 	runGit(t, repoDir, "commit", "-m", "master change shared")
 
-	// Sync should conflict, LLM resolution fails, enters merge_conflict state
+	// Sync should conflict and enter merge_conflict state
 	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/conflict-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should return nil (enters merge_conflict state): %v", err)
