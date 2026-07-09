@@ -7,6 +7,29 @@ export interface CheckpointState {
     commitHash?: string;
 }
 
+/**
+ * Find the index of the last user message before the given entry index.
+ * Returns -1 if no user message exists before that position.
+ */
+export function findLastUserMessageBefore(entries: ChatEntry[], beforeIndex: number): number {
+    for (let i = beforeIndex - 1; i >= 0; i--) {
+        if (entries[i].role === 'user') return i;
+    }
+    return -1;
+}
+
+/**
+ * Trim entries for regeneration: keep everything up to and including the last
+ * user message before the clicked entry. The WebSocket echo will update this
+ * entry's ID to match the server-assigned one. All entries after the last user
+ * message (the assistant response being regenerated plus anything after it) are removed.
+ */
+export function trimEntriesForRegenerate(entries: ChatEntry[], entryIndex: number): ChatEntry[] {
+    const lastUserIdx = findLastUserMessageBefore(entries, entryIndex);
+    if (lastUserIdx === -1) return entries;
+    return entries.slice(0, lastUserIdx + 1);
+}
+
 /** Per-entry metadata for the chat list. */
 export interface EntryMeta {
     cpState: CheckpointState | null;

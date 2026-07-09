@@ -11,7 +11,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
     import { useCheckpointTracker } from '$lib/composables/use-checkpoint-tracker.svelte';
-    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, getCheckpointEntryCheckpointState as getCheckpointEntryCheckpointStateUtil, computeLastUserMessageIds, type EntryMeta } from '$lib/utils/chat-entries';
+    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, getCheckpointEntryCheckpointState as getCheckpointEntryCheckpointStateUtil, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
@@ -268,11 +268,11 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     }
 
     /** Send a message via the API with tracking state. Returns false on failure. */
-    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>): Promise<boolean> {
+    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false): Promise<boolean> {
         lastSentMessage = msg;
         stream.state.awaitingResponse = true;
         try {
-            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined);
+            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
             return true;
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
@@ -402,7 +402,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
             // For stopped/completed tasks, pending calls are stale leftovers.
             if (taskStatus !== 'in_progress') {
-                entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+                stream.state.entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
             }
             // Restore context usage from the last assistant message.
             // Use total context (prompt + predicted) to reflect full window consumed.
@@ -558,7 +558,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
         // If LLM is streaming, cancel the current response by clearing partial assistant entry.
         if (isLoading) {
-            entries = entries.filter(e => !e.isStreaming);
+            stream.state.entries = entries.filter(e => !e.isStreaming);
             if (currentAssistantId) {
                 stream.state.currentAssistantId = null;
             }
@@ -577,7 +577,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             }
         }
         // Remove all error entries (cleared by next user action)
-        entries = entries.filter(e => e.role !== 'error');
+        stream.state.entries = entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
         const entryId = genId();
         const isOfflineNow = getOfflineStatus();
@@ -585,7 +585,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         // Send with model info for lazy-start
         if (!await sendWithTracking(msg, attachments)) {
             const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
-            entries = entries.filter(e => !(e.role === 'user' && e.content === msg));
+            stream.state.entries = entries.filter(e => !(e.role === 'user' && e.content === msg));
             stream.state.entries = [...entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
             return;
         }
@@ -677,9 +677,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
         // Find the last user message before this assistant message
-        const beforeEntries = entries.slice(0, idx);
-        const lastUser = [...beforeEntries].reverse().find(e => e.role === 'user');
-        if (!lastUser) return;
+        const lastUserIdx = findLastUserMessageBefore(entries, idx);
+        if (lastUserIdx === -1) return;
+        const lastUser = entries[lastUserIdx];
         // Regenerate from backend starting after the last user message
         try {
             await regenerateTaskMessages(projectId, taskId, lastUser.id, true);
@@ -687,10 +687,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             console.error('Failed to regenerate messages:', e);
         }
         // Trim local entries: keep everything up to and including the last user message
-        const userIdx = entries.findIndex(e => e.id === lastUser.id);
-        entries = entries.slice(0, userIdx + 1);
+        stream.state.entries = trimEntriesForRegenerate(entries, idx);
         isRegenerating = true;
-        if (!await sendWithTracking(lastUser.content)) {
+        if (!await sendWithTracking(lastUser.content, undefined, true)) {
             showToast('Failed to regenerate');
             isRegenerating = false;
             return;
@@ -747,7 +746,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         const streamingId = currentAssistantId;
         stream.closeCurrentAssistant();
         // Remove the streaming assistant entry and entries with pending tool calls.
-        entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
+        stream.state.entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
         // Clear active tool calls (immediate UI update)
         stream.state.activeToolCalls.clear();
         stream.state.processedToolIds.clear();
@@ -849,7 +848,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
 
             // Discard deleted entries so loadHistory doesn't merge them back as non-DB entries.
-            entries = entries.filter((_, i) => i < idx);
+            stream.state.entries = entries.filter((_, i) => i < idx);
 
             // Reload from DB — restores pre-summary messages if summary was deleted.
             await loadHistory(true);
@@ -908,14 +907,14 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {
-            entries = entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
+            stream.state.entries = entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
             updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
         }
 
         if (isLoading || disabled) return;
-        entries = entries.slice(0, idx);
+        stream.state.entries = entries.slice(0, idx);
         stream.closeCurrentAssistant();
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
@@ -944,7 +943,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         connecting = false;
         if (!firstConnectDone) {
             firstConnectDone = true;
-            entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+            stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
         }
     }
 
@@ -952,7 +951,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     async function handleDismissError(messageId: string) {
         try {
             await deleteTaskMessage(projectId, taskId, messageId);
-            entries = entries.filter(e => e.id !== messageId);
+            stream.state.entries = entries.filter(e => e.id !== messageId);
         } catch (e) {
             console.error('Failed to dismiss error:', e);
         }
@@ -962,7 +961,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     function handleRetryConnect() {
         connected = false;
         // Remove existing connection lost errors
-        entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
+        stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
         connect();
     }
 

@@ -92,6 +92,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		LlamaServerURL  string `json:"llama_server_url"`
 		ReasoningEffort string `json:"reasoning_effort"`
 		Attachments     string `json:"attachments"`
+		Regenerate      bool   `json:"regenerate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "content is required")
@@ -167,6 +168,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		ServerURL:       req.LlamaServerURL,
 		ReasoningEffort: req.ReasoningEffort,
 		Attachments:     req.Attachments,
+		Regenerate:      req.Regenerate,
 	})
 
 	// Return the message

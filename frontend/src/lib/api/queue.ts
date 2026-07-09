@@ -400,7 +400,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
     const taskId = resolveId(p.taskId);
     switch (action.type) {
         case 'sendTaskMessage':
-            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments);
+            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments, undefined, p.regenerate);
             break;
         case 'createTaskMessage':
             await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
@@ -711,12 +711,14 @@ async function sendTaskMessageRaw(
     modelName?: string,
     serverUrl?: string,
     attachments?: Array<{ mimeType: string; data: string }>,
-    reasoningEffort?: string
+    reasoningEffort?: string,
+    regenerate = false
 ): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
     const body: Record<string, any> = { content };
     if (modelName) body.model_name = modelName;
     if (serverUrl) body.llama_server_url = serverUrl;
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+    if (regenerate) body.regenerate = regenerate;
     if (attachments && attachments.length > 0) {
         body.attachments = JSON.stringify(attachments);
     }

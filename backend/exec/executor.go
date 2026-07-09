@@ -714,7 +714,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 	}
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "", execSetup.project.ForwardPorts, execSetup.project.SandboxMounts)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "", false, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts)
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -801,7 +801,7 @@ func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.U
 			te.taskMu.Unlock()
 			// Brief drain to let old executor finish its select loop
 			time.Sleep(100 * time.Millisecond)
-			go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort)
+			go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
 			return
 		}
 		select {
@@ -813,7 +813,7 @@ func (te *TaskExecutor) forwardUserMessage(projectID, taskID string, um stream.U
 		return
 	}
 	te.taskMu.Unlock()
-	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort)
+	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
 }
 
 // StopSandbox removes the sandbox container for a task (called on task deletion).
@@ -837,8 +837,8 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 }
 
 // handleLazyStart is called when a user message arrives for a task with no active executor.
-func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL, reasoningEffort string) {
-	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s, effort=%s)", taskID, projectID, modelName, serverURL, reasoningEffort)
+func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool) {
+	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s, effort=%s, regenerate=%v)", taskID, projectID, modelName, serverURL, reasoningEffort, regenerate)
 
 	te.taskMu.Lock()
 	if _, exists := te.tasks[taskID]; exists {
@@ -878,7 +878,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts)
+	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content, regenerate, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts)
 }
 
 // CommitAndMerge commits worktree changes and optionally merges the task branch.

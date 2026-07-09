@@ -163,11 +163,12 @@ func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) erro
 	if err != nil {
 		return err
 	}
-	// Delete this message and all messages created after it (scoped to thread if provided)
+	// Delete this message and all messages created after it (scoped to thread if provided).
+	// Explicitly match the message ID to handle any timestamp precision edge cases.
 	if threadID != "" {
-		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND thread_id = ? AND created_at >= ?`, taskID, threadID, createdAt)
+		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND thread_id = ? AND (id = ? OR created_at >= ?)`, taskID, threadID, messageID, createdAt)
 	} else {
-		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND created_at >= ?`, taskID, createdAt)
+		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND (id = ? OR created_at >= ?)`, taskID, messageID, createdAt)
 	}
 	return err
 }

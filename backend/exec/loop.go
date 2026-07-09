@@ -208,7 +208,7 @@ type loopContext struct {
 	usage            *types.ChatUsage
 }
 
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, forwardPorts []types.PortForward, sandboxMounts []types.SandboxMount) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, regenerate bool, forwardPorts []types.PortForward, sandboxMounts []types.SandboxMount) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -378,6 +378,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
 
+	// During regeneration, HandleSend creates the re-sent user message in the DB.
+	// If the DELETE hasn't completed yet (race between DELETE and POST handlers),
+	// the old user message may still be in the DB alongside the new one, creating
+	// duplicate consecutive user messages. Remove the stale copy.
+	if regenerate {
+		messages = removeDuplicateUserMessage(messages)
+	}
+
 	// Context tracking: load context window from provider config, discover if unknown
 	var contextWindow *int
 	if cw := te.configStore.GetModelContextWindow(modelName, serverURL); cw != nil {
@@ -447,8 +455,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Check for user messages that arrived during tool execution.
 		select {
 		case um := <-userMsgChan:
-			log.Printf("[user-msg] task=%s received message before LLM call", task.ID)
+			log.Printf("[user-msg] task=%s received message before LLM call (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset() // user input breaks any loop pattern
+			if um.Regenerate {
+				lc.messages = truncateForRegenerate(lc.messages)
+			}
 			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
@@ -694,7 +705,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Stream completed normally (or all retries exhausted)
 		case um := <-userMsgChan:
 			// New user message — cancel current LLM call.
-			log.Printf("[cancel] task=%s user message received during streaming, cancelling", task.ID)
+			log.Printf("[cancel] task=%s user message received during streaming, cancelling (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset() // user input breaks any loop pattern
 			callCancel()
 			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
@@ -722,6 +733,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
 			lc.pendingToolCalls = nil
+
+			// If any queued message is a regenerate, truncate stale assistant messages.
+			for _, qm := range queuedMsgs {
+				if qm.Regenerate {
+					lc.messages = truncateForRegenerate(lc.messages)
+					break
+				}
+			}
 
 			// Add queued messages to conversation history.
 			for _, qm := range queuedMsgs {
@@ -999,8 +1018,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Check for queued user messages before sending complete.
 			select {
 			case um := <-userMsgChan:
-				log.Printf("[user-msg] task=%s received message after response, continuing", task.ID)
+				log.Printf("[user-msg] task=%s received message after response, continuing (regenerate=%v)", task.ID, um.Regenerate)
 				lc.detector.reset() // user input breaks any loop pattern
+				if um.Regenerate {
+					lc.messages = truncateForRegenerate(lc.messages)
+				}
 				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				if um.ModelName != "" {
 					switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
@@ -1079,8 +1101,11 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.detector.reset() // context changed, clear stale text window
 			continue
 		case um := <-userMsgChan:
-			log.Printf("[user-msg] task=%s received message while idle, continuing", task.ID)
+			log.Printf("[user-msg] task=%s received message while idle, continuing (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset()
+			if um.Regenerate {
+				lc.messages = truncateForRegenerate(lc.messages)
+			}
 			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
@@ -1108,6 +1133,35 @@ func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
 	if err := te.store.CreateTaskMessage(errMsg); err != nil {
 		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
 	}
+}
+
+// truncateForRegenerate removes the last user message and everything after it
+// from the in-memory conversation. When a regenerate arrives, the DB has already
+// trimmed messages from the last user message onward (DeleteTaskMessagesAfter),
+// but lc.messages still retains the stale entries. This function syncs the
+// in-memory state by finding the last user message and discarding it plus
+// everything after it. The new (re-sent) user message is then appended.
+func truncateForRegenerate(messages []types.ChatMessage) []types.ChatMessage {
+	for i := len(messages) - 1; i > 0; i-- {
+		if messages[i].Role == "user" {
+			return messages[:i]
+		}
+	}
+	return messages
+}
+
+// removeDuplicateUserMessage removes the first of two consecutive user messages
+// with identical content. During regeneration, a race between the DELETE and POST
+// handlers can leave the old user message in the DB alongside the new one.
+func removeDuplicateUserMessage(messages []types.ChatMessage) []types.ChatMessage {
+	for i := 1; i < len(messages); i++ {
+		if messages[i].Role == "user" && messages[i-1].Role == "user" && messages[i].Content == messages[i-1].Content {
+			// Keep the newer one (at index i), remove the older one (at index i-1)
+			messages = append(messages[:i-1], messages[i:]...)
+			break
+		}
+	}
+	return messages
 }
 
 func (te *TaskExecutor) gitRun(dir string, args ...string) error {

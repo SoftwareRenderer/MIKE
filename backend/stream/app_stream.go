@@ -110,10 +110,11 @@ type UserMessage struct {
 	ServerURL       string
 	ReasoningEffort string
 	Attachments     string // JSON array of {mimeType, data} for images
+	Regenerate      bool   // true when re-sending a message to trigger regeneration
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
-type LazyStartHandler func(projectID, taskID, content, modelName, serverURL, reasoningEffort string)
+type LazyStartHandler func(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool)
 
 // clientState holds the subscription state for a single WebSocket connection.
 type clientState struct {
