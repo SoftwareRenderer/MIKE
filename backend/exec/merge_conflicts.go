@@ -91,6 +91,45 @@ func addIfNew(f string, seen map[string]struct{}, files *[]string) bool {
 	return true
 }
 
+// hasConflictMarkers checks if a file contains git merge conflict markers.
+func hasConflictMarkers(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	return strings.Contains(content, "<<<<<<<") ||
+		strings.Contains(content, "=======") ||
+		strings.Contains(content, ">>>>>>>")
+}
+
+// GetAllConflictsResolved checks whether ALL conflicted files have been
+// resolved (no conflict markers remain in any of them). Returns true only
+// when every conflicted file is clean — git requires all conflicts to be
+// staged before a merge commit can be made, so partial resolution is not
+// sufficient.
+func GetAllConflictsResolved(dir string) bool {
+	conflictedFiles := GetConflictedFiles(dir)
+	for _, f := range conflictedFiles {
+		if hasConflictMarkers(filepath.Join(dir, f)) {
+			return false
+		}
+	}
+	return true
+}
+
+// GetResolvedConflictedFiles returns the conflicted files to stage for the
+// resolution commit. If all conflicts are resolved, returns all conflicted
+// files (git requires ALL to be staged for the merge commit). If any file
+// still has conflict markers, returns nil — the caller should skip the commit
+// and re-prompt the LLM.
+func GetResolvedConflictedFiles(dir string) []string {
+	if GetAllConflictsResolved(dir) {
+		return GetConflictedFiles(dir)
+	}
+	return nil
+}
+
 // getMergeStatusOutput returns the raw git status --porcelain output for diagnostics.
 func getMergeStatusOutput(dir string) string {
 	cmd := osexec.Command("git", "status", "--porcelain")

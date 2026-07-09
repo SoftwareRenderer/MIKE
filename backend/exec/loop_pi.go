@@ -462,7 +462,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						if task.HasMergeConflict {
 							log.Printf("[pi] task=%s Pi finished resolving conflicts, committing resolution", task.ID)
 							// Stage only the conflicted files (not all changes — user may have unstaged files)
-							conflictedFiles := GetConflictedFiles(worktreePath)
+							conflictedFiles := GetResolvedConflictedFiles(worktreePath)
 							commitOK := true
 							if len(conflictedFiles) > 0 {
 								addArgs := append([]string{"add"}, conflictedFiles...)
@@ -478,16 +478,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								}
 							}
 							if commitOK {
-								if err := te.gitRun(worktreePath, "merge", "--continue"); err != nil {
-									log.Printf("[pi] task=%s git merge --continue failed: %v", task.ID, err)
-									commitOK = false
-								} else {
-									log.Printf("[pi] task=%s conflict resolution committed", task.ID)
-									// Restore user's unstaged changes (stashed during sync merge)
-									te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-									_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
-									te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-								}
+								log.Printf("[pi] task=%s conflict resolution committed", task.ID)
+								// Restore user's unstaged changes (stashed during sync merge)
+								te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+								te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 							}
 							_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
 							task.ExecutionState = "idle"
@@ -531,7 +526,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// Pi resolved conflicts — commit resolution, finish sync merge,
 						// then attempt the final merge.
-						conflictedFiles := GetConflictedFiles(worktreePath)
+						conflictedFiles := GetResolvedConflictedFiles(worktreePath)
 						commitOK := true
 						if len(conflictedFiles) > 0 {
 							addArgs := append([]string{"add"}, conflictedFiles...)
@@ -547,16 +542,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							}
 						}
 						if commitOK {
-							if err := te.gitRun(worktreePath, "merge", "--continue"); err != nil {
-								log.Printf("[pi] task=%s git merge --continue failed: %v", task.ID, err)
-								commitOK = false
-							} else {
-								log.Printf("[pi] task=%s conflict resolution committed", task.ID)
-								// Restore user's unstaged changes (stashed during sync merge)
-								te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
-								te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-							}
+							log.Printf("[pi] task=%s conflict resolution committed", task.ID)
+							// Restore user's unstaged changes (stashed during sync merge)
+							te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+							_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+							te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 						}
 						_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
 
