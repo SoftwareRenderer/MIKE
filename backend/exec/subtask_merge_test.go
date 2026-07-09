@@ -636,26 +636,29 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	runGitInDir(t, setup.worktreePath, "add", "-A")
 	runGitInDir(t, setup.worktreePath, "commit", "-m", "subtask edits shared file")
 
-	// Try to merge — should conflict
+	// Try to merge — the sync-merge (target→task) will conflict.
+	// With the new sync-merge feature, LLM resolution failure enters
+	// merge_conflict state for interactive resolution (not an error).
 	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
 	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 
-	// Merge should fail because:
-	// 1. Git merge conflicts
-	// 2. LLM resolution fails (no real LLM available)
-	// 3. merge --abort is called
-	if err == nil {
-		t.Fatal("mergeBranch should fail when there's a conflict and no LLM")
-	}
-	if !strings.Contains(err.Error(), "conflict") {
-		t.Errorf("error should mention conflict, got: %v", err)
+	// Sync-merge enters merge_conflict state — MergeBranch returns nil
+	// (the task is now in merge_conflict state for interactive resolution).
+	// The final merge (task→target) is skipped.
+	if err != nil {
+		t.Fatalf("mergeBranch should return nil when sync enters merge_conflict state: %v", err)
 	}
 
-	// Verify the parent branch was NOT modified (merge was aborted)
-	// The parent's worktree should still have the parent's version
+	// Verify task is in merge_conflict state
+	subtaskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	if subtaskFromDB.ExecutionState != "merge_conflict" {
+		t.Fatalf("expected execution_state=merge_conflict, got %q", subtaskFromDB.ExecutionState)
+	}
+
+	// Verify the parent branch was NOT modified (sync merge is in progress, not committed)
 	content, _ := os.ReadFile(sharedFile)
 	if string(content) != "parent version of the file\n" {
-		t.Errorf("parent worktree should be unchanged after abort, got: %q", string(content))
+		t.Errorf("parent worktree should be unchanged, got: %q", string(content))
 	}
 }
 

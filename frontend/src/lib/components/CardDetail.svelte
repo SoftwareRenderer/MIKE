@@ -574,6 +574,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                             taskId={task.id}
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
+                            taskExecutionState={task.execution_state}
                             taskTitle={task.title}
                             onRefreshDiff={(data) => {
                                 // Skip update while loadDiff() is in progress to prevent

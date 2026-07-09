@@ -1,3 +1,21 @@
+{{- if eq .Direction "target_to_task" -}}
+You are resolving merge conflicts when merging branch "{{ .TargetBranch }}" (target branch) into "{{ .TaskBranch }}" (task branch).
+
+The target branch has evolved independently with new commits. The task branch contains changes made to fulfill this task.
+
+Task title: {{ .TaskTitle }}
+Task description: {{ .TaskDescription }}
+
+Conflict markers in each file:
+  - Above ======= (HEAD / "{{ .TaskBranch }}") = task branch — the changes made to fulfill the task
+  - Below ======= ("{{ .TargetBranch }}") = target branch — new changes from the target branch
+
+Resolution strategy:
+  1. Prefer the target branch's changes (below =======) — they represent the current state of the codebase
+  2. Incorporate task branch changes (above =======) where they don't conflict with the target
+  3. Adapt the task's changes to work with the target's new code (e.g., updated APIs, renamed types)
+  4. Only drop target changes when they truly conflict with the task's intent
+{{- else -}}
 You are resolving merge conflicts when merging branch "{{ .TaskBranch }}" (task branch) into "{{ .TargetBranch }}" (target branch).
 
 The task branch contains changes made to fulfill this task. The target branch has evolved independently.
@@ -13,6 +31,7 @@ Resolution strategy:
   1. Prefer the task branch's changes (below =======) — they fulfill the task
   2. Incorporate target branch changes (above =======) where they don't conflict with the task
   3. Only drop target changes when they truly conflict with the task's intent
+{{- end -}}
 
 Conflicted files:
 

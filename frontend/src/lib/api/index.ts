@@ -52,6 +52,7 @@ export {
     deleteTask,
     moveTask,
     commitAndDone,
+    completeMerge,
     clearDoneTasks,
     startTask,
     startSubtask,

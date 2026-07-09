@@ -720,6 +720,112 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
+// HandleCompleteMerge completes a merge that is stuck in merge_conflict state.
+// The user (or LLM) has resolved the conflicted files; this endpoint stages,
+// commits, continues the merge, and then attempts the final merge.
+func (h *TaskHandler) HandleCompleteMerge(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.ExecutionState != "merge_conflict" {
+		httputil.JSONError(w, http.StatusBadRequest, fmt.Sprintf("task is not in merge_conflict state (current: %s)", task.ExecutionState))
+		return
+	}
+	if h.worktreeMgr == nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+		return
+	}
+
+	// Serialize per project
+	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "queued")
+	release := h.commitQueue.Acquire(projectID)
+	defer release()
+	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
+
+	// Get task's worktree path
+	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to get worktree path")
+		return
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "task worktree not found")
+		return
+	}
+
+	// Stage all resolved files
+	if err := h.worktreeMgr.GitRunInDir(worktreePath, append(git.GitAuthorFlags(), "add", "-A")...); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to stage files: %v", err))
+		return
+	}
+
+	// Commit the resolution
+	modelName := task.ModelName
+	if modelName == "" {
+		modelName = "unknown"
+	}
+	commitMsg := fmt.Sprintf("%s\n\nMerge conflict resolution\n\nCo-authored-by: %s",
+		task.Title, modelName)
+	if err := h.worktreeMgr.GitRunInDir(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to commit resolution: %v", err))
+		return
+	}
+
+	// Continue the merge
+	if err := h.worktreeMgr.GitRunInDir(worktreePath, "merge", "--continue"); err != nil {
+		// Merge continue failed — keep merge_conflict state, log error
+		log.Printf("[complete-merge] task=%s merge --continue failed: %v", taskID, err)
+		h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "failed")
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("merge continue failed: %v", err))
+		return
+	}
+
+	// Sync merge succeeded — reload task and attempt final merge
+	task, _ = h.store.GetTask(projectID, taskID)
+	task.ExecutionState = "idle"
+	_ = h.store.UpdateTaskExecutionState(taskID, projectID, "idle")
+
+	if h.executor != nil {
+		if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
+			log.Printf("[complete-merge] task=%s final merge failed: %v", taskID, mergeErr)
+			// Don't fail the whole operation — the sync was successful
+		}
+	}
+
+	// Move task to Done
+	task, _ = h.store.GetTask(projectID, taskID)
+	task.Status = "done"
+	task.ExecutionState = "completed"
+	task.UpdatedAt = time.Now()
+	if err := h.store.UpdateTask(task); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Stop sandbox container
+	if h.executor != nil {
+		h.executor.StopSandbox(taskID)
+	}
+
+	// If a subtask was marked done, auto-start the next sibling
+	if task.ParentTaskID != "" {
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, "done")
+	}
+
+	h.refreshTaskPorts(task)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "completed")
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
 // broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
 func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string) {
 	if h.boardStreamMgr == nil {

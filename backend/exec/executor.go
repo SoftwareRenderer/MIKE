@@ -899,6 +899,116 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 	}
 }
 
+// syncTargetIntoTask merges the target branch into the task's branch (in the task's worktree)
+// when the target has new commits since the task branch diverged. This catches conflicts early
+// while the LLM still has full context of the task's changes.
+//
+// Returns nil on success (clean merge or no new commits) or when merge_conflict state is entered.
+// The caller (MergeBranch) should check task.ExecutionState after return — if it is
+// "merge_conflict", the final merge should be skipped.
+func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
+	project, err := te.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project for sync: %w", err)
+	}
+
+	// Check if target branch has new commits beyond where task branch diverged.
+	// merge-base is the common ancestor; if it equals target HEAD, target hasn't moved.
+	mergeBaseCmd := osexec.Command("git", "merge-base", taskBranch, targetBranch)
+	mergeBaseCmd.Dir = project.Path
+	mergeBaseOut, err := mergeBaseCmd.Output()
+	if err != nil {
+		log.Printf("[sync-merge] task=%s could not compute merge-base: %v, skipping sync", taskID, err)
+		return nil
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+
+	targetHeadCmd := osexec.Command("git", "rev-parse", targetBranch)
+	targetHeadCmd.Dir = project.Path
+	targetHeadOut, err := targetHeadCmd.Output()
+	if err != nil {
+		log.Printf("[sync-merge] task=%s could not resolve target HEAD: %v, skipping sync", taskID, err)
+		return nil
+	}
+	targetHead := strings.TrimSpace(string(targetHeadOut))
+
+	if mergeBase == targetHead {
+		log.Printf("[sync-merge] task=%s target %s has no new commits, skipping sync", taskID, targetBranch)
+		return nil
+	}
+
+	log.Printf("[sync-merge] task=%s target %s has new commits (merge-base=%s, target=%s), syncing", taskID, targetBranch, mergeBase[:7], targetHead[:7])
+
+	// Get task's worktree path
+	worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		return fmt.Errorf("get worktree path for sync: %w", err)
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		log.Printf("[sync-merge] task=%s worktree does not exist, skipping sync", taskID)
+		return nil
+	}
+
+	// Stash any working tree changes in the worktree.
+	hadStash := false
+	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", "kanban sync-merge stash"); err == nil {
+		hadStash = true
+	}
+	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	defer func() {
+		if hadStash {
+			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+		}
+	}()
+
+	// Ensure we're on the task branch
+	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
+		return fmt.Errorf("checkout task branch %s for sync: %w", taskBranch, err)
+	}
+
+	// Merge target branch into task branch
+	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
+	if mergeErr == nil {
+		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
+		te.logSystemMessage(taskID, task.CurrentThreadID,
+			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
+		return nil
+	}
+
+	// Merge conflict — try LLM resolution (prefer target/main's changes)
+	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, resolving with LLM", taskID, targetBranch, taskBranch)
+	te.logSystemMessage(taskID, task.CurrentThreadID,
+		fmt.Sprintf("Syncing %s into task branch — conflicts detected. Resolving with LLM...", targetBranch))
+
+	if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, taskBranch, targetBranch, "target_to_task", task, true); resolveErr != nil {
+		if errors.Is(resolveErr, ErrNotAMergeConflict) {
+			mergeDetail := strings.TrimSpace(mergeOut)
+			if mergeDetail == "" {
+				mergeDetail = mergeErr.Error()
+			}
+			log.Printf("[sync-merge] task=%s merge failed (not a conflict): %s", taskID, mergeDetail)
+			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
+			return fmt.Errorf("sync merge failed (not a conflict): %s", mergeDetail)
+		}
+
+		// LLM resolution failed — enter merge_conflict state for interactive resolution
+		log.Printf("[sync-merge] task=%s LLM resolution failed, entering merge_conflict state", taskID)
+		_ = te.store.UpdateTaskExecutionState(taskID, projectID, "merge_conflict")
+		task.ExecutionState = "merge_conflict"
+		te.logSystemMessage(taskID, task.CurrentThreadID,
+			fmt.Sprintf("Could not auto-resolve conflicts when syncing %s into task branch. The merge is in progress — review the conflicted files and resolve them, then click \"Complete Merge\".", targetBranch))
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		// Keep merge in progress — do NOT abort. LLM/user will resolve with file tools.
+		return nil
+	}
+
+	log.Printf("[sync-merge] task=%s conflicts resolved and committed", taskID)
+	return nil
+}
+
 // mergeBranch merges the task's branch into the target branch.
 // For child tasks, merges into the parent's branch. For root tasks, merges into origin.
 // Returns nil on success or if merge is not applicable.
@@ -963,6 +1073,17 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		return nil
 	}
 
+	// Sync target branch into task branch first (catches conflicts early).
+	if syncErr := te.syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch, task); syncErr != nil {
+		return fmt.Errorf("sync target into task: %w", syncErr)
+	}
+	// If sync entered merge_conflict state, skip the final merge.
+	task, _ = te.store.GetTaskByTaskID(taskID)
+	if task.ExecutionState == "merge_conflict" {
+		log.Printf("[merge] task=%s sync entered merge_conflict state, skipping final merge", taskID)
+		return nil
+	}
+
 	if mergeInWorktree != "" {
 		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID)
 	}
@@ -998,7 +1119,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
 				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
 				// Include git output so the user sees the actual reason
@@ -1050,7 +1171,7 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 	if mergeErr != nil {
 		// Merge conflict — try LLM resolution
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
 				mergeDetail := strings.TrimSpace(mergeOut)
 				if mergeDetail == "" {

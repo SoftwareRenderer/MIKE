@@ -29,8 +29,9 @@ var ErrNotAMergeConflict = errors.New("")
 // resolveMergeConflicts uses the LLM to resolve merge conflicts in the given files.
 // basePath is the directory containing the conflicted files (worktree or project dir).
 // targetBranch is the branch being merged into, taskBranch is the branch being merged.
+// direction is "task_to_target" (prefer task changes) or "target_to_task" (prefer target changes).
 // Returns the LLM-generated summary of the resolution.
-func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targetBranch, taskBranch string, task *types.Task, conflictedFiles []string) (string, error) {
+func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targetBranch, taskBranch, direction string, task *types.Task, conflictedFiles []string) (string, error) {
 	serverURL := task.LlamaServerURL
 	modelName := task.ModelName
 	if serverURL == "" || modelName == "" {
@@ -60,6 +61,7 @@ func (te *TaskExecutor) resolveMergeConflicts(basePath, projectID, taskID, targe
 		TaskTitle:       task.Title,
 		TaskDescription: task.Prompt,
 		ConflictedFiles: conflictContext,
+		Direction:       direction,
 	})
 	if err != nil {
 		return "", fmt.Errorf("render merge conflict prompt: %w", err)
@@ -227,9 +229,12 @@ func getMergeStatusOutput(dir string) string {
 
 // tryResolveMergeConflicts attempts LLM-based conflict resolution after a failed merge.
 // Uses a fallback chain: primary scan → fallback scan → auto-continue → diagnostic error.
+// direction is "task_to_target" (prefer task changes) or "target_to_task" (prefer target changes).
+// If keepMergeOnFailure is true, the merge is NOT aborted on LLM resolution failure
+// (caller will handle the conflicted state, e.g., for interactive resolution).
 // On success, stages files, commits, and logs a merge_resolution message.
-// On failure, aborts the merge and returns the error (caller should handle gracefully).
-func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
+// On failure, aborts the merge (unless keepMergeOnFailure) and returns the error.
+func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, direction string, task *types.Task, keepMergeOnFailure bool) error {
 	// Confirm we're actually in a merge state
 	if !isMergeInProgress(dir) {
 		// Not a merge conflict — likely a hook failure, lock issue, or other git error
@@ -272,10 +277,12 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetB
 		fmt.Sprintf("Merge conflict detected in: %s. Resolving with LLM...", strings.Join(conflictedFiles, ", ")))
 
 	// Resolve conflicts with LLM
-	summary, err := te.resolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, task, conflictedFiles)
+	summary, err := te.resolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, direction, task, conflictedFiles)
 	if err != nil {
 		log.Printf("[merge] task=%s LLM conflict resolution failed: %v", taskID, err)
-		_ = runGitDir(dir, "merge", "--abort")
+		if !keepMergeOnFailure {
+			_ = runGitDir(dir, "merge", "--abort")
+		}
 		return fmt.Errorf("LLM conflict resolution failed: %w", err)
 	}
 

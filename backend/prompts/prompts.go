@@ -84,6 +84,7 @@ type MergeConflictData struct {
 	TaskTitle       string
 	TaskDescription string
 	ConflictedFiles string
+	Direction       string // "task_to_target" or "target_to_task"
 }
 
 // RenderMergeConflictPrompt renders the merge conflict resolution prompt from a template file.
