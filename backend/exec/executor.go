@@ -977,13 +977,6 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		hadStash = true
 	}
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-	defer func() {
-		if hadStash {
-			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
-			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-		}
-	}()
 
 	// Ensure we're on the task branch
 	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
@@ -996,11 +989,18 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
 		te.logSystemMessage(taskID, task.CurrentThreadID,
 			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
+		// Pop stash — clean merge, safe to restore user's unstaged changes
+		if hadStash {
+			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+		}
 		return nil
 	}
 
 	// Merge conflict — set flag so the LLM loop (or HandleCommitAndDone)
 	// can trigger the agent to resolve via file tools.
+	// Keep user's stash intact — it will be popped after merge --continue.
 	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, setting merge conflict flag", taskID, targetBranch, taskBranch)
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 	task.HasMergeConflict = true

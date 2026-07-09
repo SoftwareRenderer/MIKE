@@ -483,6 +483,10 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 									commitOK = false
 								} else {
 									log.Printf("[pi] task=%s conflict resolution committed", task.ID)
+									// Restore user's unstaged changes (stashed during sync merge)
+									te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+									_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+									te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 								}
 							}
 							_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
@@ -525,37 +529,61 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						agentEnded = true
 					} else if task.HasMergeConflict {
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).
-						// User already clicked "Commit and move to done" — proceed with merge.
-						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
-						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, true)
+						// Pi resolved conflicts — commit resolution, finish sync merge,
+						// then attempt the final merge.
+						conflictedFiles := GetConflictedFiles(worktreePath)
+						commitOK := true
+						if len(conflictedFiles) > 0 {
+							addArgs := append([]string{"add"}, conflictedFiles...)
+							if err := te.gitRun(worktreePath, addArgs...); err != nil {
+								log.Printf("[pi] task=%s git add failed: %v", task.ID, err)
+								commitOK = false
+							}
+						}
+						if commitOK {
+							if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+								log.Printf("[pi] task=%s git commit failed: %v", task.ID, err)
+								commitOK = false
+							}
+						}
+						if commitOK {
+							if err := te.gitRun(worktreePath, "merge", "--continue"); err != nil {
+								log.Printf("[pi] task=%s git merge --continue failed: %v", task.ID, err)
+								commitOK = false
+							} else {
+								log.Printf("[pi] task=%s conflict resolution committed", task.ID)
+								// Restore user's unstaged changes (stashed during sync merge)
+								te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
+								te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+							}
+						}
+						_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
+
+						if commitOK {
+							if mergeErr := te.MergeBranch(projectID, task.ID, task); mergeErr != nil {
+								log.Printf("[pi] task=%s final merge failed: %v", task.ID, mergeErr)
+								task, _ = te.store.GetTaskByTaskID(task.ID)
+							}
+						}
+
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
-							// Still conflicted — prompt Pi again
-							conflictedFiles := GetConflictedFiles(worktreePath)
-							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-								TaskBranch:      task.Branch,
-								TargetBranch:    task.BaseRef,
-								TaskTitle:       task.Title,
-								TaskDescription: task.Prompt,
-								ConflictedFiles: conflictedFiles,
-							})
-							if pErr != nil {
-								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
+							log.Printf("[pi] task=%s merge still conflicted after agent ended", task.ID)
+							task.ExecutionState = "failed"
+							task.Status = "review"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(task.ID)
 							}
-							log.Printf("[pi] task=%s merge still conflicted after commit, re-prompting Pi", task.ID)
-							err := client.Prompt(ctx, prompt)
-							if err != nil {
-								log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
-								agentEnded = true
+							task.Output = fmt.Sprintf("Pi Coding Agent finished but merge still conflicted (%s)", stopReason)
+						} else {
+							task.ExecutionState = "completed"
+							task.Status = "done"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(task.ID)
 							}
-							break
+							task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
 						}
-						task.ExecutionState = "completed"
-						task.Status = "done"
-						if te.sandboxMgr != nil {
-							_ = te.sandboxMgr.Stop(task.ID)
-						}
-						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
 						te.store.UpdateTask(task)
 						agentEnded = true
 					} else if stopReason == "error" {
