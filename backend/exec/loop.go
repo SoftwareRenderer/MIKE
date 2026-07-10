@@ -834,10 +834,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 
 				if tc.Function.Name == "task_complete" {
-					// Extract summary from tool args
-					if summary, ok := args["summary"].(string); ok && summary != "" {
-						task.ChangeSummary = summary
-					}
 					if task.AutoCommit {
 						if task.HasMergeConflict {
 							_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)

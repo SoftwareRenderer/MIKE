@@ -508,7 +508,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 }
 
 // generateCommitMessage builds a commit message from task title, summary, and model.
-// If task.ChangeSummary is empty, generates one via LLM from conversation + diff.
+// Generates one via LLM from conversation + diff.
 func (h *TaskHandler) generateCommitMessage(ctx context.Context, taskID string, task *types.Task) string {
 	return h.executor.GenerateCommitMessageForTask(ctx, taskID, task)
 }

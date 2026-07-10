@@ -6,7 +6,7 @@
     import { WebglAddon } from '@xterm/addon-webgl';
     import { selectedProject, selectedTask, projectTerminalPorts } from '$lib/stores/app';
 import { showTerminal } from '$lib/stores/ui';
-    import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
+    import { createTerminal, createProjectTerminal, isTerminalStale, getTask, getProject } from '$lib/api';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
@@ -192,6 +192,33 @@ import { showTerminal } from '$lib/stores/ui';
                 activePorts = ports;
             }
         });
+
+        // Fetch fresh port data from API to avoid stale store values.
+        // Stores can be empty/stale when the terminal opens (e.g., container
+        // already exists so no WebSocket broadcast is sent).
+        (async () => {
+            const proj = get(selectedProject);
+            const task = get(selectedTask);
+            if (!proj) return;
+            if (task) {
+                // Task terminal: fetch latest task to get assigned_ports
+                try {
+                    const fresh = await getTask(proj.id, task.id);
+                    if (fresh.assigned_ports && fresh.assigned_ports.length > 0) {
+                        activePorts = fresh.assigned_ports;
+                    }
+                } catch { /* stale data is fine — WebSocket will update */ }
+            } else {
+                // Project terminal: fetch latest project to get active_terminal_ports
+                try {
+                    const fresh = await getProject(proj.id);
+                    if (fresh.active_terminal_ports && fresh.active_terminal_ports.length > 0) {
+                        activePorts = fresh.active_terminal_ports;
+                        projectTerminalPorts.set(fresh.active_terminal_ports);
+                    }
+                } catch { /* stale data is fine — WebSocket will update */ }
+            }
+        })();
 
         term = new Terminal({
             cursorBlink: true,

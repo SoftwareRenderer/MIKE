@@ -555,6 +555,15 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check that git user.name and user.email are configured
+	for _, key := range []string{"user.name", "user.email"} {
+		cmd := exec.Command("git", "config", "--global", key)
+		if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) == "" {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("git %s is not set — run: git config --global %s '<value>'", key, key))
+			return
+		}
+	}
+
 	// git init
 	cmd := exec.Command("git", "-C", req.Path, "init")
 	if out, err := cmd.CombinedOutput(); err != nil {

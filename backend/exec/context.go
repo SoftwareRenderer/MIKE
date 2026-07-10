@@ -395,9 +395,8 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffS
 }
 
 // GenerateCommitMessageForTask builds a full commit message from task title, summary, and model.
-// If task.ChangeSummary is set, uses it directly. Otherwise generates one via LLM from
-// conversation + diff. This is the single source of truth for commit message generation
-// across all commit paths (auto-commit, manual commit-and-done).
+// Generates one via LLM from conversation + diff. This is the single source of truth for commit
+// message generation across all commit paths (auto-commit, manual commit-and-done).
 func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID string, task *types.Task) string {
 	modelName := task.ModelName
 	if modelName == "" {
