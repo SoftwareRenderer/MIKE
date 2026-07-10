@@ -1911,6 +1911,101 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	}
 }
 
+// TestLoopDetector_ResetClearsStreak verifies that detector.reset() clears loopStreak,
+// which is the mechanism used when a user action (e.g., message delete) changes context.
+func TestLoopDetector_ResetClearsStreak(t *testing.T) {
+	te := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	proj := &types.Project{ID: "proj-reset-streak", Name: "Reset Streak", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := te.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &types.Task{
+		ID: "task-reset-streak", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
+		Status: "in_progress", ExecutionState: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := te.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	detector := newLoopDetector()
+	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
+
+	// Build up a streak of 2
+	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	if detector.loopStreak != 2 {
+		t.Fatalf("expected loopStreak=2, got %d", detector.loopStreak)
+	}
+
+	// Simulate user action: reset detector (what ContextChanged path does)
+	detector.reset()
+	if detector.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after reset, got %d", detector.loopStreak)
+	}
+
+	// After reset, first 2 of 3 should NOT terminate (fresh streak)
+	for i := 0; i < 2; i++ {
+		terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+		if terminated {
+			t.Fatalf("hint %d should not terminate (fresh streak, %d/3)", i+1, i+2)
+		}
+	}
+	// Task should still be running (not failed from the old streak)
+	taskAfter, _ := te.store.GetTaskByTaskID(task.ID)
+	if taskAfter.ExecutionState == "failed" {
+		t.Error("task should not be failed — reset cleared the old streak")
+	}
+}
+
+// TestNotifyContextChanged_SendsToChannel verifies that NotifyContextChanged
+// sends a UserMessage with ContextChanged=true to the executor channel.
+func TestNotifyContextChanged_SendsToChannel(t *testing.T) {
+	te := newTestExecutor(t)
+
+	// Simulate an execution state with a userMsgChan
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	userMsgChan := make(chan stream.UserMessage, 16)
+
+	te.taskMu.Lock()
+	te.tasks["test-task"] = &executionState{
+		ctx:         ctx,
+		cancel:      cancel,
+		userMsgChan: userMsgChan,
+		summarizeCh: make(chan chan error, 16),
+	}
+	te.taskMu.Unlock()
+
+	// Call NotifyContextChanged
+	te.NotifyContextChanged("proj", "test-task")
+
+	// Verify the channel received the notification
+	select {
+	case um := <-userMsgChan:
+		if !um.ContextChanged {
+			t.Error("expected ContextChanged=true")
+		}
+		if um.Content != "" {
+			t.Errorf("expected empty content, got %q", um.Content)
+		}
+	default:
+		t.Fatal("no message sent to channel")
+	}
+}
+
+// TestNotifyContextChanged_NoOpWhenNoTask verifies that NotifyContextChanged
+// is a no-op when no executor is running for the task.
+func TestNotifyContextChanged_NoOpWhenNoTask(t *testing.T) {
+	te := newTestExecutor(t)
+
+	// Should not panic when no task is running
+	te.NotifyContextChanged("proj", "nonexistent-task")
+}
+
 // --- raw_args Delta Tests ---
 
 // computeToolCallData builds the data map for a tool_call WS event,

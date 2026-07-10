@@ -457,19 +457,25 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Check for user messages that arrived during tool execution.
 		select {
 		case um := <-userMsgChan:
-			log.Printf("[user-msg] task=%s received message before LLM call (regenerate=%v)", task.ID, um.Regenerate)
-			lc.detector.reset() // user input breaks any loop pattern
-			if um.Regenerate {
-				lc.messages = truncateForRegenerate(lc.messages)
-			} else {
-				// Re-sync with DB to pick up any deleted messages.
+			if um.ContextChanged {
+				log.Printf("[context-changed] task=%s conversation context changed, resetting loop detector", task.ID)
+				lc.detector.reset()
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
-			}
-			lc.messages = append(lc.messages, userMessageToChatMessage(um))
-			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
-				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
-				lc.client = switched.client
-				lc.providerName = switched.providerName
+			} else {
+				log.Printf("[user-msg] task=%s received message before LLM call (regenerate=%v)", task.ID, um.Regenerate)
+				lc.detector.reset() // user input breaks any loop pattern
+				if um.Regenerate {
+					lc.messages = truncateForRegenerate(lc.messages)
+				} else {
+					// Re-sync with DB to pick up any deleted messages.
+					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
+				}
+				lc.messages = append(lc.messages, userMessageToChatMessage(um))
+				if um.ModelName != "" && um.ServerURL != PiSentinelURL {
+					switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
+					lc.client = switched.client
+					lc.providerName = switched.providerName
+				}
 			}
 		default:
 		}
@@ -665,6 +671,22 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case <-streamDone:
 			// Stream completed normally (or all retries exhausted)
 		case um := <-userMsgChan:
+			if um.ContextChanged {
+				log.Printf("[context-changed] task=%s conversation context changed during streaming, cancelling", task.ID)
+				lc.detector.reset()
+				callCancel()
+				select {
+				case <-streamDone:
+				case <-time.After(2 * time.Second):
+					log.Printf("[cancel] task=%s streamDone timeout, forcing continue", task.ID)
+				}
+				te.gate.Release(serverURL)
+				lc.assistantContent.Reset()
+				lc.reasoningContent.Reset()
+				lc.pendingToolCalls = nil
+				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
+				continue
+			}
 			// New user message — cancel current LLM call.
 			log.Printf("[cancel] task=%s user message received during streaming, cancelling (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset() // user input breaks any loop pattern
@@ -1072,6 +1094,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Check for queued user messages before sending complete.
 			select {
 			case um := <-userMsgChan:
+				if um.ContextChanged {
+					log.Printf("[context-changed] task=%s conversation context changed after response, re-syncing", task.ID)
+					lc.detector.reset()
+					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
+					continue
+				}
 				log.Printf("[user-msg] task=%s received message after response, continuing (regenerate=%v)", task.ID, um.Regenerate)
 				lc.detector.reset() // user input breaks any loop pattern
 				if um.Regenerate {
@@ -1160,6 +1188,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.detector.reset() // context changed, clear stale text window
 			continue
 		case um := <-userMsgChan:
+			if um.ContextChanged {
+				log.Printf("[context-changed] task=%s conversation context changed while idle, re-syncing", task.ID)
+				lc.detector.reset()
+				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
+				continue
+			}
 			log.Printf("[user-msg] task=%s received message while idle, continuing (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset()
 			if um.Regenerate {

@@ -30,6 +30,10 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 				JSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			// Notify running executor to reset loop detector and re-sync messages.
+			if s.executor != nil {
+				s.executor.NotifyContextChanged(projectID, taskID)
+			}
 			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}
@@ -47,6 +51,11 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID); err != nil {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		// Notify running executor to reset loop detector and re-sync messages.
+		// Skip during regeneration — the regenerate message itself triggers a re-sync.
+		if !req.Regenerate && s.executor != nil {
+			s.executor.NotifyContextChanged(projectID, taskID)
 		}
 		// Clear buffered task events so reconnecting clients don't replay
 		// stale events (e.g., summarization for a deleted message).

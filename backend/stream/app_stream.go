@@ -111,6 +111,7 @@ type UserMessage struct {
 	ReasoningEffort string
 	Attachments     string // JSON array of {mimeType, data} for images
 	Regenerate      bool   // true when re-sending a message to trigger regeneration
+	ContextChanged  bool   // true when conversation context changed (e.g., message deleted); resets loop detector
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.

@@ -215,12 +215,16 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				// with steer behavior to start the next turn.
 				select {
 				case um := <-userMsgChan:
-					log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
-					err := client.Prompt(ctx, um.Content, "steer")
-					if err != nil {
-						log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
+					if um.ContextChanged {
+						log.Printf("[pi] task=%s context changed notification, skipping", task.ID)
+					} else {
+						log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
+						err := client.Prompt(ctx, um.Content, "steer")
+						if err != nil {
+							log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
+						}
+						// Don't set agentEnded — continue the event loop for the next turn
 					}
-					// Don't set agentEnded — continue the event loop for the next turn
 				default:
 					// No queued messages — check if auto-commit/merge is needed.
 					// Perform merge inside the event loop so Pi can resolve conflicts with tools.
@@ -342,6 +346,10 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			}
 
 		case um := <-userMsgChan:
+			if um.ContextChanged {
+				log.Printf("[pi] task=%s context changed notification, skipping", task.ID)
+				continue
+			}
 			// Forward user message to Pi with steer behavior.
 			// "steer" queues the message while the agent is running;
 			// it is delivered after the current turn's tool calls finish.

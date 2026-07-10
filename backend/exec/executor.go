@@ -817,6 +817,23 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
 }
 
+// NotifyContextChanged tells the running executor that the conversation context has changed
+// (e.g., messages were deleted). The executor will reset its loop detector and re-sync
+// messages from the DB on the next LLM call.
+func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	state, exists := te.tasks[taskID]
+	if !exists {
+		return
+	}
+	select {
+	case state.userMsgChan <- stream.UserMessage{ContextChanged: true}:
+	default:
+		log.Printf("[context-changed] task=%s channel full, dropping notification", taskID)
+	}
+}
+
 // StopSandbox removes the sandbox container for a task (called on task deletion).
 func (te *TaskExecutor) StopSandbox(taskID string) {
 	if te.sandboxMgr != nil {
