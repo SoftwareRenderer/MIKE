@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/types"
 )
@@ -390,6 +391,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the forked branch
 	s.broadcastTaskDiff(taskID)
+	// Generate checkpoint label for the fork point message.
+	s.generateCheckpointLabelForFork(r.Context(), taskID, projectID, req.FromMessageID)
 	JSONResponse(w, http.StatusCreated, newThread)
 }
 
@@ -530,4 +533,36 @@ func (s *Server) getProjectMutex(projectID string) *sync.Mutex {
 	s.projectMux[projectID] = mu
 	s.projectMuxMu.Unlock()
 	return mu
+}
+
+// generateCheckpointLabelForFork generates a short label for the checkpoint message
+// at the fork point and sends it to the frontend via WebSocket.
+func (s *Server) generateCheckpointLabelForFork(ctx context.Context, taskID, projectID, fromMessageID string) {
+	task, err := s.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return
+	}
+	// Get diff stat at the fork point
+	diffStat, _ := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
+	if diffStat == "" {
+		diffStat = "no diff available"
+	}
+	// Get conversation up to the checkpoint message
+	taskMsgs, _ := s.store.GetTaskMessages(taskID, task.CurrentThreadID)
+	var conversation []types.ChatMessage
+	for _, m := range taskMsgs {
+		content := m.Content
+		if m.ReasoningContent != "" {
+			content = m.ReasoningContent + "\n" + content
+		}
+		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+	}
+	turnText := exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3))
+	label := s.executor.GenerateCheckpointLabel(ctx, taskID, diffStat, turnText)
+	if label != "" && label != "file changes" {
+		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+			"message_id": fromMessageID,
+			"label":      label,
+		}})
+	}
 }

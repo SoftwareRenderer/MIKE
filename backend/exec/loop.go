@@ -59,7 +59,7 @@ func unstageNewBinaryFilesInDir(dir string) {
 }
 
 // streamFlusher batches token, reasoning, and tool_call WebSocket events
-// and sends them at most once every throttleInterval (500ms).
+// and sends them at most once every throttleInterval (100ms).
 // This reduces WebSocket write overhead during fast LLM streaming.
 type streamFlusher struct {
 	mu             sync.Mutex
@@ -535,77 +535,81 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 		}()
 
-		go func() {
-			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
-				if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-					lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-					flusher.appendReasoning(*choice.Delta.ReasoningContent)
+		// Shared callbacks for ChatStream — used by both the initial call and retries.
+		tokenCb := func(choice types.ChatChoice) {
+			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+				lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
+				flusher.appendReasoning(*choice.Delta.ReasoningContent)
+			}
+			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
+				lc.assistantContent.WriteString(*choice.Delta.Content)
+				flusher.appendToken(*choice.Delta.Content)
+				// Real-time phrase repetition detection (not throttled — detection runs per-token)
+				if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
+					log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
 				}
-				if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-					lc.assistantContent.WriteString(*choice.Delta.Content)
-					flusher.appendToken(*choice.Delta.Content)
-					// Real-time phrase repetition detection (not throttled — detection runs per-token)
-					if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
-						log.Printf("[loop] task=%s phrase repetition detected during streaming", task.ID)
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
+			}
+			if len(choice.Delta.ToolCalls) > 0 {
+				priorLen := len(lc.pendingToolCalls)
+				lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
+				for i := 0; i < len(lc.pendingToolCalls); i++ {
+					tc := lc.pendingToolCalls[i]
+					if tc.ID == "" || tc.Function.Name == "" {
+						continue
+					}
+					argLen := len(tc.Function.Arguments)
+					prevLen := lc.prevArgLens[tc.ID]
+					isNew := i >= priorLen
+					isUpdated := !isNew && argLen != prevLen
+					if !isNew && !isUpdated {
+						continue
+					}
+					lc.prevArgLens[tc.ID] = argLen
+					path := extractPathFromArgs(tc.Function.Arguments)
+					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
+				}
+			}
+			// Throttled progress updates for write_file (1 per 2 seconds)
+			if time.Since(lastProgressSend) > 2*time.Second {
+				for _, tc := range lc.pendingToolCalls {
+					if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
+						lastProgressSend = time.Now()
 					}
 				}
-				if len(choice.Delta.ToolCalls) > 0 {
-					priorLen := len(lc.pendingToolCalls)
-					lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
-					for i := 0; i < len(lc.pendingToolCalls); i++ {
-						tc := lc.pendingToolCalls[i]
-						if tc.ID == "" || tc.Function.Name == "" {
-							continue
-						}
-						argLen := len(tc.Function.Arguments)
-						prevLen := lc.prevArgLens[tc.ID]
-						isNew := i >= priorLen
-						isUpdated := !isNew && argLen != prevLen
-						if !isNew && !isUpdated {
-							continue
-						}
-						lc.prevArgLens[tc.ID] = argLen
-						path := extractPathFromArgs(tc.Function.Arguments)
-						flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
-					}
-				}
-				// Throttled progress updates for write_file (1 per 2 seconds)
-				if time.Since(lastProgressSend) > 2*time.Second {
-					for _, tc := range lc.pendingToolCalls {
-						if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
-							lastProgressSend = time.Now()
-						}
-					}
-				}
-				// Send stats event when predicted token count changes.
-				// LLM client accumulates usage/timings from each SSE frame.
-				if lc.usage != nil {
-					predictedN := lc.usage.CompletionTokens
-					if predictedN != lastPredictedN {
-						lastPredictedN = predictedN
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-							"model_name":       activeModel,
-							"prompt_tokens":    lc.usage.PromptTokens,
-							"predicted_tokens": predictedN,
-							"predicted_ms":     lc.usage.PredictedMs,
-						}})
-					}
-				}
-			}, func(progress types.PromptProgressData) {
-				// Forward prompt processing progress to the frontend.
-				// Throttle to ~2 updates/sec to avoid flooding the WebSocket.
-				if time.Since(lastProgressSend) > 500*time.Millisecond {
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
-						"total":     progress.Total,
-						"cache":     progress.Cache,
-						"processed": progress.Processed,
-						"time_ms":   progress.TimeMs,
+			}
+			// Send stats event when predicted token count changes.
+			// LLM client accumulates usage/timings from each SSE frame.
+			if lc.usage != nil {
+				predictedN := lc.usage.CompletionTokens
+				if predictedN != lastPredictedN {
+					lastPredictedN = predictedN
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+						"model_name":       activeModel,
+						"prompt_tokens":    lc.usage.PromptTokens,
+						"predicted_tokens": predictedN,
+						"predicted_ms":     lc.usage.PredictedMs,
 					}})
-					lastProgressSend = time.Now()
 				}
-			})
+			}
+		}
+		progressCb := func(progress types.PromptProgressData) {
+			// Forward prompt processing progress to the frontend.
+			// Throttle to ~2 updates/sec to avoid flooding the WebSocket.
+			if time.Since(lastProgressSend) > 500*time.Millisecond {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
+					"total":     progress.Total,
+					"cache":     progress.Cache,
+					"processed": progress.Processed,
+					"time_ms":   progress.TimeMs,
+				}})
+				lastProgressSend = time.Now()
+			}
+		}
+
+		go func() {
+			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 
 			// Retry on transient errors (skip if cancelled by user message).
 			if streamErr != nil && callCtx.Err() == nil {
@@ -635,55 +639,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					lc.reasoningContent.Reset()
 					lc.pendingToolCalls = nil
 					flusher.reset()
-					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, func(choice types.ChatChoice) {
-						if choice.Delta.ReasoningContent != nil {
-							lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-							flusher.appendReasoning(*choice.Delta.ReasoningContent)
-						}
-						if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-							lc.assistantContent.WriteString(*choice.Delta.Content)
-							flusher.appendToken(*choice.Delta.Content)
-						}
-						if len(choice.Delta.ToolCalls) > 0 {
-							lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
-							for i := 0; i < len(lc.pendingToolCalls); i++ {
-								tc := lc.pendingToolCalls[i]
-								if tc.ID == "" || tc.Function.Name == "" {
-									continue
-								}
-								argLen := len(tc.Function.Arguments)
-								prevLen := lc.prevArgLens[tc.ID]
-								lc.prevArgLens[tc.ID] = argLen
-								if argLen != prevLen {
-									path := extractPathFromArgs(tc.Function.Arguments)
-									flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, prevLen == 0, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
-								}
-							}
-						}
-						// Send stats event when predicted token count changes (retry path)
-						if lc.usage != nil {
-							predictedN := lc.usage.CompletionTokens
-							if predictedN != lastPredictedN {
-								lastPredictedN = predictedN
-								te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-									"model_name":       activeModel,
-									"prompt_tokens":    lc.usage.PromptTokens,
-									"predicted_tokens": predictedN,
-									"predicted_ms":     lc.usage.PredictedMs,
-								}})
-							}
-						}
-					}, func(progress types.PromptProgressData) {
-						if time.Since(lastProgressSend) > 500*time.Millisecond {
-							te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
-								"total":     progress.Total,
-								"cache":     progress.Cache,
-								"processed": progress.Processed,
-								"time_ms":   progress.TimeMs,
-							}})
-							lastProgressSend = time.Now()
-						}
-					})
+					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 					if streamErr == nil {
 						break
 					}
@@ -874,61 +830,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						task.ChangeSummary = summary
 					}
 					if task.AutoCommit {
-						// If a merge conflict was detected (sync-merge or final-merge),
-						// the LLM has resolved conflicts by editing files. Commit the
-						// resolution, finish the merge, then attempt the final merge.
 						if task.HasMergeConflict {
-							commitOK := true
-							if isMergeInProgress(worktreePath) {
-								// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
-								conflictedFiles := GetResolvedConflictedFiles(worktreePath)
-								if len(conflictedFiles) > 0 {
-									addArgs := append([]string{"add"}, conflictedFiles...)
-									if err := te.gitRun(worktreePath, addArgs...); err != nil {
-										log.Printf("[merge] task=%s git add failed: %v", task.ID, err)
-										commitOK = false
-									}
-								}
-							} else {
-								// Final-merge conflict: worktree has no MERGE_HEAD.
-								checkCmd := exec.Command("git", "diff", "--quiet")
-								checkCmd.Dir = worktreePath
-								if checkCmd.Run() == nil {
-									log.Printf("[merge] task=%s no changes to commit for conflict resolution", task.ID)
-									commitOK = false
-								}
-								if commitOK {
-									if err := te.gitRun(worktreePath, "add", "-A"); err != nil {
-										log.Printf("[merge] task=%s git add -A failed: %v", task.ID, err)
-										commitOK = false
-									}
-								}
-							}
-							if commitOK {
-								if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
-									log.Printf("[merge] task=%s git commit failed: %v", task.ID, err)
-									commitOK = false
-								}
-							}
-							if commitOK {
-								log.Printf("[merge] task=%s conflict resolution committed", task.ID)
-								// Drop stale stash (contains LLM's pre-sync edits, already committed).
-								// Do NOT pop — that would re-apply old edits as unstaged changes.
-								te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-								_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
-								te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-							}
-							_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
-
-							if commitOK {
-								// Final merge (task branch into target)
-								if mergeErr := te.MergeBranch(projectID, task.ID, task); mergeErr != nil {
-									log.Printf("[merge] task=%s final merge failed: %v", task.ID, mergeErr)
-									task, _ = te.store.GetTaskByTaskID(task.ID)
-								}
-							}
-
-							task, _ = te.store.GetTaskByTaskID(task.ID)
+							_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
 							if task.HasMergeConflict {
 								// Still conflicted — inject resolution prompt and continue
 								conflictedFiles := GetConflictedFiles(worktreePath)
@@ -1015,58 +918,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// LLM resolved conflicts by editing files — commit resolution,
 						// finish the sync merge, then attempt the final merge.
-						commitOK := true
-						if isMergeInProgress(worktreePath) {
-							// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
-							// Stage the resolved conflicted files.
-							conflictedFiles := GetResolvedConflictedFiles(worktreePath)
-							if len(conflictedFiles) > 0 {
-								addArgs := append([]string{"add"}, conflictedFiles...)
-								if err := te.gitRun(worktreePath, addArgs...); err != nil {
-									log.Printf("[merge] task=%s git add failed: %v", task.ID, err)
-									commitOK = false
-								}
-							}
-						} else {
-							// Final-merge conflict: worktree has no MERGE_HEAD.
-							// Stage the LLM's file edits (it modified task branch to be merge-compatible).
-							checkCmd := exec.Command("git", "diff", "--quiet")
-							checkCmd.Dir = worktreePath
-							if checkCmd.Run() == nil {
-								log.Printf("[merge] task=%s no changes to commit for conflict resolution", task.ID)
-								commitOK = false
-							}
-							if commitOK {
-								if err := te.gitRun(worktreePath, "add", "-A"); err != nil {
-									log.Printf("[merge] task=%s git add -A failed: %v", task.ID, err)
-									commitOK = false
-								}
-							}
-						}
-						if commitOK {
-							if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
-								log.Printf("[merge] task=%s git commit failed: %v", task.ID, err)
-								commitOK = false
-							}
-						}
-						if commitOK {
-							log.Printf("[merge] task=%s conflict resolution committed", task.ID)
-							// Drop stale stash (contains LLM's pre-sync edits, already committed).
-							// Do NOT pop — that would re-apply old edits as unstaged changes.
-							te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-							_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
-							te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-						}
-						_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
-
-						if commitOK {
-							if mergeErr := te.MergeBranch(projectID, task.ID, task); mergeErr != nil {
-								log.Printf("[merge] task=%s final merge failed: %v", task.ID, mergeErr)
-								task, _ = te.store.GetTaskByTaskID(task.ID)
-							}
-						}
-
-						task, _ = te.store.GetTaskByTaskID(task.ID)
+						_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
 						if task.HasMergeConflict {
 							// Still conflicted after LLM called task_complete — fail.
 							log.Printf("[merge] task=%s merge still conflicted after task_complete", task.ID)
@@ -1098,12 +950,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 					// Post-tool git check: broadcast diff if a git command changed the state
 					if hadGitCmd {
-						te.taskMu.Lock()
-						execState := te.tasks[task.ID]
-						te.taskMu.Unlock()
-						if execState != nil {
-							te.checkAndBroadcastDiff(projectID, task.ID, task, execState, "")
-						}
+						te.broadcastDiffIfGitCmd(projectID, task.ID, task)
 					}
 					// If this is a subtask, auto-start the next sibling
 					if task.ParentTaskID != "" {
@@ -1114,12 +961,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 			// Post-tool git check: broadcast diff if a git command changed the state
 			if hadGitCmd {
-				te.taskMu.Lock()
-				execState := te.tasks[task.ID]
-				te.taskMu.Unlock()
-				if execState != nil {
-					te.checkAndBroadcastDiff(projectID, task.ID, task, execState, "")
-				}
+				te.broadcastDiffIfGitCmd(projectID, task.ID, task)
 			}
 
 			// Check consecutive identical tool call failures (turn-level).
@@ -1410,11 +1252,7 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	if usage != nil {
 		return usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, int(usage.PromptMs), int(usage.PredictedMs)
 	}
-	durationMs := int(time.Since(startTime).Milliseconds())
-	promptTokens = estimatePromptTokens(messages)
-	predictedTokens = estimateTotalTokens(assistantText, reasoningContent)
-	cacheTokens = 0
-	promptMs = durationMs * 7 / 10
-	predictedMs = durationMs * 3 / 10
-	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
+	// usage is nil only when ChatStream returns no SSE data at all (empty/error stream).
+	// Callers should treat zero stats as "unknown" — no estimation needed.
+	return 0, 0, 0, 0, 0
 }

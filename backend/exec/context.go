@@ -228,7 +228,8 @@ func isSandboxableTool(name string) bool {
 // createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.
 // Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
 // from the working tree — files stay visible in the filesystem.
-// Runs the LLM labeler in a goroutine so it does not block the main execution loop.
+// Runs in a goroutine so it does not block the main execution loop.
+// Label generation is deferred to fork time (handleThreadFork).
 // newMessages contains only messages since the last checkpoint.
 func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
@@ -240,31 +241,10 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	// Send pending event to frontend
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
-	// Extract turn text before spawning the goroutine so it doesn't
-	// hold a reference to the full (and growing) messages slice.
-	turnText := FormatConversationTurns(ExtractLastTurns(newMessages, 3))
-
-	// Run stash + LLM labeler in background (non-blocking)
+	// Run stash creation in background (non-blocking).
+	// Label generation is deferred to fork time (handleThreadFork).
 	go func() {
-		// Check for cancellation before expensive work
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		diffStat, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-		if err != nil {
-			diffStat = "file changes"
-		}
-
-		taskForLabel, _ := te.store.GetTaskByTaskID(taskID)
-		branchName := ""
-		if taskForLabel != nil && taskForLabel.Branch != "" {
-			branchName = taskForLabel.Branch
-		}
-		shortLabel := te.generateCheckpointLabel(ctx, taskID, diffStat, turnText)
-		label := git.StashMessageForCheckpoint(taskID, branchName, shortLabel)
+		label := git.StashMessageForCheckpoint(taskID, "", "")
 
 		// Check for cancellation before git operations
 		select {
@@ -315,7 +295,6 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
-				"label":       label,
 			}})
 			return
 		}
@@ -329,14 +308,13 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 			"message_id":  assistantMsgID,
 			"commit_hash": stashHash,
-			"label":       label,
 		}})
 	}()
 }
 
-// generateCheckpointLabel generates a short 5-word label for a git stash checkpoint.
+// GenerateCheckpointLabel generates a short 5-word label for a git stash checkpoint.
 // Falls back to the task title on any error.
-func (te *TaskExecutor) generateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
+func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
 		return "file changes"

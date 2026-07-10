@@ -303,3 +303,67 @@ func runGitDir(dir string, args ...string) error {
 	return err
 }
 
+// commitConflictResolution stages resolved conflicted files, commits the
+// resolution, drops the stale stash, clears the merge conflict flag, and
+// attempts the final merge. Returns (commitOK, refreshedTask).
+//
+// This encapsulates the git operations shared by all merge-conflict resolution
+// paths in the execution loop. Callers handle the divergent post-resolution
+// control flow (inject prompt vs. mark done vs. mark failed).
+func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) (commitOK bool, updatedTask *types.Task) {
+	commitOK = true
+
+	if isMergeInProgress(worktreePath) {
+		// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
+		conflictedFiles := GetResolvedConflictedFiles(worktreePath)
+		if len(conflictedFiles) > 0 {
+			addArgs := append([]string{"add"}, conflictedFiles...)
+			if err := te.gitRun(worktreePath, addArgs...); err != nil {
+				log.Printf("[merge] task=%s git add failed: %v", taskID, err)
+				commitOK = false
+			}
+		}
+	} else {
+		// Final-merge conflict: worktree has no MERGE_HEAD.
+		checkCmd := osexec.Command("git", "diff", "--quiet")
+		checkCmd.Dir = worktreePath
+		if checkCmd.Run() == nil {
+			log.Printf("[merge] task=%s no changes to commit for conflict resolution", taskID)
+			commitOK = false
+		}
+		if commitOK {
+			if err := te.gitRun(worktreePath, "add", "-A"); err != nil {
+				log.Printf("[merge] task=%s git add -A failed: %v", taskID, err)
+				commitOK = false
+			}
+		}
+	}
+
+	if commitOK {
+		if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+			log.Printf("[merge] task=%s git commit failed: %v", taskID, err)
+			commitOK = false
+		}
+	}
+
+	if commitOK {
+		log.Printf("[merge] task=%s conflict resolution committed", taskID)
+		// Drop stale stash (contains LLM's pre-sync edits, already committed).
+		// Do NOT pop — that would re-apply old edits as unstaged changes.
+		te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+		_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
+		te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	}
+
+	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
+
+	if commitOK {
+		if mergeErr := te.MergeBranch(projectID, taskID, task); mergeErr != nil {
+			log.Printf("[merge] task=%s final merge failed: %v", taskID, mergeErr)
+		}
+	}
+
+	updatedTask, _ = te.store.GetTaskByTaskID(taskID)
+	return commitOK, updatedTask
+}
+

@@ -24,6 +24,14 @@ func TestCheckpointLabelPrompt_DifferentFromCommitPrompt(t *testing.T) {
 	}
 }
 
+func TestCheckpointLabelPrompt_UseDescription(t *testing.T) {
+	// Label is only generated at fork time, not during checkpoint creation.
+	// See handleThreadFork -> generateCheckpointLabelForFork -> GenerateCheckpointLabel.
+	if !strings.Contains(checkpointLabelPrompt, "imperative mood") {
+		t.Error("checkpointLabelPrompt should specify imperative mood")
+	}
+}
+
 func TestBuildCheckpointLabelMessages(t *testing.T) {
 	msgs := buildCheckpointLabelMessages("src/main.go | 10 ++++++++---", "User: Fix the bug\nAssistant: I'll patch it")
 

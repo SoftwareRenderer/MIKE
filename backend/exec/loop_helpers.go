@@ -74,6 +74,18 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, serv
 	}
 }
 
+// broadcastDiffIfGitCmd looks up the execution state and broadcasts a diff
+// if the task has an active executor. Used after tool execution when a git
+// command may have changed the working tree state.
+func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *types.Task) {
+	te.taskMu.Lock()
+	state := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if state != nil {
+		te.checkAndBroadcastDiff(projectID, taskID, task, state, "")
+	}
+}
+
 // checkAndBroadcastDiff computes the task diff and broadcasts stats only if the hash
 // differs from the last broadcast. This avoids duplicate broadcasts when fsnotify
 // already caught the same change. If forkBranch is provided, it resolves the thread
