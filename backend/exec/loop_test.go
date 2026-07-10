@@ -2107,3 +2107,87 @@ func TestStreamFlusher_SecondFlush(t *testing.T) {
 		t.Errorf("expected second batch 'world', got %q", events[1].Data.(map[string]string)["text"])
 	}
 }
+
+// --- Reasoning Content Tests ---
+
+func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
+	// Simulate DB messages with reasoning content
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Build a feature"},
+		{Role: "assistant", Content: "I'll implement it", ReasoningContent: "Let me think about the approach..."},
+		{Role: "assistant", Content: "Done!", ReasoningContent: ""},
+		{Role: "assistant", Content: "", ReasoningContent: "I need to reason before acting"},
+	}
+
+	task := &types.Task{PlanMode: false}
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+
+	// Skip system prompt (index 0)
+	if len(messages) != 5 {
+		t.Fatalf("expected 5 messages (system + 4), got %d", len(messages))
+	}
+
+	// User message
+	if messages[1].Role != "user" || messages[1].Content != "Build a feature" {
+		t.Errorf("user message wrong: role=%s, content=%s", messages[1].Role, messages[1].Content)
+	}
+
+	// Assistant with reasoning — ReasoningContent must be separate, NOT concatenated into Content
+	if messages[2].Role != "assistant" {
+		t.Errorf("expected assistant, got %s", messages[2].Role)
+	}
+	if messages[2].Content != "I'll implement it" {
+		t.Errorf("expected Content='I'll implement it', got %q", messages[2].Content)
+	}
+	if messages[2].ReasoningContent != "Let me think about the approach..." {
+		t.Errorf("expected ReasoningContent='Let me think about the approach...', got %q", messages[2].ReasoningContent)
+	}
+
+	// Assistant without reasoning
+	if messages[3].Content != "Done!" || messages[3].ReasoningContent != "" {
+		t.Errorf("assistant without reasoning wrong: Content=%q, ReasoningContent=%q", messages[3].Content, messages[3].ReasoningContent)
+	}
+
+	// Reasoning-only assistant (empty content)
+	if messages[4].Content != "" {
+		t.Errorf("reasoning-only: expected empty Content, got %q", messages[4].Content)
+	}
+	if messages[4].ReasoningContent != "I need to reason before acting" {
+		t.Errorf("reasoning-only: expected ReasoningContent='I need to reason before acting', got %q", messages[4].ReasoningContent)
+	}
+}
+
+func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Read a file"},
+		{Role: "assistant", Content: "I'll read it", ReasoningContent: "Need to check the file first"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","args":{"path":"foo.txt"}}`, ToolResult: `{"output":"file contents","success":true,"duration":10}`},
+	}
+
+	task := &types.Task{PlanMode: false}
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+
+	// system + user + assistant + tool = 4
+	if len(messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(messages))
+	}
+
+	// Assistant message: reasoning should be separate
+	if messages[2].ReasoningContent != "Need to check the file first" {
+		t.Errorf("expected ReasoningContent='Need to check the file first', got %q", messages[2].ReasoningContent)
+	}
+	if messages[2].Content != "I'll read it" {
+		t.Errorf("expected Content='I'll read it', got %q", messages[2].Content)
+	}
+
+	// Tool result message
+	if messages[3].Role != "tool" {
+		t.Errorf("expected tool role, got %s", messages[3].Role)
+	}
+	if messages[3].ToolCallID != "call_1" {
+		t.Errorf("expected ToolCallID='call_1', got %q", messages[3].ToolCallID)
+	}
+	if messages[3].Content != "file contents" {
+		t.Errorf("expected Content='file contents', got %q", messages[3].Content)
+	}
+}

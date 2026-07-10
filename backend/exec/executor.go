@@ -1272,11 +1272,11 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 			}
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
 		case "assistant":
-			content := m.Content
+			msg := types.ChatMessage{Role: m.Role, Content: m.Content}
 			if m.ReasoningContent != "" {
-				content = m.ReasoningContent + "\n" + m.Content
+				msg.ReasoningContent = m.ReasoningContent
 			}
-			messages = append(messages, types.ChatMessage{Role: m.Role, Content: content})
+			messages = append(messages, msg)
 		case "tool_call":
 			if m.ToolResult != "" {
 				var resultMap map[string]any

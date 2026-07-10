@@ -1133,13 +1133,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				return
 			}
 
-			// Build assistant message with merged reasoning + content + tool calls.
+			// Build assistant message with reasoning, content, and tool calls.
 			// Including tool_calls in the message history is critical for models like gemma
 			// to understand what tool was called and match it to the result.
-			assistantContentFull := assistantText
-			if lc.reasoningContent.Len() > 0 {
-				assistantContentFull = lc.reasoningContent.String() + "\n" + assistantText
-			}
+			// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
 			var assistantToolCalls []types.ToolCallMsg
 			for _, tc := range lc.pendingToolCalls {
 				if tc.ID != "" && tc.Function.Name != "" {
@@ -1151,11 +1148,15 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					assistantToolCalls[len(assistantToolCalls)-1].Function.Arguments = tc.Function.Arguments
 				}
 			}
-			lc.messages = append(lc.messages, types.ChatMessage{
+			assistantMsg := types.ChatMessage{
 				Role:      "assistant",
-				Content:   assistantContentFull,
+				Content:   assistantText,
 				ToolCalls: assistantToolCalls,
-			})
+			}
+			if lc.reasoningContent.Len() > 0 {
+				assistantMsg.ReasoningContent = lc.reasoningContent.String()
+			}
+			lc.messages = append(lc.messages, assistantMsg)
 			for _, tr := range toolResults {
 				lc.messages = append(lc.messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
@@ -1187,12 +1188,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Text-only response resets the failure tracker
 			lc.tracker.reset()
 
-			// Merge reasoning into content so the model sees its own thinking
-			assistantContentFull := assistantText
+		// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
+			assistantMsg := types.ChatMessage{Role: "assistant", Content: assistantText}
 			if lc.reasoningContent.Len() > 0 {
-				assistantContentFull = lc.reasoningContent.String() + "\n" + assistantText
+				assistantMsg.ReasoningContent = lc.reasoningContent.String()
 			}
-			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: assistantContentFull})
+			lc.messages = append(lc.messages, assistantMsg)
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String(), lc.startTime)
 			duration := time.Since(lc.startTime).Milliseconds()
 			te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1273,8 +1274,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 			})
 
-			// Append reasoning to conversation history so the LLM sees its own thinking
-			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: reasoningText})
+			// Append reasoning to conversation history so the LLM sees its own thinking.
+			// Put in ReasoningContent so toAPIMessage sends it as reasoning_content.
+			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: "", ReasoningContent: reasoningText})
 
 			// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
 			lc.detector.recordTurn(nil, "")
