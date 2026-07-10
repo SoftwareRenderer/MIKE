@@ -90,11 +90,9 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 }
 
 // buildLLMContext filters out summarization messages (summary is in system prompt)
-// and messages containing task_complete tool calls (task is done, don't re-send).
-// Tool results that reference a filtered assistant message are also removed (orphans).
+// and assistant messages containing task_complete tool calls, plus their orphaned results.
 func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
-	// First pass: collect all tool_call_ids from assistant messages that contain task_complete.
-	// These assistants are filtered, so their tool results become orphans.
+	// Collect tool_call_ids from assistants with task_complete — their results become orphans.
 	filteredIDs := make(map[string]bool)
 	for _, m := range messages {
 		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "task_complete") {
@@ -104,7 +102,7 @@ func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
 		}
 	}
 
-	// Second pass: filter out summarization, task_complete assistants, and orphaned results.
+	// Filter: summarization, task_complete assistants, and orphaned tool results.
 	var result []types.ChatMessage
 	for _, m := range messages {
 		if m.Role == "summarization" {

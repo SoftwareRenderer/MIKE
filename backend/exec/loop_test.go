@@ -2410,6 +2410,67 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 	}
 }
 
+func TestBuildMessagesFromDB_FiltersTaskComplete(t *testing.T) {
+	// DB reload: assistant + task_complete tool result should be filtered,
+	// matching buildLLMContext behavior.
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Fix the bug"},
+		{Role: "assistant", Content: "I'll fix it"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"edit_file","args":{"path":"foo.go"}}`, ToolResult: `{"output":"file edited","success":true,"duration":10}`},
+		{Role: "assistant", Content: "Task done!"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"task_complete","args":{"summary":"fixed"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
+		{Role: "user", Content: "Now do something else"},
+	}
+
+	task := &types.Task{PlanMode: false}
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+
+	// system + user + assistant + tool(edit_file) + user — task_complete turn filtered
+	if len(messages) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(messages))
+		for i, m := range messages {
+			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
+		}
+	}
+
+	for _, m := range messages {
+		if m.Role == "tool" && strings.Contains(m.Content, "Task complete") {
+			t.Error("task_complete tool result should be filtered out")
+		}
+		if m.Content == "Task done!" {
+			t.Error("assistant that called task_complete should be filtered out")
+		}
+	}
+}
+
+func TestBuildMessagesFromDB_FiltersTaskCompleteWithSiblings(t *testing.T) {
+	// Mixed tools (bash + task_complete): entire turn should be filtered.
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Fix and complete"},
+		{Role: "assistant", Content: ""},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"bash","args":{"command":"git status"}}`, ToolResult: `{"output":"nothing to commit","success":true,"duration":5}`},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"task_complete","args":{"summary":"done"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
+		{Role: "user", Content: "Next task"},
+	}
+
+	task := &types.Task{PlanMode: false}
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+
+	// system + 2 users — assistant + all tool results filtered
+	if len(messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(messages))
+		for i, m := range messages {
+			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
+		}
+	}
+
+	for _, m := range messages {
+		if m.Role == "tool" {
+			t.Errorf("no tool results should remain, got: content=%q", m.Content)
+		}
+	}
+}
+
 // --- removeDuplicateUserMessage Tests ---
 
 func TestRemoveDuplicateUserMessage_PlainText(t *testing.T) {
