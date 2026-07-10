@@ -2,15 +2,6 @@
 </script>
 
 <div class="pi-info-section">
-    <div class="pi-info-header">
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
-            <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
-            <circle cx="6" cy="9" r="1" fill="currentColor"/>
-            <circle cx="10" cy="9" r="1" fill="currentColor"/>
-            <path d="M8 2v3M5 4h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        </svg>
-        <span>Pi Coding Agent</span>
-    </div>
     <p class="pi-info-text">
         Pi is a full coding agent that handles its own LLM calls, tool execution, and reasoning.
         When selected, Pi runs inside the task's worktree and manages the entire task lifecycle.
@@ -31,19 +22,6 @@
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
         border: 1px solid var(--color-border);
-    }
-    .pi-info-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: 600;
-        font-size: 0.875rem;
-        margin-bottom: 8px;
-        color: var(--color-text-primary);
-    }
-    .pi-info-header svg {
-        flex-shrink: 0;
-        color: var(--color-accent);
     }
     .pi-info-text {
         font-size: 0.8125rem;

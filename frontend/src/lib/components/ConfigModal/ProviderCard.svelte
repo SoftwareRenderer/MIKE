@@ -281,7 +281,7 @@
     .pi-icon {
         display: flex;
         align-items: center;
-        color: var(--color-accent);
+        color: #A371F7;
         flex-shrink: 0;
     }
     .provider-display-name {

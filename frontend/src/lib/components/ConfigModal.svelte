@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
     import { config as configStore, selectedProject, pwaInstallPrompt } from '$lib/stores/app';
     import { showConfig } from '$lib/stores/ui';
-    import { createFocusTrap } from '$lib/a11y';
+    import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
@@ -488,27 +488,8 @@
         }
     }
 
-    let modalEl: HTMLDivElement | null = null;
-    let focusTrap: ReturnType<typeof createFocusTrap> | null = null;
-    let triggerEl: HTMLElement | null = null;
-
-    onMount(() => {
-        // Store the element that triggered this modal for focus restoration
-        triggerEl = document.activeElement as HTMLElement;
-        // Setup focus trap after modal is rendered
-        if (modalEl) {
-            focusTrap = createFocusTrap(modalEl, handleClose);
-            // Focus the close button or first interactive element
-            setTimeout(() => focusTrap?.focusFirst(), 50);
-        }
-    });
-
     function handleClose() {
-        focusTrap?.destroy();
-        focusTrap = null;
         onClose();
-        // Restore focus to trigger element
-        setTimeout(() => triggerEl?.focus(), 50);
     }
 
     // PWA install handler
@@ -526,13 +507,7 @@
     }
 </script>
 
-<div class="overlay" onclick={handleClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="config-modal-title" tabindex="-1">
-        <div class="modal-header">
-            <h2 id="config-modal-title">Settings</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close settings" title="Close settings">✕</button>
-        </div>
-        <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+<BaseModal title="Settings" onClose={handleClose}>
             <!-- Providers Section -->
             <fieldset class="section">
                 <div class="section-header">
@@ -642,28 +617,22 @@
             {#if error}
                 <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
             {/if}
-
-            <div class="modal-footer">
-                {#if onSignOut}
-                    <button type="button" class="btn-signout" onclick={onSignOut} title="Sign out of Kanban">Sign out</button>
-                {/if}
-                <div class="modal-footer-right">
-                    <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
-                    <button type="submit" class="btn-primary" disabled={loading} title="Save settings">
-                        {loading ? 'Saving...' : 'Save'}
-                    </button>
-                </div>
+        <div slot="footer" class="footer-slot-wrapper">
+            {#if onSignOut}
+                <button type="button" class="btn-signout" onclick={onSignOut} title="Sign out of Kanban">Sign out</button>
+            {/if}
+            <div class="modal-footer-right">
+                <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+                <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
+                    {loading ? 'Saving...' : 'Save'}
+                </button>
             </div>
-        </form>
-    </div>
-</div>
+        </div>
+</BaseModal>
 
 <style>
     @import '$lib/styles/shared.css';
 
-    :global(.overlay) {
-        z-index: 100;
-    }
     .modal-body {
         padding: 20px 20px 0;
         display: flex;
@@ -876,37 +845,27 @@
         font-size: 0.875rem;
         font-weight: 500;
     }
-    .modal-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 12px 20px;
-        border-top: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        flex-shrink: 0;
-        position: sticky;
-        bottom: 0;
-        z-index: 10;
-    }
     .modal-footer-right {
         display: flex;
         gap: 8px;
+        margin-left: auto;
+    }
+    .footer-slot-wrapper {
+        display: contents;
     }
     .btn-signout {
         padding: 8px 16px;
         border-radius: var(--radius-md);
-        background: transparent;
-        color: var(--color-status-red, #f85149);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
         font-size: 0.875rem;
         font-weight: 500;
         cursor: pointer;
-        border: 1px solid var(--color-status-red, #f85149);
-        transition: background 0.15s, color 0.15s;
+        border: 1px solid var(--color-border);
+        transition: background 0.15s;
     }
     .btn-signout:hover {
-        background: var(--color-status-red, #f85149);
-        color: white;
+        background: var(--color-surface-4);
     }
     .btn-pwa-install {
         display: inline-flex;
@@ -926,6 +885,15 @@
         background: var(--color-accent);
         color: white;
     }
+    button {
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        background: var(--color-surface-3);
+    }
     .btn-primary {
         padding: 8px 20px;
         border-radius: var(--radius-md);
@@ -938,40 +906,10 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
-    button[type="button"] {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
 
     @media (max-width: 768px) {
-        .modal {
-            width: 100vw;
-            max-width: none;
-            max-height: 100dvh;
-            height: 100dvh;
-            border-radius: 0;
-            border: none;
-        }
-        .modal-header {
-            padding: 16px;
-        }
         .modal-body {
-            padding: 16px;
             padding-bottom: calc(56px + env(safe-area-inset-bottom));
-        }
-        .modal-footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            width: 100vw;
-            padding: 8px 16px;
-            padding-bottom: calc(4px + env(safe-area-inset-bottom));
         }
     }
 </style>
