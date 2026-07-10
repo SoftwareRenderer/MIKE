@@ -57,7 +57,7 @@ func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
 
 // summarizeContext produces a compact summary of the conversation history.
 // Sends a non-streaming chat completion. Does not modify the messages slice.
-func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
+func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
 	oldLen := len(messages)
 
 	chatHistory := formatChatHistory(messages, previousSummary != "")
@@ -74,7 +74,6 @@ func (te *TaskExecutor) summarizeContext(messages []types.ChatMessage, serverURL
 	}
 
 	// Non-streaming, with reasoning enabled.
-	ctx := context.Background()
 	usage, summary, err := te.ChatCompletion(ctx, serverURL, modelName, summarizeMessages, &ChatCompletionOpts{ReasoningEffort: ""})
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
@@ -365,9 +364,7 @@ func (te *TaskExecutor) generateCheckpointLabel(ctx context.Context, taskID, dif
 
 // GenerateCommitMessage uses the LLM to generate a descriptive commit label from git diff stat
 // and pre-formatted conversation turn text. Falls back to "{title}\n\nCo-authored-by: {model}" on any error.
-// turnText is the pre-formatted conversation text (caller extracts last N turns to avoid
-// passing the full conversation slice into a background goroutine).
-func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string) string {
+func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
 		return "file changes"
@@ -376,7 +373,6 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 
 	labelMessages := buildCommitMessages(diffStat, turnText)
 
-	ctx := context.Background()
 	maxTokens := 128
 	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
@@ -395,7 +391,7 @@ func (te *TaskExecutor) GenerateCommitMessage(taskID, diffStat, turnText string)
 // If task.ChangeSummary is set, uses it directly. Otherwise generates one via LLM from
 // conversation + diff. This is the single source of truth for commit message generation
 // across all commit paths (auto-commit, manual commit-and-done).
-func (te *TaskExecutor) GenerateCommitMessageForTask(taskID string, task *types.Task) string {
+func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID string, task *types.Task) string {
 	modelName := task.ModelName
 	if modelName == "" {
 		modelName = "unknown model"
@@ -414,7 +410,7 @@ func (te *TaskExecutor) GenerateCommitMessageForTask(taskID string, task *types.
 		}
 		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
 	}
-	commitMsg := te.GenerateCommitMessage(taskID, diffStat, FormatConversationTurns(ExtractLastTurns(conversation, 3)))
+	commitMsg := te.GenerateCommitMessage(ctx, taskID, diffStat, FormatConversationTurns(ExtractLastTurns(conversation, 3)))
 	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
 	// Use the task title instead for a more useful commit message.
 	if commitMsg == "file changes" && task.Title != "" {

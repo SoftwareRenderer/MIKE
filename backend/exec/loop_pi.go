@@ -489,7 +489,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							task.ExecutionState = "idle"
 							_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 						}
-						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						commitMsg := te.GenerateCommitMessageForTask(ctx, task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
 						// Reload task — CommitAndMerge may have set merge conflict flag
 						task, _ = te.store.GetTaskByTaskID(task.ID)

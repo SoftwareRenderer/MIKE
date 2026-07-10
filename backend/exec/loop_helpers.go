@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
@@ -110,9 +111,9 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 
 // applySummarization runs summarization, appends the summary message, and broadcasts the event.
 // Summary is injected into the system prompt on the next LLM call.
-func (te *TaskExecutor) applySummarization(task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
+func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
 	prevSummary := extractPrevSummary(messages)
-	sumResult, err := te.summarizeContext(messages, serverURL, modelName, prevSummary)
+	sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, prevSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)
 		if resultCh != nil {

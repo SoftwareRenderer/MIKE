@@ -509,8 +509,8 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 
 // generateCommitMessage builds a commit message from task title, summary, and model.
 // If task.ChangeSummary is empty, generates one via LLM from conversation + diff.
-func (h *TaskHandler) generateCommitMessage(taskID string, task *types.Task) string {
-	return h.executor.GenerateCommitMessageForTask(taskID, task)
+func (h *TaskHandler) generateCommitMessage(ctx context.Context, taskID string, task *types.Task) string {
+	return h.executor.GenerateCommitMessageForTask(ctx, taskID, task)
 }
 
 // resolveGitAuthor returns the effective git author name/email.
@@ -567,7 +567,7 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	commitMsg := h.generateCommitMessage(taskID, task)
+	commitMsg := h.generateCommitMessage(r.Context(), taskID, task)
 
 	// Resolve effective git author: env var override, then project git config, then defaults
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
@@ -676,7 +676,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if worktreeExists {
 		commitMsg := body.CommitMessage
 		if commitMsg == "" {
-			commitMsg = h.generateCommitMessage(taskID, task)
+			commitMsg = h.generateCommitMessage(r.Context(), taskID, task)
 		}
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
@@ -884,7 +884,8 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 // On failure or timeout, it keeps the existing (first-line) title.
 func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		// Get LLM config from the task itself
 		task, err := h.store.GetTask(projectID, taskID)

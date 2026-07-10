@@ -349,7 +349,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// Generate thread name from new_content if provided, otherwise use "Fork #N"
 	threads, _ := s.store.GetThreadsByTask(taskID)
 	if req.NewContent != "" {
-		newThread.Name = s.generateThreadName(task, req.NewContent)
+		newThread.Name = s.generateThreadName(r.Context(), task, req.NewContent)
 	} else {
 		newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
 	}
@@ -394,7 +394,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 }
 
 // generateThreadName generates a short thread label via LLM, or truncates the text.
-func (s *Server) generateThreadName(task *types.Task, content string) string {
+func (s *Server) generateThreadName(ctx context.Context, task *types.Task, content string) string {
 	trimmed := strings.TrimSpace(content)
 	if len(trimmed) == 0 {
 		return "Fork"
@@ -402,8 +402,6 @@ func (s *Server) generateThreadName(task *types.Task, content string) string {
 
 	// Try LLM generation if config is available
 	if task.LlamaServerURL != "" && task.ModelName != "" {
-		ctx := context.Background()
-
 		messages := []types.ChatMessage{
 			{Role: "system", Content: "You are a thread name generator. Given a user message, generate a very short, descriptive thread label (max 30 characters, no quotes). Return only the label, nothing else."},
 			{Role: "user", Content: trimmed},

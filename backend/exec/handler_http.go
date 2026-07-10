@@ -243,7 +243,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	previousSummary := extractPrevSummary(messages)
 
-	sumResult, err := te.summarizeContext(messages, task.LlamaServerURL, task.ModelName, previousSummary)
+	sumResult, err := te.summarizeContext(r.Context(), messages, task.LlamaServerURL, task.ModelName, previousSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())

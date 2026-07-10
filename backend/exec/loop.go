@@ -977,7 +977,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						}
 
 						// No merge conflict — normal auto-commit path
-						commitMsg := te.GenerateCommitMessageForTask(task.ID, task)
+						commitMsg := te.GenerateCommitMessageForTask(ctx, task.ID, task)
 						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
@@ -1290,7 +1290,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		// Auto-summarize if context is approaching the window limit.
 		if lc.contextWindow != nil {
 			if shouldSummarize(lc.messages, *lc.contextWindow) {
-				lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, serverURL, activeModel, nil)
+				lc.messages = te.applySummarization(ctx, task, projectID, task.ID, lc.messages, serverURL, activeModel, nil)
 				lc.detector.reset() // context changed, clear stale text window
 			}
 		}
@@ -1303,7 +1303,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		case resultCh := <-summarizeCh:
 			// Manual summarization request from HandleSummarize
 			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
-			lc.messages = te.applySummarization(task, projectID, task.ID, lc.messages, serverURL, activeModel, resultCh)
+			lc.messages = te.applySummarization(ctx, task, projectID, task.ID, lc.messages, serverURL, activeModel, resultCh)
 			lc.detector.reset() // context changed, clear stale text window
 			continue
 		case um := <-userMsgChan:
