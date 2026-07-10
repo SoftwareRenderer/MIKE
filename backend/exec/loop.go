@@ -1125,6 +1125,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Check consecutive identical tool call failures (turn-level).
 			if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
 				task.ExecutionState = "failed"
+				task.Status = "review"
 				task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 				te.store.UpdateTask(task)
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)

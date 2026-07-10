@@ -900,7 +900,8 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			{Role: "user", Content: prompt},
 		}
 
-		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, nil)
+		maxTokens := 50
+		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, &exec.ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)
