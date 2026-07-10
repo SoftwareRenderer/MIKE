@@ -4,9 +4,9 @@
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { WebglAddon } from '@xterm/addon-webgl';
-    import { selectedProject, selectedTask } from '$lib/stores/app';
+    import { selectedProject, selectedTask, projectTerminalPorts } from '$lib/stores/app';
 import { showTerminal } from '$lib/stores/ui';
-    import { createTerminal, createProjectTerminal, isTerminalStale, getProject, getBoard } from '$lib/api';
+    import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -29,6 +29,8 @@ import { showTerminal } from '$lib/stores/ui';
     let modAlt = $state(false);
     // Active port mappings for the badge
     let activePorts = $state<import('$lib/types').AssignedPort[]>([]);
+    let unsubTask: (() => void) | null = null;
+    let unsubProjectPorts: (() => void) | null = null;
 
 
     /** Escape sequences sent by xterm.js for each key. */
@@ -119,27 +121,6 @@ import { showTerminal } from '$lib/stores/ui';
     // Load saved height on init
     loadHeight().then(h => { panelHeight = h; }).catch(() => {});
 
-    // Fetch active port mappings for the current terminal context
-    async function loadActivePorts() {
-        const proj = get(selectedProject);
-        const task = get(selectedTask);
-        if (!proj) return;
-        try {
-            if (task) {
-                // Task terminal: get assigned_ports from board
-                const board = await getBoard(proj.id);
-                const t = board.tasks.find(t => t.id === task.id);
-                activePorts = t?.assigned_ports && t.assigned_ports.length > 0 ? t.assigned_ports : [];
-            } else {
-                // Project-level terminal: get active_terminal_ports
-                const p = await getProject(proj.id);
-                activePorts = p.active_terminal_ports || [];
-            }
-        } catch {
-            // Ignore fetch errors
-        }
-    }
-
     // Create/recreate the terminal WebSocket for the current project/task.
     function createTerminalWS(proj: ReturnType<typeof selectedProject.get> | null, task: ReturnType<typeof selectedTask.get> | null) {
         if (proj && task) {
@@ -185,8 +166,24 @@ import { showTerminal } from '$lib/stores/ui';
             trap = createFocusTrap(panelEl, close);
         }
 
-        // Load active port mappings
-        loadActivePorts();
+        // Subscribe to task updates for task terminals (assigned_ports changes)
+        unsubTask = selectedTask.subscribe(task => {
+            if (task && task.assigned_ports && task.assigned_ports.length > 0) {
+                activePorts = task.assigned_ports;
+            } else if (!task) {
+                // Switched to project-level terminal
+                projectTerminalPorts.subscribe(ports => { activePorts = ports; })();
+            } else {
+                activePorts = [];
+            }
+        });
+
+        // Subscribe to project-level terminal ports
+        unsubProjectPorts = projectTerminalPorts.subscribe(ports => {
+            if (!get(selectedTask)) {
+                activePorts = ports;
+            }
+        });
 
         term = new Terminal({
             cursorBlink: true,
@@ -731,6 +728,8 @@ import { showTerminal } from '$lib/stores/ui';
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('visibilitychange', handleTerminalVisibility);
             webglRef = null;
+            if (unsubTask) { unsubTask(); unsubTask = null; }
+            if (unsubProjectPorts) { unsubProjectPorts(); unsubProjectPorts = null; }
             try { term?.dispose(); } catch {}
             term = null;
         };

@@ -10,6 +10,9 @@ export const board = writable<Board | null>(null);
 export const selectedTask = writable<Task | null>(null);
 export const config = writable<Config | null>(null);
 
+// Active port mappings for the project-level terminal (broadcast via WebSocket)
+export const projectTerminalPorts = writable<Array<{ host_port: number; container_port: number }>>([]);
+
 // ─── Sidebar ───
 
 export const sidebarCollapsed = writable(false);

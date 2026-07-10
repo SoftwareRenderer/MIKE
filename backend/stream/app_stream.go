@@ -599,6 +599,14 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	asm.BroadcastProjectCounts()
 }
 
+// BroadcastProjectPorts sends a project_ports event to all clients of a project.
+func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []types.AssignedPort) {
+	asm.sendBoardPayload(projectID, map[string]any{
+		"type":  "project_ports",
+		"ports": ports,
+	})
+}
+
 // -- Ring buffer --
 
 // bufferRaw adds a raw JSON frame to all clients' ring buffers.

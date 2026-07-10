@@ -114,6 +114,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: taskID, Ports: ports}})
 	})
+	// Wire project-level terminal port assignment callback → WebSocket broadcast
+	s.terminalMgr.SetOnProjectPortsAssigned(func(projectID string, ports []types.AssignedPort) {
+		s.appStreamMgr.BroadcastProjectPorts(projectID, ports)
+	})
 	commitQueue := exec.NewCommitQueue()
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, commitQueue)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)

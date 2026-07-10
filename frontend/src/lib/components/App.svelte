@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, selectedTask, showEditTask, editTaskData as editTaskDataStore } from '$lib/stores/app';
+    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, selectedTask, showEditTask, editTaskData as editTaskDataStore, projectTerminalPorts } from '$lib/stores/app';
 import { showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig } from '$lib/stores/ui';
 import { showConfirm, showToast } from '$lib/stores/dialogs';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
@@ -441,6 +441,9 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     },
                     onPortConflict: (project_id, conflicted_ports) => {
                         portConflict = { project_id, ports: conflicted_ports };
+                    },
+                    onProjectPorts: (ports) => {
+                        projectTerminalPorts.set(ports);
                     },
                 });
                 // Expose appStream so TaskChat can subscribe after handler setup

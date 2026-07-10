@@ -56,12 +56,13 @@ type sandboxOps interface {
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
-	mu             sync.RWMutex
-	sessions       map[string]*taskTerminal
-	store          *store.Store
-	cfgStore       *config.ConfigStore
-	sandboxMgr     sandboxOps
-	onPortsAssigned func(taskID, projectID string, ports []types.AssignedPort) // callback when ports are assigned
+	mu                    sync.RWMutex
+	sessions              map[string]*taskTerminal
+	store                 *store.Store
+	cfgStore              *config.ConfigStore
+	sandboxMgr            sandboxOps
+	onPortsAssigned       func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
+	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
 
 // NewTerminalManager creates a new TerminalManager.
@@ -77,6 +78,11 @@ func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandbo
 // SetOnPortsAssigned sets a callback invoked when sandbox ports are assigned during terminal shell creation.
 func (tm *TerminalManager) SetOnPortsAssigned(fn func(taskID, projectID string, ports []types.AssignedPort)) {
 	tm.onPortsAssigned = fn
+}
+
+// SetOnProjectPortsAssigned sets a callback invoked when project-level terminal ports are assigned.
+func (tm *TerminalManager) SetOnProjectPortsAssigned(fn func(projectID string, ports []types.AssignedPort)) {
+	tm.onProjectPortsAssigned = fn
 }
 
 // GetProjectPorts returns the assigned ports for a project-level terminal, if active.
@@ -174,9 +180,14 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			return nil, fmt.Errorf("sandbox not available: %w", err)
 		}
 		// Notify caller of assigned ports
-		if len(assignedPorts) > 0 && tm.onPortsAssigned != nil && !strings.HasPrefix(taskID, "proj:") {
-			// Task-level terminal: broadcast via callback
-			tm.onPortsAssigned(taskID, projectID, assignedPorts)
+		if len(assignedPorts) > 0 {
+			if !strings.HasPrefix(taskID, "proj:") && tm.onPortsAssigned != nil {
+				// Task-level terminal: broadcast via callback
+				tm.onPortsAssigned(taskID, projectID, assignedPorts)
+			} else if strings.HasPrefix(taskID, "proj:") && tm.onProjectPortsAssigned != nil {
+				// Project-level terminal: broadcast via callback
+				tm.onProjectPortsAssigned(projectID, assignedPorts)
+			}
 		}
 		sess = &taskTerminal{
 			cmd:        shell.Cmd,
