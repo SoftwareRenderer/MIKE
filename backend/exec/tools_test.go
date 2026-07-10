@@ -65,7 +65,7 @@ func TestIsSandboxableTool(t *testing.T) {
 		{"write_file", true},
 		{"edit_file", true},
 		{"bash", true},
-		{"task_complete", false},
+		{"request_review", false},
 		{"unknown_tool", false},
 		{"", false},
 	}
@@ -251,7 +251,7 @@ func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
 
 func TestExecuteTool_TaskComplete(t *testing.T) {
 	te := &TaskExecutor{}
-	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
+	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
@@ -881,4 +881,3 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 		t.Errorf("unexpected error: %q", result)
 	}
 }
-

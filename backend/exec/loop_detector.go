@@ -48,23 +48,23 @@ type LoopType int
 
 const (
 	LoopNone          LoopType = iota
-	LoopTool                  // repeated read of same target
-	LoopText                  // repeated similar text-only responses
-	LoopPhrase                // exact phrase repetition within a response
-	LoopReasoningOnly         // reasoning-only response with no content or tool calls
+	LoopTool                   // repeated read of same target
+	LoopText                   // repeated similar text-only responses
+	LoopPhrase                 // exact phrase repetition within a response
+	LoopReasoningOnly          // reasoning-only response with no content or tool calls
 )
 
 const maxLoopHints = 3
 
 // loopDetector tracks tool call targets and text responses to detect LLM loops.
 type loopDetector struct {
-	lastReadToolName string        // tool name of the most recent read-only call
-	lastReadArgs     string        // raw args JSON of the most recent read-only call
-	lastReadTime     time.Time     // when the last read occurred
-	textWindow       []string      // recent text-only responses (content, trimmed)
-	loopStreak       int           // consecutive loop detections (reset to 0 on valid turn)
+	lastReadToolName string          // tool name of the most recent read-only call
+	lastReadArgs     string          // raw args JSON of the most recent read-only call
+	lastReadTime     time.Time       // when the last read occurred
+	textWindow       []string        // recent text-only responses (content, trimmed)
+	loopStreak       int             // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
-	phraseFired      bool          // phrase loop detected during current streaming response
+	phraseFired      bool            // phrase loop detected during current streaming response
 }
 
 // newLoopDetector creates a new loopDetector.
@@ -345,7 +345,7 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 		return true
 	case "write_file", "edit_file":
 		return false
-	case "task_complete":
+	case "request_review":
 		return false
 	case "bash":
 		var args map[string]any
@@ -422,11 +422,11 @@ func buildHint(loopType LoopType, target string) string {
 	case LoopTool:
 		return fmt.Sprintf("You've read/checked `%s` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action \u2014 edit the file, run a command, or mark the task complete.", target)
 	case LoopText:
-		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `task_complete` if the task is done."
+		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `request_review` if the task is done."
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	case LoopReasoningOnly:
-		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, task_complete, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
+		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, request_review, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
 	default:
 		return ""
 	}

@@ -370,7 +370,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
-	// In plan mode, restrict tools to read-only + create_task + task_complete
+	// In plan mode, restrict tools to read-only + create_task + request_review
 	var tools []types.ChatTool
 	if task.PlanMode {
 		tools = llama.GetPlanModeToolDefinitions()
@@ -855,7 +855,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 				}
 
-				if tc.Function.Name == "task_complete" {
+				if tc.Function.Name == "request_review" {
 					if task.AutoCommit {
 						if task.HasMergeConflict {
 							_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
@@ -947,8 +947,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						// finish the sync merge, then attempt the final merge.
 						_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
 						if task.HasMergeConflict {
-							// Still conflicted after LLM called task_complete — fail.
-							log.Printf("[merge] task=%s merge still conflicted after task_complete", task.ID)
+							// Still conflicted after LLM called request_review — fail.
+							log.Printf("[merge] task=%s merge still conflicted after request_review", task.ID)
 							task.ExecutionState = "failed"
 							task.Status = "review"
 							if te.sandboxMgr != nil {
@@ -1057,7 +1057,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// Text-only response resets the failure tracker
 			lc.tracker.reset()
 
-		// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
+			// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
 			assistantMsg := types.ChatMessage{Role: "assistant", Content: assistantText}
 			if lc.reasoningContent.Len() > 0 {
 				assistantMsg.ReasoningContent = lc.reasoningContent.String()

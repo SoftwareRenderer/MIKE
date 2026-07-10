@@ -317,7 +317,7 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	args = map[string]string{"path": "src/main.go"}
 	argsJSON, _ = json.Marshal(args)
 	tc = []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
-	d.recordTurn(tc, "") // first read, valid (loopStreak stays 0)
+	d.recordTurn(tc, "")                  // first read, valid (loopStreak stays 0)
 	loopType, _, _ = d.recordTurn(tc, "") // second read, loop
 	if loopType != LoopTool {
 		t.Fatal("expected LoopTool")
@@ -433,9 +433,9 @@ func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
 	d := newLoopDetector()
 
-	// First turn: read_file then task_complete (state-changing clears tracker)
-	// So we need: first turn read_file, second turn task_complete + read_file
-	// The read_file on turn 2 should NOT trigger loop because task_complete cleared it
+	// First turn: read_file then request_review (state-changing clears tracker)
+	// So we need: first turn read_file, second turn request_review + read_file
+	// The read_file on turn 2 should NOT trigger loop because request_review cleared it
 	args1 := map[string]string{"path": "src/main.go"}
 	args1JSON, _ := json.Marshal(args1)
 
@@ -590,7 +590,7 @@ func TestBuildHint_ReasoningOnly(t *testing.T) {
 		t.Error("hint should mention reasoning")
 	}
 	// Verify it lists available tools
-	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "task_complete", "create_task"} {
+	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "request_review", "create_task"} {
 		if !strings.Contains(hint, tool) {
 			t.Errorf("hint should mention tool %q, got: %s", tool, hint)
 		}
@@ -1078,8 +1078,8 @@ func TestStopProjectTasks(t *testing.T) {
 	te.tasks[task2.ID] = &executionState{ctx: ctx2, cancel: cancel2, userMsgChan: make(chan stream.UserMessage, 16)}
 	// Also add a non-project task (orphan)
 	te.tasks["orphan-task"] = &executionState{
-		ctx:       context.Background(),
-		cancel:    func() {},
+		ctx:         context.Background(),
+		cancel:      func() {},
 		userMsgChan: make(chan stream.UserMessage, 16),
 	}
 	te.taskMu.Unlock()
@@ -1182,14 +1182,14 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 	t.Helper()
 	now := time.Now().UTC()
 	task := &types.Task{
-		ID:          taskID,
-		ProjectID:   projectID,
-		Title:       "Test Task",
-		Prompt:      "Test prompt",
-		Status:      "backlog",
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Test Task",
+		Prompt:         "Test prompt",
+		Status:         "backlog",
 		ExecutionState: "idle",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1678,7 +1678,7 @@ func TestBuildLLMContext_WithToolCalls(t *testing.T) {
 	}
 }
 
-// --- buildLLMContext task_complete filter Tests ---
+// --- buildLLMContext request_review filter Tests ---
 
 func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 	messages := []types.ChatMessage{
@@ -1697,12 +1697,12 @@ func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 	// Set tool names
 	messages[2].ToolCalls[0].Function.Name = "read_file"
 	messages[2].ToolCalls[0].Function.Arguments = `{"path":"foo.go"}`
-	messages[4].ToolCalls[0].Function.Name = "task_complete"
+	messages[4].ToolCalls[0].Function.Name = "request_review"
 	messages[4].ToolCalls[0].Function.Arguments = `{"summary":"fixed"}`
 
 	result := buildLLMContext(messages)
 
-	// task_complete assistant (msg[4]) should be filtered out
+	// request_review assistant (msg[4]) should be filtered out
 	// system + user + assistant(read_file) + tool + user + assistant = 6
 	if len(result) != 6 {
 		t.Fatalf("expected 6 messages, got %d", len(result))
@@ -1711,11 +1711,11 @@ func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 		}
 	}
 
-	// Verify no task_complete tool call in result
+	// Verify no request_review tool call in result
 	for _, m := range result {
 		for _, tc := range m.ToolCalls {
-			if tc.Function.Name == "task_complete" {
-				t.Error("task_complete tool call should be filtered out")
+			if tc.Function.Name == "request_review" {
+				t.Error("request_review tool call should be filtered out")
 			}
 		}
 	}
@@ -1731,12 +1731,12 @@ func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
 		{Role: "tool", Content: "task completed", ToolCallID: "call-tc"},
 		{Role: "user", Content: "new request"},
 	}
-	messages[2].ToolCalls[0].Function.Name = "task_complete"
+	messages[2].ToolCalls[0].Function.Name = "request_review"
 	messages[2].ToolCalls[0].Function.Arguments = `{"summary":"done"}`
 
 	result := buildLLMContext(messages)
 
-	// task_complete assistant (msg[2]) and its tool result (msg[3]) filtered
+	// request_review assistant (msg[2]) and its tool result (msg[3]) filtered
 	// system + user + user = 3
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
@@ -1764,15 +1764,15 @@ func TestBuildLLMContext_KeepsOtherToolCalls(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// No task_complete, all messages pass through (except summarization which isn't present)
+	// No request_review, all messages pass through (except summarization which isn't present)
 	if len(result) != 5 {
 		t.Fatalf("expected 5 messages, got %d", len(result))
 	}
 }
 
 func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
-	// Assistant message with mixed tool calls: bash + task_complete
-	// The entire assistant message should be filtered since it contains task_complete
+	// Assistant message with mixed tool calls: bash + request_review
+	// The entire assistant message should be filtered since it contains request_review
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "fix and complete"},
@@ -1786,12 +1786,12 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 	}
 	messages[2].ToolCalls[0].Function.Name = "bash"
 	messages[2].ToolCalls[0].Function.Arguments = `{"command":"git status"}`
-	messages[2].ToolCalls[1].Function.Name = "task_complete"
+	messages[2].ToolCalls[1].Function.Name = "request_review"
 	messages[2].ToolCalls[1].Function.Arguments = `{"summary":"done"}`
 
 	result := buildLLMContext(messages)
 
-	// Assistant with task_complete + both tool results filtered
+	// Assistant with request_review + both tool results filtered
 	// system + user + user = 3
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
@@ -2063,10 +2063,10 @@ func TestRawArgsDelta_Update(t *testing.T) {
 func TestRawArgsDelta_Accumulation(t *testing.T) {
 	// Simulate frontend accumulation of deltas
 	chunks := []string{
-		`{"command":"ls`,           // chunk 1 (new, full)
-		` -la`,                     // chunk 2 (delta)
-		` /home/user`,             // chunk 3 (delta)
-		`/projects"}`,             // chunk 4 (delta)
+		`{"command":"ls`, // chunk 1 (new, full)
+		` -la`,           // chunk 2 (delta)
+		` /home/user`,    // chunk 3 (delta)
+		`/projects"}`,    // chunk 4 (delta)
 	}
 
 	// Simulate: first chunk is full raw_args, subsequent are deltas
@@ -2411,21 +2411,21 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 }
 
 func TestBuildMessagesFromDB_FiltersTaskComplete(t *testing.T) {
-	// DB reload: assistant + task_complete tool result should be filtered,
+	// DB reload: assistant + request_review tool result should be filtered,
 	// matching buildLLMContext behavior.
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Fix the bug"},
 		{Role: "assistant", Content: "I'll fix it"},
 		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"edit_file","args":{"path":"foo.go"}}`, ToolResult: `{"output":"file edited","success":true,"duration":10}`},
 		{Role: "assistant", Content: "Task done!"},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"task_complete","args":{"summary":"fixed"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"request_review","args":{"summary":"fixed"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
 		{Role: "user", Content: "Now do something else"},
 	}
 
 	task := &types.Task{PlanMode: false}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
-	// system + user + assistant + tool(edit_file) + user — task_complete turn filtered
+	// system + user + assistant + tool(edit_file) + user — request_review turn filtered
 	if len(messages) != 5 {
 		t.Fatalf("expected 5 messages, got %d", len(messages))
 		for i, m := range messages {
@@ -2435,21 +2435,21 @@ func TestBuildMessagesFromDB_FiltersTaskComplete(t *testing.T) {
 
 	for _, m := range messages {
 		if m.Role == "tool" && strings.Contains(m.Content, "Task complete") {
-			t.Error("task_complete tool result should be filtered out")
+			t.Error("request_review tool result should be filtered out")
 		}
 		if m.Content == "Task done!" {
-			t.Error("assistant that called task_complete should be filtered out")
+			t.Error("assistant that called request_review should be filtered out")
 		}
 	}
 }
 
 func TestBuildMessagesFromDB_FiltersTaskCompleteWithSiblings(t *testing.T) {
-	// Mixed tools (bash + task_complete): entire turn should be filtered.
+	// Mixed tools (bash + request_review): entire turn should be filtered.
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Fix and complete"},
 		{Role: "assistant", Content: ""},
 		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"bash","args":{"command":"git status"}}`, ToolResult: `{"output":"nothing to commit","success":true,"duration":5}`},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"task_complete","args":{"summary":"done"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"request_review","args":{"summary":"done"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
 		{Role: "user", Content: "Next task"},
 	}
 

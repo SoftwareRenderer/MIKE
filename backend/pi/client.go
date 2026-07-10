@@ -534,10 +534,10 @@ func MapPiToolName(piToolName string) string {
 		return "edit_file"
 	case "bash":
 		return "bash"
-	case "task_complete":
-		return "task_complete"
+	case "request_review":
+		return "request_review"
 	case "final_answer":
-		return "task_complete"
+		return "request_review"
 	default:
 		return piToolName
 	}

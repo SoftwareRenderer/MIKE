@@ -20,17 +20,17 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 
 	taskID := "conflict-resolve-task"
 	task := &types.Task{
-		ID:                taskID,
-		ProjectID:         projectID,
-		Title:             "Conflict Resolution Test",
-		Prompt:            "Resolve merge conflicts",
-		Status:            "in_progress",
-		Branch:            "task/conflict-resolve",
-		BaseRef:           "master",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
-		HasMergeConflict:  true,
-		CurrentThreadID:   "thread-1",
+		ID:               taskID,
+		ProjectID:        projectID,
+		Title:            "Conflict Resolution Test",
+		Prompt:           "Resolve merge conflicts",
+		Status:           "in_progress",
+		Branch:           "task/conflict-resolve",
+		BaseRef:          "master",
+		LlamaServerURL:   "http://localhost:8080",
+		ModelName:        "test-model",
+		HasMergeConflict: true,
+		CurrentThreadID:  "thread-1",
 	}
 	te.store.CreateTask(task)
 
@@ -84,8 +84,8 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	// Non-conflicted change (LLM created a new file as part of the task)
 	os.WriteFile(filepath.Join(wtPath, "new_feature.txt"), []byte("new feature by LLM\n"), 0o644)
 
-	// --- Execute the conflict resolution commit logic (from loop.go task_complete handler) ---
-	// This is the exact logic from the task_complete handler:
+	// --- Execute the conflict resolution commit logic (from loop.go request_review handler) ---
+	// This is the exact logic from the request_review handler:
 	// 1. Stage only RESOLVED conflicted files (no conflict markers)
 	conflictedFiles = GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
@@ -626,15 +626,15 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	// Create parent task
 	parentID := "parent-conflict-resolve"
 	parent := &types.Task{
-		ID:                parentID,
-		ProjectID:         projectID,
-		Title:             "Parent Task",
-		Prompt:            "Parent prompt",
-		Status:            "in_progress",
-		Branch:            "task/" + parentID,
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
-		CurrentThreadID:   "thread-parent",
+		ID:              parentID,
+		ProjectID:       projectID,
+		Title:           "Parent Task",
+		Prompt:          "Parent prompt",
+		Status:          "in_progress",
+		Branch:          "task/" + parentID,
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
+		CurrentThreadID: "thread-parent",
 	}
 	te.store.CreateTask(parent)
 
@@ -654,16 +654,16 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	// Create subtask
 	subtaskID := "subtask-conflict-resolve"
 	subtask := &types.Task{
-		ID:                subtaskID,
-		ProjectID:         projectID,
-		Title:             "Subtask",
-		Prompt:            "Subtask prompt",
-		Status:            "in_progress",
-		ParentTaskID:      parentID,
-		Branch:            "task/" + subtaskID,
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
-		CurrentThreadID:   "thread-subtask",
+		ID:              subtaskID,
+		ProjectID:       projectID,
+		Title:           "Subtask",
+		Prompt:          "Subtask prompt",
+		Status:          "in_progress",
+		ParentTaskID:    parentID,
+		Branch:          "task/" + subtaskID,
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
+		CurrentThreadID: "thread-subtask",
 	}
 	te.store.CreateTask(subtask)
 

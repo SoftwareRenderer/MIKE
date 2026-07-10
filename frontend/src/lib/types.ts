@@ -6,7 +6,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
     write_file: 'Write',
     edit_file: 'Edit',
     bash: 'Execute',
-    task_complete: 'Done',
+    request_review: 'Done',
 };
 
 /** Returns the display name for a tool, falling back to the raw name. */

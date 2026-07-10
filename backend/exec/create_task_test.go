@@ -69,7 +69,7 @@ func createParentTask(t *testing.T, s *store.Store, id, projectID string, status
 		Title:          "Parent Task",
 		Prompt:         "Parent prompt",
 		Status:         status,
-		ExecutionState:    "idle",
+		ExecutionState: "idle",
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		AutoCommit:     true,
@@ -394,12 +394,12 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 
 	// Try to complete without subtasks (empty state)
 	state := &executionState{createdIDs: nil}
-	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
+	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{
 		"summary": "Plan complete",
 	}, "", parent, state, nil)
 
 	if ok {
-		t.Error("expected task_complete to fail in plan mode without subtasks")
+		t.Error("expected request_review to fail in plan mode without subtasks")
 	}
 	if !strings.Contains(result, "Cannot complete planning without creating") {
 		t.Errorf("unexpected error message: %s", result)
@@ -431,12 +431,12 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	parent, _ = te.store.GetTask("proj-1", "plan-parent-1")
 
 	// Try to complete with subtask
-	result2, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
+	result2, ok := te.executeTool(context.Background(), "request_review", map[string]any{
 		"summary": "Plan complete",
 	}, "", parent, state, nil)
 
 	if !ok {
-		t.Errorf("expected task_complete to succeed with subtasks, got: %s", result2)
+		t.Errorf("expected request_review to succeed with subtasks, got: %s", result2)
 	}
 }
 
@@ -450,7 +450,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 		Title:          "Standard Task",
 		Prompt:         "Standard prompt",
 		Status:         "in_progress",
-		ExecutionState:    "running",
+		ExecutionState: "running",
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		PlanMode:       false,
@@ -462,11 +462,11 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 	}
 
 	// Try to complete without subtasks (should succeed)
-	result, ok := te.executeTool(context.Background(), "task_complete", map[string]any{
+	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{
 		"summary": "Task complete",
 	}, "", task, &executionState{}, nil)
 
 	if !ok {
-		t.Errorf("expected task_complete to succeed in standard mode, got: %s", result)
+		t.Errorf("expected request_review to succeed in standard mode, got: %s", result)
 	}
 }

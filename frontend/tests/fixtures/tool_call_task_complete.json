@@ -7,7 +7,7 @@
             {
               "id": "call_complete001",
               "function": {
-                "name": "task_complete",
+                "name": "request_review",
                 "arguments": "{}"
               },
               "type": "function"

@@ -26,30 +26,30 @@ func TestPromptCommandFormat(t *testing.T) {
 			},
 		},
 		{
-			name:    "with steer behavior",
-			message: "follow up message",
+			name:              "with steer behavior",
+			message:           "follow up message",
 			streamingBehavior: []string{"steer"},
 			wantFields: map[string]bool{
-				"type":                true,
-				"message":             true,
-				"id":                  true,
-				"streamingBehavior":   true,
+				"type":              true,
+				"message":           true,
+				"id":                true,
+				"streamingBehavior": true,
 			},
 		},
 		{
-			name:    "with followUp behavior",
-			message: "do this after",
+			name:              "with followUp behavior",
+			message:           "do this after",
 			streamingBehavior: []string{"followUp"},
 			wantFields: map[string]bool{
-				"type":                true,
-				"message":             true,
-				"id":                  true,
-				"streamingBehavior":   true,
+				"type":              true,
+				"message":           true,
+				"id":                true,
+				"streamingBehavior": true,
 			},
 		},
 		{
-			name:    "empty streaming behavior omitted",
-			message: "test message",
+			name:              "empty streaming behavior omitted",
+			message:           "test message",
 			streamingBehavior: []string{""},
 			wantFields: map[string]bool{
 				"type":    true,
@@ -115,10 +115,10 @@ func TestPromptCommandFormat(t *testing.T) {
 // different assistantMessageEvent types are handled correctly.
 func TestToStreamEvent_MessageUpdate(t *testing.T) {
 	tests := []struct {
-		name           string
-		event          PiEvent
-		wantType       types.WSMessageType
-		wantHasData    bool
+		name        string
+		event       PiEvent
+		wantType    types.WSMessageType
+		wantHasData bool
 	}{
 		{
 			name: "text_delta produces token event",
@@ -195,10 +195,10 @@ func TestToStreamEvent_ToolExecution(t *testing.T) {
 
 	// tool_execution_end
 	endEvent := PiEvent{
-		Type:       "tool_execution_end",
-		ToolName:   "read",
-		ToolCallID: "call_123",
-		ToolResult: "# README\nContent here",
+		Type:        "tool_execution_end",
+		ToolName:    "read",
+		ToolCallID:  "call_123",
+		ToolResult:  "# README\nContent here",
 		ToolIsError: false,
 	}
 	result = ToStreamEvent(endEvent, false)
@@ -243,15 +243,15 @@ func TestToStreamEvent_AgentEvents(t *testing.T) {
 // TestMapPiToolName verifies Pi tool name to Kanban tool name mapping.
 func TestMapPiToolName(t *testing.T) {
 	tests := []struct {
-		piName  string
+		piName     string
 		wantKanban string
 	}{
 		{"read", "read_file"},
 		{"write", "write_file"},
 		{"edit", "edit_file"},
 		{"bash", "bash"},
-		{"task_complete", "task_complete"},
-		{"final_answer", "task_complete"},
+		{"request_review", "request_review"},
+		{"final_answer", "request_review"},
 		{"unknown_tool", "unknown_tool"},
 	}
 

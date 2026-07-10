@@ -402,7 +402,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			out = out[:maxOutputSize] + "\n\n... (output truncated at 50KB) ..."
 		}
 		return out, true
-	case "task_complete":
+	case "request_review":
 		// In plan mode, require at least one task created during planning before allowing completion
 		if task.PlanMode {
 			if state == nil {
@@ -438,7 +438,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 				summary = fmt.Sprintf("Plan created with %d subtask%s. Awaiting approval.",
 					nestedCount, pluralS(nestedCount))
 			}
-			log.Printf("[task_complete] plan mode: %s", summary)
+			log.Printf("[request_review] plan mode: %s", summary)
 		}
 		return "Task complete", true
 	case "create_task":

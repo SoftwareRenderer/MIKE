@@ -15,12 +15,12 @@ type CreateTaskArgs struct {
 
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
-	"read_file":     "Read",
-	"write_file":    "Write",
-	"edit_file":     "Edit",
-	"bash":          "Execute",
-	"task_complete": "Done",
-	"create_task":   "Create Task",
+	"read_file":      "Read",
+	"write_file":     "Write",
+	"edit_file":      "Edit",
+	"bash":           "Execute",
+	"request_review": "Done",
+	"create_task":    "Create Task",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -89,7 +89,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 		{
 			Type: "function",
 			Function: &types.ToolDef{
-				Name:        "task_complete",
+				Name:        "request_review",
 				DisplayName: "Done",
 				Description: "If the task is complete, use this tool.",
 				Parameters: map[string]any{
@@ -170,9 +170,9 @@ func GetToolDefinitions() []types.ChatTool {
 		{
 			Type: "function",
 			Function: &types.ToolDef{
-				Name:        "task_complete",
+				Name:        "request_review",
 				DisplayName: "Done",
-				Description: "Signal that the task is complete",
+				Description: "Request the user to review completed changes",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

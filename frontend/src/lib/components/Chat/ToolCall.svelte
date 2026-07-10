@@ -186,7 +186,7 @@
     let iconSrc = $derived(
         tc.toolName === 'read_file' ? fileTextIcon :
         tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
-        tc.toolName === 'task_complete' ? checkCircleIcon :
+        tc.toolName === 'request_review' ? checkCircleIcon :
         zapIcon
     );
 
@@ -255,7 +255,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'task_complete'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}
@@ -288,7 +288,7 @@
             {:else}
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
             {/if}
-        {:else if tc.toolName === 'task_complete' && tc.args && tc.args.summary}
+        {:else if tc.toolName === 'request_review' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
         {:else if tc.result && tc.result.trim()}
             {#if resultNeedsTruncation}
@@ -302,7 +302,7 @@
                 <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
-        {#if tc.duration !== undefined && tc.toolName !== 'task_complete'}
+        {#if tc.duration !== undefined && tc.toolName !== 'request_review'}
             <span class="tool-duration">{tc.duration}ms</span>
         {/if}
     </div>

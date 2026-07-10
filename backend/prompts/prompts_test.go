@@ -70,9 +70,9 @@ func TestRenderMergeConflictPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "your tools") {
 		t.Error("prompt should instruct to use tools")
 	}
-	// Should instruct to call task_complete
-	if !strings.Contains(prompt, "task_complete") {
-		t.Error("prompt should instruct to call task_complete")
+	// Should instruct to call request_review
+	if !strings.Contains(prompt, "request_review") {
+		t.Error("prompt should instruct to call request_review")
 	}
 	// Should instruct to ask about conflicting intent
 	if !strings.Contains(prompt, "conflicting intent") {

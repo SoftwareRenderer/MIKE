@@ -90,25 +90,25 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 }
 
 // buildLLMContext filters out summarization messages (summary is in system prompt)
-// and assistant messages containing task_complete tool calls, plus their orphaned results.
+// and assistant messages containing request_review tool calls, plus their orphaned results.
 func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
-	// Collect tool_call_ids from assistants with task_complete — their results become orphans.
+	// Collect tool_call_ids from assistants with request_review — their results become orphans.
 	filteredIDs := make(map[string]bool)
 	for _, m := range messages {
-		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "task_complete") {
+		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "request_review") {
 			for _, tc := range m.ToolCalls {
 				filteredIDs[tc.ID] = true
 			}
 		}
 	}
 
-	// Filter: summarization, task_complete assistants, and orphaned tool results.
+	// Filter: summarization, request_review assistants, and orphaned tool results.
 	var result []types.ChatMessage
 	for _, m := range messages {
 		if m.Role == "summarization" {
 			continue
 		}
-		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "task_complete") {
+		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "request_review") {
 			continue
 		}
 		if m.Role == "tool" && filteredIDs[m.ToolCallID] {
@@ -216,7 +216,7 @@ func formatToolAction(name, arguments string) string {
 			}
 			return "execute `" + cmd + "`"
 		}
-	case "task_complete":
+	case "request_review":
 		return "complete the task"
 	}
 	return "perform an action"

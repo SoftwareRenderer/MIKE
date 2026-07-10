@@ -37,7 +37,7 @@ const toolCallStreaming = loadFixture('tool_call_streaming');
 const toolCallWithText = loadFixture('tool_call_with_text');
 const toolCallComplete = loadFixture('tool_call_complete');
 const toolCallLoop = loadFixture('tool_call_loop');
-const toolCallTaskComplete = loadFixture('tool_call_task_complete');
+const toolCallTaskComplete = loadFixture('tool_call_request_review');
 const textLoop = loadFixture('text_loop');
 const phraseRepeat = loadFixture('phrase_repeat');
 const toolCallCreateTask = loadFixture('tool_call_create_task');
@@ -119,9 +119,9 @@ function selectResponse(parsed) {
         .map(m => (m.content || '').toLowerCase());
     const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : '';
 
-    // Plan mode: LLM creates subtasks via create_task tool, then calls task_complete.
+    // Plan mode: LLM creates subtasks via create_task tool, then calls request_review.
     // First call (no tool results yet): return create_task tool call.
-    // After create_task result: return task_complete to end planning.
+    // After create_task result: return request_review to end planning.
     const isPlanMode = messages.some(m => m.role === 'system' && /PLAN MODE/i.test(m.content || ''));
     if (isPlanMode && hasTools) {
         if (hasToolResults) {
@@ -132,9 +132,9 @@ function selectResponse(parsed) {
     }
 
     // Loop detection tests: return repeated responses to trigger loop detection.
-    // Tool loop: return same tool call (head /tmp/test_file.txt) 2x, then task_complete.
-    // Text loop: return similar text 3x, then task_complete.
-    // Phrase loop: return response with repeated phrases, then task_complete after hint.
+    // Tool loop: return same tool call (head /tmp/test_file.txt) 2x, then request_review.
+    // Text loop: return similar text 3x, then request_review.
+    // Phrase loop: return response with repeated phrases, then request_review after hint.
     // System hint messages (injected by backend) break the loop.
     const hasSystemHint = messages.some(m => m.role === 'system' && /twice in a row|similar responses|repeated yourself/i.test(m.content || ''));
     if (/loop-test-tool/i.test(lastUserMsg)) {
@@ -164,7 +164,7 @@ function selectResponse(parsed) {
 
     // If there are tool results in the conversation, the LLM should respond
     // with text (not another tool call) to avoid infinite tool-call loops.
-    // After enough tool cycles, call task_complete to terminate.
+    // After enough tool cycles, call request_review to terminate.
     // Use per-conversation counting (tool message count) instead of a global counter.
     const hasToolResults = messages.some(m => m.role === 'tool');
     if (hasToolResults) {
@@ -240,7 +240,7 @@ const server = http.createServer((req, res) => {
                                     chunks === toolCallStreaming ? 'tool_call_streaming' :
                                     chunks === toolCallWithText ? 'tool_call_with_text' :
                                     chunks === toolCallLoop ? 'tool_call_loop' :
-                                    chunks === toolCallTaskComplete ? 'tool_call_task_complete' :
+                                    chunks === toolCallTaskComplete ? 'tool_call_request_review' :
                                     chunks === textLoop ? 'text_loop' :
                                     chunks === phraseRepeat ? 'phrase_repeat' :
                                     chunks === toolCallResponse ? 'tool_call' :

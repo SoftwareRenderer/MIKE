@@ -99,7 +99,7 @@
   - [x] Parse native `tool_calls` from streaming response
   - [x] Fallback: parse tool calls from free-form text
   - [x] Connection retry with exponential backoff (3 attempts: 2s, 4s, 8s)
-- [x] Tool definitions (read_file, write_file, execute_command, task_complete)
+- [x] Tool definitions (read_file, write_file, execute_command, request_review)
 - [x] System prompt generation (with worktree path, tool definitions, timeout guidance)
 - [x] Tool execution engine
   - [x] `read_file` — read from worktree with path validation
@@ -107,7 +107,7 @@
   - [x] `execute_command` — run in worktree with timeout
     - [x] Command blacklist (sudo, rm -rf /, mkfs, dd, fork bombs, chmod 777 /)
     - [x] Timeout enforcement (default 5s, hard cap 300s)
-  - [x] `task_complete` — signal completion with summary
+  - [x] `request_review` — signal completion with summary
 - [x] Tool result feedback (feed results back to model as assistant tool responses)
 - [x] Malformed JSON in tool arguments → tool failure + error feedback
 
@@ -137,7 +137,7 @@
   - [x] `git add -A && git commit`
   - [x] Auto-PR branch creation (`pr/<branch>`)
   - [x] Auto-move to Done (skip Review)
-- [x] Auto-move to Review when task_complete called (if auto_commit is false)
+- [x] Auto-move to Review when request_review called (if auto_commit is false)
 - [x] Dependent task auto-start on parent completion
 - [x] Mid-stream disconnect handling
   - [x] Detect SSE stream break

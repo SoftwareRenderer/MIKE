@@ -39,7 +39,7 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
             return `${pathDisplay} (${suffix})`;
         }
-        case 'task_complete':
+        case 'request_review':
             return args.summary as string || '(task complete)';
         case 'create_task': {
             const title = args.title as string;
@@ -51,7 +51,7 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
 }
 
 /** Tools that should not show their args inline (shown in result instead) */
-export const HIDE_ARGS_FOR_TOOLS = new Set(['create_task', 'task_complete']);
+export const HIDE_ARGS_FOR_TOOLS = new Set(['create_task', 'request_review']);
 
 /** Tools that can run in a sandbox */
 export const SANDBOXABLE_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'bash']);

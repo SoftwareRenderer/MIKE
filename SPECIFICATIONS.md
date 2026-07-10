@@ -234,7 +234,7 @@ type StreamReasoningEndEvent struct {
 // StreamToolCallEvent - AI requests a tool invocation
 type StreamToolCallEvent struct {
     ToolID   string                 `json:"tool_id"`   // Unique ID for this tool call
-    ToolName string                 `json:"tool_name"` // "read_file", "write_file", "execute_command", "task_complete"
+    ToolName string                 `json:"tool_name"` // "read_file", "write_file", "execute_command", "request_review"
     Args     map[string]interface{} `json:"args"`      // Tool arguments
 }
 
@@ -425,7 +425,7 @@ Content-Type: application/json
         { "type": "function", "function": { "name": "read_file", "parameters": { ... } } },
         { "type": "function", "function": { "name": "write_file", "parameters": { ... } } },
         { "type": "function", "function": { "name": "execute_command", "parameters": { ... } } },
-        { "type": "function", "function": { "name": "task_complete", "parameters": { ... } } }
+        { "type": "function", "function": { "name": "request_review", "parameters": { ... } } }
     ]
 }
 ```
@@ -452,9 +452,9 @@ You have access to the following tools via function calling:
 - read_file(path): Read the contents of a file
 - write_file(path, content): Write content to a file (creates directories as needed)
 - execute_command(command, timeout): Execute a shell command in the worktree
-- task_complete(summary): Signal that the task is complete with a summary of work done
+- request_review(summary): Signal that the task is complete with a summary of work done
 
-When the task is complete, call task_complete() with a summary including:
+When the task is complete, call request_review() with a summary including:
 - Files created or modified
 - Commands executed
 - Any issues encountered
@@ -485,7 +485,7 @@ Do not ask about things already answerable from the codebase.
 ### Phase 3: Decompose Into Subtasks
 Use the `create_task(title, prompt)` tool to break the work into a tree of subtasks on the Kanban board.
 Each subtask should be small and independently verifiable. Use `parent_task_id` for nested subtasks.
-After creating all subtasks, call task_complete() with summary: "Plan created with N subtasks. Awaiting approval to proceed."
+After creating all subtasks, call request_review() with summary: "Plan created with N subtasks. Awaiting approval to proceed."
 
 ### Phase 4: Execute the Plan
 Once the user approves the plan (by moving the task to In Progress), subtasks will be executed
@@ -531,7 +531,7 @@ automatically. The AI does NOT need to execute subtasks itself — that is handl
 6. Backend connects to llama.cpp /v1/chat/completions with stream=true
    - On connection failure: retry with exponential backoff (3 attempts: 2s, 4s, 8s)
    - After 3 failures: status_state → "paused", await user resume
-   - System prompt with worktree path and tool definitions (including task_complete)
+   - System prompt with worktree path and tool definitions (including request_review)
    - User message = task prompt (+ conversation history on retry)
        │
        ▼
@@ -546,11 +546,11 @@ automatically. The AI does NOT need to execute subtasks itself — that is handl
       * Failed tool call → increment counter
       * Counter >= MaxConsecutiveFailedTurns → status_state → "failed"
    - Continues multi-turn conversation until:
-      a) The AI calls `task_complete()` tool, OR
+      a) The AI calls `request_review()` tool, OR
       b) Max consecutive failed turns reached (`task.MaxConsecutiveFailedTurns`, default: 3)
        │
        ▼
-8. On completion (task_complete called):
+8. On completion (request_review called):
    - If task.AutoCommit == true:
       a) Generate commit message from task summary
       b) Run `git add -A && git commit -m "<summary>"` in the worktree
@@ -602,7 +602,7 @@ automatically. The AI does NOT need to execute subtasks itself — that is handl
     - Load persisted conversation history from SQLite
     - Add context message: "Your previous execution was interrupted.
       Please review your partial work and continue. If the task is already
-      complete, call task_complete(). Otherwise, finish the remaining work."
+      complete, call request_review(). Otherwise, finish the remaining work."
     - Reuse the existing git worktree (preserve partial work)
     - Reset consecutive failed turns counter to 0
     - Reset status_state → "running"
@@ -644,7 +644,7 @@ The backend supports four tools that the AI can request:
 | `read_file` | `path` (string) | Read file contents from worktree |
 | `write_file` | `path` (string), `content` (string) | Write file to worktree (creates directories as needed) |
 | `execute_command` | `command` (string), `timeout` (int, optional) | Run shell command in worktree. `timeout` is model-specified in seconds (default: 5s if omitted, server-side hard cap: 300s). The model should set a low timeout for fast commands (e.g., `ls`) and higher for builds/tests. Server-side blocking of unsafe commands. |
-| `task_complete` | `summary` (string) | Signal task completion with a work summary |
+| `request_review` | `summary` (string) | Signal task completion with a work summary |
 
 **Tool Execution Safety:**
 - `execute_command`: Working directory always set to the worktree root
@@ -673,7 +673,7 @@ The backend supports four tools that the AI can request:
 
 - **SQLite persistence**: Conversation history (full message arrays including tool calls and results) is persisted to the `conversation_history` table in SQLite after each turn completes.
 - **Survives restarts**: If the server restarts mid-execution, the task is marked as `paused`. The conversation history is preserved in the database and can be loaded on resume.
-- **Retry context (from In Progress/failed)**: On retry, the full persisted conversation history is loaded from SQLite and re-sent to the model with an additional system message: "Your previous execution was interrupted. Please review your partial work and continue. If the task is already complete, call task_complete(). Otherwise, finish the remaining work."
+- **Retry context (from In Progress/failed)**: On retry, the full persisted conversation history is loaded from SQLite and re-sent to the model with an additional system message: "Your previous execution was interrupted. Please review your partial work and continue. If the task is already complete, call request_review(). Otherwise, finish the remaining work."
 - **Retry context (from Review/rejected)**: When a task is moved from Review back to In Progress, conversation history is cleared and a fresh start is made. The re-prompt includes the previous AI summary and all unresolved review comments formatted as: "FILE: <file_path> (line <line_num>): <comment>". This ensures the AI can address specific line-level feedback from the reviewer.
 - **Cleanup**: Conversation history is automatically deleted (via FOREIGN KEY CASCADE) when the associated task is deleted. Worktree artifacts and conversation history are NOT purged when a task is moved to Done, allowing post-completion inspection.
 
@@ -793,7 +793,7 @@ All components follow the design patterns and input/presentation features from t
   - **Pending**: tool name + arguments in monospace block + loading spinner
   - **Success**: green check + output preview (collapsible) + duration badge
   - **Error**: red X + error message in red text
-- Tool name displayed as a Badge with icon (file for read/write, terminal for execute_command, check for task_complete)
+- Tool name displayed as a Badge with icon (file for read/write, terminal for execute_command, check for request_review)
 - Arguments rendered as formatted JSON in a monospace code block
 - Output rendered in a scrollable monospace container with max-height
 
