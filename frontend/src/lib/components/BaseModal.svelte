@@ -64,6 +64,11 @@
             </slot>
             <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
         </div>
+        {#if $$slots.toolbar}
+            <div class="modal-toolbar">
+                <slot name="toolbar" />
+            </div>
+        {/if}
         <div class="modal-body">
             <slot />
         </div>
@@ -78,6 +83,11 @@
 <style>
     @import '$lib/styles/shared.css';
 
+    .modal-toolbar {
+        padding: 12px 20px 8px;
+        border-bottom: 1px solid var(--color-border);
+        flex-shrink: 0;
+    }
     .modal-footer {
         display: flex;
         align-items: center;

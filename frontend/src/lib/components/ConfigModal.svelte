@@ -5,6 +5,7 @@
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
     import { config as configStore, selectedProject, pwaInstallPrompt } from '$lib/stores/app';
     import { showConfig } from '$lib/stores/ui';
+    import { showConfirm } from '$lib/stores/dialogs';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -492,6 +493,18 @@
         onClose();
     }
 
+    async function handleSignOut() {
+        const confirmed = await showConfirm({
+            title: 'Sign out',
+            message: 'Are you sure you want to sign out?',
+            confirmText: 'Sign out',
+            variant: 'destructive',
+        });
+        if (confirmed && onSignOut) {
+            await onSignOut();
+        }
+    }
+
     // PWA install handler
     async function handlePwaInstall() {
         const promptEvent = $pwaInstallPrompt;
@@ -619,7 +632,7 @@
             {/if}
         <div slot="footer" class="footer-slot-wrapper">
             {#if onSignOut}
-                <button type="button" class="btn-signout" onclick={onSignOut} title="Sign out of Kanban">Sign out</button>
+                <button type="button" class="btn-signout" onclick={handleSignOut} title="Sign out of Kanban">Sign out</button>
             {/if}
             <div class="modal-footer-right">
                 <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>

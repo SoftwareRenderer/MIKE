@@ -54,7 +54,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
         // If current project has reviews, show it with count
         if (reviewCount > 0) {
-            return `🟡 ${name} - ${reviewCount} task${reviewCount === 1 ? '' : 's'} awaiting review`;
+            return `🟡 ${name} - ${reviewCount} task${reviewCount === 1 ? '' : 's'} for review`;
         }
         // Check if any other project has reviews
         for (const [pid, counts] of Object.entries(projectCounts)) {

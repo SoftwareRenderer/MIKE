@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { createFocusTrap } from '$lib/a11y';
+    import BaseModal from './BaseModal.svelte';
     import { ensureCsrfToken } from '$lib/api';
     import homeIcon from '$lib/assets/icons/home.svg';
     import folderIcon from '$lib/assets/icons/folder.svg';
@@ -135,74 +135,52 @@
         return p || '/';
     }
 
-    let browserEl: HTMLDivElement | null = null;
-    let trap: ReturnType<typeof createFocusTrap> | null = null;
-    let triggerEl: HTMLElement | null = null;
-
-    onMount(() => {
-        triggerEl = document.activeElement as HTMLElement;
-        if (browserEl) {
-            trap = createFocusTrap(browserEl, handleClose);
-            setTimeout(() => trap?.focusFirst(), 50);
-        }
-    });
-
     function handleClose() {
-        trap?.destroy();
-        trap = null;
         onClose();
-        setTimeout(() => triggerEl?.focus(), 50);
     }
 </script>
 
-<div class="overlay" onclick={handleClose} role="presentation">
-    <div class="browser" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={browserEl} role="dialog" aria-modal="true" aria-labelledby="file-browser-title" tabindex="-1">
-        <div class="browser-header">
-            <h2 id="file-browser-title">Select Project Directory</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
-        </div>
-
-        <div class="browser-body">
-            <!-- Path bar -->
-            <div class="path-bar">
-                <div class="path-bar-row">
-                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
-                        <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
-                    </button>
+<BaseModal title="Select Project Directory" width="560px" zIndex={300} onClose={handleClose}>
+        <div slot="toolbar" class="path-bar">
+            <div class="path-bar-row">
+                <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
+                    <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
+                </button>
+                <input
+                    type="text"
+                    class="path-input"
+                    bind:value={currentPath}
+                    onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
+                    placeholder="Enter path or browse..."
+                    aria-label="File path"
+                />
+                <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                        <line x1="12" y1="10" x2="12" y2="16"/>
+                        <line x1="9" y1="13" x2="15" y2="13"/>
+                    </svg>
+                </button>
+            </div>
+            {#if showNewFolder}
+                <div class="new-folder-row">
+                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                         type="text"
-                        class="path-input"
-                        bind:value={currentPath}
-                        onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
-                        placeholder="Enter path or browse..."
-                        aria-label="File path"
+                        class="folder-name-input"
+                        bind:value={newFolderName}
+                        placeholder="Folder name"
+                        onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
+                        autofocus
+                        aria-label="New folder name"
                     />
-                    <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                            <line x1="12" y1="10" x2="12" y2="16"/>
-                            <line x1="9" y1="13" x2="15" y2="13"/>
-                        </svg>
-                    </button>
+                    <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
+                    <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
                 </div>
-                {#if showNewFolder}
-                    <div class="new-folder-row">
-                        <!-- svelte-ignore a11y_autofocus -->
-                        <input
-                            type="text"
-                            class="folder-name-input"
-                            bind:value={newFolderName}
-                            placeholder="Folder name"
-                            onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
-                            autofocus
-                            aria-label="New folder name"
-                        />
-                        <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
-                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
-                    </div>
-                {/if}
-            </div>
+            {/if}
+        </div>
 
+        <div class="body-wrapper">
             {#if error}
                 <div class="error">{error}</div>
             {/if}
@@ -242,66 +220,34 @@
             {/if}
         </div>
 
-        <div class="browser-footer">
+        <div slot="footer" class="footer-wrapper">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
                 <label class="sandbox-toggle">
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
                     <span>Use Sandbox</span>
                 </label>
-                <button class="btn-cancel" onclick={handleClose} title="Cancel">Cancel</button>
+                <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
                 {#if isGitRepo}
-                    <button
-                        class="btn-select"
-                        onclick={handleSelect}
-                        title="Select this directory as project"
-                    >
+                    <button type="button" class="btn-primary" onclick={handleSelect} title="Select this directory as project">
                         Select
                     </button>
                 {:else}
-                    <button
-                        class="btn-select"
-                        onclick={handleInitGit}
-                        disabled={initGitLoading}
-                        title="Initialize git repository in this directory"
-                    >
+                    <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title="Initialize git repository in this directory">
                         {initGitLoading ? 'Initializing...' : 'Initialize Git'}
                     </button>
                 {/if}
             </div>
         </div>
-    </div>
-</div>
+</BaseModal>
 
 <style>
-    @import '$lib/styles/shared.css';
-
-    :global(.overlay) {
-        z-index: 300;
-    }
-    .browser {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        width: 560px;
-        max-width: 90vw;
-        max-height: 80vh;
+    :global(.modal) {
         display: flex;
         flex-direction: column;
-        overflow: hidden;
+        max-height: 80vh;
     }
-    .browser-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 16px 20px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .browser-header h2 {
-        font-size: 1rem;
-        font-weight: 600;
-    }
-    .browser-body {
+    :global(.modal-body) {
         flex: 1;
         overflow-y: auto;
         padding: 0 16px 16px;
@@ -309,15 +255,17 @@
         flex-direction: column;
         gap: 8px;
     }
+    :global(.modal-footer) {
+        gap: 12px;
+    }
+    .body-wrapper,
+    .footer-wrapper {
+        display: contents;
+    }
     .path-bar {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        background: var(--color-surface-1);
-        padding: 12px 0 8px;
     }
     .path-bar-row {
         display: flex;
@@ -477,14 +425,6 @@
         border-radius: 10px;
         font-weight: 600;
     }
-    .browser-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 16px;
-        border-top: 1px solid var(--color-border);
-        gap: 12px;
-    }
     .current-path {
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
@@ -513,28 +453,5 @@
         cursor: pointer;
         accent-color: var(--color-primary);
     }
-    .btn-cancel {
-        padding: 6px 16px;
-        background: var(--color-surface-3);
-        border-radius: var(--radius-md);
-        font-size: 0.875rem;
-    }
-    .btn-cancel:hover {
-        background: var(--color-surface-4);
-    }
-    .btn-select {
-        padding: 6px 16px;
-        background: var(--color-accent);
-        color: white;
-        border-radius: var(--radius-md);
-        font-size: 0.875rem;
-        font-weight: 500;
-    }
-    .btn-select:hover:not(:disabled) {
-        background: var(--color-accent-hover);
-    }
-    .btn-select:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
+
 </style>

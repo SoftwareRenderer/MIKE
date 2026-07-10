@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    
     import type { Provider } from '$lib/types';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
-    import { createFocusTrap } from '$lib/a11y';
+    import BaseModal from '../BaseModal.svelte';
 
     let {
         taskTitle,
@@ -45,24 +45,13 @@
     let autoMergeDraft = $state(editAutoMerge);
     let subtasksAutoMergeDraft = $state(editSubtasksAutoMerge);
 
-    let modalEl: HTMLDivElement | null = null;
     let titleInput: HTMLInputElement | null = null;
-    let trap: ReturnType<typeof createFocusTrap> | null = null;
-    let triggerEl: HTMLElement | null = null;
 
-    onMount(() => {
-        triggerEl = document.activeElement as HTMLElement;
-        if (modalEl) {
-            trap = createFocusTrap(modalEl, handleClose);
-        }
+    $effect(() => {
         setTimeout(() => {
             titleInput?.focus();
             titleInput?.select();
         }, 50);
-    });
-
-    onDestroy(() => {
-        trap?.destroy();
     });
 
     function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
@@ -78,24 +67,11 @@
     }
 
     function handleClose() {
-        trap?.destroy();
-        trap = null;
         onCancel();
-        setTimeout(() => triggerEl?.focus(), 50);
-    }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') handleClose();
     }
 </script>
 
-<div class="overlay" onclick={handleClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={handleKeydown} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="edit-task-title" tabindex="-1">
-        <div class="modal-header">
-            <h2 id="edit-task-title">Edit Task</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
-        </div>
-        <div class="modal-body">
+<BaseModal title="Edit Task" width="440px" onClose={handleClose}>
             <label for="edit-task-title-input">
                 <span class="field-label">Title</span>
                 <input
@@ -149,37 +125,31 @@
                 </div>
                 {/if}
             </div>
-            <div class="modal-footer">
-                <button type="button" onclick={handleClose}>Cancel</button>
+            <div slot="footer" class="footer-wrapper">
+                <button type="button" class="btn-secondary" onclick={handleClose}>Cancel</button>
                 <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>Save</button>
             </div>
-        </div>
-    </div>
-</div>
+</BaseModal>
 
 <style>
-    @import '$lib/styles/shared.css';
-
-    :global(.overlay) {
-        z-index: 100;
-        background: rgba(0,0,0,0.5);
-    }
     :global(.modal) {
-        width: 440px;
         box-shadow: 0 12px 40px rgba(0,0,0,0.3);
     }
-    .modal-header {
+    :global(.modal-header) {
         padding: 14px 18px;
     }
-    .modal-header h2 {
+    :global(.modal-header) h2 {
         font-size: 0.9375rem;
         color: var(--color-text-primary);
     }
-    .modal-body {
+    :global(.modal-body) {
         padding: 16px 18px 18px;
         display: flex;
         flex-direction: column;
         gap: 14px;
+    }
+    .footer-wrapper {
+        display: contents;
     }
     label {
         display: flex;
@@ -251,64 +221,9 @@
         font-size: 0.6875rem;
         color: var(--color-text-tertiary);
     }
-    .modal-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        padding-top: 12px;
-        border-top: 1px solid var(--color-border);
-    }
-    .btn-primary {
-        padding: 7px 18px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent);
-        color: #fff;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .btn-primary:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-    .btn-primary:hover:not(:disabled) {
-        opacity: 0.85;
-    }
-    button[type="button"] {
-        padding: 7px 14px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    button[type="button"]:hover {
-        background: var(--color-surface-4);
-    }
-
     @media (max-width: 768px) {
-        .modal {
-            width: 100vw;
-            max-width: none;
-            max-height: 100dvh;
-            height: 100dvh;
-            border-radius: 0;
-            border: none;
-        }
-        .modal-header {
+        :global(.modal-body) {
             padding: 16px;
-        }
-        .modal-body {
-            padding: 16px;
-        }
-        button[type="button"],
-        .btn-primary {
-            min-height: 44px;
         }
     }
 </style>
