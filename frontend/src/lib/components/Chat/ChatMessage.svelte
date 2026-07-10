@@ -25,6 +25,8 @@
         duration?: number;
         isPending?: boolean;
         bytesWritten?: number;
+        linesAdded?: number;
+        linesRemoved?: number;
         contentIndex?: number;
         reasoningIndex?: number;
     }

@@ -31,7 +31,7 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
         }
         case 'edit_file': {
             const p = args.path as string;
-            if (!p) return '(editing...)';
+            if (!p) return '';
             const edits = args.edits as Array<{ oldText: string; newText: string }>;
             const editCount = edits ? edits.length : 0;
             const pathDisplay = p.startsWith('./') ? p : `./${p}`;

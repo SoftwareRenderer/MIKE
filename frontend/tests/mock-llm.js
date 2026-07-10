@@ -37,10 +37,11 @@ const toolCallStreaming = loadFixture('tool_call_streaming');
 const toolCallWithText = loadFixture('tool_call_with_text');
 const toolCallComplete = loadFixture('tool_call_complete');
 const toolCallLoop = loadFixture('tool_call_loop');
-const toolCallTaskComplete = loadFixture('tool_call_request_review');
+const toolCallTaskComplete = loadFixture('tool_call_task_complete');
 const textLoop = loadFixture('text_loop');
 const phraseRepeat = loadFixture('phrase_repeat');
 const toolCallCreateTask = loadFixture('tool_call_create_task');
+const toolCallEditFile = loadFixture('tool_call_edit_file');
 
 let requestCount = 0;
 let loopToolCount = 0;  // per-scenario counter for tool loop test
@@ -187,6 +188,11 @@ function selectResponse(parsed) {
         return { chunks: toolCallStreaming, chunkDelay: 1 };
     }
 
+    // Edit file tool call: tools provided and message mentions "edit"
+    if (hasTools && /\bedit\b/i.test(lastUserMsg)) {
+        return { chunks: toolCallEditFile, chunkDelay: 1 };
+    }
+
     // Tool call with text content: LLM sends tool name as text before the tool call
     // This simulates the "tool name printed twice" bug
     if (hasTools && /text.*tool|tool.*text|toolname.*dup/i.test(lastUserMsg)) {
@@ -238,6 +244,7 @@ const server = http.createServer((req, res) => {
                 const { chunks, chunkDelay } = selectResponse(parsed);
                 const fixtureName = chunks === toolCallFail ? 'tool_call_fail' :
                                     chunks === toolCallStreaming ? 'tool_call_streaming' :
+                                    chunks === toolCallEditFile ? 'tool_call_edit_file' :
                                     chunks === toolCallWithText ? 'tool_call_with_text' :
                                     chunks === toolCallLoop ? 'tool_call_loop' :
                                     chunks === toolCallTaskComplete ? 'tool_call_request_review' :

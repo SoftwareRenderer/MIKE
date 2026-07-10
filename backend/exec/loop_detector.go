@@ -43,6 +43,29 @@ func extractPathFromArgs(args string) string {
 	return ""
 }
 
+// countEditLines counts lines added and removed from edit_file tool args.
+// Parses the (possibly partial) JSON to extract oldText/newText from edits array.
+// Returns (added, removed) line counts.
+func countEditLines(args string) (added, removed int) {
+	// Try parsed JSON first (works when full edits array is available)
+	parsed := parseToolArgs(args)
+	if parsed != nil {
+		if edits, ok := parsed["edits"].([]any); ok {
+			for _, e := range edits {
+				if editMap, ok := e.(map[string]any); ok {
+					if oldText, ok := editMap["oldText"].(string); ok {
+						removed += strings.Count(oldText, "\n")
+					}
+					if newText, ok := editMap["newText"].(string); ok {
+						added += strings.Count(newText, "\n")
+					}
+				}
+			}
+		}
+	}
+	return added, removed
+}
+
 // LoopType indicates the type of loop detected.
 type LoopType int
 

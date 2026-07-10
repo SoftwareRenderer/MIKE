@@ -66,7 +66,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'tool_call': {
                 if (suppressEvents) break;
                 stream.clearAwaiting();
-                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string };
+                const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string; lines_added?: number; lines_removed?: number };
                 if (!data.tool_id || data.tool_id === '') break;
 
                 let entry = s.currentAssistantId ? s.entries.find(e => e.id === s.currentAssistantId) || null : null;
@@ -85,6 +85,8 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (!existing.isPending && existing.result !== undefined) break;
                     const newRawArgs = data.raw_args_delta ? (existing.raw_args || '') + data.raw_args_delta : data.raw_args;
                     const updated = { ...existing, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args || {}, raw_args: newRawArgs, sandbox: data.sandbox, path: data.path };
+                    if (data.lines_added !== undefined) updated.linesAdded = data.lines_added;
+                    if (data.lines_removed !== undefined) updated.linesRemoved = data.lines_removed;
                     entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id ? updated : tc);
                 } else if (s.processedToolIds.has(data.tool_id)) {
                     break;
@@ -95,6 +97,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     entry.toolCalls = [...(entry.toolCalls || []), {
                         toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
                         args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
+                        linesAdded: data.lines_added, linesRemoved: data.lines_removed,
                         isPending: true, contentIndex: ci, reasoningIndex: ri,
                     }];
                     entry.isStreaming = true;
@@ -145,12 +148,14 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'tool_progress': {
-                const data = event.data as { tool_id?: string; bytes_written: number; path?: string };
+                const data = event.data as { tool_id?: string; bytes_written?: number; lines_added?: number; lines_removed?: number; path?: string };
                 for (const entry of s.entries) {
                     if (entry.toolCalls) {
                         for (const tc of entry.toolCalls) {
                             if (tc.isPending && (!data.tool_id || tc.toolId === data.tool_id)) {
-                                tc.bytesWritten = data.bytes_written;
+                                if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                                if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                                if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
                                 if (data.path) tc.path = data.path;
                             }
                         }

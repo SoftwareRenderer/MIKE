@@ -1,5 +1,6 @@
 <script lang="ts">
     import { getToolDisplayName } from '$lib/types';
+    import { slide } from 'svelte/transition';
     import shieldGreenIcon from '$lib/assets/icons/shield-green.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import zapIcon from '$lib/assets/icons/zap.svg';
@@ -23,6 +24,8 @@
             sandbox?: boolean;
             duration?: number;
             bytesWritten?: number;
+            linesAdded?: number;
+            linesRemoved?: number;
             resultTruncated?: boolean; // true if backend truncated the result
             originalLines?: number; // original line count before truncation
             originalBytes?: number; // original byte count before truncation
@@ -218,6 +221,28 @@
         }
         return blocks;
     }
+
+    // Edit diff expand/collapse
+    let editDiffExpanded = $state(false);
+    let editLinesAdded = $derived(() => {
+        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
+        if (!edits) return 0;
+        let count = 0;
+        for (const edit of edits) {
+            count += (edit.newText || '').split('\n').length;
+        }
+        return count;
+    });
+    let editLinesRemoved = $derived(() => {
+        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
+        if (!edits) return 0;
+        let count = 0;
+        for (const edit of edits) {
+            count += (edit.oldText || '').split('\n').length;
+        }
+        return count;
+    });
+    let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
 </script>
 
 <div class="tool-call-entry">
@@ -255,28 +280,40 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}
         </div>
-        {#if tc.toolName === 'edit_file' && tc.args && tc.args.edits}
-            <div class="edit-diff">
-                {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
-                    {#each block.edits as line}
-                        <div class="edit-diff-line {line.type === 'removed' ? 'edit-removed' : 'edit-added'}">
-                            <span class="edit-diff-sign">{line.type === 'removed' ? '-' : '+'}</span>
-                            <span class="edit-diff-text">{line.text}</span>
-                        </div>
+        {#if hasEditDiff}
+            <button class="edit-diff-toggle" onclick={() => editDiffExpanded = !editDiffExpanded} aria-expanded={editDiffExpanded}>
+                <span class="lines-added">+{editLinesAdded()}</span>
+                <span class="lines-removed">/-{editLinesRemoved()}</span>
+                <span class="edit-diff-arrow">{editDiffExpanded ? '▴' : '▾'}</span>
+            </button>
+            {#if editDiffExpanded}
+                <div class="edit-diff" transition:slide={{ duration: 200 }}>
+                    {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
+                        {#each block.edits as line}
+                            <div class="edit-diff-line {line.type === 'removed' ? 'edit-removed' : 'edit-added'}">
+                                <span class="edit-diff-sign">{line.type === 'removed' ? '-' : '+'}</span>
+                                <span class="edit-diff-text">{line.text}</span>
+                            </div>
+                        {/each}
+                        {#if block.separator}
+                            <div class="edit-separator"></div>
+                        {/if}
                     {/each}
-                    {#if block.separator}
-                        <div class="edit-separator"></div>
-                    {/if}
-                {/each}
-            </div>
+                </div>
+            {/if}
             {#if !tc.success && tc.result && tc.result.trim()}
                 <pre class="tool-result tool-result-error">{tc.result}</pre>
             {/if}
+        {:else if tc.toolName === 'write_file' && !tc.isPending}
+            <div class="tool-result tool-write-result">
+                <span class="write-result-text">Wrote {formatBytes(tc.bytesWritten ?? 0)} to:</span>
+                <span class="write-result-path">{tc.path || tc.args?.path || '(unknown)'}</span>
+            </div>
         {:else if tc.toolName === 'create_task' && tc.result && tc.success}
             {#if createResult && createResult.task_id}
                 <div class="tool-result tool-create-task">
@@ -360,6 +397,8 @@
     }
     .tool-status.pending { color: var(--color-accent); }
     .progress-text { font-size: 0.8125rem; font-weight: 600; }
+    .lines-added { color: var(--color-status-green); }
+    .lines-removed { color: var(--color-status-red); }
     .tool-status.error { color: var(--color-status-red); }
     .spinner {
         display: inline-block;
@@ -428,6 +467,24 @@
         padding: 6px 8px;
         border-radius: var(--radius-sm);
         margin: 4px 0 0;
+    }
+    .tool-write-result {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--color-surface-0);
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        margin: 4px 0 0;
+        font-size: 0.75rem;
+    }
+    .write-result-text {
+        color: var(--color-text-secondary);
+    }
+    .write-result-path {
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-weight: 500;
     }
     .create-task-text {
         color: var(--color-text-secondary);
@@ -505,5 +562,31 @@
     .edit-separator {
         border-top: 1px dashed var(--color-border);
         margin: 4px 8px;
+    }
+    .edit-diff-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--color-surface-0);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 4px 10px;
+        margin: 4px 0 0;
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        transition: all 0.15s ease;
+    }
+    .edit-diff-toggle:hover {
+        background: var(--color-surface-2);
+        border-color: var(--color-border-bright);
+        color: var(--color-text-primary);
+    }
+    .edit-diff-arrow {
+        font-size: 0.625rem;
+        color: var(--color-text-tertiary);
+        margin-left: 2px;
     }
 </style>

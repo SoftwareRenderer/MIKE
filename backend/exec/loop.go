@@ -175,6 +175,12 @@ func (f *streamFlusher) flush() {
 				// Update — send delta from start position.
 				data["raw_args_delta"] = d.args[d.startArgLen:d.currentArgLen]
 			}
+			// Include edit line counts in the tool_call event so they're available immediately.
+			if d.toolName == "edit_file" {
+				added, removed := countEditLines(d.args)
+				data["lines_added"] = added
+				data["lines_removed"] = removed
+			}
 			f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeToolCall, Data: data})
 		}
 		f.toolCallDeltas = make(map[string]toolCallDelta)

@@ -243,7 +243,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
-		return fmt.Sprintf("Wrote %d bytes", len(content)), true
+		return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
 	case "edit_file":
 		path, _ := args["path"].(string)
 		read := sandboxRead

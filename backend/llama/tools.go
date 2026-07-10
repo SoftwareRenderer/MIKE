@@ -133,7 +133,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Parameters: map[string]any{
 					"type": "object",
 					// ensure that the LLM sees path before content
-					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file"},"content":{"type":"string","description":"Content to write"}}`),
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"content":{"type":"string","description":"Content to write"}}`),
 					"required":   []string{"path", "content"},
 				},
 			},
@@ -146,7 +146,7 @@ func GetToolDefinitions() []types.ChatTool {
 				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Each oldText must match exactly (whitespace, indentation)",
 				Parameters: map[string]any{
 					"type":       "object",
-					"properties": json.RawMessage(`{"path":{"type":"string","description":"Path to the file to edit"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
 					"required":   []string{"path", "edits"},
 				},
 			},

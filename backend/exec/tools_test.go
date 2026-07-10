@@ -160,8 +160,8 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
-	if result != "Wrote 13 bytes" {
-		t.Errorf("expected 'Wrote 13 bytes', got %q", result)
+	if result != "Wrote 13 bytes to test.txt" {
+		t.Errorf("expected 'Wrote 13 bytes to test.txt', got %q", result)
 	}
 	if writtenPath != "test.txt" {
 		t.Errorf("expected path 'test.txt', got %q", writtenPath)
@@ -192,8 +192,8 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
 	}
-	if result != "Wrote 10 bytes" {
-		t.Errorf("expected 'Wrote 10 bytes', got %q", result)
+	if result != "Wrote 10 bytes to host.txt" {
+		t.Errorf("expected 'Wrote 10 bytes to host.txt', got %q", result)
 	}
 
 	// Verify file was written

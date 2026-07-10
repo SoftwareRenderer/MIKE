@@ -122,6 +122,8 @@ export interface ChatEntry {
         duration?: number;
         isPending?: boolean;
         bytesWritten?: number;
+        linesAdded?: number;
+        linesRemoved?: number;
     }>;
     toolCall?: {
         toolName: string;
