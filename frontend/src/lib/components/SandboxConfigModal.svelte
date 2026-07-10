@@ -756,6 +756,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         gap: 12px;
     }
 
+    .config-row-expandable {
+        padding-left: 36px;
+    }
+
     .config-row-subsection {
         padding-left: 36px;
     }
@@ -970,6 +974,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     /* Dockerfile section */
     .dockerfile-section {
         padding: 8px 0 0;
+        padding-left: 36px;
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -1081,6 +1086,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         gap: 6px;
         font-size: 0.75rem;
         color: var(--color-text-secondary);
+        padding-left: 24px;
     }
 
     .image-tag-info code {
@@ -1317,15 +1323,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .port-error,
     .mount-error {
         padding: 4px 8px;
+        padding-left: 36px;
         background: rgba(248, 81, 73, 0.1);
         border: 1px solid rgba(248, 81, 73, 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
-    }
-
-    .port-error {
-        padding-left: 36px;
     }
 
     .port-no-active {
@@ -1342,6 +1345,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         flex-direction: column;
         gap: 4px;
         margin-top: 4px;
+        padding-left: 36px;
     }
 
     .mount-item {
@@ -1413,6 +1417,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         align-items: center;
         gap: 6px;
         margin: 4px 2px 0;
+        padding-left: 36px;
     }
 
     .mount-input {
