@@ -1306,7 +1306,16 @@ func estimateTokensFromText(text string) int {
 func estimatePromptTokens(messages []types.ChatMessage) int {
 	total := 0
 	for _, m := range messages {
-		total += estimateTokensFromText(m.Content)
+		if len(m.ContentParts) > 0 {
+			// Multi-modal: text is in ContentParts[0].Text, not Content
+			for _, p := range m.ContentParts {
+				if p.Type == "text" {
+					total += estimateTokensFromText(p.Text)
+				}
+			}
+		} else {
+			total += estimateTokensFromText(m.Content)
+		}
 		total += estimateTokensFromText(m.ReasoningContent)
 	}
 	return total

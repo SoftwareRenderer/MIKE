@@ -2191,3 +2191,145 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 		t.Errorf("expected Content='file contents', got %q", messages[3].Content)
 	}
 }
+
+// --- removeDuplicateUserMessage Tests ---
+
+func TestRemoveDuplicateUserMessage_PlainText(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "user", Content: "hello"}, // duplicate
+		{Role: "assistant", Content: "hi"},
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should have removed one of the duplicate user messages
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	// The newer user message (index 2 in original) should be kept
+	if result[1].Role != "user" || result[1].Content != "hello" {
+		t.Errorf("expected user 'hello', got role=%s content=%s", result[1].Role, result[1].Content)
+	}
+}
+
+func TestRemoveDuplicateUserMessage_DifferentContent(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "user", Content: "world"}, // different
+		{Role: "assistant", Content: "hi"},
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should NOT remove anything
+	if len(result) != 4 {
+		t.Fatalf("expected 4 messages (no duplicates), got %d", len(result))
+	}
+}
+
+func TestRemoveDuplicateUserMessage_ContentPartsSameText(t *testing.T) {
+	imgSource := &struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this"},
+			{Type: "image", ImageSource: imgSource},
+		}},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this"},
+			{Type: "image", ImageSource: imgSource},
+		}}, // duplicate with same parts
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should have removed one duplicate
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+}
+
+func TestRemoveDuplicateUserMessage_ContentPartsDifferentText(t *testing.T) {
+	imgSource := &struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this"},
+			{Type: "image", ImageSource: imgSource},
+		}},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check that"}, // different text
+			{Type: "image", ImageSource: imgSource},
+		}},
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should NOT remove — text differs
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (different text), got %d", len(result))
+	}
+}
+
+func TestRemoveDuplicateUserMessage_ContentPartsDifferentCount(t *testing.T) {
+	imgSource := &struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this"},
+		}},
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this"},
+			{Type: "image", ImageSource: imgSource}, // has image, other doesn't
+		}},
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should NOT remove — different part counts
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (different part counts), got %d", len(result))
+	}
+}
+
+func TestRemoveDuplicateUserMessage_MixedPlainAndContentParts(t *testing.T) {
+	imgSource := &struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "prompt"},
+		{Role: "user", Content: "hello"}, // plain text
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "hello"},
+			{Type: "image", ImageSource: imgSource},
+		}}, // has ContentParts
+	}
+
+	result := removeDuplicateUserMessage(messages)
+
+	// Should NOT remove — one is plain, one has ContentParts
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (mixed types), got %d", len(result))
+	}
+}

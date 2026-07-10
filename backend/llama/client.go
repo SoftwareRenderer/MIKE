@@ -84,7 +84,7 @@ func toAPIMessage(m types.ChatMessage) map[string]any {
 	if m.ToolCallID != "" {
 		result["tool_call_id"] = m.ToolCallID
 	}
-	if m.ReasoningContent != "" {
+	if m.Role == "assistant" && m.ReasoningContent != "" {
 		result["reasoning_content"] = m.ReasoningContent
 	}
 	return result

@@ -132,3 +132,42 @@ func TestToAPIMessage_ToolCallWithReasoning(t *testing.T) {
 		t.Error("expected tool_calls to be present")
 	}
 }
+
+func TestToAPIMessage_ReasoningOnlyOnAssistantRole(t *testing.T) {
+	// reasoning_content should only be sent for assistant role per OpenAI spec
+	// Even if ReasoningContent is set on other roles, it should be suppressed.
+
+	// User message with ReasoningContent — should NOT have reasoning_content in output
+	userMsg := types.ChatMessage{
+		Role:             "user",
+		Content:          "hello",
+		ReasoningContent: "should be ignored",
+	}
+	result := toAPIMessage(userMsg)
+	if _, ok := result["reasoning_content"]; ok {
+		t.Error("user message should NOT have reasoning_content field")
+	}
+
+	// Tool message with ReasoningContent — should NOT have reasoning_content in output
+	toolMsg := types.ChatMessage{
+		Role:             "tool",
+		Content:          "file contents",
+		ToolCallID:       "call_1",
+		ReasoningContent: "should be ignored",
+	}
+	result = toAPIMessage(toolMsg)
+	if _, ok := result["reasoning_content"]; ok {
+		t.Error("tool message should NOT have reasoning_content field")
+	}
+
+	// Assistant message — SHOULD have reasoning_content
+	assistantMsg := types.ChatMessage{
+		Role:             "assistant",
+		Content:          "answer",
+		ReasoningContent: "thinking...",
+	}
+	result = toAPIMessage(assistantMsg)
+	if result["reasoning_content"] != "thinking..." {
+		t.Errorf("assistant message should have reasoning_content, got %v", result["reasoning_content"])
+	}
+}

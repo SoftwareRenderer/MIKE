@@ -1362,15 +1362,41 @@ func truncateForRegenerate(messages []types.ChatMessage) []types.ChatMessage {
 // removeDuplicateUserMessage removes the first of two consecutive user messages
 // with identical content. During regeneration, a race between the DELETE and POST
 // handlers can leave the old user message in the DB alongside the new one.
+// Compares both Content and ContentParts (for messages with image attachments).
 func removeDuplicateUserMessage(messages []types.ChatMessage) []types.ChatMessage {
 	for i := 1; i < len(messages); i++ {
-		if messages[i].Role == "user" && messages[i-1].Role == "user" && messages[i].Content == messages[i-1].Content {
+		if messages[i].Role == "user" && messages[i-1].Role == "user" && userMessagesEqual(messages[i-1], messages[i]) {
 			// Keep the newer one (at index i), remove the older one (at index i-1)
 			messages = append(messages[:i-1], messages[i:]...)
 			break
 		}
 	}
 	return messages
+}
+
+// userMessagesEqual compares two user messages for content identity.
+// Checks both plain Content and ContentParts (multi-modal messages store text in ContentParts[0].Text).
+func userMessagesEqual(a, b types.ChatMessage) bool {
+	if len(a.ContentParts) > 0 && len(b.ContentParts) > 0 {
+		// Both have multi-modal parts — compare text parts and attachment count
+		if len(a.ContentParts) != len(b.ContentParts) {
+			return false
+		}
+		for j := range a.ContentParts {
+			if a.ContentParts[j].Text != b.ContentParts[j].Text {
+				return false
+			}
+			// Compare image presence (not raw data — attachments may differ between stale/new)
+			aHasImg := a.ContentParts[j].ImageSource != nil
+			bHasImg := b.ContentParts[j].ImageSource != nil
+			if aHasImg != bHasImg {
+				return false
+			}
+		}
+		return true
+	}
+	// Plain text comparison
+	return a.Content == b.Content
 }
 
 func (te *TaskExecutor) gitRun(dir string, args ...string) error {

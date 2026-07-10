@@ -143,3 +143,60 @@ func TestExtractLastTurns_NoNewMessages(t *testing.T) {
 		t.Errorf("expected 0 turns when no new messages, got %d", len(turns))
 	}
 }
+
+// --- estimatePromptTokens Tests ---
+
+func TestEstimatePromptTokens_PlainContent(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "hello world this is a test"},
+	}
+	tokens := estimatePromptTokens(messages)
+	// "hello world this is a test" = 6 words * 1.3 = ~8
+	if tokens < 5 || tokens > 15 {
+		t.Errorf("expected ~8 tokens, got %d", tokens)
+	}
+}
+
+func TestEstimatePromptTokens_WithReasoning(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "answer", ReasoningContent: "let me think about this carefully step by step"},
+	}
+	tokens := estimatePromptTokens(messages)
+	// "answer" (1 word) + "let me think about this carefully step by step" (9 words) = 10 * 1.3 = ~13
+	if tokens < 10 || tokens > 20 {
+		t.Errorf("expected ~13 tokens, got %d", tokens)
+	}
+}
+
+func TestEstimatePromptTokens_ContentParts(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "user", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "check this image for me please"},
+			{Type: "image", ImageSource: &struct {
+				Type      string `json:"type"`
+				MediaType string `json:"media_type"`
+				Data      string `json:"data"`
+			}{Type: "base64", MediaType: "image/png", Data: "abc123"}},
+		}},
+	}
+	tokens := estimatePromptTokens(messages)
+	// "check this image for me please" = 6 words * 1.3 = ~8
+	// Content is empty, so only ContentParts text should be counted
+	if tokens < 5 || tokens > 15 {
+		t.Errorf("expected ~8 tokens from ContentParts text, got %d", tokens)
+	}
+}
+
+func TestEstimatePromptTokens_ContentPartsOverridesContent(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "this should be ignored", ContentParts: []types.ContentPart{
+			{Type: "text", Text: "this should be counted"},
+		}},
+	}
+	tokens := estimatePromptTokens(messages)
+	// ContentParts takes priority — "this should be counted" = 4 words * 1.3 = ~5
+	// NOT "this should be ignored" (4 words) + "this should be counted" (4 words)
+	if tokens > 10 {
+		t.Errorf("expected only ContentParts text (~5 tokens), got %d (Content was also counted?)", tokens)
+	}
+}
