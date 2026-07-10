@@ -6,7 +6,7 @@
     import { WebglAddon } from '@xterm/addon-webgl';
     import { selectedProject, selectedTask } from '$lib/stores/app';
 import { showTerminal } from '$lib/stores/ui';
-    import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
+    import { createTerminal, createProjectTerminal, isTerminalStale, getProject, getBoard } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -27,6 +27,8 @@ import { showTerminal } from '$lib/stores/ui';
     let panelHeight = $state(DEFAULT_HEIGHT);
     let modCtrl = $state(false);
     let modAlt = $state(false);
+    // Active port mappings for the badge
+    let activePorts = $state<import('$lib/types').AssignedPort[]>([]);
 
 
     /** Escape sequences sent by xterm.js for each key. */
@@ -117,6 +119,27 @@ import { showTerminal } from '$lib/stores/ui';
     // Load saved height on init
     loadHeight().then(h => { panelHeight = h; }).catch(() => {});
 
+    // Fetch active port mappings for the current terminal context
+    async function loadActivePorts() {
+        const proj = get(selectedProject);
+        const task = get(selectedTask);
+        if (!proj) return;
+        try {
+            if (task) {
+                // Task terminal: get assigned_ports from board
+                const board = await getBoard(proj.id);
+                const t = board.tasks.find(t => t.id === task.id);
+                activePorts = t?.assigned_ports && t.assigned_ports.length > 0 ? t.assigned_ports : [];
+            } else {
+                // Project-level terminal: get active_terminal_ports
+                const p = await getProject(proj.id);
+                activePorts = p.active_terminal_ports || [];
+            }
+        } catch {
+            // Ignore fetch errors
+        }
+    }
+
     // Create/recreate the terminal WebSocket for the current project/task.
     function createTerminalWS(proj: ReturnType<typeof selectedProject.get> | null, task: ReturnType<typeof selectedTask.get> | null) {
         if (proj && task) {
@@ -161,6 +184,9 @@ import { showTerminal } from '$lib/stores/ui';
         if (panelEl) {
             trap = createFocusTrap(panelEl, close);
         }
+
+        // Load active port mappings
+        loadActivePorts();
 
         term = new Terminal({
             cursorBlink: true,
@@ -721,7 +747,21 @@ import { showTerminal } from '$lib/stores/ui';
             onDragMove={onTerminalResizeMove}
             onDragEnd={onTerminalResizeEnd}
         />
-        <span class="title">Terminal</span>
+        <div class="header-left">
+            <span class="title">Terminal</span>
+            {#if activePorts.length > 0}
+            <span class="port-badge" title="Active port mappings (Host : Container)">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path d="M4 7H16M4 13H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M12 4.5L16 7L12 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 10.5L4 13L8 15.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                {#each activePorts as port}
+                    <span class="port-text">{port.host_port}<span class="port-container">:{port.container_port}</span></span>
+                {/each}
+            </span>
+            {/if}
+        </div>
         <div class="header-actions">
             <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
         </div>
@@ -807,9 +847,38 @@ import { showTerminal } from '$lib/stores/ui';
         width: 100%;
         left: 0;
     }
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+    }
     .title {
         font-size: 0.875rem;
         font-weight: 600;
+        color: var(--color-text-secondary);
+    }
+    .port-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(80, 140, 255, 0.12);
+        border: 1px solid rgba(80, 140, 255, 0.25);
+        color: var(--color-accent-light);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        font-weight: 500;
+        flex-shrink: 0;
+    }
+    .port-text + .port-text::before {
+        content: '|';
+        margin-right: 4px;
+        color: var(--color-accent-light);
+    }
+    .port-container {
         color: var(--color-text-secondary);
     }
     .header-actions {
