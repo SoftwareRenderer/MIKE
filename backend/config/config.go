@@ -114,9 +114,7 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("workspace_dir", c.WorkspaceDir); err != nil {
-		return err
-	}
+	// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
 	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
 		return err
 	}
@@ -213,9 +211,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
-		if workspace, ok := updates["workspace_dir"]; ok {
-			current.WorkspaceDir = workspace.(string)
-		}
+		// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)

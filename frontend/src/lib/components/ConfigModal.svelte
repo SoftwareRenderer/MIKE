@@ -26,7 +26,6 @@
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
 
-    let workspaceDir = $state('');
     let defaultProvider = $state('');
     let defaultAutoCommit = $state(false);
     let defaultAutoMerge = $state(true);
@@ -154,7 +153,6 @@
 
     // Sync form fields and providers from config on mount and when config changes
     $effect(() => {
-        workspaceDir = config?.workspace_dir || '';
         defaultProvider = config?.default_provider || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
         defaultAutoMerge = config?.default_auto_merge ?? true;
@@ -472,7 +470,7 @@
                     return base;
                 });
             const cfg = await updateConfig({
-                workspace_dir: workspaceDir.trim(),
+                workspace_dir: config?.workspace_dir || '',
                 providers: savedProviders,
                 default_provider: defaultProvider,
                 default_auto_commit: defaultAutoCommit,
@@ -612,11 +610,11 @@
             <!-- General Section -->
             <fieldset class="section">
                 <h3 class="section-label">General</h3>
-                <label class="field-label">
-                    Workspace Directory
-                    <input type="text" bind:value={workspaceDir} placeholder="./workspace" aria-label="Workspace directory" />
+                <div class="field-label">
+                    <span class="field-label-inline">Directory for Worktrees</span>
+                    <div class="readonly-value">{config?.workspace_dir || '—'}</div>
                     <span class="field-help">Directory where task worktrees are created</span>
-                </label>
+                </div>
                 <div class="field-label">
                     <span class="field-label-inline">Database</span>
                     <div class="readonly-value">{config?.database_path || '—'}</div>

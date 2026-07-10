@@ -21,19 +21,44 @@ func testConfigStore(t *testing.T) *ConfigStore {
 func TestGetConfig(t *testing.T) {
 	cs := testConfigStore(t)
 
-	// Set workspace_dir (required for GetConfig to succeed)
-	cfg := &types.Config{WorkspaceDir: "/tmp/workspace"}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("initial config: %v", err)
+	// workspace_dir is set via CLI/env, not via UpdateConfig.
+	// Use a temp dir for the test fixture.
+	wsDir := t.TempDir()
+	if err := cs.store.SetConfigValue("workspace_dir", wsDir); err != nil {
+		t.Fatalf("set workspace_dir: %v", err)
 	}
 
-	// Verify it was saved
 	read, err := cs.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if read.WorkspaceDir != "/tmp/workspace" {
-		t.Fatalf("expected /tmp/workspace, got %q", read.WorkspaceDir)
+	if read.WorkspaceDir != wsDir {
+		t.Fatalf("expected %q, got %q", wsDir, read.WorkspaceDir)
+	}
+}
+
+func TestUpdateConfigIgnoresWorkspaceDir(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// Set initial workspace_dir via store
+	originalDir := t.TempDir()
+	if err := cs.store.SetConfigValue("workspace_dir", originalDir); err != nil {
+		t.Fatalf("set workspace_dir: %v", err)
+	}
+
+	// Try to change workspace_dir via UpdateConfig — should be ignored
+	newDir := t.TempDir()
+	cfg := &types.Config{WorkspaceDir: newDir}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.WorkspaceDir != originalDir {
+		t.Fatalf("workspace_dir should not change via UpdateConfig: got %q", read.WorkspaceDir)
 	}
 }
 
@@ -41,7 +66,6 @@ func TestGetAgentConfigDir_NoAgent(t *testing.T) {
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
-		WorkspaceDir: "/tmp/workspace",
 		Providers: []types.Provider{
 			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
 		},
@@ -60,7 +84,6 @@ func TestGetAgentConfigDir_PiProvider(t *testing.T) {
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
-		WorkspaceDir: "/tmp/workspace",
 		Providers: []types.Provider{
 			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
 			{Name: "pi", Kind: "agent", URL: "pi://agent", Concurrency: 1},
@@ -86,7 +109,6 @@ func TestGetAgentConfigDir_PiWithExplicitDir(t *testing.T) {
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
-		WorkspaceDir: "/tmp/workspace",
 		Providers: []types.Provider{
 			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "/custom/pi/config", Concurrency: 1},
 		},
@@ -105,7 +127,6 @@ func TestGetAgentConfigDir_PiWithTildeDir(t *testing.T) {
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
-		WorkspaceDir: "/tmp/workspace",
 		Providers: []types.Provider{
 			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "~/.my-pi", Concurrency: 1},
 		},
@@ -127,7 +148,6 @@ func TestIsAgentProvider(t *testing.T) {
 
 	// Set up config with both LLM and agent providers
 	cfg := &types.Config{
-		WorkspaceDir: "/tmp/workspace",
 		Providers: []types.Provider{
 			{Name: "llm-provider", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
 			{Name: "pi-agent", Kind: "pi", URL: "pi://agent", Concurrency: 1},

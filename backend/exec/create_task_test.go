@@ -47,7 +47,7 @@ func createProject(t *testing.T, s *store.Store, id, name string) *types.Project
 	p := &types.Project{
 		ID:        id,
 		Name:      name,
-		Path:      "/tmp/test-project",
+		Path:      t.TempDir(),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

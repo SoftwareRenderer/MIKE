@@ -36,7 +36,7 @@ func TestLoadWithCert_UserProvided(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadWithCert("/tmp/test-data", certPath, keyPath)
+	cfg, err := LoadWithCert(t.TempDir(), certPath, keyPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestLoadWithCert_UserProvided(t *testing.T) {
 }
 
 func TestLoadWithCert_UserProvided_MissingCert(t *testing.T) {
-	_, err := LoadWithCert("/tmp/test-data", "/nonexistent/cert.pem", "/nonexistent/key.pem")
+	_, err := LoadWithCert(t.TempDir(), "/nonexistent/cert.pem", "/nonexistent/key.pem")
 	if err == nil {
 		t.Fatal("expected error for missing cert file")
 	}
@@ -65,7 +65,7 @@ func TestLoadWithCert_UserProvided_MissingKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := LoadWithCert("/tmp/test-data", certPath, "/nonexistent/key.pem")
+	_, err := LoadWithCert(t.TempDir(), certPath, "/nonexistent/key.pem")
 	if err == nil {
 		t.Fatal("expected error for missing key file")
 	}
@@ -139,7 +139,7 @@ func TestLoad_BackwardCompat_EnvVars(t *testing.T) {
 	t.Run("KANBAN_TLS=0 disables TLS", func(t *testing.T) {
 		os.Setenv("KANBAN_TLS", "0")
 		defer os.Unsetenv("KANBAN_TLS")
-		cfg, err := Load("/tmp/test-data")
+		cfg, err := Load(t.TempDir())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -162,7 +162,7 @@ func TestLoad_BackwardCompat_EnvVars(t *testing.T) {
 			os.Unsetenv("KANBAN_TLS_KEY")
 		}()
 
-		cfg, err := Load("/tmp/test-data")
+		cfg, err := Load(t.TempDir())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
