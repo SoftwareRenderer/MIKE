@@ -9,7 +9,7 @@ import { showTerminal } from '$lib/stores/ui';
     import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
-    import { startDrag } from '$lib/utils/use-resize-drag';
+    import ResizeHandle from './ResizeHandle.svelte';
     import '@xterm/xterm/css/xterm.css';
 
     const HEIGHT_KEY = 'kanban:terminal:height';
@@ -139,21 +139,20 @@ import { showTerminal } from '$lib/stores/ui';
         setTimeout(() => triggerEl?.focus(), 50);
     }
 
-    function onResizeStart(event: MouseEvent) {
-        const startY = event.clientY;
-        const startHeight = panelHeight;
+    // Terminal resize handlers
+    let resizeStartY = 0;
+    let resizeStartHeight = 0;
 
-        startDrag(event, {
-            axis: 'y',
-            cursor: 'ns-resize',
-            onMove: (pointerY: number) => {
-                const delta = startY - pointerY; // dragging up increases height
-                panelHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + delta));
-            },
-            onEnd: () => {
-                saveHeight(panelHeight).catch(() => {});
-            },
-        });
+    function onTerminalResizeStart(_event: MouseEvent | TouchEvent, startY: number) {
+        resizeStartY = startY;
+        resizeStartHeight = panelHeight;
+    }
+    function onTerminalResizeMove(pointerY: number) {
+        const delta = resizeStartY - pointerY; // dragging up increases height
+        panelHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, resizeStartHeight + delta));
+    }
+    function onTerminalResizeEnd() {
+        saveHeight(panelHeight).catch(() => {});
     }
 
     onMount(() => {
@@ -715,8 +714,13 @@ import { showTerminal } from '$lib/stores/ui';
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
 <div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
     <div class="terminal-header">
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div class="resize-handle" onmousedown={onResizeStart} role="separator" aria-orientation="horizontal" aria-label="Resize terminal"></div>
+        <ResizeHandle
+            axis="horizontal"
+            ariaLabel="Resize terminal"
+            onDragStart={onTerminalResizeStart}
+            onDragMove={onTerminalResizeMove}
+            onDragEnd={onTerminalResizeEnd}
+        />
         <span class="title">Terminal</span>
         <div class="header-actions">
             <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
@@ -786,27 +790,22 @@ import { showTerminal } from '$lib/stores/ui';
         flex-shrink: 0;
         position: relative;
     }
-    .resize-handle {
+    /* ResizeHandle sits at top edge of header, hit area extends upward */
+    .terminal-header :global(.resize-handle) {
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        height: 8px;
-        cursor: ns-resize;
-        z-index: 1;
+        height: 10px;
+        margin: 0;
+        width: 100%;
     }
-    .resize-handle::after {
-        content: '';
-        position: absolute;
+    .terminal-header :global(.resize-handle::before) {
         top: 0;
+        height: 1px;
+        transform: none;
+        width: 100%;
         left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--color-border);
-        transition: background 0.15s ease;
-    }
-    .resize-handle:hover::after {
-        background: var(--color-accent);
     }
     .title {
         font-size: 0.875rem;

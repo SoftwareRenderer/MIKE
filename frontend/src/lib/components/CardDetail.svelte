@@ -10,11 +10,10 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { useColumnResize } from '$lib/composables/use-column-resize.svelte';
+    import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
-    import { loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import DiffViewer from './DiffViewer.svelte';
@@ -304,25 +303,62 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(allTasks, expandedTasksContext, task.parent_task_id);
 
-    // Column resize (extracted composable)
+    // Column resize (inline — matches BranchView pattern)
     let columnsRef: HTMLDivElement | null = $state(null);
-    let resize = useColumnResize();
+    const DEFAULT_BOARD_RATIO = 0.22;
+    const DEFAULT_CHAT_RATIO = 0.55;
+    const MIN_BOARD_RATIO = 0.12;
+    const MAX_BOARD_RATIO = 0.40;
+    const MIN_CHAT_RATIO = 0.15;
+    const MAX_CHAT_RATIO = 0.80;
 
-    // Wrapper to pass container width to composable
-    function onBoardDragStartWrapper(ev: MouseEvent, startX: number) {
-        resize.onBoardDragStart(ev, startX);
+    let boardRatio = $state(DEFAULT_BOARD_RATIO);
+    let chatRatio = $state(DEFAULT_CHAT_RATIO);
+    let boardDragStartX = 0;
+    let boardDragStartRatio = 0;
+    let chatDragStartX = 0;
+    let chatDragStartRatio = 0;
+
+    let boardWidth = $derived(`${(boardRatio * 100).toFixed(1)}%`);
+    let chatWidth = $derived(`${(chatRatio * (1 - boardRatio) * 100).toFixed(1)}%`);
+    let diffWidth = $derived(`${(((1 - chatRatio) * (1 - boardRatio)) * 100).toFixed(1)}%`);
+
+    function handleBoardDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+        boardDragStartX = startX;
+        boardDragStartRatio = boardRatio;
     }
-    function onBoardDragMoveWrapper(pointerX: number) {
+    function handleBoardDragMove(pointerX: number) {
         if (!columnsRef) return;
-        resize.onBoardDragMove(pointerX, columnsRef.offsetWidth);
+        const delta = (pointerX - boardDragStartX) / Math.max(columnsRef.offsetWidth, 1);
+        boardRatio = Math.max(MIN_BOARD_RATIO, Math.min(MAX_BOARD_RATIO, boardDragStartRatio + delta));
     }
-    function onChatDragStartWrapper(ev: MouseEvent, startX: number) {
-        resize.onChatDragStart(ev, startX);
+    function handleBoardDragEnd() {
+        saveAppSetting('kanban:detail:boardRatio', boardRatio).catch(() => {});
     }
-    function onChatDragMoveWrapper(pointerX: number) {
+
+    function handleChatDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+        chatDragStartX = startX;
+        chatDragStartRatio = chatRatio;
+    }
+    function handleChatDragMove(pointerX: number) {
         if (!columnsRef) return;
-        resize.onChatDragMove(pointerX, columnsRef.offsetWidth);
+        const remaining = Math.max(columnsRef.offsetWidth * (1 - boardRatio), 1);
+        const delta = (pointerX - chatDragStartX) / remaining;
+        chatRatio = Math.max(MIN_CHAT_RATIO, Math.min(MAX_CHAT_RATIO, chatDragStartRatio + delta));
     }
+    function handleChatDragEnd() {
+        saveAppSetting('kanban:detail:chatRatio', chatRatio).catch(() => {});
+    }
+
+    // Load saved ratios
+    loadAppSetting('kanban:detail:boardRatio', DEFAULT_BOARD_RATIO).then(v => {
+        const val = Number.parseFloat(String(v));
+        if (!isNaN(val) && val > 0) boardRatio = val;
+    }).catch(() => {});
+    loadAppSetting('kanban:detail:chatRatio', DEFAULT_CHAT_RATIO).then(v => {
+        const val = Number.parseFloat(String(v));
+        if (!isNaN(val) && val > 0) chatRatio = val;
+    }).catch(() => {});
 
 
 
@@ -534,7 +570,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
-            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={resize.boardWidth}>
+            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <BoardOverview
                     sections={overviewSections}
                     {allTasks}
@@ -563,14 +599,14 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             {#if !isMobile}
                 <ResizeHandle
                     ariaLabel="Resize board and agent panels"
-                    onDragStart={onBoardDragStartWrapper}
-                    onDragMove={onBoardDragMoveWrapper}
-                    onDragEnd={resize.onBoardDragEnd}
+                    onDragStart={handleBoardDragStart}
+                    onDragMove={handleBoardDragMove}
+                    onDragEnd={handleBoardDragEnd}
                 />
             {/if}
 
             <!-- Column 2: Chat / Agent Interface -->
-            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={resize.chatWidth}>
+            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={chatWidth}>
                 <div style="flex:1;min-height:0">
                     {#key task.id}
                         <TaskChat
@@ -603,14 +639,14 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             {#if !isMobile}
                 <ResizeHandle
                     ariaLabel="Resize agent and changes panels"
-                    onDragStart={onChatDragStartWrapper}
-                    onDragMove={onChatDragMoveWrapper}
-                    onDragEnd={resize.onChatDragEnd}
+                    onDragStart={handleChatDragStart}
+                    onDragMove={handleChatDragMove}
+                    onDragEnd={handleChatDragEnd}
                 />
             {/if}
 
             <!-- Column 3: Working Changes (Diff) -->
-            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={resize.diffWidth}>
+            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->

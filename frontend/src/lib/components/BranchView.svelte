@@ -9,6 +9,7 @@
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
+    import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
@@ -158,9 +159,6 @@
     function persistExplorerLayout() {
         saveExplorerLayout({ leftWidth, rightWidth, splitRatio }).catch(() => {});
     }
-
-    // Active resize handle: 'left', 'right', 'split', or null
-    let activeResize = $state<'left' | 'right' | 'split' | null>(null);
 
     const COMMIT_BATCH_SIZE = 30;
     let commitOffset = $state(0);
@@ -322,49 +320,56 @@
     }
 
     // Resize handlers
-    function handleResizeStart(type: 'left' | 'right' | 'split', e: MouseEvent | TouchEvent) {
-        activeResize = type;
-        e.preventDefault();
-    }
-
-    function getPointerPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
-        if ('touches' in e) {
-            return { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY };
-        }
-        return { x: e.clientX, y: e.clientY };
-    }
-
-    function handlePointerMove(e: MouseEvent | TouchEvent) {
-        if (!activeResize) return;
-        const { x, y } = getPointerPos(e);
+    function handleLeftDragStart(_e: MouseEvent | TouchEvent, startX: number) {
         const body = document.querySelector('.branch-body');
         if (!body) return;
-        const rect = body.getBoundingClientRect();
-
-        if (activeResize === 'left') {
-            const posX = x - rect.left;
-            leftWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, posX));
-        } else if (activeResize === 'right') {
-            const posX = rect.right - x;
-            rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, posX));
-        } else if (activeResize === 'split') {
-            const splitContainer = document.querySelector('.branch-split-container');
-            if (!splitContainer) return;
-            const splitRect = splitContainer.getBoundingClientRect();
-            const posY = y - splitRect.top;
-            splitRatio = Math.max(0.2, Math.min(0.8, posY / splitRect.height));
-        }
+        leftDragStartX = startX;
+        leftDragBodyLeft = body.getBoundingClientRect().left;
     }
-
-    function handlePointerUp() {
-        activeResize = null;
-        persistExplorerLayout();
+    let leftDragStartX = 0;
+    let leftDragBodyLeft = 0;
+    function handleLeftDragMove(pointerX: number) {
+        const body = document.querySelector('.branch-body');
+        if (!body) return;
+        const posX = pointerX - body.getBoundingClientRect().left;
+        leftWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, posX));
     }
+    function handleLeftDragEnd() { persistExplorerLayout(); }
 
-    // Prevent text selection during resize
-    function handleSelectStart(e: Event) {
-        if (activeResize) e.preventDefault();
+    function handleRightDragStart(_e: MouseEvent | TouchEvent, startX: number) {
+        const body = document.querySelector('.branch-body');
+        if (!body) return;
+        rightDragStartX = startX;
+        rightDragBodyRight = body.getBoundingClientRect().right;
     }
+    let rightDragStartX = 0;
+    let rightDragBodyRight = 0;
+    function handleRightDragMove(pointerX: number) {
+        const body = document.querySelector('.branch-body');
+        if (!body) return;
+        const posX = body.getBoundingClientRect().right - pointerX;
+        rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, posX));
+    }
+    function handleRightDragEnd() { persistExplorerLayout(); }
+
+    function handleSplitDragStart(_e: MouseEvent | TouchEvent, startY: number) {
+        const container = document.querySelector('.branch-split-container');
+        if (!container) return;
+        splitDragStartY = startY;
+        splitDragContainerTop = container.getBoundingClientRect().top;
+        splitDragContainerHeight = container.getBoundingClientRect().height;
+    }
+    let splitDragStartY = 0;
+    let splitDragContainerTop = 0;
+    let splitDragContainerHeight = 0;
+    function handleSplitDragMove(pointerY: number) {
+        const container = document.querySelector('.branch-split-container');
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const posY = pointerY - rect.top;
+        splitRatio = Math.max(0.2, Math.min(0.8, posY / rect.height));
+    }
+    function handleSplitDragEnd() { persistExplorerLayout(); }
 
     $effect(() => {
         const mobile = isMobile;
@@ -387,20 +392,10 @@
             activeTab = 'editor';
         }
         window.addEventListener('keydown', handleKeydown);
-        document.addEventListener('mousemove', handlePointerMove);
-        document.addEventListener('mouseup', handlePointerUp);
-        document.addEventListener('touchmove', handlePointerMove, { passive: false });
-        document.addEventListener('touchend', handlePointerUp);
-        document.addEventListener('selectstart', handleSelectStart);
     });
 
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
-        document.removeEventListener('mousemove', handlePointerMove);
-        document.removeEventListener('mouseup', handlePointerUp);
-        document.removeEventListener('touchmove', handlePointerMove);
-        document.removeEventListener('touchend', handlePointerUp);
-        document.removeEventListener('selectstart', handleSelectStart);
     });
 </script>
 
@@ -526,18 +521,15 @@
                     />
                 </div>
 
-                <!-- Drag handle (vertical split) -->
+                <!-- Drag handle (file browser / git graph split) -->
                 {#if !isMobile}
-                <div
-                    class="branch-split-handle"
-                    class:dragging={activeResize === 'split'}
-                    onmousedown={(e) => handleResizeStart('split', e)}
-                    ontouchstart={(e) => handleResizeStart('split', e)}
-                    role="separator"
-                    aria-label="Resize panels"
-                    aria-orientation="horizontal"
-                    tabindex="-1"
-                ></div>
+                <ResizeHandle
+                    axis="horizontal"
+                    ariaLabel="Resize file browser and git graph panels"
+                    onDragStart={handleSplitDragStart}
+                    onDragMove={handleSplitDragMove}
+                    onDragEnd={handleSplitDragEnd}
+                />
                 {/if}
 
                 <!-- Bottom: Git graph -->
@@ -558,16 +550,12 @@
         </div>
 
         <!-- Resize handle: left column -->
-        <div
-            class="branch-resize-handle"
-            class:active={activeResize === 'left'}
-            onmousedown={(e) => handleResizeStart('left', e)}
-            ontouchstart={(e) => handleResizeStart('left', e)}
-            role="separator"
-            aria-label="Resize left panel"
-            aria-orientation="vertical"
-            tabindex="-1"
-        ></div>
+        <ResizeHandle
+            ariaLabel="Resize left panel"
+            onDragStart={handleLeftDragStart}
+            onDragMove={handleLeftDragMove}
+            onDragEnd={handleLeftDragEnd}
+        />
 
         {#if diffCommit}
             <!-- Commit diff overlay (replaces editor + symbols columns) -->
@@ -605,16 +593,12 @@
 
             <!-- Resize handle: right column (only when symbols exist) -->
             {#if symbols.length > 0}
-            <div
-                class="branch-resize-handle"
-                class:active={activeResize === 'right'}
-                onmousedown={(e) => handleResizeStart('right', e)}
-                ontouchstart={(e) => handleResizeStart('right', e)}
-                role="separator"
-                aria-label="Resize right panel"
-                aria-orientation="vertical"
-                tabindex="-1"
-            ></div>
+            <ResizeHandle
+                ariaLabel="Resize right panel"
+                onDragStart={handleRightDragStart}
+                onDragMove={handleRightDragMove}
+                onDragEnd={handleRightDragEnd}
+            />
             {/if}
 
             <!-- Right column: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
@@ -821,64 +805,10 @@
         flex-direction: column;
     }
 
-    /* Vertical split handle (file browser / git graph) */
-    .branch-split-handle {
-        height: 4px;
-        cursor: row-resize;
-        background: var(--color-border);
-        transition: background 0.15s ease;
-        flex-shrink: 0;
-        position: relative;
-        z-index: 10;
-    }
-    .branch-split-handle:hover,
-    .branch-split-handle.dragging {
-        background: var(--color-accent);
-    }
-    .branch-split-handle::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        width: 24px;
-        height: 2px;
-        background: var(--color-text-secondary);
-        border-radius: 1px;
-        opacity: 0.4;
-    }
-
     .branch-git-graph {
         overflow: hidden;
         display: flex;
         flex-direction: column;
-    }
-
-    /* Column resize handles */
-    .branch-resize-handle {
-        width: 4px;
-        cursor: col-resize;
-        background: var(--color-border);
-        transition: background 0.15s ease;
-        flex-shrink: 0;
-        z-index: 10;
-        position: relative;
-    }
-    .branch-resize-handle:hover,
-    .branch-resize-handle.active {
-        background: var(--color-accent);
-    }
-    .branch-resize-handle::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        width: 2px;
-        height: 24px;
-        background: var(--color-text-secondary);
-        border-radius: 1px;
-        opacity: 0.4;
     }
 
     .branch-center-column {
@@ -964,9 +894,6 @@
         .branch-right-column {
             width: 100% !important;
             border-left: none;
-        }
-        .branch-resize-handle {
-            display: none;
         }
         .branch-left-column.hidden,
         .branch-center-column.hidden,
