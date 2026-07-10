@@ -22,6 +22,7 @@ type CreateProjectRequest struct {
 	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
 	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
+	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 }
 
 // UpdateProjectRequest is the request body for updating a project.
@@ -34,6 +35,7 @@ type UpdateProjectRequest struct {
 	SandboxMemoryLimit      *int          `json:"sandbox_memory_limit,omitempty"`
 	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
+	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 }
 
 // CreateDependencyRequest is the request body for creating a dependency.

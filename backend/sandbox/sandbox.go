@@ -201,8 +201,9 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
 // (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
 // If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
+// If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
 // Returns (error, assignedPorts) where assignedPorts lists the host→container mappings.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount) (error, []types.AssignedPort) {
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (error, []types.AssignedPort) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -351,6 +352,14 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 		log.Printf("[sandbox] task=%s mounting %s -> %s (%s)", taskID, hostPath, m.ContainerPath, mode)
 	}
 
+	// Environment variables (user-configured per-project)
+	for _, e := range sandboxEnvs {
+		if e.Key != "" {
+			createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
+			log.Printf("[sandbox] task=%s setting env %s", taskID, e.Key)
+		}
+	}
+
 	// Container entrypoint: just sleep (agent is started via podman exec)
 	createArgs = append(createArgs, image,
 		"/bin/sh", "-c",
@@ -492,7 +501,7 @@ type ShellProcess struct {
 // The caller is responsible for calling Close() when done.
 // Returns (*ShellProcess, assignedPorts, error).
 func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, []types.AssignedPort, error) {
-	return sm.startShell(taskID, false, "", "", "", "", "", false, 0, nil, "", nil)
+	return sm.startShell(taskID, false, "", "", "", "", "", false, 0, nil, "", nil, nil)
 }
 
 // StartShellWithCreate starts an interactive shell, creating the sandbox container
@@ -506,9 +515,10 @@ func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, []types.Assi
 // If piAgentDir is non-empty, the Pi config directory is bind-mounted.
 // If projectPath is non-empty, the .git/ directory is mounted read-only.
 // If sandboxMounts is non-empty, custom host path bind mounts are added.
+// If sandboxEnvs is non-empty, environment variables are set in the container.
 // Returns (*ShellProcess, assignedPorts, error).
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount) (*ShellProcess, []types.AssignedPort, error) {
-	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts)
+func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*ShellProcess, []types.AssignedPort, error) {
+	return sm.startShell(taskID, true, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
 }
 
 // ExecProject runs a command inside the project's sandbox container,
@@ -521,7 +531,7 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", nil); err != nil {
+		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", nil, nil); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -537,7 +547,7 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectNa
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", nil); err != nil {
+		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", nil, nil); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -552,7 +562,7 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPat
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", nil); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", nil, nil); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -566,14 +576,14 @@ func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, p
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", nil); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", nil, nil); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }
 
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount) (*ShellProcess, []types.AssignedPort, error) {
+func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*ShellProcess, []types.AssignedPort, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -586,7 +596,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		}
 		// Create container on demand (for project terminals)
 		var err error
-		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts)
+		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}

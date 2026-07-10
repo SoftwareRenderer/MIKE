@@ -654,3 +654,67 @@ func TestProjectUpdateSandboxMounts(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectUpdateSandboxEnvs(t *testing.T) {
+	s := testServer(t)
+
+	// Create project
+	projID := createTestProject(t, s)
+
+	// Update envs
+	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_envs": []map[string]any{
+			{"key": "DATABASE_URL", "value": "postgres://localhost/db"},
+			{"key": "API_KEY", "value": "secret123"},
+			{"key": "EMPTY_VAR", "value": ""},
+		},
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	envs, ok := result["sandbox_envs"].([]any)
+	if !ok {
+		t.Fatalf("expected sandbox_envs to be array, got %T", result["sandbox_envs"])
+	}
+	if len(envs) != 3 {
+		t.Fatalf("expected 3 envs, got %d", len(envs))
+	}
+
+	// Verify first env
+	e0 := envs[0].(map[string]any)
+	if e0["key"] != "DATABASE_URL" {
+		t.Fatalf("expected key DATABASE_URL, got %v", e0["key"])
+	}
+	if e0["value"] != "postgres://localhost/db" {
+		t.Fatalf("expected value postgres://localhost/db, got %v", e0["value"])
+	}
+
+	// Update to single env
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_envs": []map[string]any{
+			{"key": "NEW_VAR", "value": "new_value"},
+		},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	envs = result["sandbox_envs"].([]any)
+	if len(envs) != 1 {
+		t.Fatalf("expected 1 env, got %d", len(envs))
+	}
+
+	// Clear envs
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_envs": []map[string]any{},
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	// sandbox_envs is omitted when empty (omitempty)
+	if result["sandbox_envs"] != nil {
+		envs := result["sandbox_envs"].([]any)
+		if len(envs) != 0 {
+			t.Fatalf("expected 0 envs, got %d", len(envs))
+		}
+	}
+}

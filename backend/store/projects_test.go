@@ -844,3 +844,87 @@ func TestProjectSandboxMounts(t *testing.T) {
 		t.Fatal("expected to find proj-mounts in list")
 	}
 }
+
+func TestProjectSandboxEnvs(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with sandbox envs
+	proj := newProject("proj-envs", "env-test", "/tmp/repo-envs")
+	proj.SandboxEnvs = []types.SandboxEnv{
+		{Key: "DATABASE_URL", Value: "postgres://localhost/db"},
+		{Key: "API_KEY", Value: "secret123"},
+		{Key: "EMPTY_VAR", Value: ""},
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-envs")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if len(got.SandboxEnvs) != 3 {
+		t.Fatalf("expected 3 envs, got %d", len(got.SandboxEnvs))
+	}
+	if got.SandboxEnvs[0].Key != "DATABASE_URL" {
+		t.Fatalf("expected key DATABASE_URL, got %s", got.SandboxEnvs[0].Key)
+	}
+	if got.SandboxEnvs[0].Value != "postgres://localhost/db" {
+		t.Fatalf("expected value postgres://localhost/db, got %s", got.SandboxEnvs[0].Value)
+	}
+	if got.SandboxEnvs[2].Key != "EMPTY_VAR" {
+		t.Fatalf("expected key EMPTY_VAR, got %s", got.SandboxEnvs[2].Key)
+	}
+	if got.SandboxEnvs[2].Value != "" {
+		t.Fatalf("expected empty value, got %s", got.SandboxEnvs[2].Value)
+	}
+
+	// Update envs
+	newEnvs := []types.SandboxEnv{
+		{Key: "NEW_VAR", Value: "new_value"},
+	}
+	if err := s.UpdateProjectSandboxEnvs("proj-envs", newEnvs); err != nil {
+		t.Fatalf("update envs: %v", err)
+	}
+	got, err = s.GetProject("proj-envs")
+	if err != nil {
+		t.Fatalf("get project after update: %v", err)
+	}
+	if len(got.SandboxEnvs) != 1 {
+		t.Fatalf("expected 1 env, got %d", len(got.SandboxEnvs))
+	}
+	if got.SandboxEnvs[0].Key != "NEW_VAR" {
+		t.Fatalf("expected key NEW_VAR, got %s", got.SandboxEnvs[0].Key)
+	}
+
+	// Clear envs
+	if err := s.UpdateProjectSandboxEnvs("proj-envs", nil); err != nil {
+		t.Fatalf("clear envs: %v", err)
+	}
+	got, err = s.GetProject("proj-envs")
+	if err != nil {
+		t.Fatalf("get project after clear: %v", err)
+	}
+	if len(got.SandboxEnvs) != 0 {
+		t.Fatalf("expected 0 envs, got %d", len(got.SandboxEnvs))
+	}
+
+	// Verify in list
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-envs" {
+			found = true
+			if len(p.SandboxEnvs) != 0 {
+				t.Fatalf("expected 0 envs in list, got %d", len(p.SandboxEnvs))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-envs in list")
+	}
+}

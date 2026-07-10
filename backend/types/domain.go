@@ -145,6 +145,12 @@ type SandboxMount struct {
 	Mode          string `json:"mode"` // "rw" or "ro"
 }
 
+// SandboxEnv specifies an environment variable to set in sandbox containers.
+type SandboxEnv struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // Project represents a workspace project.
 type Project struct {
 	ID                      string        `json:"id"`
@@ -158,6 +164,7 @@ type Project struct {
 	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
 	ForwardPorts            []PortForward  `json:"forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
+	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	CreatedAt               time.Time     `json:"created_at"`
 	UpdatedAt               time.Time     `json:"updated_at"`

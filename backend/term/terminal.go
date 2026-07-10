@@ -49,7 +49,7 @@ type sandboxOps interface {
 	BuildImage(projectName, dockerfilePath string) error
 	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
 	PullImageWithProgress(image string, onProgress func(line string)) error
-	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount) (*sandbox.ShellProcess, []types.AssignedPort, error)
+	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
@@ -122,6 +122,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	projectPath := ""
 	var forwardPorts []types.PortForward
 	var sandboxMounts []types.SandboxMount
+	var sandboxEnvs []types.SandboxEnv
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -136,6 +137,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		projectPath = proj.Path
 		forwardPorts = proj.ForwardPorts
 		sandboxMounts = proj.SandboxMounts
+		sandboxEnvs = proj.SandboxEnvs
 	}
 
 	var sess *taskTerminal
@@ -174,7 +176,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !strings.HasPrefix(taskID, "proj:") {
 			shellProjectPath = projectPath
 		}
-		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts)
+		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

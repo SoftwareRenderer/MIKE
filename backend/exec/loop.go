@@ -210,7 +210,7 @@ type loopContext struct {
 	checkpointIdx    int // messages index of last checkpoint
 }
 
-func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, regenerate bool, forwardPorts []types.PortForward, sandboxMounts []types.SandboxMount) {
+func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, regenerate bool, forwardPorts []types.PortForward, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[panic] task=%s recovered from panic: %v", task.ID, r)
@@ -301,7 +301,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		hasExistingContainer := te.sandboxMgr.ContainerRunning(task.ID)
 		if !hasExistingContainer {
 			var assignedPorts []types.AssignedPort
-			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts)
+			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
 			if createErr != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"

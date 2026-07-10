@@ -4,7 +4,7 @@
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { showConfirm } from '$lib/stores/dialogs';
-    import type { PortForward, AssignedPort, SandboxMount } from '$lib/types';
+    import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
     import BaseModal from './BaseModal.svelte';
@@ -38,6 +38,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let mountsExpanded = $state(project.sandbox_mounts && project.sandbox_mounts.length > 0);
     let hasPendingMount = $derived(newMountHostPath.trim() !== '' || newMountContainerPath.trim() !== '');
     let showDirectoryPicker = $state(false);
+    // Environment variables
+    let sandboxEnvs = $state<SandboxEnv[]>(project.sandbox_envs ?? []);
+    let newEnvKey = $state('');
+    let newEnvValue = $state('');
+    let envError = $state('');
+    let envsExpanded = $state(project.sandbox_envs && project.sandbox_envs.length > 0);
+    let hasPendingEnv = $derived(newEnvKey.trim() !== '');
     // Save warning for un-added changes
     let saveWarning = $state('');
     // Active host ports from running tasks (container_port → host_port map)
@@ -181,6 +188,31 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         sandboxMounts = sandboxMounts.filter((_, i) => i !== index);
     }
 
+    // Env helpers
+    function addEnv() {
+        envError = '';
+        saveWarning = '';
+        if (!newEnvKey.trim()) {
+            envError = 'Environment variable name is required';
+            return;
+        }
+        // Check for duplicate keys
+        if (sandboxEnvs.some(e => e.key === newEnvKey.trim())) {
+            envError = 'Duplicate variable name: ' + newEnvKey.trim();
+            return;
+        }
+        sandboxEnvs = [...sandboxEnvs, {
+            key: newEnvKey.trim(),
+            value: newEnvValue,
+        }];
+        newEnvKey = '';
+        newEnvValue = '';
+    }
+
+    function removeEnv(index: number) {
+        sandboxEnvs = sandboxEnvs.filter((_, i) => i !== index);
+    }
+
     async function handleRebuild() {
         if (!sandboxDockerfilePath || building) return;
         building = true;
@@ -206,7 +238,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     async function handleSave() {
         if (isLocked || saving) return;
         // Warn if user typed something in add fields but hasn't added them
-        if (hasPendingPort || hasPendingMount) {
+        if (hasPendingPort || hasPendingMount || hasPendingEnv) {
             saveWarning = 'You have un-added changes — click + to add them before saving.';
             return;
         }
@@ -222,6 +254,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             sandbox_memory_limit?: number;
             sandbox_forward_ports?: PortForward[];
             sandbox_mounts?: SandboxMount[];
+            sandbox_envs?: SandboxEnv[];
         } = {};
         let needsConfirmation = false;
 
@@ -275,6 +308,15 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 m.mode !== originalMounts[i]?.mode);
         if (mountsChanged) {
             changes.sandbox_mounts = sandboxMounts;
+        }
+
+        // Environment variables changes
+        const originalEnvs = project.sandbox_envs ?? [];
+        const envsChanged = sandboxEnvs.length !== originalEnvs.length ||
+            sandboxEnvs.some((e, i) => e.key !== originalEnvs[i]?.key ||
+                e.value !== originalEnvs[i]?.value);
+        if (envsChanged) {
+            changes.sandbox_envs = sandboxEnvs;
         }
 
         // Validate: dockerfile mode requires a path
@@ -453,28 +495,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             </div>
             {/if}
 
-            <!-- Memory limit input -->
-            <div class="config-row config-row-input">
-                <div class="config-info">
-                    <div class="config-icon">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <rect x="2" y="2" width="16" height="16" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                            <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1"/>
-                            <circle cx="4" cy="4" r="1" fill="currentColor"/>
-                            <path d="M4 2v-1M8 2v-1M12 2v-1M16 2v-1M4 18v1M8 18v1M12 18v1M16 18v1M2 4h-1M2 8h-1M2 12h-1M2 16h-1M18 4h1M18 8h1M18 12h1M18 16h1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                        </svg>
-                    </div>
-                    <div class="config-text">
-                        <span class="config-label">Memory Limit</span>
-                        <span class="config-desc">Max container memory (MB)</span>
-                    </div>
-                </div>
-                <div class="memory-input-group">
-                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} aria-label="Maximum container memory in MB" />
-                    <span class="memory-unit">MB</span>
-                </div>
-            </div>
-
             <!-- Custom mounts (collapsible) -->
             <div class="config-row-group" class:expanded={mountsExpanded}>
             <div class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }}>
@@ -558,6 +578,90 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             {/if}
             </div>
             {/if}
+            </div>
+
+            <!-- Environment variables (collapsible) -->
+            <div class="config-row-group" class:expanded={envsExpanded}>
+            <div class="config-row config-row-expandable" onclick={() => { envsExpanded = !envsExpanded; }}>
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M3 6h14M3 10h14M3 14h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label" class:collapsed={!envsExpanded}>Environment Variables</span>
+                        {#if envsExpanded}
+                        <span class="config-desc">Set environment variables in sandbox containers.</span>
+                        {/if}
+                    </div>
+                </div>
+                <svg class="chevron" class:chevron-open={envsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+
+            {#if envsExpanded}
+            <div class="envs-content" transition:slide={{ duration: 200 }}>
+            <!-- Existing env vars list -->
+            {#if sandboxEnvs.length > 0}
+            <div class="env-list">
+                {#each sandboxEnvs as env, i}
+                <div class="env-item">
+                    <div class="env-info">
+                        <span class="env-key" title={env.key}>{env.key}</span>
+                        <span class="env-equals">=</span>
+                        <span class="env-value" title={env.value}>{env.value || '(empty)'}</span>
+                    </div>
+                    <button type="button" class="btn-remove-env" onclick={() => removeEnv(i)} disabled={isLocked} title="Remove">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {/each}
+            </div>
+            {/if}
+
+            <!-- Add new env var -->
+            <div class="env-add-row">
+                <input type="text" class="env-input env-input-key" bind:value={newEnvKey} placeholder="KEY" disabled={isLocked} aria-label="Variable name" />
+                <span class="env-equals-sign">=</span>
+                <input type="text" class="env-input" bind:value={newEnvValue} placeholder="value" disabled={isLocked} aria-label="Variable value" />
+                <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title="Add variable">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+
+            {#if envError}
+            <div class="env-error">{envError}</div>
+            {/if}
+            </div>
+            {/if}
+            </div>
+
+            <!-- Memory limit input -->
+            <div class="config-row config-row-input">
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <rect x="2" y="2" width="16" height="16" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                            <rect x="5" y="5" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1"/>
+                            <circle cx="4" cy="4" r="1" fill="currentColor"/>
+                            <path d="M4 2v-1M8 2v-1M12 2v-1M16 2v-1M4 18v1M8 18v1M12 18v1M16 18v1M2 4h-1M2 8h-1M2 12h-1M2 16h-1M18 4h1M18 8h1M18 12h1M18 16h1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label">Memory Limit</span>
+                        <span class="config-desc">Max container memory (MB)</span>
+                    </div>
+                </div>
+                <div class="memory-input-group">
+                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} aria-label="Maximum container memory in MB" />
+                    <span class="memory-unit">MB</span>
+                </div>
             </div>
 
             <!-- Image source selector -->
@@ -754,10 +858,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .config-row-input {
         gap: 12px;
-    }
-
-    .config-row-expandable {
-        padding-left: 36px;
     }
 
     .config-row-subsection {
@@ -1484,6 +1584,165 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .radio-group-small .radio-label {
         padding: 2px 7px;
         font-size: 0.6875rem;
+    }
+
+    /* Environment variables */
+    .envs-content {
+        padding: 0 0 4px;
+    }
+
+    .env-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 4px;
+        padding-left: 36px;
+    }
+
+    .env-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+    }
+
+    .env-info {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-primary);
+        min-width: 0;
+    }
+
+    .env-key {
+        font-weight: 600;
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .env-equals {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .env-value {
+        color: var(--color-accent-light);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .btn-remove-env {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-remove-env:hover:not(:disabled) {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--color-status-red);
+    }
+
+    .btn-remove-env:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .env-add-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+        padding-left: 36px;
+    }
+
+    .env-input {
+        flex: 1;
+        min-width: 80px;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+    }
+
+    .env-input-key {
+        max-width: 140px;
+    }
+
+    .env-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .env-input:disabled {
+        opacity: 0.5;
+    }
+
+    .env-equals-sign {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+        font-size: 0.75rem;
+    }
+
+    .btn-add-env {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, border-color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-add-env:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    .btn-add-env.pending {
+        background: rgba(34, 197, 94, 0.15);
+        border-color: rgba(34, 197, 94, 0.6);
+        color: #22c55e;
+    }
+
+    .btn-add-env:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .env-error {
+        padding: 4px 8px;
+        padding-left: 36px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-sm);
+        color: var(--color-status-red);
+        font-size: 0.75rem;
     }
 
     @media (max-width: 768px) {

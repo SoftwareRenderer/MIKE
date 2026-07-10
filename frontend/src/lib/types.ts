@@ -25,6 +25,11 @@ export interface SandboxMount {
     mode: 'rw' | 'ro';
 }
 
+export interface SandboxEnv {
+    key: string;
+    value: string;
+}
+
 export interface AssignedPort {
     host_port: number;
     container_port: number;
@@ -42,6 +47,7 @@ export interface Project {
     sandbox_memory_limit?: number;
     forward_ports?: PortForward[];
     sandbox_mounts?: SandboxMount[];
+    sandbox_envs?: SandboxEnv[];
     active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;

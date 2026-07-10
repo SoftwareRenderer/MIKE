@@ -109,6 +109,22 @@ Sandbox Isolation is enabled for this project
                         </div>
                     </div>
                     {/if}
+
+                    <!-- Environment variables -->
+                    {#if project.sandbox_envs && project.sandbox_envs.length > 0}
+                    <div class="envs-section">
+                        <span class="section-label">Environment Variables</span>
+                        <div class="envs-list">
+                            {#each project.sandbox_envs as env}
+                            <div class="env-item">
+                                <span class="env-key" title={env.key}>{env.key}</span>
+                                <span class="env-equals">=</span>
+                                <span class="env-value" title={env.value}>{env.value || '(empty)'}</span>
+                            </div>
+                            {/each}
+                        </div>
+                    </div>
+                    {/if}
                 </div>
             {/if}
         </div>
@@ -298,6 +314,49 @@ Sandbox Isolation is enabled for this project
     .mount-mode.mode-ro {
         background: rgba(210, 153, 34, 0.15);
         color: var(--color-status-yellow, #d29922);
+    }
+
+    .envs-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .envs-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .env-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .env-key {
+        font-weight: 600;
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .env-equals {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .env-value {
+        color: var(--color-accent-light);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
 </style>
