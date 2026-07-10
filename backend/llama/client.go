@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"kanban/backend/types"
 )
@@ -179,13 +180,25 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
+	// Read idle timeout: abort if no data arrives for 30s.
+	// Reset the deadline on each successful scan to handle slow token generation.
+	var readCtx context.Context
+	var readCancel context.CancelFunc
+	readCtx, readCancel = context.WithTimeout(ctx, 30*time.Second)
+
 	for scanner.Scan() {
 		select {
-		case <-ctx.Done():
-			return usage, ctx.Err()
+		case <-readCtx.Done():
+			readCancel()
+			if ctx.Err() != nil {
+				return usage, ctx.Err()
+			}
+			return usage, readCtx.Err()
 		default:
 		}
 		line := scanner.Text()
+		readCancel()
+		readCtx, readCancel = context.WithTimeout(ctx, 30*time.Second)
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -229,6 +242,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			cb(choice)
 		}
 	}
+	readCancel()
 
 	if usage != nil {
 		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",

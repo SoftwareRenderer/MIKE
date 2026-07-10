@@ -15,7 +15,8 @@ type providerState struct {
 // queueEntry represents a goroutine waiting for a provider slot.
 type queueEntry struct {
 	provider string
-	done     chan struct{} // closed when entry is served or cancelled
+	done     chan struct{} // received when entry is served; closed when cancelled
+	once     sync.Once     // ensures exactly one signal (serve or cancel)
 }
 
 // ConcurrencyGate limits the number of concurrent operations per provider.
@@ -76,19 +77,22 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	case <-entry.done:
 		return 0, nil
 	case <-ctx.Done():
-		close(entry.done)
+		entry.once.Do(func() { close(entry.done) })
 		g.cleanupEntry(entry)
 		return 0, ctx.Err()
 	}
 }
 
 // Release returns a slot for the given provider and serves the next waiter (if any).
+// The signal is sent outside the lock on an unbuffered channel, which blocks the
+// sender until the receiver is scheduled. This ensures fair ordering: the waiter
+// runs before Release returns, preventing the releasing goroutine from racing ahead.
 func (g *ConcurrencyGate) Release(providerURL string) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	ps, ok := g.providers[providerURL]
 	if !ok || ps.active <= 0 {
+		g.mu.Unlock()
 		return
 	}
 
@@ -103,7 +107,8 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 
 	ps.active--
 
-	// Serve next waiter in queue (skip cancelled entries)
+	// Find next waiter for this provider
+	var signal *queueEntry
 	for i, e := range g.queue {
 		if e.provider != providerURL {
 			continue
@@ -112,16 +117,25 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 		case <-e.done:
 			// Already cancelled — remove
 			g.queue = append(g.queue[:i], g.queue[i+1:]...)
-			i-- // adjust index after removal
+			i--
 			continue
 		default:
 			// Active waiter — serve it
 			ps.active++
 			ps.lastAcquire = time.Now()
-			close(e.done)
 			g.queue = append(g.queue[:i], g.queue[i+1:]...)
-			return
+			signal = e
 		}
+		break
+	}
+
+	g.mu.Unlock()
+
+	// Signal outside the lock. Send on unbuffered channel blocks until
+	// the receiver is scheduled, ensuring the waiter runs before this
+	// goroutine can compete for the lock again.
+	if signal != nil {
+		signal.once.Do(func() { signal.done <- struct{}{} })
 	}
 }
 
@@ -180,11 +194,7 @@ func (g *ConcurrencyGate) Close() {
 	defer g.mu.Unlock()
 	g.closed = true
 	for _, e := range g.queue {
-		select {
-		case <-e.done:
-		default:
-			close(e.done)
-		}
+		e.once.Do(func() { close(e.done) })
 	}
 	g.queue = nil
 }
