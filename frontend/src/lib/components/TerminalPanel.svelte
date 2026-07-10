@@ -7,6 +7,7 @@
     import { selectedProject, selectedTask, projectTerminalPorts } from '$lib/stores/app';
 import { showTerminal } from '$lib/stores/ui';
     import { createTerminal, createProjectTerminal, isTerminalStale } from '$lib/api';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -26,6 +27,12 @@ import { showTerminal } from '$lib/stores/ui';
     let triggerEl: HTMLElement | null = null;
     let panelHeight = $state(DEFAULT_HEIGHT);
     let modCtrl = $state(false);
+    let fullscreen = $state(false);
+    const { isMobile } = useIsMobile();
+
+    function toggleFullscreen() {
+        fullscreen = !fullscreen;
+    }
     let modAlt = $state(false);
     // Active port mappings for the badge
     let activePorts = $state<import('$lib/types').AssignedPort[]>([]);
@@ -135,6 +142,7 @@ import { showTerminal } from '$lib/stores/ui';
     }
 
     function close() {
+        fullscreen = false;
         trap?.destroy();
         trap = null;
         showTerminal.set(false);
@@ -737,7 +745,7 @@ import { showTerminal } from '$lib/stores/ui';
 </script>
 
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
-<div class="terminal-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style="height:{panelHeight}px">
+<div class="terminal-panel" class:fullscreen bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style:height={fullscreen ? undefined : panelHeight + 'px'}>
     <div class="terminal-header">
         <ResizeHandle
             axis="horizontal"
@@ -762,6 +770,15 @@ import { showTerminal } from '$lib/stores/ui';
             {/if}
         </div>
         <div class="header-actions">
+            {#if !isMobile}
+            <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title="Toggle fullscreen">
+                {#if fullscreen}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {/if}
+            </button>
+            {/if}
             <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
         </div>
     </div>
@@ -818,6 +835,15 @@ import { showTerminal } from '$lib/stores/ui';
         z-index: 200;
         display: flex;
         flex-direction: column;
+    }
+    .terminal-panel.fullscreen {
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 100dvh !important;
+        border-radius: 0;
+        border: none;
     }
     .terminal-header {
         display: flex;
@@ -884,6 +910,21 @@ import { showTerminal } from '$lib/stores/ui';
         display: flex;
         align-items: center;
         gap: 2px;
+    }
+    .icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2px 6px;
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+    }
+    .icon-btn:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
     }
     @import '$lib/styles/shared.css';
 
