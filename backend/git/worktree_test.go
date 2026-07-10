@@ -46,7 +46,7 @@ func setupTestRepo(t *testing.T) (string, string, *store.Store, *config.ConfigSt
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	cfg.WorkspaceDir = worktreesDir
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}

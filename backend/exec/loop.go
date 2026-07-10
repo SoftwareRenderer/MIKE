@@ -461,6 +461,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.detector.reset() // user input breaks any loop pattern
 			if um.Regenerate {
 				lc.messages = truncateForRegenerate(lc.messages)
+			} else {
+				// Re-sync with DB to pick up any deleted messages.
+				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			}
 			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
@@ -693,11 +696,17 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.pendingToolCalls = nil
 
 			// If any queued message is a regenerate, truncate stale assistant messages.
+			// Otherwise, re-sync with DB to pick up any deleted messages.
+			hadRegenerate := false
 			for _, qm := range queuedMsgs {
 				if qm.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
+					hadRegenerate = true
 					break
 				}
+			}
+			if !hadRegenerate {
+				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			}
 
 			// Add queued messages to conversation history.
@@ -1071,6 +1080,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				lc.detector.reset() // user input breaks any loop pattern
 				if um.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
+				} else {
+					// Re-sync with DB to pick up any deleted messages.
+					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 				}
 				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				if um.ModelName != "" {
@@ -1156,6 +1168,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.detector.reset()
 			if um.Regenerate {
 				lc.messages = truncateForRegenerate(lc.messages)
+			} else {
+				// Re-sync with DB to pick up any deleted messages.
+				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			}
 			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
@@ -1184,6 +1199,22 @@ func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
 	if err := te.store.CreateTaskMessage(errMsg); err != nil {
 		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
 	}
+}
+
+// syncMessagesFromDB re-syncs the in-memory conversation with the database.
+// When messages are deleted from the DB (e.g., user deletes chat messages),
+// the in-memory lc.messages slice is stale. This function reloads messages
+// from the DB and rebuilds the conversation, ensuring deleted messages are
+// excluded from the next LLM call. It also refreshes the task to pick up
+// any thread changes from fork cleanup.
+// Returns the synced messages and the (possibly updated) task.
+func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, *types.Task) {
+	// Reload task from DB to pick up thread changes (e.g., fork cleanup switched active thread).
+	if updatedTask, err := te.store.GetTaskByTaskID(task.ID); err == nil && updatedTask != nil {
+		task = updatedTask
+	}
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+	return buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled), task
 }
 
 // truncateForRegenerate removes the last user message and everything after it

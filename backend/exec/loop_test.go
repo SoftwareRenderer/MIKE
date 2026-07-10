@@ -1678,6 +1678,129 @@ func TestBuildLLMContext_WithToolCalls(t *testing.T) {
 	}
 }
 
+// --- buildLLMContext task_complete filter Tests ---
+
+func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "fix the bug"},
+		{Role: "assistant", Content: "I'll fix it", ToolCalls: []types.ToolCallMsg{
+			{ID: "call1", Type: "function"},
+		}},
+		{Role: "tool", Content: "file contents", ToolCallID: "call1"},
+		{Role: "assistant", Content: "Task done!", ToolCalls: []types.ToolCallMsg{
+			{ID: "call2", Type: "function"},
+		}},
+		{Role: "user", Content: "now do something else"},
+		{Role: "assistant", Content: "working on it"},
+	}
+	// Set tool names
+	messages[2].ToolCalls[0].Function.Name = "read_file"
+	messages[2].ToolCalls[0].Function.Arguments = `{"path":"foo.go"}`
+	messages[4].ToolCalls[0].Function.Name = "task_complete"
+	messages[4].ToolCalls[0].Function.Arguments = `{"summary":"fixed"}`
+
+	result := buildLLMContext(messages)
+
+	// task_complete assistant (msg[4]) should be filtered out
+	// system + user + assistant(read_file) + tool + user + assistant = 6
+	if len(result) != 6 {
+		t.Fatalf("expected 6 messages, got %d", len(result))
+		for i, m := range result {
+			t.Logf("  [%d] role=%s content=%q toolCalls=%v", i, m.Role, m.Content, m.ToolCalls)
+		}
+	}
+
+	// Verify no task_complete tool call in result
+	for _, m := range result {
+		for _, tc := range m.ToolCalls {
+			if tc.Function.Name == "task_complete" {
+				t.Error("task_complete tool call should be filtered out")
+			}
+		}
+	}
+}
+
+func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "fix the bug"},
+		{Role: "assistant", Content: "done", ToolCalls: []types.ToolCallMsg{
+			{ID: "call-tc", Type: "function"},
+		}},
+		{Role: "tool", Content: "task completed", ToolCallID: "call-tc"},
+		{Role: "user", Content: "new request"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "task_complete"
+	messages[2].ToolCalls[0].Function.Arguments = `{"summary":"done"}`
+
+	result := buildLLMContext(messages)
+
+	// task_complete assistant (msg[2]) and its tool result (msg[3]) filtered
+	// system + user + user = 3
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+		for i, m := range result {
+			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
+		}
+	}
+}
+
+func TestBuildLLMContext_KeepsOtherToolCalls(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "do stuff"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call1", Type: "function"},
+			{ID: "call2", Type: "function"},
+		}},
+		{Role: "tool", Content: "result1", ToolCallID: "call1"},
+		{Role: "tool", Content: "result2", ToolCallID: "call2"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "bash"
+	messages[2].ToolCalls[0].Function.Arguments = `{"command":"ls"}`
+	messages[2].ToolCalls[1].Function.Name = "read_file"
+	messages[2].ToolCalls[1].Function.Arguments = `{"path":"foo.go"}`
+
+	result := buildLLMContext(messages)
+
+	// No task_complete, all messages pass through (except summarization which isn't present)
+	if len(result) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(result))
+	}
+}
+
+func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
+	// Assistant message with mixed tool calls: bash + task_complete
+	// The entire assistant message should be filtered since it contains task_complete
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "fix and complete"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call1", Type: "function"},
+			{ID: "call2", Type: "function"},
+		}},
+		{Role: "tool", Content: "result", ToolCallID: "call1"},
+		{Role: "tool", Content: "completed", ToolCallID: "call2"},
+		{Role: "user", Content: "next"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "bash"
+	messages[2].ToolCalls[0].Function.Arguments = `{"command":"git status"}`
+	messages[2].ToolCalls[1].Function.Name = "task_complete"
+	messages[2].ToolCalls[1].Function.Arguments = `{"summary":"done"}`
+
+	result := buildLLMContext(messages)
+
+	// Assistant with task_complete + both tool results filtered
+	// system + user + user = 3
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+		for i, m := range result {
+			t.Logf("  [%d] role=%s content=%q", i, m.Role, m.Content)
+		}
+	}
+}
+
 // --- shouldSummarize Tests ---
 
 func TestShouldSummarize_SmallContext(t *testing.T) {

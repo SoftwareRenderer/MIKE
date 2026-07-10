@@ -40,7 +40,7 @@ func TestBranchPollerLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	cfg.WorkspaceDir = worktreesDir
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestBranchPollerSkipsBacklog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	cfg.WorkspaceDir = worktreesDir
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	cfg.WorkspaceDir = worktreesDir
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}

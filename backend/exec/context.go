@@ -36,12 +36,12 @@ func buildCheckpointLabelMessages(diffStat, turnText string) []types.ChatMessage
 
 // summarizeResult holds the result of a context summarization operation.
 type summarizeResult struct {
-	summary       string
-	oldLen        int
-	promptTokens  int
+	summary         string
+	oldLen          int
+	promptTokens    int
 	predictedTokens int
-	promptMs      int64
-	predictedMs   int64
+	promptMs        int64
+	predictedMs     int64
 }
 
 // shouldSummarize checks if the assembled LLM context is approaching the window limit.
@@ -80,26 +80,55 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 	}
 
 	return summarizeResult{
-		summary:       summary,
-		oldLen:        oldLen,
-		promptTokens:  usage.PromptTokens,
+		summary:         summary,
+		oldLen:          oldLen,
+		promptTokens:    usage.PromptTokens,
 		predictedTokens: usage.CompletionTokens,
-		promptMs:      usage.PromptMs,
-		predictedMs:   usage.PredictedMs,
+		promptMs:        usage.PromptMs,
+		predictedMs:     usage.PredictedMs,
 	}, nil
 }
 
 // buildLLMContext filters out summarization messages (summary is in system prompt)
-// and passes all other messages through unchanged.
+// and messages containing task_complete tool calls (task is done, don't re-send).
+// Tool results that reference a filtered assistant message are also removed (orphans).
 func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
+	// First pass: collect all tool_call_ids from assistant messages that contain task_complete.
+	// These assistants are filtered, so their tool results become orphans.
+	filteredIDs := make(map[string]bool)
+	for _, m := range messages {
+		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "task_complete") {
+			for _, tc := range m.ToolCalls {
+				filteredIDs[tc.ID] = true
+			}
+		}
+	}
+
+	// Second pass: filter out summarization, task_complete assistants, and orphaned results.
 	var result []types.ChatMessage
 	for _, m := range messages {
 		if m.Role == "summarization" {
 			continue
 		}
+		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "task_complete") {
+			continue
+		}
+		if m.Role == "tool" && filteredIDs[m.ToolCallID] {
+			continue
+		}
 		result = append(result, m)
 	}
 	return result
+}
+
+// hasToolCall checks if any tool call in the slice matches the given name.
+func hasToolCall(toolCalls []types.ToolCallMsg, name string) bool {
+	for _, tc := range toolCalls {
+		if tc.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // formatChatHistory formats conversation as plain text for the summarization prompt.

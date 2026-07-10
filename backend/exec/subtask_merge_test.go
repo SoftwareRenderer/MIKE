@@ -412,12 +412,7 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 	t.Cleanup(func() { s.Close() })
 
 	cfgStore := config.NewConfigStore(s, dbPath)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.WorkspaceDir = worktreesDir
-	cfgStore.UpdateConfig(cfg)
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 
 	projectID := "test-project"
 	proj := &types.Project{ID: projectID, Name: "test", Path: repoDir}
