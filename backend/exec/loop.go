@@ -207,6 +207,7 @@ type loopContext struct {
 	sandboxEnabled   bool
 	startTime        time.Time
 	usage            *types.ChatUsage
+	checkpointIdx    int // messages index of last checkpoint
 }
 
 func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, projectPath, serverURL, modelName string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, networkIsolation bool, baseImage, sandboxDockerfilePath string, memoryLimit int, initialContent string, regenerate bool, forwardPorts []types.PortForward, sandboxMounts []types.SandboxMount) {
@@ -1174,8 +1175,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
 
-			// Auto-commit file changes as a checkpoint
-			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, lc.messages, lc.sandboxEnabled)
+			// Auto-commit file changes as a checkpoint.
+			newMessages := lc.messages[lc.checkpointIdx:]
+			te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, assistantMsgID, newMessages, lc.sandboxEnabled)
+			lc.checkpointIdx = len(lc.messages)
 
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue

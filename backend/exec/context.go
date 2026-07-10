@@ -24,6 +24,16 @@ func buildCommitMessages(diffStat, turnText string) []types.ChatMessage {
 	}
 }
 
+// checkpointLabelPrompt generates a short 5-word label for git stash checkpoints.
+const checkpointLabelPrompt = "Generate a short label of 5 words or less describing the file changes. Use imperative mood (e.g. 'Add login validation', 'Fix race condition'). Output ONLY the label, nothing else."
+
+func buildCheckpointLabelMessages(diffStat, turnText string) []types.ChatMessage {
+	return []types.ChatMessage{
+		{Role: "system", Content: checkpointLabelPrompt},
+		{Role: "user", Content: fmt.Sprintf("Recent changes:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
+	}
+}
+
 // summarizeResult holds the result of a context summarization operation.
 type summarizeResult struct {
 	summary       string
@@ -220,8 +230,8 @@ func isSandboxableTool(name string) bool {
 // Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
 // from the working tree — files stay visible in the filesystem.
 // Runs the LLM labeler in a goroutine so it does not block the main execution loop.
-// ctx is used to cancel the background goroutine when the task is stopped.
-func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, messages []types.ChatMessage, sandboxEnabled bool) {
+// newMessages contains only messages since the last checkpoint.
+func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
 	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {
@@ -231,9 +241,9 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	// Send pending event to frontend
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
-	// Extract turn text BEFORE spawning the goroutine so the goroutine
-	// doesn't hold a reference to the full (and growing) messages slice.
-	turnText := FormatConversationTurns(ExtractLastTurns(messages, 3))
+	// Extract turn text before spawning the goroutine so it doesn't
+	// hold a reference to the full (and growing) messages slice.
+	turnText := FormatConversationTurns(ExtractLastTurns(newMessages, 3))
 
 	// Run stash + LLM labeler in background (non-blocking)
 	go func() {
@@ -254,8 +264,8 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		if taskForLabel != nil && taskForLabel.Branch != "" {
 			branchName = taskForLabel.Branch
 		}
-		commitMsg := te.GenerateCommitMessage(taskID, diffStat, turnText)
-		label := git.StashMessageForCheckpoint(taskID, branchName, commitMsg)
+		shortLabel := te.generateCheckpointLabel(ctx, taskID, diffStat, turnText)
+		label := git.StashMessageForCheckpoint(taskID, branchName, shortLabel)
 
 		// Check for cancellation before git operations
 		select {
@@ -323,6 +333,34 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			"label":       label,
 		}})
 	}()
+}
+
+// generateCheckpointLabel generates a short 5-word label for a git stash checkpoint.
+// Falls back to the task title on any error.
+func (te *TaskExecutor) generateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
+		return "file changes"
+	}
+	fallback := task.Title
+	if fallback == "" {
+		fallback = "file changes"
+	}
+
+	labelMessages := buildCheckpointLabelMessages(diffStat, turnText)
+
+	maxTokens := 10
+	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
+	if err != nil {
+		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
+		return fallback
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return fallback
+	}
+	log.Printf("[checkpoint-label] task=%s generated: %q", taskID, label)
+	return label
 }
 
 // GenerateCommitMessage uses the LLM to generate a descriptive commit label from git diff stat
