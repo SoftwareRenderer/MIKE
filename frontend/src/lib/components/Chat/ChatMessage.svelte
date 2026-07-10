@@ -475,7 +475,7 @@
         border: 1px solid var(--color-border);
     }
     .message-text {
-        font-size: 1rem;
+        font-size: 0.875rem;
         line-height: 1.875rem;
         word-break: break-word;
         white-space: pre-wrap;

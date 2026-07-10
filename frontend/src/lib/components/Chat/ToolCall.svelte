@@ -412,7 +412,7 @@
     }
     .tool-result-summary {
         font-family: inherit;
-        font-size: 1rem;
+        font-size: 0.875rem;
         line-height: 1.875rem;
         color: var(--color-text-primary);
         white-space: pre-wrap;
