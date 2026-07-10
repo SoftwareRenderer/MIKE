@@ -950,10 +950,14 @@ func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 			if isChange {
 				keptChanges++
 				if keptChanges > maxChangeLines {
-					// Update the @@ header to reflect actual counts, then stop
-					result[hunkResultIdx] = fmt.Sprintf("@@ -%d,%d +%d,%d %s@@",
-						hunkOldStart, hunkOldLines, hunkNewStart, hunkNewLines, hunkContext)
-					return strings.Join(result, "\n"), truncatedFiles
+					// Remove overflow line from counts (it won't be appended),
+					// then break to continue with the next file block.
+					if line[0] == '-' {
+						hunkOldLines--
+					} else {
+						hunkNewLines--
+					}
+					break
 				}
 			}
 			result = append(result, line)

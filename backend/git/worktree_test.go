@@ -328,6 +328,80 @@ func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
 	}
 }
 
+func TestTruncateDiffLines_FirstFileExceedsLimit(t *testing.T) {
+	// Regression: early return in truncation loop dropped all files after
+	// the first file that exceeded the change-line limit.
+	var lines []string
+	// First file: 10 added lines (exceeds limit of 6)
+	lines = append(lines, "diff --git a/large.txt b/large.txt")
+	lines = append(lines, "--- a/large.txt")
+	lines = append(lines, "+++ b/large.txt")
+	lines = append(lines, "@@ -1,2 +1,12 @@")
+	lines = append(lines, " line1")
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, "+large-line-"+string(rune('0'+i)))
+	}
+	lines = append(lines, " line2")
+	// Second file: 3 added lines (under limit)
+	lines = append(lines, "diff --git a/small.txt b/small.txt")
+	lines = append(lines, "--- a/small.txt")
+	lines = append(lines, "+++ b/small.txt")
+	lines = append(lines, "@@ -1,2 +1,4 @@")
+	lines = append(lines, " lineA")
+	lines = append(lines, "+small-1")
+	lines = append(lines, "+small-2")
+	lines = append(lines, " lineB")
+	lines = append(lines, "+small-3")
+	// Third file: 2 added lines (under limit)
+	lines = append(lines, "diff --git a/tiny.txt b/tiny.txt")
+	lines = append(lines, "--- a/tiny.txt")
+	lines = append(lines, "+++ b/tiny.txt")
+	lines = append(lines, "@@ -1 +1,2 @@")
+	lines = append(lines, " lineX")
+	lines = append(lines, "+tiny-1")
+	lines = append(lines, "+tiny-2")
+
+	diff := "\n" + strings.Join(lines, "\n")
+	result, truncated := truncateDiffLines(diff, 6)
+
+	// Only large.txt should be truncated
+	if len(truncated) != 1 || truncated[0] != "large.txt" {
+		t.Errorf("expected [large.txt], got %v", truncated)
+	}
+
+	// All three files must be present in the result
+	if !strings.Contains(result, "diff --git a/large.txt") {
+		t.Error("expected large.txt in result")
+	}
+	if !strings.Contains(result, "diff --git a/small.txt") {
+		t.Error("expected small.txt in result (regression: was dropped by early return)")
+	}
+	if !strings.Contains(result, "diff --git a/tiny.txt") {
+		t.Error("expected tiny.txt in result (regression: was dropped by early return)")
+	}
+
+	// large.txt truncated to 6 changes
+	if !strings.Contains(result, "+large-line-1") {
+		t.Error("expected first change of large.txt")
+	}
+	if !strings.Contains(result, "+large-line-6") {
+		t.Error("expected 6th change of large.txt")
+	}
+	if strings.Contains(result, "+large-line-7") {
+		t.Error("expected 7th+ changes of large.txt to be truncated")
+	}
+
+	// small.txt fully present (3 changes, under limit)
+	if !strings.Contains(result, "+small-1") || !strings.Contains(result, "+small-3") {
+		t.Error("expected all small.txt changes")
+	}
+
+	// tiny.txt fully present (2 changes, under limit)
+	if !strings.Contains(result, "+tiny-1") || !strings.Contains(result, "+tiny-2") {
+		t.Error("expected all tiny.txt changes")
+	}
+}
+
 func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
 	result, truncated := truncateDiffLines("", 60)
 	if result != "" {
