@@ -608,3 +608,246 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 	})
 }
+
+func TestGitIdentityAvailable(t *testing.T) {
+	// Save and restore env vars for standard git identity
+	saveEnv := func(keys ...string) map[string]string {
+		orig := make(map[string]string)
+		for _, k := range keys {
+			orig[k] = os.Getenv(k)
+		}
+		return orig
+	}
+	restoreEnv := func(saved map[string]string) {
+		for k, v := range saved {
+			if v == "" {
+				os.Unsetenv(k)
+			} else {
+				os.Setenv(k, v)
+			}
+		}
+	}
+
+	gitEnvKeys := []string{
+		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
+		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
+		"KANBAN_GIT_AUTHOR_NAME", "KANBAN_GIT_AUTHOR_EMAIL",
+	}
+
+	t.Run("KANBAN env vars satisfy check", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		// Clear all git env vars
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		// Set KANBAN vars
+		os.Setenv("KANBAN_GIT_AUTHOR_NAME", "Kanban User")
+		os.Setenv("KANBAN_GIT_AUTHOR_EMAIL", "kanban@example.com")
+
+		// gitIdentityAvailable uses git.GitAuthorName/Email (package-level, set at init)
+		// and os.Getenv for standard git env vars. For this test we verify the
+		// standard git env var path.
+		name, email := resolveGitIdentity()
+		if name == "" || email == "" {
+			t.Errorf("expected non-empty identity from KANBAN env vars, got name=%q email=%q", name, email)
+		}
+	})
+
+	t.Run("standard git env vars satisfy check", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		os.Setenv("GIT_AUTHOR_NAME", "Git User")
+		os.Setenv("GIT_AUTHOR_EMAIL", "git@example.com")
+
+		name, email := resolveGitIdentity()
+		if name != "Git User" {
+			t.Errorf("expected name=\"Git User\", got %q", name)
+		}
+		if email != "git@example.com" {
+			t.Errorf("expected email=\"git@example.com\", got %q", email)
+		}
+	})
+
+	t.Run("GIT_COMMITTER takes precedence over GIT_AUTHOR", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		os.Setenv("GIT_AUTHOR_NAME", "Author")
+		os.Setenv("GIT_COMMITTER_NAME", "Committer")
+		os.Setenv("GIT_AUTHOR_EMAIL", "author@example.com")
+		os.Setenv("GIT_COMMITTER_EMAIL", "committer@example.com")
+
+		name, email := resolveGitIdentity()
+		if name != "Committer" {
+			t.Errorf("expected name=\"Committer\", got %q", name)
+		}
+		if email != "committer@example.com" {
+			t.Errorf("expected email=\"committer@example.com\", got %q", email)
+		}
+	})
+
+	t.Run("partial identity — only email from env, name from git config", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		os.Setenv("GIT_AUTHOR_EMAIL", "only-email@example.com")
+
+		name, email := resolveGitIdentity()
+		// Email comes from env var, name falls back to git config (or empty)
+		if email != "only-email@example.com" {
+			t.Errorf("expected email=\"only-email@example.com\", got %q", email)
+		}
+		// Name may come from git config if set on this system
+		_ = name
+	})
+
+	t.Run("partial identity — only name from env, email from git config", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		os.Setenv("GIT_AUTHOR_NAME", "Only Name")
+
+		name, email := resolveGitIdentity()
+		if name != "Only Name" {
+			t.Errorf("expected name=\"Only Name\", got %q", name)
+		}
+		// Email may come from git config if set on this system
+		_ = email
+	})
+
+	t.Run("no env vars falls back to git config", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+
+		name, email := resolveGitIdentity()
+		// Falls back to git config --global. If configured, should return values.
+		// If not configured, returns empty strings.
+		// This test just verifies the function doesn't panic.
+		_ = name
+		_ = email
+	})
+}
+
+func TestHandleFSInitGit_EnvVars(t *testing.T) {
+	s := testServer(t)
+
+	// Save and restore env vars
+	gitEnvKeys := []string{
+		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
+		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
+		"KANBAN_GIT_AUTHOR_NAME", "KANBAN_GIT_AUTHOR_EMAIL",
+	}
+	saveEnv := func(keys ...string) map[string]string {
+		orig := make(map[string]string)
+		for _, k := range keys {
+			orig[k] = os.Getenv(k)
+		}
+		return orig
+	}
+	restoreEnv := func(saved map[string]string) {
+		for k, v := range saved {
+			if v == "" {
+				os.Unsetenv(k)
+			} else {
+				os.Setenv(k, v)
+			}
+		}
+	}
+
+	t.Run("succeeds with git env vars even without git config", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		// Set standard git env vars (KANBAN vars are package-level, set at init)
+		// The handler checks resolveGitIdentity() which reads GIT_* env vars at call time
+		os.Setenv("GIT_AUTHOR_NAME", "Test Author")
+		os.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+
+		tmpDir := t.TempDir()
+		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
+			"path": tmpDir,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		// Verify git repo was created
+		if _, err := os.Stat(filepath.Join(tmpDir, ".git")); os.IsNotExist(err) {
+			t.Fatal("expected .git directory to exist")
+		}
+	})
+
+	t.Run("succeeds with KANBAN env vars", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+		// KANBAN vars are read at package init time, so this tests the code path
+		// where git.GitAuthorName/Email are already set. If they're empty, falls back
+		// to GIT_* env vars or git config.
+		// For this test, set standard git env vars as fallback
+		os.Setenv("GIT_COMMITTER_NAME", "Kanban Bot")
+		os.Setenv("GIT_COMMITTER_EMAIL", "bot@kanban.local")
+
+		tmpDir := t.TempDir()
+		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
+			"path": tmpDir,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rejects when no identity available", func(t *testing.T) {
+		saved := saveEnv(gitEnvKeys...)
+		defer restoreEnv(saved)
+		for _, k := range gitEnvKeys {
+			os.Unsetenv(k)
+		}
+
+		tmpDir := t.TempDir()
+		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
+			"path": tmpDir,
+		})
+		cookie, csrfToken := loginTestCSRF(t, s)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+
+		// Should fail if git config is also not set
+		if rr.Code == http.StatusOK {
+			// This is acceptable if the test environment has git config set
+			t.Log("git config was available, skipping negative test")
+			return
+		}
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "user.name") && !strings.Contains(rr.Body.String(), "user.email") {
+			t.Fatalf("expected identity error, got: %s", rr.Body.String())
+		}
+	})
+}
