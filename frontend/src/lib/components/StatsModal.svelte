@@ -1,30 +1,28 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    
     import type { ProjectStats, ModelStats } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
     import { showStats } from '$lib/stores/ui';
-    import { createFocusTrap } from '$lib/a11y';
+    import BaseModal from './BaseModal.svelte';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
 
     let stats: ProjectStats | null = $state(null);
     let loading = $state(true);
     let error = $state('');
-    let modalEl: HTMLDivElement | null = null;
 
-    onMount(async () => {
-        try {
-            const data = await getProjectStats(projectId);
-            stats = data;
-        } catch (e) {
-            error = String(e);
-        } finally {
-            loading = false;
+    $effect(() => {
+        async function load() {
+            try {
+                const data = await getProjectStats(projectId);
+                stats = data;
+            } catch (e) {
+                error = String(e);
+            } finally {
+                loading = false;
+            }
         }
-        if (modalEl) {
-            createFocusTrap(modalEl, handleClose);
-            modalEl.focus();
-        }
+        load();
     });
 
     function handleClose() {
@@ -103,13 +101,7 @@
     }
 </script>
 
-<div class="overlay" onclick={handleClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="stats-modal-title" tabindex="-1">
-        <div class="modal-header">
-            <h2 id="stats-modal-title">Token Usage</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close stats" title="Close stats">✕</button>
-        </div>
-        <div class="modal-body">
+<BaseModal title="Token Usage" width="90vw" zIndex={300} onClose={handleClose}>
             {#if loading}
                 <div class="loading">Loading stats...</div>
             {:else if error}
@@ -203,31 +195,19 @@
                     </tbody>
                 </table>
             {/if}
-        </div>
-    </div>
-</div>
+</BaseModal>
 
 <style>
-    @import '$lib/styles/shared.css';
-
     :global(.overlay) {
-        z-index: 300;
         background: rgba(0, 0, 0, 0.5);
     }
     :global(.modal) {
-        width: 90vw;
         max-width: 860px;
         max-height: 80dvh;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-    .modal-header {
-        padding: 14px 20px;
-        flex-shrink: 0;
-    }
     .modal-body {
         padding: 20px;
-        overflow-y: auto;
-        flex: 1;
     }
     .loading, .empty {
         text-align: center;
@@ -347,20 +327,6 @@
         font-size: 0.8125rem;
     }
     @media (max-width: 768px) {
-        .modal {
-            width: 100vw;
-            max-width: none;
-            max-height: 100dvh;
-            height: 100dvh;
-            border-radius: 0;
-            border: none;
-        }
-        .modal-header {
-            padding: 16px;
-        }
-        .modal-body {
-            padding: 16px;
-        }
         .summary-row {
             flex-wrap: wrap;
         }

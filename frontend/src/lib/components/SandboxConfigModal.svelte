@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
     import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
@@ -7,7 +7,8 @@
     import type { PortForward, AssignedPort, SandboxMount } from '$lib/types';
     import shieldIcon from '$lib/assets/icons/shield.svg';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
-    import ToggleSwitch from './ToggleSwitch.svelte';
+    import BaseModal from './BaseModal.svelte';
+import ToggleSwitch from './ToggleSwitch.svelte';
     import DockerfilePicker from './DockerfilePicker.svelte';
     import DirectoryPicker from './DirectoryPicker.svelte';
 
@@ -56,7 +57,6 @@
     let buildLogAtBottom = $state(true);
     let error = $state('');
     let isLocked = $derived(inProgressCount > 0);
-    let modalEl: HTMLDivElement | null = null;
 
     function scrollBuildLog() {
         if (!buildLogEl || !buildLogAtBottom) return;
@@ -88,7 +88,6 @@
     });
 
     onMount(async () => {
-        window.addEventListener('keydown', handleKeydown);
         // Fetch project to get active terminal ports
         try {
             const proj = await getProject(project.id);
@@ -97,10 +96,6 @@
             // Ignore fetch errors
         }
         await refreshActivePorts();
-    });
-
-    onDestroy(() => {
-        window.removeEventListener('keydown', handleKeydown);
     });
 
     async function refreshActivePorts() {
@@ -122,19 +117,6 @@
             activeHostPorts = map;
         } catch {
             // Ignore fetch errors
-        }
-    }
-
-    function handleOverlayClick(e: MouseEvent) {
-        if (e.target === e.currentTarget) {
-            onClose();
-        }
-    }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            onClose();
         }
     }
 
@@ -340,12 +322,7 @@
     }
 </script>
 
-<div class="sandbox-config-overlay" role="dialog" aria-modal="true" aria-labelledby="sandbox-config-title" tabindex="-1" onclick={handleOverlayClick} onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}>
-    <div class="sandbox-config-dialog" bind:this={modalEl}>
-        <div class="dialog-header">
-            <h3 id="sandbox-config-title">Sandbox Configuration</h3>
-            <button class="close-btn" onclick={onClose} aria-label="Close" title="Close">✕</button>
-        </div>
+<BaseModal title="Sandbox Configuration" width="560px" onClose={onClose}>
 
         {#if isLocked}
             <div class="locked-notice">
@@ -705,14 +682,13 @@
             <div class="error-message">{error}</div>
         {/if}
 
-        <div class="dialog-actions">
-            <button type="button" class="btn-cancel" onclick={onClose} disabled={saving}>Cancel</button>
-            <button type="button" class="btn-save" onclick={handleSave} disabled={saving || isLocked}>
+        <div slot="footer" class="footer-wrapper">
+            <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>Cancel</button>
+            <button type="button" class="btn-primary" onclick={handleSave} disabled={saving || isLocked}>
                 {saving ? 'Saving...' : 'Save'}
             </button>
         </div>
-    </div>
-</div>
+</BaseModal>
 
 {#if showDockerfilePicker}
     <DockerfilePicker initialPath={project.path} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
@@ -723,43 +699,6 @@
 {/if}
 
 <style>
-    .sandbox-config-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        animation: fade-in 0.15s ease-out;
-    }
-
-    .sandbox-config-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 20px 24px;
-        max-width: 480px;
-        width: 90%;
-        max-height: 90vh;
-        overflow-y: auto;
-        animation: scale-in 0.15s ease-out;
-    }
-
-    .dialog-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 16px;
-    }
-
-    .dialog-header h3 {
-        font-size: 0.875rem;
-        font-weight: 600;
-        margin: 0;
-        color: var(--color-text-primary);
-    }
-
     @import '$lib/styles/shared.css';
 
     :global(.close-btn) {
@@ -1215,65 +1154,9 @@
         margin-bottom: 12px;
     }
 
-    .dialog-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
+    .footer-wrapper {
+        display: contents;
     }
-
-    .btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        cursor: pointer;
-        transition: background 0.15s;
-    }
-
-    .btn-cancel:hover {
-        background: var(--color-surface-3);
-    }
-
-    .btn-save {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: none;
-        background: var(--color-accent);
-        color: white;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-    }
-
-    .btn-save:hover {
-        background: var(--color-accent-hover);
-    }
-
-    .btn-save:disabled,
-    .btn-cancel:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    @keyframes fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
-    @keyframes scale-in {
-        from {
-            opacity: 0;
-            transform: scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1);
-        }
-    }
-
     @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -1599,15 +1482,6 @@
     }
 
     @media (max-width: 768px) {
-        .sandbox-config-dialog {
-            width: 100vw;
-            max-width: none;
-            max-height: 100dvh;
-            height: 100dvh;
-            border-radius: 0;
-            border: none;
-            padding: 16px;
-        }
         .mount-input::placeholder,
         .port-input::placeholder {
             font-size: 12px;

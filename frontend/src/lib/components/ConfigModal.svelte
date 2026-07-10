@@ -622,7 +622,7 @@
                 <button type="button" class="btn-signout" onclick={onSignOut} title="Sign out of Kanban">Sign out</button>
             {/if}
             <div class="modal-footer-right">
-                <button type="button" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+                <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
                 <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
                     {loading ? 'Saving...' : 'Save'}
                 </button>
@@ -885,27 +885,7 @@
         background: var(--color-accent);
         color: white;
     }
-    button {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-        background: var(--color-surface-3);
-    }
-    .btn-primary {
-        padding: 8px 20px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent);
-        color: white;
-        font-weight: 500;
-        cursor: pointer;
-    }
-    .btn-primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
+
 
     @media (max-width: 768px) {
         .modal-body {

@@ -1,8 +1,9 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    
     import type { Task, Project } from '$lib/types';
     import { getProject } from '$lib/api';
     import shieldIcon from '$lib/assets/icons/shield.svg';
+import BaseModal from './BaseModal.svelte';
 
     let { task, onClose }: {
         task: Task;
@@ -13,25 +14,24 @@
     let loading = $state(true);
     let error = $state('');
 
-    onMount(async () => {
-        try {
-            project = await getProject(task.project_id);
-        } catch (e) {
-            error = String(e);
-        } finally {
-            loading = false;
+    $effect(() => {
+        async function load() {
+            try {
+                project = await getProject(task.project_id);
+            } catch (e) {
+                error = String(e);
+            } finally {
+                loading = false;
+            }
         }
+        load();
     });
 </script>
 
-<div class="sandbox-panel-overlay" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div class="sandbox-panel" role="dialog" aria-modal="true" aria-label="Sandbox settings">
-        <div class="panel-header">
-            <div class="panel-title">
-                <img src={shieldIcon} width="16" height="16" alt="" />
-                <span>Sandboxed Task</span>
-            </div>
-            <button class="close-btn" onclick={onClose} aria-label="Close">✕</button>
+<BaseModal width="480px" onClose={onClose}>
+        <div slot="header" class="panel-title">
+            <img src={shieldIcon} width="16" height="16" alt="" />
+            <span>Sandboxed Task</span>
         </div>
 
         <div class="panel-body">
@@ -112,39 +112,10 @@ Sandbox Isolation is enabled for this project
                 </div>
             {/if}
         </div>
-    </div>
-</div>
+</BaseModal>
 
 <style>
-    .sandbox-panel-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        animation: fade-in 0.15s ease-out;
-    }
-
-    .sandbox-panel {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 20px 24px;
-        max-width: 400px;
-        width: 90%;
-        max-height: 90vh;
-        overflow-y: auto;
-        animation: scale-in 0.15s ease-out;
-    }
-
-    .panel-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 16px;
-    }
+    @import '$lib/styles/shared.css';
 
     .panel-title {
         display: flex;
@@ -153,14 +124,6 @@ Sandbox Isolation is enabled for this project
         font-size: 0.875rem;
         font-weight: 600;
         color: var(--color-text-primary);
-    }
-
-    @import '$lib/styles/shared.css';
-
-    :global(.close-btn) {
-        width: 28px;
-        height: 28px;
-        font-size: 1rem;
     }
 
     .panel-body {
@@ -337,19 +300,4 @@ Sandbox Isolation is enabled for this project
         color: var(--color-status-yellow, #d29922);
     }
 
-    @keyframes fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
-    @keyframes scale-in {
-        from {
-            opacity: 0;
-            transform: scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1);
-        }
-    }
 </style>

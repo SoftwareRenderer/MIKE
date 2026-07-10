@@ -81,7 +81,7 @@
     .modal-footer {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         gap: 8px;
         padding: 12px 20px;
         border-top: 1px solid var(--color-border);
@@ -90,6 +90,36 @@
         position: sticky;
         bottom: 0;
         z-index: 10;
+    }
+    .modal-footer :global(.btn-secondary),
+    .modal-footer :global(.btn-primary) {
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
+        font-size: 0.875rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        border: none;
+        transition: background 0.15s, opacity 0.15s;
+    }
+    .modal-footer :global(.btn-secondary) {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .modal-footer :global(.btn-secondary):hover:not(:disabled) {
+        background: var(--color-surface-4);
+    }
+    .modal-footer :global(.btn-primary) {
+        background: var(--color-accent);
+        color: white;
+    }
+    .modal-footer :global(.btn-primary):hover:not(:disabled) {
+        opacity: 0.85;
+    }
+    .modal-footer :global(.btn-secondary):disabled,
+    .modal-footer :global(.btn-primary):disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 
     @media (max-width: 768px) {
