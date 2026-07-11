@@ -71,11 +71,39 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Host filesystem (worktree is bind-mounted into sandbox)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		JSONError(w, http.StatusNotFound, err.Error())
-		return
+	// Optional: read file at a specific git ref (e.g. HEAD) instead of working tree
+	ref := r.URL.Query().Get("ref")
+	var content []byte
+	var readErr error
+	if ref != "" {
+		var output string
+		if taskID != "" {
+			relPath, relErr := filepath.Rel(worktreePath, path)
+			if relErr != nil {
+				JSONError(w, http.StatusBadRequest, relErr.Error())
+				return
+			}
+			output, readErr = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "show", ref+":"+relPath)
+		} else {
+			relPath, relErr := filepath.Rel(project.Path, path)
+			if relErr != nil {
+				JSONError(w, http.StatusBadRequest, relErr.Error())
+				return
+			}
+			output, readErr = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "show", ref+":"+relPath)
+		}
+		if readErr != nil {
+			JSONError(w, http.StatusNotFound, "file not found at ref "+ref)
+			return
+		}
+		content = []byte(output)
+	} else {
+		// Host filesystem (worktree is bind-mounted into sandbox)
+		content, readErr = os.ReadFile(path)
+		if readErr != nil {
+			JSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
 	}
 	if len(content) > 1_000_000 {
 		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")

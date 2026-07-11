@@ -50,6 +50,7 @@ export function computeDiffMarkers(originalContent: string, currentContent: stri
 
         if (part.added && !part.removed) {
             // Added lines
+            let startIdx = 0;
             if (pendingRemovals.length > 0) {
                 // Pair removed+added as "modified" — one-to-one pairing
                 const paired = Math.min(pendingRemovals.length, lines.length);
@@ -57,20 +58,13 @@ export function computeDiffMarkers(originalContent: string, currentContent: stri
                     markers[currentLine] = { type: 'modified', removedText: pendingRemovals[i] };
                     currentLine++;
                 }
-                // Remaining removals (more removed than added) — attach to current position
-                for (let i = paired; i < pendingRemovals.length; i++) {
-                    // These extra removals are attached as 'removed' markers at the current position
-                    // The current line at this position was already an added line, so we keep it as added
-                    // but store the removed text alongside. For simplicity, mark as 'removed'.
-                    // Actually, the extra removed lines don't have a corresponding current line,
-                    // so we insert them as standalone 'removed' markers.
-                    markers[currentLine] = { type: 'removed', text: pendingRemovals[i] };
-                    // Don't increment currentLine — the removed line doesn't exist in current doc
-                }
+                // Mark where unpaired added lines start
+                startIdx = paired;
+                // Excess removals (more removed than added) — skip them
                 pendingRemovals = [];
             }
-            // Remaining added lines (no removal pairing)
-            for (const _line of lines) {
+            // Unpaired added lines
+            for (let i = startIdx; i < lines.length; i++) {
                 markers[currentLine] = { type: 'added' };
                 currentLine++;
             }

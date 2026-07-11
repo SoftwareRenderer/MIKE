@@ -9,7 +9,8 @@
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, lineNumbers, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { gitGutter } from '$lib/utils/git-gutter';
     import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
     import { tags } from '@lezer/highlight';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
@@ -95,7 +96,8 @@
     let fileTooLarge = $state(false);
     let fileName = $state('');
     let editorFocused = $state(false);
-    let originalContent = $state('');
+    let originalContent = $state(''); // HEAD content for git gutter
+    let savedContent = $state('');    // disk content for unsaved-changes tracking
     let showConfirm = $state(false);
 
     // Tracked incrementally to avoid O(n) string compare/split on every edit
@@ -147,6 +149,7 @@
     let searchVisible = $state(false);
     let searchApp: any = null;
     let editorCreating = $state(false); // prevent race between loadFile() and $effect
+    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -246,9 +249,12 @@
         const langSupport = getLanguageSupport(filePath);
         // Use base content so delta replay starts from the saved state.
         const initialDoc = historyBase || content;
+        const gitGutterExt = gitGutter();
+        gitGutterState = gitGutterExt.state;
+        gitGutterExt.state.original = originalContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
-            lineNumbers(),
+            gitGutterExt.extension,
             highlightActiveLineGutter(),
             highlightSpecialChars(),
             history(),
@@ -277,9 +283,9 @@
             syntaxHighlighting(githubDarkHighlight),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
-                    // Sync content first, then compute hasChanges
+                    // Sync content first, then compute hasChanges vs disk
                     content = update.state.doc.toString();
-                    hasChanges = content !== originalContent;
+                    hasChanges = content !== savedContent;
                     lineCount = update.state.doc.lines;
                     charCount = update.state.doc.length;
                     // Capture delta for undo/redo history persistence.
@@ -328,7 +334,7 @@
             (view as any).__restoring = false;
             // Sync content after replay
             content = view.state.doc.toString();
-            hasChanges = content !== originalContent;
+            hasChanges = content !== savedContent;
         }
 
         // Track focus/blur via DOM events on the editor's dom element
@@ -389,11 +395,27 @@
                 throw new Error(err.error || 'Failed to read file');
             }
             const data = await res.json();
-            originalContent = data.content || '';
-            // Use unsaved draft if available, otherwise use file content
+            const fileContent = data.content || '';
+
+            // Fetch HEAD version for git gutter comparison
+            try {
+                const headRes = await fetch(
+                    `/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}&ref=HEAD`
+                );
+                if (headRes.ok) {
+                    const headData = await headRes.json();
+                    originalContent = headData.content || '';
+                } else {
+                    originalContent = fileContent; // new file, no HEAD
+                }
+            } catch {
+                originalContent = fileContent;
+            }
+            // Use unsaved draft if available, otherwise use current file content
             const draft = await getEditorDraft(filePath);
-            content = draft !== null ? draft : originalContent;
-            hasChanges = content !== originalContent;
+            content = draft !== null ? draft : fileContent;
+            savedContent = fileContent;
+            hasChanges = content !== savedContent;
             lineCount = content ? content.split('\n').length : 0;
             charCount = content.length;
 
@@ -403,8 +425,8 @@
                 historyBase = savedHistory.base;
                 historyDeltas = savedHistory.deltas;
             } else {
-                // No history or expired — start fresh
-                historyBase = originalContent;
+                // No history or expired — start fresh from current file content
+                historyBase = fileContent;
                 historyDeltas = [];
             }
         } catch (e) {
@@ -440,8 +462,14 @@
                 const err = await res.json().catch(() => ({ error: 'Failed to save' }));
                 throw new Error(err.error || 'Failed to save');
             }
-            originalContent = content;
+            savedContent = content;
             hasChanges = false;
+            // Update git gutter — disk now matches editor, recompute vs HEAD
+            if (view) {
+                if (gitGutterState) {
+                    gitGutterState.original = content;
+                }
+            }
             await clearEditorDraft(filePath);
         } catch (e) {
             error = String(e);

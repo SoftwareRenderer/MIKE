@@ -11,7 +11,8 @@
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, lineNumbers, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { gitGutter } from '$lib/utils/git-gutter';
     import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
     import { tags } from '@lezer/highlight';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
@@ -107,14 +108,15 @@
     let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
-    let originalContent = $state('');
+    let originalContent = $state(''); // HEAD content for git gutter
+    let savedContent = $state('');    // disk content for unsaved-changes tracking
     let loading = $state(true);
     let saving = $state(false);
     let error = $state('');
     let fileTooLarge = $state(false);
     let displayPath = $state('');
 
-    let hasChanges = $derived(content !== originalContent);
+    let hasChanges = $derived(content !== savedContent);
     let lineCount = $derived(content.split('\n').length);
 
     let editorEl: HTMLDivElement | null = null;
@@ -122,6 +124,7 @@
     let showConfirm = $state(false);
 
     let view: EditorView | null = null;
+    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
     let searchVisible = $state(false);
     let searchApp: any = null;
 
@@ -208,9 +211,12 @@
         if (!editorEl) return;
 
         const langSupport = getLanguageSupport(filePath);
+        const gitGutterExt = gitGutter();
+        gitGutterState = gitGutterExt.state;
+        gitGutterExt.state.original = originalContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
-            lineNumbers(),
+            gitGutterExt.extension,
             highlightActiveLineGutter(),
             highlightSpecialChars(),
             history(),
@@ -358,7 +364,23 @@
             }
             const data = await res.json();
             content = data.content || '';
-            originalContent = content;
+
+            // Fetch HEAD version for git gutter comparison
+            const headParams = new URLSearchParams({ path: filePath, ref: 'HEAD' });
+            if (projectId) headParams.set('project', projectId);
+            if (taskId) headParams.set('task', taskId);
+            try {
+                const headRes = await fetch(`/api/fs/read?${headParams}`);
+                if (headRes.ok) {
+                    const headData = await headRes.json();
+                    originalContent = headData.content || '';
+                } else {
+                    originalContent = content; // fallback: no HEAD (new file)
+                }
+            } catch {
+                originalContent = content;
+            }
+            savedContent = content; // disk matches current
         } catch (e) {
             error = String(e);
         } finally {
@@ -387,7 +409,12 @@
                 const err = await res.json().catch(() => ({ error: 'Failed to save file' }));
                 throw new Error(err.error || 'Failed to save file');
             }
-            originalContent = content;
+            savedContent = content;
+            if (view) {
+                if (gitGutterState) {
+                    gitGutterState.original = content;
+                }
+            }
         } catch (e) {
             showToast('Failed to save: ' + String(e), 'error');
         } finally {
