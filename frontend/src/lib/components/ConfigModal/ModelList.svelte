@@ -221,9 +221,8 @@
         flex-shrink: 0;
     }
     .btn-remove-model:hover {
-        color: var(--color-danger);
-        background: var(--color-danger);
-        background-color: rgba(248, 81, 73, 0.1);
+        background: var(--color-status-red);
+        color: white;
     }
     .models-empty {
         font-size: 0.8125rem;

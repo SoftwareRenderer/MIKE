@@ -1330,8 +1330,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .btn-remove-port:hover:not(:disabled),
     .btn-remove-mount:hover:not(:disabled) {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
+        background: var(--color-status-red);
+        color: white;
     }
 
     .btn-remove-port:disabled,
@@ -1655,8 +1655,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .btn-remove-env:hover:not(:disabled) {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
+        background: var(--color-status-red);
+        color: white;
     }
 
     .btn-remove-env:disabled {

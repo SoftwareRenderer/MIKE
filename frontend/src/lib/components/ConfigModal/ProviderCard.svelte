@@ -331,8 +331,8 @@
         cursor: pointer;
     }
     .btn-remove-provider:hover {
-        color: var(--color-danger);
-        background: rgba(248, 81, 73, 0.1);
+        background: var(--color-status-red);
+        color: white;
     }
     .btn-expand {
         display: flex;

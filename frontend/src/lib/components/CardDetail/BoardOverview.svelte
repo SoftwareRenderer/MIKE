@@ -209,8 +209,8 @@
         opacity: 1;
     }
     .add-btn:hover {
-        color: var(--color-accent);
-        background: var(--color-accent)18;
+        background: var(--color-accent);
+        color: white;
     }
     .clear-btn {
         display: inline-flex;
@@ -223,8 +223,8 @@
         transition: color 0.15s ease, background 0.15s ease;
     }
     .clear-btn:hover {
-        color: var(--color-status-red, #f85149);
-        background: var(--color-status-red, #f85149)18;
+        background: var(--color-status-red, #f85149);
+        color: white;
     }
     .section-chevron {
         flex-shrink: 0;

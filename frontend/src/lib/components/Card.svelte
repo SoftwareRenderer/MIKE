@@ -606,7 +606,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                 {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
                     <button
                         type="button"
-                        class="action-icon"
+                        class="action-icon action-add"
                         onclick={handleCreateChild}
                         aria-label="Create subtask"
                         title="Create subtask"
@@ -939,16 +939,12 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         transition: background 0.1s ease, color 0.1s ease;
     }
     .action-icon:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
+        background: var(--color-accent);
+        color: white;
     }
     .action-icon.action-move:hover {
-        background: var(--color-surface-3);
-        /* keep column color from inline style */
-    }
-    .action-icon.action-delete:hover {
-        background: var(--color-status-red)22;
-        color: var(--color-status-red) !important;
+        background: var(--col-color, var(--color-accent));
+        color: white !important;
     }
     .action-idle {
         display: flex;

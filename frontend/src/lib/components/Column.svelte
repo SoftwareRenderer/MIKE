@@ -25,6 +25,13 @@
 
     let isOver = $state(false);
     let isDropRejected = $state(false);
+    let addBtnVisible = $state(true);
+    let cardListEl: HTMLDivElement | null = null;
+
+    function handleScroll() {
+        if (!cardListEl) return;
+        addBtnVisible = cardListEl.scrollTop === 0;
+    }
 
     function handleDragOver(e: DragEvent) {
         e.preventDefault();
@@ -71,6 +78,11 @@
         </h3>
         <div class="header-right">
             <span class="count">{tasks.length}</span>
+            {#if columnId === 'backlog' && onAddTask && !addBtnVisible}
+                <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label="Create a new task" title="Create a new task">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+            {/if}
             {#if onClearAll && tasks.length > 0}
                 <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={`Clear all ${tasks.length} done tasks`} title={`Clear all ${tasks.length} done tasks`}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -81,7 +93,7 @@
             {/if}
         </div>
     </div>
-    <div class="card-list">
+    <div class="card-list" bind:this={cardListEl} onscroll={handleScroll}>
         {#if onAddTask}
             <button class="add-task-btn" onclick={onAddTask} title="Create a new task">+ Create Task</button>
         {/if}
@@ -155,6 +167,26 @@
         align-items: center;
         gap: 6px;
     }
+    .add-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        padding: 0;
+        flex-shrink: 0;
+        opacity: 1;
+    }
+    .add-btn:hover {
+        background: var(--color-accent);
+        color: white;
+    }
     .clear-btn {
         display: flex;
         align-items: center;
@@ -171,8 +203,8 @@
         flex-shrink: 0;
     }
     .clear-btn:hover {
-        background: var(--color-status-red)22;
-        color: var(--color-status-red);
+        background: var(--color-status-red);
+        color: white;
     }
     .card-list {
         flex: 1;
