@@ -9,7 +9,7 @@
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
-    import GitStatusOverlay from './GitStatusOverlay.svelte';
+    import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
@@ -40,9 +40,8 @@
     let diffLoading = $state(false);
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
-    // Git Status overlay state
-    let showGitStatus = $state(false);
-    let gitStatusTab = $state<'files' | 'diff'>('files');
+    // Review Changes panel state
+    let showChanges = $state(false);
 
     // Sync selectedBranch when parent updates currentBranch via WebSocket
     $effect(() => {
@@ -116,7 +115,7 @@
 
     // Mobile layout
     const { isMobile } = useIsMobile();
-    let activeTab = $state<'files' | 'editor' | 'symbols'>('files');
+    let activeTab = $state<'files' | 'editor' | 'symbols' | 'changes'>('files');
     let editorFullscreen = $state(false);
     let diffFullscreen = $state(false);
 
@@ -231,7 +230,6 @@
 
     function handleFileSelected(path: string) {
         if (!isPathSafe(path)) return;
-        showGitStatus = false;
         closeCommitDiff();
         selectedFilePath = path;
         onUpdateFile(path);
@@ -316,11 +314,11 @@
         }
     });
 
-    // Handle Escape key — close overlays in order: git status → commit diff → branch view
+    // Handle Escape key — close panels in order: changes → commit diff → branch view
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
-            if (showGitStatus) {
-                showGitStatus = false;
+            if (showChanges) {
+                showChanges = false;
             } else if (diffCommit) {
                 closeCommitDiff();
             } else if (!editorFocused) {
@@ -331,13 +329,9 @@
 
     // Resize handlers
     function handleLeftDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        const body = document.querySelector('.explorer-body');
-        if (!body) return;
         leftDragStartX = startX;
-        leftDragBodyLeft = body.getBoundingClientRect().left;
     }
     let leftDragStartX = 0;
-    let leftDragBodyLeft = 0;
     function handleLeftDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -347,13 +341,9 @@
     function handleLeftDragEnd() { persistExplorerLayout(); }
 
     function handleRightDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        const body = document.querySelector('.explorer-body');
-        if (!body) return;
         rightDragStartX = startX;
-        rightDragBodyRight = body.getBoundingClientRect().right;
     }
     let rightDragStartX = 0;
-    let rightDragBodyRight = 0;
     function handleRightDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -363,28 +353,20 @@
     function handleRightDragEnd() { persistExplorerLayout(); }
 
     function handleSplitDragStart(_e: MouseEvent | TouchEvent, startY: number) {
-        const container = document.querySelector('.explorer-split-container');
-        if (!container) return;
         splitDragStartY = startY;
-        splitDragContainerTop = container.getBoundingClientRect().top;
-        splitDragContainerHeight = container.getBoundingClientRect().height;
     }
     let splitDragStartY = 0;
-    let splitDragContainerTop = 0;
-    let splitDragContainerHeight = 0;
     function handleSplitDragMove(pointerY: number) {
         const container = document.querySelector('.explorer-split-container');
         if (!container) return;
-        const rect = container.getBoundingClientRect();
-        const posY = pointerY - rect.top;
-        splitRatio = Math.max(0.2, Math.min(0.8, posY / rect.height));
+        const posY = pointerY - container.getBoundingClientRect().top;
+        splitRatio = Math.max(0.2, Math.min(0.8, posY / container.getBoundingClientRect().height));
     }
     function handleSplitDragEnd() { persistExplorerLayout(); }
 
     $effect(() => {
         const mobile = isMobile;
         if (mobile) {
-            activeTab = 'files';
             splitRatio = 0.75;
         }
     });
@@ -412,7 +394,7 @@
 <div class="explorer-view" class:fullscreen={(editorFullscreen && selectedFilePath) || (diffFullscreen && diffCommit)} role="dialog" aria-label="Explorer view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="explorer-header">
-        <button class="close-btn" onclick={() => { editorFullscreen = false; diffFullscreen = false; onClose(); }} aria-label="Close branch view" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; diffFullscreen = false; onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -422,14 +404,9 @@
         </svg>
         <span class="project-path">{toHomeRelative(projectPath)}</span>
 
-        <!-- Branch selector dropdown -->
-        <div class="explorer-selector" class:open={showDropdown} bind:this={dropdownEl}>
-            <button
-                class="explorer-dropdown-btn"
-                onclick={toggleDropdown}
-                title="Switch branch"
-                disabled={checkoutLoading}
-            >
+        <!-- Branch selector: badge when changes panel open, dropdown otherwise -->
+        {#if showChanges}
+            <span class="explorer-branch-badge" title="{selectedBranch}">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="6" cy="6" r="2.5"/>
                     <circle cx="10" cy="10" r="2.5"/>
@@ -437,44 +414,62 @@
                     <line x1="6" y1="3.5" x2="6" y2="2"/>
                     <line x1="10" y1="12.5" x2="10" y2="14"/>
                 </svg>
-                <span class="explorer-name">{selectedBranch}</span>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <polyline points="2,3.5 5,6.5 8,3.5"/>
-                </svg>
-            </button>
+                {selectedBranch}
+            </span>
+        {:else}
+            <div class="explorer-selector" class:open={showDropdown} bind:this={dropdownEl}>
+                <button
+                    class="explorer-dropdown-btn"
+                    onclick={toggleDropdown}
+                    title="Switch branch"
+                    disabled={checkoutLoading}
+                >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="6" cy="6" r="2.5"/>
+                        <circle cx="10" cy="10" r="2.5"/>
+                        <line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/>
+                        <line x1="6" y1="3.5" x2="6" y2="2"/>
+                        <line x1="10" y1="12.5" x2="10" y2="14"/>
+                    </svg>
+                    <span class="explorer-name">{selectedBranch}</span>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="2,3.5 5,6.5 8,3.5"/>
+                    </svg>
+                </button>
 
-            {#if showDropdown}
-                <div class="explorer-dropdown-list" role="listbox">
-                    {#if loadingBranches}
-                        <div class="explorer-dropdown-item loading">Loading...</div>
-                    {:else}
-                        {#each branches as branch}
-                            <button
-                                class="explorer-dropdown-item"
-                                class:active={branch === selectedBranch}
-                                onclick={() => handleBranchSelect(branch)}
-                                role="option"
-                                aria-selected={branch === selectedBranch}
-                            >
-                                {#if branch === selectedBranch}
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <polyline points="1.5,5 4,7.5 8.5,2.5"/>
-                                    </svg>
-                                {:else}
-                                    <span class="explorer-check-empty"></span>
-                                {/if}
-                                <span>{branch}</span>
-                            </button>
-                        {/each}
-                        {#if branches.length === 0}
-                            <div class="explorer-dropdown-item empty">No branches</div>
+                {#if showDropdown}
+                    <div class="explorer-dropdown-list" role="listbox">
+                        {#if loadingBranches}
+                            <div class="explorer-dropdown-item loading">Loading...</div>
+                        {:else}
+                            {#each branches as branch}
+                                <button
+                                    class="explorer-dropdown-item"
+                                    class:active={branch === selectedBranch}
+                                    onclick={() => handleBranchSelect(branch)}
+                                    role="option"
+                                    aria-selected={branch === selectedBranch}
+                                >
+                                    {#if branch === selectedBranch}
+                                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <polyline points="1.5,5 4,7.5 8.5,2.5"/>
+                                        </svg>
+                                    {:else}
+                                        <span class="explorer-check-empty"></span>
+                                    {/if}
+                                    <span>{branch}</span>
+                                </button>
+                            {/each}
+                            {#if branches.length === 0}
+                                <div class="explorer-dropdown-item empty">No branches</div>
+                            {/if}
                         {/if}
-                    {/if}
-                </div>
-            {/if}
-        </div>
+                    </div>
+                {/if}
+            </div>
+        {/if}
         <div class="explorer-header-spacer"></div>
-        <button class="icon-btn git-status-btn" onclick={() => showGitStatus = !showGitStatus} aria-label="Review Changes" title="Review Changes">
+        <button class="icon-btn git-status-btn" class:active={showChanges} onclick={() => showChanges = !showChanges} aria-label="Review Changes" title="Review Changes">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v12"/><circle cx="4" cy="2" r="2" fill="currentColor" stroke="none"/><circle cx="4" cy="13.5" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="13.5" r="2" fill="currentColor" stroke="none"/><path d="M12.038 13.487l-.05-5.519c.015-4.475-.074-5.754-2.897-5.794l-1.449.05"/><path d="M9.164 4.323l-2.5-2.156 2.5-2.156" fill="currentColor" stroke="none"/></svg>
         </button>
         <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
@@ -485,30 +480,8 @@
         </button>
     </div>
 
-    <!-- Mobile Tab Bar: Git Status -->
-    {#if isMobile && showGitStatus}
-        <div class="mobile-tab-bar">
-            <button
-                class="tab-btn {gitStatusTab === 'files' ? 'active' : ''}"
-                onclick={() => gitStatusTab = 'files'}
-                title="File list"
-            >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h4l2 2v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2h4l2 2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                Changes
-            </button>
-            <button
-                class="tab-btn {gitStatusTab === 'diff' ? 'active' : ''}"
-                onclick={() => gitStatusTab = 'diff'}
-                title="Diff view"
-            >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                Diff
-            </button>
-        </div>
-    {/if}
-
     <!-- Mobile Tab Bar -->
-    {#if isMobile && !showGitStatus && !diffCommit && !editorFullscreen && !diffFullscreen}
+    {#if isMobile && !showChanges && !diffCommit && !editorFullscreen && !diffFullscreen}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -537,72 +510,17 @@
         </div>
     {/if}
 
-    <!-- 3-column layout -->
+    <!-- Multi-column layout -->
     <div class="explorer-body">
-        <!-- Left column: file browser + git graph -->
-        <div class="explorer-left-column" class:hidden={isMobile && (activeTab !== 'files' || diffCommit || showGitStatus)} style="width: {leftWidth}px">
-            <div class="explorer-split-container">
-                <!-- Top: File browser -->
-                <div class="explorer-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
-                    <BranchFileBrowser
-                        projectId={projectId}
-                        projectPath={projectPath}
-                        initialPath={currentFolderPath}
-                        sandboxEnabled={sandboxEnabled}
-                        unsavedFiles={[...unsavedFiles]}
-                        pendingFsEvent={pendingFsEvent}
-                        onFileSelected={handleFileSelected}
-                        onPathChange={(p) => currentFolderPath = p}
-                    />
-                </div>
-
-                <!-- Drag handle (file browser / git graph split) -->
-                {#if !isMobile}
-                <ResizeHandle
-                    axis="horizontal"
-                    ariaLabel="Resize file browser and git graph panels"
-                    onDragStart={handleSplitDragStart}
-                    onDragMove={handleSplitDragMove}
-                    onDragEnd={handleSplitDragEnd}
-                />
-                {/if}
-
-                <!-- Bottom: Git graph -->
-                <div class="explorer-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
-                    <BranchGitGraph
-                        projectId={projectId}
-                        currentBranch={selectedBranch}
-                        commits={commits}
-                        originTip={originTip}
-                        loading={loadingCommits}
-                        hasMore={hasMoreCommits}
-                        onCommitSelected={handleCommitSelected}
-                        onLoadMore={loadMoreCommits}
-                        selectedCommitHash={diffCommit?.hash}
-                    />
-                </div>
-            </div>
+        <!-- Review Changes panel (takes over full width when open) -->
+        {#if showChanges}
+        <div class="explorer-changes-column">
+            <GitStatusPanel
+                projectId={projectId}
+                onClose={() => showChanges = false}
+                isMobile={isMobile}
+            />
         </div>
-
-        <!-- Resize handle: left column -->
-        <ResizeHandle
-            ariaLabel="Resize left panel"
-            onDragStart={handleLeftDragStart}
-            onDragMove={handleLeftDragMove}
-            onDragEnd={handleLeftDragEnd}
-        />
-
-        {#if showGitStatus}
-            <!-- Git Status overlay (replaces editor + symbols columns) -->
-            <div class="explorer-git-status-overlay">
-                <GitStatusOverlay
-                    projectId={projectId}
-                    projectPath={projectPath}
-                    onClose={() => showGitStatus = false}
-                    activeTab={gitStatusTab}
-                    isMobile={isMobile}
-                />
-            </div>
         {:else if diffCommit}
             <!-- Commit diff overlay (replaces editor + symbols columns) -->
             <div class="explorer-diff-overlay">
@@ -622,7 +540,62 @@
                 />
             </div>
         {:else}
-            <!-- Center column: File editor -->
+            <!-- Column 1: File browser + Git graph -->
+            <div class="explorer-left-column" class:hidden={isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
+                <div class="explorer-split-container">
+                    <!-- Top: File browser -->
+                    <div class="explorer-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
+                        <BranchFileBrowser
+                            projectId={projectId}
+                            projectPath={projectPath}
+                            initialPath={currentFolderPath}
+                            sandboxEnabled={sandboxEnabled}
+                            unsavedFiles={[...unsavedFiles]}
+                            pendingFsEvent={pendingFsEvent}
+                            onFileSelected={handleFileSelected}
+                            onPathChange={(p) => currentFolderPath = p}
+                        />
+                    </div>
+
+                    <!-- Drag handle (file browser / git graph split) -->
+                    {#if !isMobile}
+                    <ResizeHandle
+                        axis="horizontal"
+                        ariaLabel="Resize file browser and git graph panels"
+                        onDragStart={handleSplitDragStart}
+                        onDragMove={handleSplitDragMove}
+                        onDragEnd={handleSplitDragEnd}
+                    />
+                    {/if}
+
+                    <!-- Bottom: Git graph -->
+                    <div class="explorer-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
+                        <BranchGitGraph
+                            projectId={projectId}
+                            currentBranch={selectedBranch}
+                            commits={commits}
+                            originTip={originTip}
+                            loading={loadingCommits}
+                            hasMore={hasMoreCommits}
+                            onCommitSelected={handleCommitSelected}
+                            onLoadMore={loadMoreCommits}
+                            selectedCommitHash={diffCommit?.hash}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resize handle: left column -->
+            {#if !isMobile}
+            <ResizeHandle
+                ariaLabel="Resize left panel"
+                onDragStart={handleLeftDragStart}
+                onDragMove={handleLeftDragMove}
+                onDragEnd={handleLeftDragEnd}
+            />
+            {/if}
+
+            <!-- Column 2: File editor -->
             <div class="explorer-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
                 <BranchEditor
                     projectId={projectId}
@@ -638,7 +611,7 @@
             </div>
 
             <!-- Resize handle: right column (only when symbols exist) -->
-            {#if symbols.length > 0}
+            {#if !isMobile && symbols.length > 0}
             <ResizeHandle
                 ariaLabel="Resize right panel"
                 onDragStart={handleRightDragStart}
@@ -647,7 +620,7 @@
             />
             {/if}
 
-            <!-- Right column: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
+            <!-- Column 3: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
             <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobile) || (isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
@@ -752,9 +725,29 @@
         border: none;
         cursor: pointer;
     }
-    .git-status-btn:hover {
+    .git-status-btn:hover,
+    .git-status-btn.active {
         background: var(--color-accent);
         color: white;
+    }
+
+    /* Branch badge (shown when changes panel is open) */
+    .explorer-branch-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        font-size: 0.8125rem;
+        font-family: var(--font-mono);
+        font-weight: 500;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
 
     /* Branch selector */
@@ -903,11 +896,13 @@
         background: var(--color-surface-1);
     }
 
-    .explorer-git-status-overlay {
+    .explorer-changes-column {
         flex: 1;
         display: flex;
-        overflow: hidden;
+        flex-direction: column;
         background: var(--color-surface-1);
+        overflow: hidden;
+        min-width: 0;
     }
 
     .mobile-tab-bar {
@@ -981,9 +976,8 @@
             flex: 1 !important;
             min-height: 0;
         }
-        .explorer-git-status-overlay {
+        .explorer-changes-column {
             width: 100% !important;
-            border-left: none;
             flex: 1 !important;
             min-height: 0;
         }

@@ -71,6 +71,7 @@
 .diff-file-header-row .diff-file-header {
     flex: 1;
     min-width: 0;
+    width: auto;
     border-radius: 6px 0 0 0;
     border-right: none;
 }
@@ -130,6 +131,7 @@
 
 .diff-file-path {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

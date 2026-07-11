@@ -125,7 +125,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let editTaskDataVal: import('$lib/stores/app').EditTaskData | null = $state(null);
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
-    let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
+    let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
@@ -941,7 +941,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={() => {
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         updateUrl({ project: currentProject?.id }, true, true);

@@ -1,5 +1,5 @@
 <script lang="ts">
-    let { activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: 'context' | 'chat' | 'diff') => void } = $props();
+    let { activeTab, onTabChange, showCheckpointTab = false }: { activeTab: string; onTabChange: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void; showCheckpointTab?: boolean } = $props();
 </script>
 
 <div class="mobile-tab-bar">
@@ -19,6 +19,18 @@
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
         Agent
     </button>
+    {#if showCheckpointTab}
+        <button
+            class="tab-btn {activeTab === 'checkpoint' ? 'active' : ''}"
+            onclick={() => onTabChange('checkpoint')}
+            title="Checkpoint changes"
+        >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+            </svg>
+            Checkpoint
+        </button>
+    {/if}
     <button
         class="tab-btn {activeTab === 'diff' ? 'active' : ''}"
         onclick={() => onTabChange('diff')}

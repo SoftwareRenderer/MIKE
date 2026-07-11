@@ -39,20 +39,11 @@
 
 <style>
     .checkpoint-diff-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: var(--color-surface-1);
         display: flex;
         flex-direction: column;
-        z-index: 50;
-        animation: overlayFadeIn 150ms ease-out;
-    }
-    @keyframes overlayFadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
     }
     .checkpoint-diff-header {
         display: flex;
