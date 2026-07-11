@@ -253,7 +253,7 @@
         if (!message) return;
         try {
             await commitProject(projectId, message.trim());
-            await loadData();
+            onClose();
         } catch (e: any) {
             showToast(e.message || 'Commit failed', 'error');
         }
