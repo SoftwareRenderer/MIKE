@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
-import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
+import { createStreamHandler, type StreamHandlerCallbacks, estimateTokens } from '$lib/services/stream-handler';
 
 function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
     return {
@@ -70,6 +70,24 @@ describe('createStreamHandler', () => {
         expect(cb.markStreaming).toHaveBeenCalled();
     });
 
+    it('token event estimates tokens from batched text', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hello world this is a batched token event' } }, false, 'p1', 't1');
+        // 43 chars / 4 ≈ 11 tokens
+        expect(stream.state.streamTokenCount).toBe(estimateTokens('Hello world this is a batched token event'));
+        // Second batched event adds more
+        handleEvent({ type: 'token', data: { text: ' more tokens here' } }, false, 'p1', 't1');
+        expect(stream.state.streamTokenCount).toBe(
+            estimateTokens('Hello world this is a batched token event') + estimateTokens(' more tokens here'),
+        );
+    });
+
+    it('reasoning event estimates tokens from batched text', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning', data: { text: 'Let me think about this problem carefully' } }, false, 'p1', 't1');
+        expect(stream.state.streamTokenCount).toBe(estimateTokens('Let me think about this problem carefully'));
+    });
+
     it('reasoning event appends to reasoningContent', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'reasoning', data: { text: 'Let me think' } }, false, 'p1', 't1');
@@ -136,6 +154,18 @@ describe('createStreamHandler', () => {
         expect(stream.state.lastPromptTokens).toBe(500);
     });
 
+    it('stats event corrects estimated token count from batched events', () => {
+        const { stream, handleEvent } = setup();
+        // Batched token events produce an estimate
+        handleEvent({ type: 'token', data: { text: 'Hello world this is a batched token event' } }, false, 'p1', 't1');
+        const estimated = stream.state.streamTokenCount;
+        // Stats event overrides with the real count from the LLM
+        handleEvent({ type: 'stats', data: { model_name: 'gpt-4', prompt_tokens: 500, predicted_tokens: 15, predicted_ms: 200 } }, false, 'p1', 't1');
+        expect(stream.state.streamTokenCount).toBe(15);
+        // The estimate (11 from 43 chars) differs from the actual LLM count (15)
+        expect(estimated).toBe(11);
+    });
+
     it('git_checkpoint_pending adds to pending set', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'git_checkpoint_pending', data: { message_id: 'msg-1' } }, false, 'p1', 't1');
@@ -179,5 +209,28 @@ describe('createStreamHandler', () => {
         handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
         // Entry with only pending tool calls should be removed
         expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
+    });
+});
+
+describe('estimateTokens', () => {
+    it('returns 0 for empty string', () => {
+        expect(estimateTokens('')).toBe(0);
+    });
+
+    it('estimates ~1 token for short text', () => {
+        expect(estimateTokens('Hi')).toBe(1);
+        expect(estimateTokens('Hello')).toBe(2);
+    });
+
+    it('estimates proportionally for longer text', () => {
+        // 11 chars / 4 = 2.75 → 3
+        expect(estimateTokens('Hello world')).toBe(3);
+        // 44 chars / 4 = 11
+        expect(estimateTokens('This is a sentence with multiple words in it')).toBe(11);
+    });
+
+    it('handles newlines and spaces', () => {
+        // 18 chars / 4 = 4.5 → 5
+        expect(estimateTokens('Line one\nLine two')).toBe(5);
     });
 });

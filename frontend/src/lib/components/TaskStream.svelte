@@ -4,6 +4,7 @@
     import type { StreamEvent, StreamSection } from '$lib/types';
     import { getToolDisplayName } from '$lib/types';
     import { getTaskEventContext } from '$lib/context';
+    import { estimateTokens } from '$lib/services/stream-handler';
     import StreamSectionComp from './StreamSection.svelte';
     import StreamActions from './StreamActions.svelte';
 
@@ -76,7 +77,7 @@
                 currentTextSection = null;
                 const sec = ensureReasoningSection();
                 sec.content += data.text;
-                sec.tokenCount = (sec.tokenCount || 0) + 1;
+                sec.tokenCount = (sec.tokenCount || 0) + estimateTokens(data.text);
                 sec.isStreaming = true;
                 break;
             }

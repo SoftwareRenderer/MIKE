@@ -2,6 +2,11 @@ import type { StreamEvent } from '$lib/types';
 import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
 import type { StreamState } from './stream-state.svelte';
 
+/** Estimate token count from text. Average English token ≈ 4 chars. */
+export function estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+}
+
 type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
 
 /** External callbacks the component must provide. */
@@ -42,9 +47,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 stream.clearAwaiting();
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
-                s.streamTokenCount++;
-                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
                 const data = event.data as { text: string };
+                s.streamTokenCount += estimateTokens(data.text);
+                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
                 const entry = ensureAssistantEntry();
                 if (!s.currentAssistantId) s.currentAssistantId = entry.id;
                 entry.content += data.text;
@@ -55,9 +60,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (suppressEvents) break;
                 stream.clearAwaiting();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
-                s.streamTokenCount++;
-                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
                 const data = event.data as { text: string };
+                s.streamTokenCount += estimateTokens(data.text);
+                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
                 scroll();
