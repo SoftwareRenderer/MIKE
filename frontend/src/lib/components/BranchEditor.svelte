@@ -104,6 +104,8 @@
     let hasChanges = $state(false);
     let lineCount = $state(0);
     let charCount = $state(0);
+    let cursorLine = $state(1);
+    let cursorCol = $state(1);
 
     // Undo/redo history persistence
     // historyBase: the base document content (first snapshot)
@@ -333,6 +335,11 @@
                     (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
                 }
                 if (update.selectionSet) {
+                    // Update cursor position
+                    const pos = update.state.selection.main.head;
+                    const line = update.state.doc.lineAt(pos);
+                    cursorLine = line.number;
+                    cursorCol = pos - line.from + 1;
                     // Extract symbols on selection change (debounced)
                     clearTimeout((view as any)._symbolTimer);
                     (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
@@ -405,6 +412,8 @@
         hasChanges = false;
         lineCount = 0;
         charCount = 0;
+        cursorLine = 1;
+        cursorCol = 1;
         historyBase = '';
         historyDeltas = [];
 
@@ -633,18 +642,21 @@
     {#if !loading && !error && !fileTooLarge && filePath}
         <div class="editor-footer">
             <div class="footer-left">
-                <span class="line-info">{lineCount} lines · {charCount} chars</span>
+                <span class="cursor-info">Ln {cursorLine}, Col {cursorCol}</span>
                 {#if hasChanges}
                     <span class="unsaved-info">Unsaved changes</span>
                 {/if}
             </div>
-            <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
+            <div class="footer-right">
+                <span class="line-info">{lineCount} lines · {charCount} chars</span>
+                <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="11" cy="11" r="8"/>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
                 Find
             </button>
+            </div>
         </div>
     {/if}
 
@@ -819,6 +831,14 @@
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+    .footer-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .cursor-info {
+        font-family: var(--font-mono);
     }
     .line-info {
         font-family: var(--font-mono);

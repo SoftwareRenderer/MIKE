@@ -118,6 +118,8 @@
 
     let hasChanges = $derived(content !== savedContent);
     let lineCount = $derived(content.split('\n').length);
+    let cursorLine = $state(1);
+    let cursorCol = $state(1);
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     // svelte-ignore non_reactive_update — DOM ref via bind:this
@@ -269,6 +271,12 @@
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     content = update.state.doc.toString();
+                }
+                if (update.selectionSet) {
+                    const pos = update.state.selection.main.head;
+                    const line = update.state.doc.lineAt(pos);
+                    cursorLine = line.number;
+                    cursorCol = pos - line.from + 1;
                 }
             }),
             EditorState.tabSize.of(4),
@@ -564,18 +572,21 @@
     {#if !loading && !error && !fileTooLarge}
         <div class="editor-footer">
             <div class="footer-left">
-                <span class="line-info">{lineCount} lines · {content.length} chars</span>
+                <span class="cursor-info">Ln {cursorLine}, Col {cursorCol}</span>
                 {#if hasChanges}
                     <span class="unsaved-info">Unsaved changes</span>
                 {/if}
             </div>
-            <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
+            <div class="footer-right">
+                <span class="line-info">{lineCount} lines · {content.length} chars</span>
+                <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="11" cy="11" r="8"/>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
                 Find
             </button>
+            </div>
         </div>
     {/if}
 </div>
@@ -820,6 +831,14 @@
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+    .footer-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .cursor-info {
+        font-family: var(--font-mono);
     }
     .line-info {
         font-family: var(--font-mono);

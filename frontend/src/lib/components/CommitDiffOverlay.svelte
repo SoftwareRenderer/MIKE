@@ -16,12 +16,10 @@ import { slide } from 'svelte/transition';
         onFileSelected: (path: string) => void;
         hasPrev: boolean;
         hasNext: boolean;
-        onToggleFullscreen?: () => void;
-        mobileFullscreen?: boolean;
         isMobile?: boolean;
     }
 
-    let { commit, diff, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, onToggleFullscreen, mobileFullscreen, isMobile }: Props = $props();
+    let { commit, diff, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
 
     // Parse the unified diff into structured files
     let diffFiles = $derived<DiffFile[]>(parseUnifiedDiff(diff));
@@ -250,17 +248,6 @@ import { slide } from 'svelte/transition';
                 </div>
             {/if}
         </div>
-        <div class="diff-header-right">
-            {#if onToggleFullscreen}
-                <button type="button" class="nav-btn diff-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
-                    {#if mobileFullscreen}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {/if}
-                </button>
-            {/if}
-        </div>
     </div>
 
     <!-- Content area -->
@@ -396,12 +383,6 @@ import { slide } from 'svelte/transition';
         align-items: center;
         gap: 12px;
     }
-    .diff-header-right {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-    }
     .diff-commit-info {
         display: flex;
         align-items: center;
@@ -513,28 +494,6 @@ import { slide } from 'svelte/transition';
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
-    .nav-btn {
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        background: transparent;
-        color: var(--color-text-secondary);
-        border-radius: 4px;
-        cursor: pointer;
-        padding: 0;
-    }
-    .nav-btn:hover:not(.disabled) {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .nav-btn:focus-visible:not(.disabled) {
-        outline: 2px solid var(--color-accent);
-        outline-offset: 1px;
-    }
-
     :global(.close-btn) {
         width: 24px;
         height: 24px;

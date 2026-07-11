@@ -9,9 +9,9 @@
      *     {/snippet}
      *   </VirtualList>
      */
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount, onDestroy, type Snippet } from 'svelte';
 
-    let { items, itemHeight = 28, minThreshold = 50, buffer = 5, role, 'aria-label': ariaLabel, scrollTop: scrollTopProp }: {
+    let { items, itemHeight = 28, minThreshold = 50, buffer = 5, role, 'aria-label': ariaLabel, scrollTop: scrollTopProp, children }: {
         items: any[];
         itemHeight?: number;
         minThreshold?: number;
@@ -19,6 +19,10 @@
         role?: string;
         'aria-label'?: string;
         scrollTop?: number; // external scroll position
+        children?: Snippet<[{
+            item: any;
+            index: number;
+        }]>;
     } = $props();
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this

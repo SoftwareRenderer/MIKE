@@ -125,14 +125,9 @@
     const isMobileCtx = useIsMobile();
     let activeTab = $state<'files' | 'editor' | 'symbols' | 'changes'>('files');
     let editorFullscreen = $state(false);
-    let diffFullscreen = $state(false);
 
     function toggleEditorFullscreen() {
         editorFullscreen = !editorFullscreen;
-    }
-
-    function toggleDiffFullscreen() {
-        diffFullscreen = !diffFullscreen;
     }
     let currentFolderPath = $state('');
     $effect(() => {
@@ -250,17 +245,6 @@
         if (isMobileCtx.isMobile) activeTab = 'editor';
     }
 
-    /** Handle opening a file from the diff view (Review Changes panel). */
-    function handleOpenFileFromDiff(path: string, lineNumber: number) {
-        if (!isPathSafe(path)) return;
-        showChanges = false;
-        closeCommitDiff();
-        selectedFilePath = path;
-        targetLine = lineNumber;
-        onUpdateFile(path);
-        if (isMobileCtx.isMobile) activeTab = 'editor';
-    }
-
     // Commit diff overlay handlers
     async function handleCommitSelected(commit: GitCommit, index: number) {
         diffCommit = commit;
@@ -290,7 +274,6 @@
         diffCommit = null;
         diffCommitIndex = -1;
         diffUnified = '';
-        diffFullscreen = false;
     }
 
     function handleDiffNavigate(direction: 'prev' | 'next') {
@@ -416,10 +399,10 @@
     });
 </script>
 
-<div class="explorer-view" class:fullscreen={(editorFullscreen && selectedFilePath) || (diffFullscreen && diffCommit)} role="dialog" aria-label="Explorer view">
+<div class="explorer-view" class:fullscreen={editorFullscreen && selectedFilePath} role="dialog" aria-label="Explorer view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="explorer-header">
-        <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; diffFullscreen = false; onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -506,7 +489,7 @@
     </div>
 
     <!-- Mobile Tab Bar -->
-    {#if isMobileCtx.isMobile && !showChanges && !diffCommit && !editorFullscreen && !diffFullscreen}
+    {#if isMobileCtx.isMobile && !showChanges && !editorFullscreen}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -545,27 +528,9 @@
                 projectPath={projectPath}
                 onClose={() => showChanges = false}
                 isMobile={isMobileCtx.isMobile}
-                onOpenFile={handleOpenFileFromDiff}
+                onUpdateFile={onUpdateFile}
             />
         </div>
-        {:else if diffCommit}
-            <!-- Commit diff overlay (replaces editor + symbols columns) -->
-            <div class="explorer-diff-overlay">
-                <CommitDiffOverlay
-                    commit={diffCommit}
-                    diff={diffUnified}
-                    loading={diffLoading}
-                    projectPath={projectPath}
-                    onClose={closeCommitDiff}
-                    onNavigate={handleDiffNavigate}
-                    onFileSelected={handleFileSelected}
-                    hasPrev={diffCommitIndex < commits.length - 1}
-                    hasNext={diffCommitIndex > 0}
-                    onToggleFullscreen={toggleDiffFullscreen}
-                    mobileFullscreen={diffFullscreen}
-                    isMobile={isMobileCtx.isMobile}
-                />
-            </div>
         {:else}
             <!-- Column 1: File browser + Git graph -->
             <div class="explorer-left-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
@@ -622,24 +587,39 @@
             />
             {/if}
 
-            <!-- Column 2: File editor -->
+            <!-- Column 2: Commit diff or file editor -->
             <div class="explorer-center-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'editor'}>
-                <BranchEditor
-                    projectId={projectId}
-                    filePath={selectedFilePath}
-                    targetLine={targetLine}
-                    onFocused={handleEditorFocused}
-                    onSymbolsUpdate={handleSymbolsUpdate}
-                    onHasChanges={handleHasChanges}
-                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
-                    onToggleFullscreen={toggleEditorFullscreen}
-                    mobileFullscreen={editorFullscreen}
-                    isMobile={isMobileCtx.isMobile}
-                />
+                {#if diffCommit}
+                    <CommitDiffOverlay
+                        commit={diffCommit}
+                        diff={diffUnified}
+                        loading={diffLoading}
+                        projectPath={projectPath}
+                        onClose={closeCommitDiff}
+                        onNavigate={handleDiffNavigate}
+                        onFileSelected={handleFileSelected}
+                        hasPrev={diffCommitIndex < commits.length - 1}
+                        hasNext={diffCommitIndex > 0}
+                        isMobile={isMobileCtx.isMobile}
+                    />
+                {:else}
+                    <BranchEditor
+                        projectId={projectId}
+                        filePath={selectedFilePath}
+                        targetLine={targetLine}
+                        onFocused={handleEditorFocused}
+                        onSymbolsUpdate={handleSymbolsUpdate}
+                        onHasChanges={handleHasChanges}
+                        onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                        onToggleFullscreen={toggleEditorFullscreen}
+                        mobileFullscreen={editorFullscreen}
+                        isMobile={isMobileCtx.isMobile}
+                    />
+                {/if}
             </div>
 
-            <!-- Resize handle: right column (only when symbols exist) -->
-            {#if !isMobileCtx.isMobile && symbols.length > 0}
+            <!-- Resize handle: right column (only when symbols exist and no diff is open) -->
+            {#if !isMobileCtx.isMobile && symbols.length > 0 && !diffCommit}
             <ResizeHandle
                 ariaLabel="Resize right panel"
                 onDragStart={handleRightDragStart}
@@ -648,8 +628,8 @@
             />
             {/if}
 
-            <!-- Column 3: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
-            <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobileCtx.isMobile) || (isMobileCtx.isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
+            <!-- Column 3: Symbol outline (hidden when no symbols or diff is open, always visible on mobile via tab) -->
+            <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobileCtx.isMobile) || (isMobileCtx.isMobile && activeTab !== 'symbols') || !!diffCommit} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
                     onSymbolClick={(line: number) => {
@@ -916,14 +896,6 @@
         display: none;
     }
 
-    .explorer-diff-overlay {
-        flex: 1;
-        display: flex;
-        overflow: hidden;
-        border-left: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-    }
-
     .explorer-changes-column {
         flex: 1;
         display: flex;
@@ -996,12 +968,6 @@
         }
         .explorer-body {
             flex-direction: column;
-            min-height: 0;
-        }
-        .explorer-diff-overlay {
-            width: 100% !important;
-            border-left: none;
-            flex: 1 !important;
             min-height: 0;
         }
         .explorer-changes-column {

@@ -6,15 +6,21 @@
     import { showCommitDialog, showConfirm, showToast } from '$lib/stores/dialogs';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import DiffViewer from './DiffViewer.svelte';
+    import BranchEditor from './BranchEditor.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
 
-    let { projectId, projectPath, onClose, isMobile, onOpenFile }: {
+    let { projectId, projectPath, onClose, isMobile, onUpdateFile }: {
         projectId: string;
         projectPath: string;
         onClose: () => void;
         isMobile: boolean;
-        onOpenFile?: (path: string, lineNumber: number) => void;
+        onUpdateFile?: (path: string | null) => void;
     } = $props();
+
+    // Editor mode: when a file is opened from the diff, show editor in place of diff viewer
+    let editorFilePath = $state('');
+    let editorTargetLine = $state(0);
+    let editorHasChanges = $state(false);
 
     // Parsed status entries for the sidebar file list
     interface StatusEntry {
@@ -259,13 +265,27 @@
         }
     }
 
-    /** Handle line click from DiffViewer — open file in editor at the clicked line. */
+    /** Handle line click from DiffViewer — open file in inline editor at the clicked line. */
     function handleLineClick(filePath: string, lineNumber: number) {
-        if (onOpenFile) {
-            // Build absolute path from project root + relative diff path
-            const absPath = projectPath.endsWith('/') ? projectPath + filePath : projectPath + '/' + filePath;
-            onOpenFile(absPath, lineNumber);
-        }
+        // Build absolute path from project root + relative diff path
+        const absPath = projectPath.endsWith('/') ? projectPath + filePath : projectPath + '/' + filePath;
+        editorFilePath = absPath;
+        editorTargetLine = lineNumber;
+        if (onUpdateFile) onUpdateFile(absPath);
+    }
+
+    /** Close the inline editor and return to diff view. */
+    function closeInlineEditor() {
+        editorFilePath = '';
+        editorTargetLine = 0;
+        if (onUpdateFile) onUpdateFile(null);
+        // Refresh data to pick up any changes
+        loadData();
+    }
+
+    /** Called when the inline editor content changes. */
+    function handleInlineEditorHasChanges(hasChanges: boolean) {
+        editorHasChanges = hasChanges;
     }
 
     function handleKeydown(e: KeyboardEvent) {
@@ -427,17 +447,35 @@
             />
             {/if}
 
-            <!-- Right: Diff viewer -->
+            <!-- Right: Diff viewer or inline editor -->
             <div class="changes-diff">
-                <DiffViewer
-                    stagedFiles={sortedStagedFiles}
-                    unstagedFiles={sortedUnstagedFiles}
-                    selectedPath={selectedPath}
-                    onStageFile={handleStageFile}
-                    onStageAll={handleStageAll}
-                    onUnstageAll={handleUnstageAll}
-                    onLineClick={handleLineClick}
-                />
+                {#if editorFilePath}
+                    <div class="changes-editor-header">
+                        <span class="changes-editor-path" title={editorFilePath}>{editorFilePath.replace(projectPath + '/', '')}</span>
+                    </div>
+                    <div class="changes-editor-body">
+                        <BranchEditor
+                            projectId={projectId}
+                            filePath={editorFilePath}
+                            targetLine={editorTargetLine}
+                            onFocused={() => {}}
+                            onSymbolsUpdate={() => {}}
+                            onHasChanges={handleInlineEditorHasChanges}
+                            onClose={closeInlineEditor}
+                            isMobile={isMobile}
+                        />
+                    </div>
+                {:else}
+                    <DiffViewer
+                        stagedFiles={sortedStagedFiles}
+                        unstagedFiles={sortedUnstagedFiles}
+                        selectedPath={selectedPath}
+                        onStageFile={handleStageFile}
+                        onStageAll={handleStageAll}
+                        onUnstageAll={handleUnstageAll}
+                        onLineClick={handleLineClick}
+                    />
+                {/if}
             </div>
         </div>
     {/if}
@@ -707,6 +745,34 @@
     .changes-diff {
         flex: 1;
         min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* Inline editor header (shown when editing a file from diff) */
+    .changes-editor-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px;
+        border-bottom: 1px solid var(--color-border);
+        flex-shrink: 0;
+        background: var(--color-surface-2);
+    }
+    .changes-editor-path {
+        flex: 1;
+        min-width: 0;
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .changes-editor-body {
+        flex: 1;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         overflow: hidden;
