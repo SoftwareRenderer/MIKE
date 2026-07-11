@@ -413,13 +413,32 @@ import { showCreateTask } from '$lib/stores/ui';
     @import '$lib/styles/shared.css';
 
     :global(.overlay) {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
         z-index: 100;
     }
     :global(.modal) {
         width: 480px;
+        max-width: 90vw;
+        max-height: 90vh;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
     .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         padding: 16px 20px;
+        border-bottom: 1px solid var(--color-border);
+        flex-shrink: 0;
     }
     .modal-body {
         padding: 20px;

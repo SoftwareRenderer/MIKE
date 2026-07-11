@@ -12,6 +12,7 @@
         header,
         toolbar,
         footer,
+        children,
     }: {
         title: string;
         width?: string;
