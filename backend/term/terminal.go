@@ -15,6 +15,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/httputil"
+	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -49,7 +50,7 @@ type sandboxOps interface {
 	BuildImage(projectName, dockerfilePath string) error
 	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
 	PullImageWithProgress(image string, onProgress func(line string)) error
-	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*sandbox.ShellProcess, []types.AssignedPort, error)
+	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
@@ -176,7 +177,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !strings.HasPrefix(taskID, "proj:") {
 			shellProjectPath = projectPath
 		}
-		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
+		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs)
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

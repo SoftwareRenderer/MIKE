@@ -1242,10 +1242,14 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	}
 
 	var systemPrompt string
+	skillsMount := ""
+	if sandboxEnabled {
+		skillsMount = sandboxmgr.SkillsMount
+	}
 	if task.PlanMode {
-		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, true)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, true)
 	} else {
-		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, false)
+		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, false)
 	}
 
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}

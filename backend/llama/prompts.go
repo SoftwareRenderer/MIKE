@@ -13,7 +13,9 @@ import (
 // BuildSystemPrompt creates the system prompt for task execution.
 // worktreePath is used to read AGENTS.md; cwd is the working directory.
 // summary is injected into the system prompt.
-func BuildSystemPrompt(worktreePath, cwd, summary string, planMode bool) string {
+// skillsMount is the container mount path for skills (e.g. "/mnt/skills")
+// when running in a sandbox; empty string for non-sandbox mode.
+func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, planMode bool) string {
 	var tools []types.ChatTool
 	if planMode {
 		tools = GetPlanModeToolDefinitions()
@@ -39,6 +41,7 @@ func BuildSystemPrompt(worktreePath, cwd, summary string, planMode bool) string 
 		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
 		PlanMode:     planMode,
 		Tools:        toolInfos,
+		Skills:       prompts.DiscoverSkills(skillsMount),
 		AgentsMd:     agentsMd,
 		Summary:      summary,
 	}

@@ -6,6 +6,7 @@ worktrees/*
 frontend/test-results
 test-results
 .worktrees/*
+prompts/skills/
 
 # Compiled binaries
 kanban

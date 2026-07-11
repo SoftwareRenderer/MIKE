@@ -4,13 +4,25 @@ You have access to the following tools via function calling:
 
 {{range .Tools}}- **{{.Name}}**: {{.Description}}
 {{end}}
+{{- if .Skills}}
+---
+
+# Available Skills
+
+The following skills are available. When a task matches a skill, read the SKILL.md file.
+
+{{range .Skills}}## **{{.Name}}**
+
+{{.Description}}
+
+Location: {{.Location}}
+{{end}}{{end}}
 ---
 
 When the task is complete, call request_review() with a summary including:
 - Files created or modified
 - Any issues encountered
-{{- if .Summary}}
-
+{{if .Summary}}
 ---
 
 # Current Task

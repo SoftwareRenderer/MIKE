@@ -307,7 +307,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		hasExistingContainer := te.sandboxMgr.ContainerRunning(task.ID)
 		if !hasExistingContainer {
 			var assignedPorts []types.AssignedPort
-			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, sandboxMounts, sandboxEnvs)
+			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs)
 			if createErr != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"

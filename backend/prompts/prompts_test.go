@@ -7,6 +7,250 @@ import (
 	"testing"
 )
 
+// --- Skill Frontmatter Parsing Tests ---
+
+func TestParseSkillFrontmatter(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantName      string
+		wantDesc      string
+		wantNoName    bool
+		wantNoDesc    bool
+	}{
+		{
+			name: "basic frontmatter",
+			input: `---
+name: my-skill
+description: Does something useful.
+---
+
+# My Skill
+
+Content here.
+`,
+			wantName: "my-skill",
+			wantDesc: "Does something useful.",
+		},
+		{
+			name: "quoted values",
+			input: `---
+name: "quoted-skill"
+description: "A skill with quotes."
+---
+
+Content.
+`,
+			wantName: "quoted-skill",
+			wantDesc: "A skill with quotes.",
+		},
+		{
+			name: "extra frontmatter fields",
+			input: `---
+name: full-skill
+description: Full featured skill.
+license: MIT
+compatibility: go 1.21+
+---
+
+Content.
+`,
+			wantName: "full-skill",
+			wantDesc: "Full featured skill.",
+		},
+		{
+			name:       "missing name",
+			input:      `---
+description: Has description but no name.
+---
+`,
+			wantNoName: true,
+			wantDesc:   "Has description but no name.",
+		},
+		{
+			name:       "missing description",
+			input:      `---
+name: no-desc-skill
+---
+`,
+			wantName:   "no-desc-skill",
+			wantNoDesc: true,
+		},
+		{
+			name:       "no frontmatter at all",
+			input:      "# Just markdown content",
+			wantNoName: true,
+			wantNoDesc: true,
+		},
+		{
+			name:       "empty frontmatter",
+			input:      "---\n---\nContent",
+			wantNoName: true,
+			wantNoDesc: true,
+		},
+		{
+			name: "whitespace in values",
+			input: `---
+name:   spaced-skill   
+description:   Spaced description   
+---
+`,
+			wantName: "spaced-skill",
+			wantDesc: "Spaced description",
+		},
+		{
+			name: "crlf line endings",
+			input: "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nContent",
+			wantName: "crlf-skill",
+			wantDesc: "CRLF skill.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, desc := parseSkillFrontmatter([]byte(tt.input))
+			if tt.wantNoName && name != "" {
+				t.Errorf("expected empty name, got %q", name)
+			}
+			if !tt.wantNoName && name != tt.wantName {
+				t.Errorf("name = %q, want %q", name, tt.wantName)
+			}
+			if tt.wantNoDesc && desc != "" {
+				t.Errorf("expected empty description, got %q", desc)
+			}
+			if !tt.wantNoDesc && desc != tt.wantDesc {
+				t.Errorf("description = %q, want %q", desc, tt.wantDesc)
+			}
+		})
+	}
+}
+
+// --- DiscoverSkills Tests ---
+
+func TestDiscoverSkills(t *testing.T) {
+	// Create a temp directory structure mimicking prompts/skills/
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+
+	// Skill 1: valid skill
+	skill1Dir := filepath.Join(skillsDir, "alpha-skill")
+	os.MkdirAll(skill1Dir, 0755)
+	os.WriteFile(filepath.Join(skill1Dir, "SKILL.md"), []byte(`---
+name: alpha-skill
+description: Alpha does alpha things.
+---
+
+# Alpha Skill
+
+Content.
+`), 0644)
+
+	// Skill 2: valid skill with extra fields
+	skill2Dir := filepath.Join(skillsDir, "beta-skill")
+	os.MkdirAll(skill2Dir, 0755)
+	os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte(`---
+name: beta-skill
+description: Beta does beta things.
+license: MIT
+---
+
+# Beta
+`), 0644)
+
+	// Skill 3: missing description (should be skipped)
+	skill3Dir := filepath.Join(skillsDir, "gamma-skill")
+	os.MkdirAll(skill3Dir, 0755)
+	os.WriteFile(filepath.Join(skill3Dir, "SKILL.md"), []byte(`---
+name: gamma-skill
+---
+
+No description.
+`), 0644)
+
+	// Skill 4: no SKILL.md (should be skipped)
+	skill4Dir := filepath.Join(skillsDir, "delta-skill")
+	os.MkdirAll(skill4Dir, 0755)
+
+	// Non-directory file (should be skipped)
+	os.WriteFile(filepath.Join(skillsDir, "not-a-dir.md"), []byte("ignore me"), 0644)
+
+	// Override promptDir to use our temp dir
+	origPromptDir := promptDir
+	promptDir = func() string { return tmpDir }
+	defer func() { promptDir = origPromptDir }()
+
+	skills := DiscoverSkills("")
+
+	// Should find 2 valid skills (alpha and beta), sorted by name
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(skills))
+	}
+
+	if skills[0].Name != "alpha-skill" {
+		t.Errorf("first skill name = %q, want %q", skills[0].Name, "alpha-skill")
+	}
+	if skills[0].Description != "Alpha does alpha things." {
+		t.Errorf("first skill desc = %q", skills[0].Description)
+	}
+
+	if skills[1].Name != "beta-skill" {
+		t.Errorf("second skill name = %q, want %q", skills[1].Name, "beta-skill")
+	}
+	if skills[1].Description != "Beta does beta things." {
+		t.Errorf("second skill desc = %q", skills[1].Description)
+	}
+}
+
+func TestDiscoverSkills_NoDirectory(t *testing.T) {
+	// Override promptDir to return a dir with no skills/ subdirectory
+	tmpDir := t.TempDir()
+	origPromptDir := promptDir
+	promptDir = func() string { return tmpDir }
+	defer func() { promptDir = origPromptDir }()
+
+	skills := DiscoverSkills("")
+	if skills != nil {
+		t.Errorf("expected nil when no skills dir exists, got %d skills", len(skills))
+	}
+}
+
+func TestDiscoverSkills_ContainerMount(t *testing.T) {
+	// Create a temp directory with a skill
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	skillDir := filepath.Join(skillsDir, "my-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: A test skill.
+---
+
+Content.
+`), 0644)
+
+	origPromptDir := promptDir
+	promptDir = func() string { return tmpDir }
+	defer func() { promptDir = origPromptDir }()
+
+	// Without container mount: uses host path
+	skills := DiscoverSkills("")
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if !filepath.IsAbs(skills[0].Location) || skills[0].Location == "/mnt/skills/my-skill/SKILL.md" {
+		t.Errorf("host mode: expected host path, got %q", skills[0].Location)
+	}
+
+	// With container mount: uses container path
+	skills = DiscoverSkills("/mnt/skills")
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Location != "/mnt/skills/my-skill/SKILL.md" {
+		t.Errorf("sandbox mode: location = %q, want %q", skills[0].Location, "/mnt/skills/my-skill/SKILL.md")
+	}
+}
+
 // findProjectRoot walks up from the current directory to find the project root
 // by looking for the prompts/merge_conflict.tmpl file.
 func findProjectRoot() (string, bool) {
