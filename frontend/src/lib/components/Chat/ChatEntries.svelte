@@ -38,6 +38,7 @@
         onViewChanges,
         scrollEl,
         onScrollElChange,
+        onStickyClick,
     }: {
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
@@ -71,6 +72,7 @@
         onViewChanges?: (commitHash: string) => void;
         scrollEl: HTMLElement | null;
         onScrollElChange?: (el: HTMLElement | null) => void;
+        onStickyClick?: () => void;
     } = $props();
     // Keep scrollEl in sync with parent
     $effect(() => {
@@ -83,7 +85,7 @@
 <div class="chat-messages-wrapper">
     {#if entries.length > 0 && showHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
-            <span class="chat-sticky-bubble">{stickyUserMessage}</span>
+            <button class="chat-sticky-bubble" onclick={onStickyClick} title="Scroll to message" aria-label="Scroll to message">{stickyUserMessage}</button>
         </div>
     {/if}
     <div class="chat-messages" bind:this={scrollEl} onscroll={onScroll} onwheel={onWheel} ontouchstart={onTouchStart} role="region" aria-label="Chat messages" tabindex="-1">
@@ -229,7 +231,6 @@
         padding: 6px 12px;
         background: var(--color-surface-1);
         border-bottom: 1px solid var(--color-border);
-        pointer-events: none;
     }
     .chat-sticky-bubble {
         font-size: 0.8125rem;
@@ -241,6 +242,14 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        border: none;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+        transition: background 0.15s ease;
+    }
+    .chat-sticky-bubble:hover {
+        background: color-mix(in srgb, var(--color-accent) 28%, transparent);
     }
     .chat-empty {
         display: flex;
