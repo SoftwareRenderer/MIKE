@@ -8,7 +8,7 @@ import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
 
 
-    let { stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll }: { stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void } = $props();
+    let { stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath }: { stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string } = $props();
     let hasContent = $derived(stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -16,6 +16,44 @@ import { slide } from 'svelte/transition';
     let sortedUnstagedFiles = $derived(sortFilesByPath(unstagedFiles));
     let sortedStagedUntracked = $derived(sortUntrackedByPath(stagedUntracked));
     let sortedUnstagedUntracked = $derived(sortUntrackedByPath(unstagedUntracked));
+
+    // Map of file path -> DOM element for scroll-to-file from sidebar
+    let fileSections = $state(new Map<string, HTMLElement>());
+    function registerFileSection(el: HTMLElement, path: string) {
+        fileSections = new Map([...fileSections, [path, el]]);
+        return () => {
+            const next = new Map(fileSections);
+            next.delete(path);
+            fileSections = next;
+        };
+    }
+
+    // Scroll to selected file when selectedPath changes (from sidebar click)
+    $effect(() => {
+        const path = selectedPath;
+        if (!path) return;
+        const el = fileSections.get(path);
+        if (!el) return;
+        // Expand the file if collapsed
+        if (collapsedFiles.has(path)) {
+            toggleFile(path);
+        }
+        // Expand parent section if collapsed
+        const file = [...sortedStagedFiles, ...sortedUnstagedFiles, ...sortedStagedUntracked, ...sortedUnstagedUntracked].find(f => (f as any).path === path);
+        if (file) {
+            const isStaged = sortedStagedFiles.includes(file as any) || sortedStagedUntracked.includes(file as any);
+            const sectionId = isStaged ? 'staged' : 'unstaged';
+            if (collapsedSections.has(sectionId)) {
+                toggleSection(sectionId);
+            }
+        }
+        // Use requestAnimationFrame + setTimeout to wait for slide transition
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+        });
+    });
 
     // Map all untracked entries by path for lookup
     let untrackedMap = $state(new Map<string, { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>());
@@ -268,7 +306,7 @@ import { slide } from 'svelte/transition';
                 {#each sortedStagedFiles as file (file.path)}
             {@const isFileExpanded = isFileOpen(file.path)}
             {@const badge = getStatusBadge(file)}
-            <section class="diff-file-section diff-file-enter">
+            <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
                 <div class="diff-file-header-row">
                     <button
                         type="button"
@@ -506,7 +544,7 @@ import { slide } from 'svelte/transition';
                 {#each sortedUnstagedFiles as file (file.path)}
             {@const isFileExpanded = isFileOpen(file.path)}
             {@const badge = getStatusBadge(file)}
-            <section class="diff-file-section diff-file-enter">
+            <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
                 <div class="diff-file-header-row">
                     <button
                         type="button"
@@ -721,7 +759,7 @@ import { slide } from 'svelte/transition';
             {@const isUntrackedExpanded = isFileOpen(entry.path)}
             {@const isLarge = entry.fileSize !== undefined}
             {@const isBin = !!entry.isBinary}
-            <section class="diff-file-section diff-file-section-untracked diff-file-enter">
+            <section class="diff-file-section diff-file-section-untracked diff-file-enter" use:registerFileSection={entry.path}>
                 <div class="diff-file-header-row">
                     <button
                         type="button"

@@ -313,6 +313,7 @@
                 <DiffViewer
                     stagedFiles={sortedStagedFiles}
                     unstagedFiles={sortedUnstagedFiles}
+                    selectedPath={selectedPath}
                 />
             </div>
         </div>
