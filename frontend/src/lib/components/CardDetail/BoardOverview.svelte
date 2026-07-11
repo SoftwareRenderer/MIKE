@@ -78,6 +78,11 @@
                 </span>
                 <div class="header-right">
                     <span class="section-count">{sectionTasks.length}</span>
+                    {#if section.id === 'backlog'}
+                        <button class="add-btn" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} type="button" aria-label="Create a new task" title="Create a new task">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </button>
+                    {/if}
                     {#if section.id === 'done' && sectionTasks.length > 0}
                         <span class="clear-btn" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -125,16 +130,12 @@
         flex-direction: column;
         gap: 12px;
         padding: 12px;
-        overflow-y: auto;
-        flex: 1;
-        min-height: 0;
     }
     .section-group {
-        background: var(--color-surface-2);
-        border-top: 2px solid var(--col-color);
+        background: var(--color-surface-1);
+        border-top: 1px solid var(--color-border);
         border-left: 3px solid var(--col-color);
         border-radius: var(--radius-md);
-        overflow: hidden;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .section-group.is-over {
@@ -150,17 +151,25 @@
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
-        background: none;
+        background-color: var(--color-surface-1);
         border: none;
         cursor: pointer;
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
         font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
         width: 100%;
         text-align: left;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        -webkit-appearance: none;
+        appearance: none;
     }
     .section-header:hover {
-        background: var(--color-surface-3);
+        background-color: var(--color-surface-1);
+        opacity: 1;
     }
     .section-title {
         display: flex;
@@ -180,11 +189,28 @@
     }
     .section-count {
         font-size: 0.75rem;
-        color: var(--color-text-tertiary);
+        color: var(--color-text-secondary);
         background: var(--color-surface-3);
         padding: 1px 6px;
         border-radius: 8px;
         font-weight: 500;
+    }
+    .add-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease;
+        opacity: 1;
+    }
+    .add-btn:hover {
+        color: var(--color-accent);
+        background: var(--color-accent)18;
     }
     .clear-btn {
         display: inline-flex;
@@ -213,6 +239,8 @@
         flex-direction: column;
         gap: 6px;
         padding: 8px;
+        overflow: hidden;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
     .task-wrapper {
         animation: fadeIn 0.2s ease;

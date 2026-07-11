@@ -616,7 +616,7 @@
         margin-bottom: 0;
     }
     .assistant .message-text :global(thead) {
-        background: var(--color-surface-3);
+        background: var(--color-surface-2);
     }
     .assistant .message-text :global(th) {
         font-weight: 600;
