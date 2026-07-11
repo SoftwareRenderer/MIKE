@@ -312,7 +312,7 @@
 
             {#if authorName || authorEmail}
                 <div class="commit-meta">
-                    Committed as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
+                    Committing as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
                 </div>
             {/if}
             {#if mergeTarget}

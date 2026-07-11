@@ -48,8 +48,9 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
 }
 
 /** Fetch git status (porcelain format) for a project.
- * Returns { clean: boolean, status: string } where status is the raw `git status --porcelain` output. */
-export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string }> {
+ * Returns { clean: boolean, status: string, head: string, authorName: string, authorEmail: string }.
+ * Status is the raw `git status --porcelain` output. Author fields are from project git config. */
+export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string; authorName: string; authorEmail: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
     return res.json();

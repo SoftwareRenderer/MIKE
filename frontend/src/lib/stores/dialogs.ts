@@ -66,6 +66,13 @@ export function showCommitDialog(options: CommitDialogOptions): Promise<string |
             message: options.message,
             confirmText: options.confirmText ?? 'Commit and move to Done',
             cancelText: options.cancelText ?? 'Cancel',
+            authorName: options.authorName,
+            authorEmail: options.authorEmail,
+            mergeTarget: options.mergeTarget,
+            streaming: options.streaming,
+            promptProgress: options.promptProgress,
+            projectId: options.projectId,
+            taskId: options.taskId,
             _resolve: resolve,
         } as CommitDialogOptions & { _resolve?: (value: string | null) => void });
     });

@@ -344,7 +344,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	w.Write(out)
 }
 
-// HandleStatus returns working tree status and current HEAD hash.
+// HandleStatus returns working tree status, current HEAD hash, and git author identity.
 func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -364,7 +364,21 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if headOut, err := exec.Command("git", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
 		headHash = strings.TrimSpace(string(headOut))
 	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]any{"clean": clean, "status": string(out), "head": headHash})
+	// Fetch git author identity for commit dialog
+	var authorName, authorEmail string
+	if nameOut, err := exec.Command("git", "-C", project.Path, "config", "user.name").CombinedOutput(); err == nil {
+		authorName = strings.TrimSpace(string(nameOut))
+	}
+	if emailOut, err := exec.Command("git", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
+		authorEmail = strings.TrimSpace(string(emailOut))
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{
+		"clean":       clean,
+		"status":      string(out),
+		"head":        headHash,
+		"authorName":  authorName,
+		"authorEmail": authorEmail,
+	})
 }
 
 // HandleProjectDiffFile returns the diff for a single file in the project.

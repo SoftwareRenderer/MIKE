@@ -851,3 +851,47 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		}
 	})
 }
+
+func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	project := &types.Project{
+		ID:   "test-status-author",
+		Name: "Status Author Test",
+		Path: tmpDir,
+	}
+	s.store.CreateProject(project)
+
+	// Initialize a git repo with specific author config
+	initGitRepo(t, tmpDir)
+
+	// Fetch git status
+	req := testRequest("GET", "/api/projects/test-status-author/git/status", nil)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("git status: %d %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+
+	// Verify authorName and authorEmail are present
+	authorName, okName := result["authorName"].(string)
+	authorEmail, okEmail := result["authorEmail"].(string)
+
+	if !okName || authorName == "" {
+		t.Fatalf("expected author_name in response, got: %v", result["author_name"])
+	}
+	if !okEmail || authorEmail == "" {
+		t.Fatalf("expected author_email in response, got: %v", result["author_email"])
+	}
+
+	if authorName != "Test" {
+		t.Fatalf("expected author_name 'Test', got '%s'", authorName)
+	}
+	if authorEmail != "test@test.com" {
+		t.Fatalf("expected author_email 'test@test.com', got '%s'", authorEmail)
+	}
+}

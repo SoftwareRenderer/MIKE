@@ -31,6 +31,9 @@
     let selectedPath = $state('');
     // HEAD hash at last load — used to detect if repo changed while panel is open
     let headHash = $state('');
+    // Git author identity for commit dialog
+    let authorName = $state('');
+    let authorEmail = $state('');
 
     // Resizable sidebar width — persisted to IndexedDB
     const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -99,8 +102,10 @@
         loading = true;
         try {
             // Fetch git status for sidebar
-            const { status, head } = await getGitStatus(projectId);
+            const { status, head, authorName: author, authorEmail: email } = await getGitStatus(projectId);
             headHash = head;
+            authorName = author;
+            authorEmail = email;
             const staged: StatusEntry[] = [];
             const unstaged: StatusEntry[] = [];
 
@@ -240,6 +245,8 @@
             message: '',
             confirmText: 'Commit',
             cancelText: 'Cancel',
+            authorName: authorName,
+            authorEmail: authorEmail,
         });
         if (!message) return;
         try {
