@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { ensureCsrfToken } from '$lib/api';
+    import { ensureCsrfToken, getGitStatus } from '$lib/api';
     import folderIcon from '$lib/assets/icons/folder.svg';
     import fileIcon from '$lib/assets/icons/file.svg';
 
@@ -44,6 +44,7 @@
             showNewFile = false;
             newFileName = '';
             loadDir(currentPath);
+            loadGitStatus();
         } catch (e) {
             createError = String(e);
         } finally {
@@ -80,6 +81,7 @@
             showNewFolder = false;
             newFolderName = '';
             loadDir(currentPath);
+            loadGitStatus();
         } catch (e) {
             createFolderError = String(e);
         } finally {
@@ -106,6 +108,9 @@
         }
         return prefixes;
     });
+
+    // Git status map: absolute_path -> single-char status (M, A, D, ?, etc.)
+    let gitStatusMap = $state(new Map<string, string>());
 
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
     let loading = $state(true);
@@ -167,6 +172,62 @@
         }
     }
 
+    /** Fetch and parse git status into a Map<absolute_path, status_char>. */
+    async function loadGitStatus() {
+        try {
+            const { status } = await getGitStatus(projectId);
+            const map = new Map<string, string>();
+            const lines = status.split('\n').filter(l => l.length > 0);
+            for (const line of lines) {
+                // Porcelain format: "XY path" where X=index, Y=working tree
+                // Renamed: "XY path -> new_path"
+                const statusChars = line.substring(0, 2);
+                const pathPart = line.substring(3);
+                // Use working tree status (pos 1), fall back to index (pos 0)
+                const statusChar = statusChars[1] !== ' ' && statusChars[1] !== '?' ? statusChars[1] : statusChars[0];
+                if (statusChar === ' ') continue; // no change
+                // Handle renames: "R  old -> new" — map both paths
+                const arrowIdx = pathPart.indexOf(' -> ');
+                if (arrowIdx >= 0) {
+                    const oldPath = pathPart.substring(0, arrowIdx);
+                    const newPath = pathPart.substring(arrowIdx + 4);
+                    map.set(oldPath, statusChar);
+                    map.set(newPath, statusChar);
+                } else {
+                    map.set(pathPart, statusChar);
+                }
+            }
+            // Convert relative paths (from git root) to absolute paths
+            const rootPath = sandboxEnabled ? mountPath : projectPath;
+            const absMap = new Map<string, string>();
+            for (const [relPath, char] of map) {
+                absMap.set(rootPath + '/' + relPath, char);
+            }
+            gitStatusMap = absMap;
+        } catch (e) {
+            console.error('Failed to fetch git status:', e);
+        }
+    }
+
+    /** Get the display status character for a file path. */
+    function getGitStatusChar(path: string): string {
+        return gitStatusMap.get(path) || '';
+    }
+
+    /** Get CSS class for git status color. */
+    function getGitStatusClass(char: string): string {
+        switch (char) {
+            case 'M': return 'git-status-modified';
+            case 'A': return 'git-status-added';
+            case 'D': return 'git-status-deleted';
+            case '?': return 'git-status-untracked';
+            case 'R': return 'git-status-renamed';
+            case 'U': return 'git-status-unmerged';
+            case 'C': return 'git-status-copied';
+            default: return '';
+        }
+    }
+
     function handleClick(entry: { isDir: boolean; path: string }) {
         if (entry.isDir) {
             loadDir(entry.path);
@@ -212,6 +273,7 @@
             // For create, check if it's already in the listing (skip redundant refresh)
             if (op === 'delete' || !entryPaths.has(eventFullPath)) {
                 loadDir(currentPath);
+                loadGitStatus();
             }
             return;
         }
@@ -220,6 +282,7 @@
         const childName = eventFullPath.substring(currentPrefix.length);
         if (op === 'create' && childName && !childName.includes('/') && !entries.some(e => e.name === childName && e.isDir)) {
             loadDir(currentPath);
+            loadGitStatus();
         }
     }
 
@@ -237,6 +300,7 @@
 
     onMount(() => {
         loadDir(currentPath);
+        loadGitStatus();
     });
 </script>
 
@@ -332,6 +396,13 @@
                             <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
                         {/if}
                         <span class="file-name">{entry.name}</span>
+                        {#if !entry.isDir}
+                            {#if getGitStatusChar(entry.path)}
+                                <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}">
+                                    {getGitStatusChar(entry.path)}
+                                </span>
+                            {/if}
+                        {/if}
                         {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
                             <span class="unsaved-dot" title="Unsaved changes">
                                 <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
@@ -503,6 +574,23 @@
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
     }
+
+    /* Git status badge */
+    .git-status-badge {
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        line-height: 1;
+        margin-left: 2px;
+    }
+    .git-status-modified { color: var(--color-status-green, #3fb950); }
+    .git-status-added { color: var(--color-status-green, #3fb950); }
+    .git-status-deleted { color: var(--color-status-red, #f85149); }
+    .git-status-untracked { color: var(--color-text-tertiary, #8b949e); }
+    .git-status-renamed { color: var(--color-status-purple, #a371f7); }
+    .git-status-unmerged { color: var(--color-status-orange, #d29922); }
+    .git-status-copied { color: var(--color-status-blue, #58a6ff); }
 
     @media (max-width: 768px) {
         .file-browser-header {

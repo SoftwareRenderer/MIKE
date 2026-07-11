@@ -102,6 +102,7 @@ export {
     getCommitDiff,
     getGitBranches,
     checkoutBranch,
+    getGitStatus,
 } from './git';
 
 // -- Stream --

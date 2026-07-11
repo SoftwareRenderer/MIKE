@@ -47,6 +47,14 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
     return res.json();
 }
 
+/** Fetch git status (porcelain format) for a project.
+ * Returns { clean: boolean, status: string } where status is the raw `git status --porcelain` output. */
+export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
+    return res.json();
+}
+
 // -- Task Git endpoints --
 
 /** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content. */
