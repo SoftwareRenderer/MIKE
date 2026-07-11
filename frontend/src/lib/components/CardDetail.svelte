@@ -332,7 +332,8 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     let boardWidth = $derived(`${(boardRatio * 100).toFixed(1)}%`);
     let chatWidth = $derived(`${(chatRatio * (1 - boardRatio) * 100).toFixed(1)}%`);
     let checkpointWidth = $derived(`${(checkpointRatio * (1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
-    let diffWidth = $derived(`${(((1 - checkpointRatio) * (1 - chatRatio) * (1 - boardRatio)) * 100).toFixed(1)}%`);
+    // When checkpoint panel is closed, diff takes full remaining space
+    let diffWidth = $derived(`${((checkpointDiffOpen ? (1 - checkpointRatio) : 1) * (1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
 
     function handleBoardDragStart(ev: MouseEvent | TouchEvent, startX: number) {
         boardDragStartX = startX;
