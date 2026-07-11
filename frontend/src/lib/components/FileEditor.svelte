@@ -119,7 +119,10 @@
     let hasChanges = $derived(content !== savedContent);
     let lineCount = $derived(content.split('\n').length);
 
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let editorEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchContainerEl: HTMLDivElement | null = null;
     let showConfirm = $state(false);
 
@@ -481,6 +484,7 @@
     }
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions — role="application" makes this an interactive landmark -->
 <div class="file-editor" role="application" tabindex="-1" onkeydown={handleKeyDown}>
     <!-- Header -->
     <div class="editor-header">

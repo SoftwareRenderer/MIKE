@@ -19,31 +19,45 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         onSaved: () => void;
     } = $props();
 
-    let sandboxEnabled = $state(project.sandbox_enabled ?? false);
-    let networkIsolation = $state(project.sandbox_network_isolation ?? false);
-    let sandboxMemoryLimit = $state(project.sandbox_memory_limit ?? 1024);
-    let sandboxImage = $state(project.sandbox_image ?? '');
-    let sandboxDockerfilePath = $state(project.sandbox_dockerfile_path ?? '');
-    let forwardPorts = $state<PortForward[]>(project.forward_ports ?? []);
+    let sandboxEnabled = $state(false);
+    let networkIsolation = $state(false);
+    let sandboxMemoryLimit = $state(1024);
+    let sandboxImage = $state('');
+    let sandboxDockerfilePath = $state('');
+    let forwardPorts = $state<PortForward[]>([]);
     let newContainerPort = $state('');
     let portError = $state('');
-    let portsExpanded = $state(project.forward_ports && project.forward_ports.length > 0);
+    let portsExpanded = $state(false);
     let hasPendingPort = $derived(String(newContainerPort).trim() !== '');
     // Custom mounts
-    let sandboxMounts = $state<SandboxMount[]>(project.sandbox_mounts ?? []);
+    let sandboxMounts = $state<SandboxMount[]>([]);
+
+    $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
+    $effect(() => { networkIsolation = project.sandbox_network_isolation ?? false; });
+    $effect(() => { sandboxMemoryLimit = project.sandbox_memory_limit ?? 1024; });
+    $effect(() => { sandboxImage = project.sandbox_image ?? ''; });
+    $effect(() => { sandboxDockerfilePath = project.sandbox_dockerfile_path ?? ''; });
+    $effect(() => { forwardPorts = project.forward_ports ?? []; });
+    $effect(() => { portsExpanded = project.forward_ports && project.forward_ports.length > 0; });
+    $effect(() => { sandboxMounts = project.sandbox_mounts ?? []; });
+    $effect(() => { mountsExpanded = project.sandbox_mounts && project.sandbox_mounts.length > 0; });
+    $effect(() => { sandboxEnvs = project.sandbox_envs ?? []; });
+    $effect(() => { envsExpanded = project.sandbox_envs && project.sandbox_envs.length > 0; });
+    $effect(() => { prevSandboxEnabled = project.sandbox_enabled ?? false; });
+    $effect(() => { networkIsolationBaseline = project.sandbox_network_isolation ?? false; });
     let newMountHostPath = $state('');
     let newMountContainerPath = $state('');
     let newMountMode = $state<'rw' | 'ro'>('rw');
     let mountError = $state('');
-    let mountsExpanded = $state(project.sandbox_mounts && project.sandbox_mounts.length > 0);
+    let mountsExpanded = $state(false);
     let hasPendingMount = $derived(newMountHostPath.trim() !== '' || newMountContainerPath.trim() !== '');
     let showDirectoryPicker = $state(false);
     // Environment variables
-    let sandboxEnvs = $state<SandboxEnv[]>(project.sandbox_envs ?? []);
+    let sandboxEnvs = $state<SandboxEnv[]>([]);
     let newEnvKey = $state('');
     let newEnvValue = $state('');
     let envError = $state('');
-    let envsExpanded = $state(project.sandbox_envs && project.sandbox_envs.length > 0);
+    let envsExpanded = $state(false);
     let hasPendingEnv = $derived(newEnvKey.trim() !== '');
     // Save warning for un-added changes
     let saveWarning = $state('');
@@ -52,7 +66,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let hasActivePorts = $derived(activeHostPorts.size > 0);
     // Active terminal ports from project-level terminal
     let terminalPorts = $state<AssignedPort[]>([]);
-    let imageSource = $state<'image' | 'dockerfile'>(sandboxDockerfilePath ? 'dockerfile' : 'image');
+    let imageSource = $state<'image' | 'dockerfile'>('image');
+    $effect(() => { imageSource = sandboxDockerfilePath ? 'dockerfile' : 'image'; });
     let dockerfileChanged = $derived(sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? ''));
     let showDockerfilePicker = $state(false);
     let imageTag = $derived(`sandbox-${project.name.replace(/ /g, '-').replace(/\//g, '-')}`);
@@ -60,6 +75,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let building = $state(false);
     let buildError = $state('');
     let buildLog = $state<string[]>([]);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let buildLogEl: HTMLDivElement | null = null;
     let buildLogAtBottom = $state(true);
     let error = $state('');
@@ -83,9 +99,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     // Auto-enable network isolation when sandbox is toggled on
-    let prevSandboxEnabled = $state(project.sandbox_enabled ?? false);
+    let prevSandboxEnabled = $state(false);
     let userToggledNetwork = $state(false);
-    let networkIsolationBaseline = $state(project.sandbox_network_isolation ?? false);
+    let networkIsolationBaseline = $state(false);
     $effect(() => {
         if (sandboxEnabled && prevSandboxEnabled === false && !userToggledNetwork) {
             networkIsolation = true;
@@ -425,7 +441,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
             <div class="config-row-group" class:expanded={portsExpanded}>
-            <div class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }}>
+            <div class="config-row config-row-subsection" role="button" tabindex="0" onclick={() => { portsExpanded = !portsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); portsExpanded = !portsExpanded; } }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -497,7 +513,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Custom mounts (collapsible) -->
             <div class="config-row-group" class:expanded={mountsExpanded}>
-            <div class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }}>
+            <div class="config-row config-row-expandable" role="button" tabindex="0" onclick={() => { mountsExpanded = !mountsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); mountsExpanded = !mountsExpanded; } }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -582,7 +598,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Environment variables (collapsible) -->
             <div class="config-row-group" class:expanded={envsExpanded}>
-            <div class="config-row config-row-expandable" onclick={() => { envsExpanded = !envsExpanded; }}>
+            <div class="config-row config-row-expandable" role="button" tabindex="0" onclick={() => { envsExpanded = !envsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); envsExpanded = !envsExpanded; } }}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -1376,11 +1392,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .port-input:disabled {
         opacity: 0.5;
-    }
-
-    .port-arrow {
-        color: var(--color-text-secondary);
-        flex-shrink: 0;
     }
 
     /* Add buttons (ports + mounts) */

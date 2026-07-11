@@ -3,15 +3,17 @@ import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from 
 
 /** Composable for subtask hierarchy management.
  * Tracks expanded/collapsed state, consolidation of subtasks under same-column ancestors,
- * and auto-expansion of parent tasks. */
-export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
+ * and auto-expansion of parent tasks.
+ * Accepts getter functions for reactive props so $derived/$effect see live values. */
+export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksContext: {
     set: (v: Set<string>) => void;
     subscribe: (fn: (v: Set<string>) => void) => () => void;
-}, currentParentId: string | undefined) {
+}, getCurrentParentId: () => string | undefined) {
     // Build children map for subtask hierarchy
     const childrenMap = $derived.by(() => {
+        const tasks = getAllTasks();
         const map = new Map<string, Task[]>();
-        for (const t of allTasks) {
+        for (const t of tasks) {
             if (t.parent_task_id) {
                 if (!map.has(t.parent_task_id)) {
                     map.set(t.parent_task_id, []);
@@ -24,15 +26,16 @@ export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
         }
         return map;
     });
-    const subtaskIds = $derived(new Set(allTasks.filter(t => t.parent_task_id).map(t => t.id)));
+    const subtaskIds = $derived.by(() => new Set(getAllTasks().filter(t => t.parent_task_id).map(t => t.id)));
 
     // Subtask IDs that should be consolidated (hidden) because any ancestor is in the same column
     const consolidatedSubtaskIds = $derived.by(() => {
+        const tasks = getAllTasks();
         const consolidated = new Set<string>();
         const taskMap = new Map<string, Task>();
-        for (const t of allTasks) taskMap.set(t.id, t);
+        for (const t of tasks) taskMap.set(t.id, t);
 
-        for (const t of allTasks) {
+        for (const t of tasks) {
             if (!t.parent_task_id) continue;
             let parentId: string | undefined = t.parent_task_id;
             while (parentId) {
@@ -49,7 +52,7 @@ export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
     });
 
     // IDs of tasks that have children (potential parents)
-    const parentTaskIds = $derived(new Set(allTasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
+    const parentTaskIds = $derived.by(() => new Set(getAllTasks().filter(t => childrenMap.has(t.id)).map(t => t.id)));
 
     // Track expanded tasks (shared store for Board + CardDetail sync)
     let expandedTasks = $state<Set<string>>(new Set());
@@ -64,7 +67,7 @@ export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
         if (parentTaskIds.size > 0) {
             expandedInitialized = true;
             (async () => {
-                const allIds = new Set(allTasks.map(t => t.id));
+                const allIds = new Set(getAllTasks().map(t => t.id));
                 await cleanupCollapsedTasks(allIds);
                 expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
             })().catch(() => {});
@@ -87,7 +90,7 @@ export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
 
     // Auto-expand parent of currently selected task
     $effect(() => {
-        autoExpandParent(currentParentId);
+        autoExpandParent(getCurrentParentId());
     });
 
     // Auto-expand parent cards when new subtasks appear
@@ -115,17 +118,17 @@ export function useSubtaskHierarchy(allTasks: Task[], expandedTasksContext: {
             next.add(taskId);
         }
         expandedTasksContext.set(next);
-        const allIds = new Set(allTasks.map(t => t.id));
+        const allIds = new Set(getAllTasks().map(t => t.id));
         persistCollapsedTasks(next, parentTaskIds).catch(() => {});
         cleanupCollapsedTasks(allIds).catch(() => {});
     }
 
     return {
-        childrenMap,
-        subtaskIds,
-        consolidatedSubtaskIds,
-        parentTaskIds,
-        expandedTasks,
+        get childrenMap() { return childrenMap; },
+        get subtaskIds() { return subtaskIds; },
+        get consolidatedSubtaskIds() { return consolidatedSubtaskIds; },
+        get parentTaskIds() { return parentTaskIds; },
+        get expandedTasks() { return expandedTasks; },
         autoExpandParent,
         toggleTaskExpanded,
     };

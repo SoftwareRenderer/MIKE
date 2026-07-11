@@ -29,10 +29,12 @@ import BaseModal from './BaseModal.svelte';
 </script>
 
 <BaseModal width="480px" onClose={onClose}>
-        <div slot="header" class="panel-title">
-            <img src={shieldIcon} width="16" height="16" alt="" />
-            <span>Sandboxed Task</span>
-        </div>
+        {#snippet header({ title })}
+            <div class="panel-title">
+                <img src={shieldIcon} width="16" height="16" alt="" />
+                <span>Sandboxed Task</span>
+            </div>
+        {/snippet}
 
         <div class="panel-body">
             <div class="status-notice">

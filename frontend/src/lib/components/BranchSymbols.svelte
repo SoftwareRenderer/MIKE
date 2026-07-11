@@ -100,44 +100,48 @@
         </div>
     {:else if isOutlineMode}
         <!-- Flattened outline for virtualization -->
-        <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} let:item={h} role="tree" aria-label="Document outline">
-            <div class={`outline-item depth-${h.depth}`}>
-                <button
-                    class="symbol-item"
-                    onclick={() => onSymbolClick(h.node.symbol.line)}
-                    role="treeitem"
-                    aria-selected="false"
-                    title={`Line ${h.node.symbol.line}: ${h.node.symbol.name}`}
-                >
-                    <span class="outline-number">{h.node.number}</span>
-                    <span class="symbol-name">
-                        {h.node.symbol.name}
-                    </span>
-                    <span class="symbol-line">{h.node.symbol.line}</span>
-                </button>
-            </div>
+        <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} role="tree" aria-label="Document outline">
+            {#snippet children({ item: h })}
+                <div class={`outline-item depth-${h.depth}`}>
+                    <button
+                        class="symbol-item"
+                        onclick={() => onSymbolClick(h.node.symbol.line)}
+                        role="treeitem"
+                        aria-selected="false"
+                        title={`Line ${h.node.symbol.line}: ${h.node.symbol.name}`}
+                    >
+                        <span class="outline-number">{h.node.number}</span>
+                        <span class="symbol-name">
+                            {h.node.symbol.name}
+                        </span>
+                        <span class="symbol-line">{h.node.symbol.line}</span>
+                    </button>
+                </div>
+            {/snippet}
         </VirtualList>
     {:else}
         <!-- Flat list for code symbols -->
-        <VirtualList items={symbols} itemHeight={22} minThreshold={50} let:item={symbol} role="tree" aria-label="Symbol outline">
-            <button
-                class="symbol-item"
-                onclick={() => onSymbolClick(symbol.line)}
-                role="treeitem"
-                aria-selected="false"
-                title={`Line ${symbol.line}: ${symbol.name}`}
-            >
-                <span
-                    class="symbol-icon"
-                    style="color: {getSymbolColor(symbol.kind)}"
+        <VirtualList items={symbols} itemHeight={22} minThreshold={50} role="tree" aria-label="Symbol outline">
+            {#snippet children({ item: symbol })}
+                <button
+                    class="symbol-item"
+                    onclick={() => onSymbolClick(symbol.line)}
+                    role="treeitem"
+                    aria-selected="false"
+                    title={`Line ${symbol.line}: ${symbol.name}`}
                 >
-                    {getSymbolIcon(symbol.kind)}
-                </span>
-                <span class="symbol-name" style="padding-left: {symbol.indent * 8}px">
-                    {symbol.name}
-                </span>
-                <span class="symbol-line">{symbol.line}</span>
-            </button>
+                    <span
+                        class="symbol-icon"
+                        style="color: {getSymbolColor(symbol.kind)}"
+                    >
+                        {getSymbolIcon(symbol.kind)}
+                    </span>
+                    <span class="symbol-name" style="padding-left: {symbol.indent * 8}px">
+                        {symbol.name}
+                    </span>
+                    <span class="symbol-line">{symbol.line}</span>
+                </button>
+            {/snippet}
         </VirtualList>
     {/if}
 </div>

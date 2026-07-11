@@ -330,7 +330,7 @@
         <div class="attachment-preview">
             {#each attachments as att, i}
                 <div class="attachment-thumb">
-                    <img src={att.preview} alt="Attached image" />
+                    <img src={att.preview} alt="" />
                     <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label="Remove image" title="Remove">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>

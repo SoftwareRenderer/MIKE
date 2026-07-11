@@ -137,7 +137,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); }
     }
 
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
 
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingIdsContext).has(task.id);
@@ -584,7 +584,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     class:queued={taskHasQueuedActions}
     class:queued-delete={taskIsQueuedDelete}
     data-task-id={task.id}
-    draggable={!isMobile}
+    draggable={!isMobileCtx.isMobile}
     onmousedown={handleMouseDown}
     ondragstart={handleDragStart}
     onclick={handleCardClick}

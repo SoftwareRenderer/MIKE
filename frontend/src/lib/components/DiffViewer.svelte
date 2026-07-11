@@ -295,9 +295,9 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{stagedCount} file{stagedCount !== 1 ? 's' : ''}</span>
                 {#if onUnstageAll}
-                <button type="button" class="diff-section-action" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} title="Unstage all changes">
+                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onUnstageAll(); } }} title="Unstage all changes">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                </button>
+                </span>
                 {/if}
             </button>
             {#if !collapsedSections.has('staged')}
@@ -411,6 +411,7 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-line-content-wrapper">
                                         {#each items as item, i}
                                             {#if item.type === 'row'}
+                                                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                 <div
                                                     class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                     role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
@@ -464,6 +465,7 @@ import { slide } from 'svelte/transition';
                                                 </button>
                                                 {#if expandedBlocks[item.block.id]}
                                                     {#each item.block.rows as row, ji}
+                                                        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                         <div
                                                             class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                             role={onLineClick && row.lineNumber != null ? "button" : undefined}
@@ -533,9 +535,9 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{unstagedCount} file{unstagedCount !== 1 ? 's' : ''}</span>
                 {#if onStageAll}
-                <button type="button" class="diff-section-action" onclick={(e) => { e.stopPropagation(); onStageAll(); }} title="Stage all changes">
+                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStageAll(); } }} title="Stage all changes">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                </button>
+                </span>
                 {/if}
             </button>
             {#if !collapsedSections.has('unstaged')}
@@ -649,6 +651,7 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-line-content-wrapper">
                                         {#each items as item, i}
                                             {#if item.type === 'row'}
+                                                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                 <div
                                                     class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                     role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
@@ -702,6 +705,7 @@ import { slide } from 'svelte/transition';
                                                 </button>
                                                 {#if expandedBlocks[item.block.id]}
                                                     {#each item.block.rows as row, ji}
+                                                        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                         <div
                                                             class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                             role={onLineClick && row.lineNumber != null ? "button" : undefined}
@@ -848,6 +852,7 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-line-content-wrapper">
                                         {#each uitems as item, i}
                                             {#if item.type === 'row'}
+                                                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                 <div
                                                     class={`diff-row diff-row-${item.row.variant}${onLineClick && item.row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                     role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
@@ -901,6 +906,7 @@ import { slide } from 'svelte/transition';
                                                 </button>
                                                 {#if expandedBlocks[item.block.id]}
                                                     {#each item.block.rows as row, ji}
+                                                        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                                         <div
                                                             class={`diff-row diff-row-context${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
                                                             role={onLineClick && row.lineNumber != null ? "button" : undefined}

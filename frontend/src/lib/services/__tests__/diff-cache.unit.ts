@@ -13,14 +13,14 @@ function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
 
 describe('DiffCache', () => {
     it('starts with empty state', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         expect(cache.state.files).toEqual({});
         expect(cache.state.untracked).toEqual({});
         expect(cache.state.loading).toBe(false);
     });
 
     it('updateDiff populates files from manifest', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.updateDiff({
             files: {
                 'src/main.ts': { hash: 'abc', type: 'tracked', added: 5, removed: 2, staged: false },
@@ -32,7 +32,7 @@ describe('DiffCache', () => {
     });
 
     it('updateDiff clears cache on empty manifest', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.updateDiff({
             files: {
                 'src/main.ts': { hash: 'abc', type: 'tracked', added: 5, removed: 2, staged: false },
@@ -44,7 +44,7 @@ describe('DiffCache', () => {
     });
 
     it('applyStagedPaths updates staged flags', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
@@ -55,7 +55,7 @@ describe('DiffCache', () => {
     });
 
     it('processStats with empty hash clears cache', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
         cache.tracker.hash = 'prev-hash'; // was tracking a non-empty diff
         cache.processStats({ hash: '', files: 0, additions: 0, deletions: 0 }, false);
@@ -63,7 +63,7 @@ describe('DiffCache', () => {
     });
 
     it('processStats skips when diffLoading is true', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
         cache.processStats({ hash: 'new-hash', files: 1, additions: 0, deletions: 0 }, true);
         // Should not have changed
@@ -71,7 +71,7 @@ describe('DiffCache', () => {
     });
 
     it('processStats removes deleted files', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0 },
@@ -91,7 +91,7 @@ describe('DiffCache', () => {
     });
 
     it('reset clears all state', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
         cache.fileHashes = { 'a.ts': 'h1' };
         cache.tracker.hash = 'some-hash';
@@ -102,7 +102,7 @@ describe('DiffCache', () => {
     });
 
     it('state is reactive via $state()', () => {
-        const cache = new DiffCache(makeApis(), 'proj-1', 'task-1');
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         expect(cache.state.files).toEqual({});
         cache.updateDiff({
             files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0 } },
@@ -113,7 +113,7 @@ describe('DiffCache', () => {
 
     it('stageFile does optimistic update', async () => {
         const apis = makeApis();
-        const cache = new DiffCache(apis, 'proj-1', 'task-1');
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
         };
@@ -128,7 +128,7 @@ describe('DiffCache', () => {
         const apis = makeApis({
             stageFile: vi.fn(async () => { throw new Error('fail'); }),
         });
-        const cache = new DiffCache(apis, 'proj-1', 'task-1');
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
         };
@@ -144,31 +144,41 @@ describe('DiffCache', () => {
         expect(DiffCache.stagedPathsKey([])).toBe('');
     });
 
-    it('setTask updates projectId and taskId for subsequent API calls', () => {
+    it('getters provide live projectId and taskId for API calls', () => {
         const apis = makeApis();
-        const cache = new DiffCache(apis, 'proj-1', 'task-1');
-        cache.setTask('proj-2', 'task-2');
-        // Verify subsequent stageFile uses new IDs
+        let currentProject = 'proj-1';
+        let currentTask = 'task-1';
+        const cache = new DiffCache(apis, () => currentProject, () => currentTask);
+        // Verify initial IDs are used
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
         };
         cache.stageFile('a.ts', true, () => {});
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', true);
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', true);
+        // Change the values the getters close over
+        currentProject = 'proj-2';
+        currentTask = 'task-2';
+        // Verify subsequent stageFile uses new IDs
+        cache.stageFile('a.ts', false, () => {});
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', false);
     });
 
-    it('setTask does not affect already-queued API calls', async () => {
+    it('getters reflect changes mid-flight for subsequent calls', async () => {
         let resolveDiff: (value: unknown) => void;
+        let currentProject = 'proj-1';
+        let currentTask = 'task-1';
         const apis = makeApis({
             getTaskDiff: vi.fn(async () => new Promise(resolve => { resolveDiff = resolve; })),
         });
-        const cache = new DiffCache(apis, 'proj-1', 'task-1');
+        const cache = new DiffCache(apis, () => currentProject, () => currentTask);
         const loadPromise = cache.loadDiff(() => {});
         // Switch task while loadDiff is in flight
-        cache.setTask('proj-2', 'task-2');
+        currentProject = 'proj-2';
+        currentTask = 'task-2';
         // Resolve the original diff
         resolveDiff!({ files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0, staged: false } } });
         await loadPromise;
-        // Original call used old IDs
+        // Original call used old IDs (captured at call time)
         expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1');
         // Subsequent calls use new IDs
         cache.state.files = {

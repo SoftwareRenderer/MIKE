@@ -79,9 +79,9 @@
                 <div class="header-right">
                     <span class="section-count">{sectionTasks.length}</span>
                     {#if section.id === 'backlog'}
-                        <button class="add-btn" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} type="button" aria-label="Create a new task" title="Create a new task">
+                        <span class="add-btn" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onShowCreateTask(); } }} aria-label="Create a new task" title="Create a new task">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                        </button>
+                        </span>
                     {/if}
                     {#if section.id === 'done' && sectionTasks.length > 0}
                         <span class="clear-btn" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>

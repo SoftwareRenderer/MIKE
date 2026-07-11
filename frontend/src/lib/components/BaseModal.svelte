@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { Snippet } from 'svelte';
     import { onMount, onDestroy } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
 
@@ -8,12 +9,19 @@
         zIndex = 1000,
         trapFocus = true,
         onClose,
+        header,
+        toolbar,
+        footer,
     }: {
         title: string;
         width?: string;
         zIndex?: number;
         trapFocus?: boolean;
         onClose: () => void | Promise<void>;
+        header?: Snippet<[ { title: string } ]>;
+        toolbar?: Snippet<[]>;
+        footer?: Snippet<[]>;
+        children?: Snippet<[]>;
     } = $props();
 
     let modalEl: HTMLDivElement | null = null;
@@ -48,6 +56,7 @@
 </script>
 
 <div class="overlay" style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions — modal container stops click propagation, not an activation target -->
     <div
         class="modal"
         style="width: {width}"
@@ -55,26 +64,28 @@
         bind:this={modalEl}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={$$slots.header ? undefined : 'modal-title'}
+        aria-labelledby={header ? undefined : 'modal-title'}
         tabindex="-1"
     >
         <div class="modal-header">
-            <slot name="header">
+            {#if header}
+                {@render header({ title })}
+            {:else}
                 <h2 id="modal-title">{title}</h2>
-            </slot>
+            {/if}
             <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
         </div>
-        {#if $$slots.toolbar}
+        {#if toolbar}
             <div class="modal-toolbar">
-                <slot name="toolbar" />
+                {@render toolbar()}
             </div>
         {/if}
         <div class="modal-body">
-            <slot />
+            {@render children?.()}
         </div>
-        {#if $$slots.footer}
+        {#if footer}
             <div class="modal-footer">
-                <slot name="footer" />
+                {@render footer()}
             </div>
         {/if}
     </div>
@@ -82,6 +93,44 @@
 
 <style>
     @import '$lib/styles/shared.css';
+
+    .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    .modal {
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        max-width: 90vw;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--color-border);
+        flex-shrink: 0;
+    }
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    .modal-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+    }
 
     .modal-toolbar {
         padding: 12px 20px 8px;

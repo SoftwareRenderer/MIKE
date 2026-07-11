@@ -7,6 +7,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+import { getBoardCache, boardCacheKey } from '$lib/storage';
 import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
 import shieldIcon from '$lib/assets/icons/shield.svg';
 import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
@@ -141,7 +142,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
 
     // Sync Svelte 4 stores → local $state (single subscription, no onMount needed)
     $effect(() => {
@@ -326,7 +327,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             if (authResolved) return;
             setOfflineStatus(true);
             try {
-                const { getBoardCache } = await import('../storage');
                 const cachedProjects = await getBoardCache<Project[]>('projects');
                 if (cachedProjects && cachedProjects.length > 0) {
                     hasLocalCache = true;
@@ -464,7 +464,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             setOfflineStatus(true);
             // Check if we have cached data to offer the user
             try {
-                const { getBoardCache } = await import('../storage');
                 const cachedProjects = await getBoardCache<Project[]>('projects');
                 if (cachedProjects && cachedProjects.length > 0) {
                     hasLocalCache = true;
@@ -699,7 +698,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             console.error('Failed to load board:', e);
             // Fallback: load board from cache if available
             try {
-                const { getBoardCache, boardCacheKey } = await import('../storage');
                 const cachedBoard = await getBoardCache<{ tasks: Task[] }>(boardCacheKey(p.id));
                 if (cachedBoard) {
                     tasks = cachedBoard.tasks || [];
@@ -752,7 +750,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 
     /** Check if viewport is tablet-sized (>768px and <=1024px). */
     function isTablet(): boolean {
-        return !isMobile && window.innerWidth <= 1024;
+        return !isMobileCtx.isMobile && window.innerWidth <= 1024;
     }
 
     /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
@@ -889,7 +887,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
     <!-- Mobile sidebar backdrop -->
-    {#if isMobile && mobileMenuOpen}
+    {#if isMobileCtx.isMobile && mobileMenuOpen}
         <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu"></button>
     {/if}
 
@@ -899,15 +897,15 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         {currentProject}
         {projectCounts}
         {collapsed}
-        {isMobile}
+        isMobile={isMobileCtx.isMobile}
         {mobileMenuOpen}
         {getProjectAbbr}
-        onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobile) mobileMenuOpen = false; }}
+        onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onRemoveProject={removeProject}
         onToggleSidebar={toggleSidebar}
-        onShowStats={() => { showStats.set(true); if (isMobile) mobileMenuOpen = false; }}
-        onShowConfig={() => { showConfig.set(true); if (isMobile) mobileMenuOpen = false; }}
-        onAddProject={() => { openAddProject(); if (isMobile) mobileMenuOpen = false; }}
+        onShowStats={() => { showStats.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onShowConfig={() => { showConfig.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onAddProject={() => { openAddProject(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
     />
 
     <!-- Main Content -->
@@ -917,7 +915,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
-                {isMobile}
+                isMobile={isMobileCtx.isMobile}
                 hasPortConflict={portConflict?.project_id === currentProject?.id}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
@@ -948,7 +946,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
-                        if (isMobile) cardDetailActiveTab = 'chat';
+                        if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         selectedTaskVal = t;
                         selectedTask.set(t);
                     }} onRefreshBoard={() => refreshBoard()} />

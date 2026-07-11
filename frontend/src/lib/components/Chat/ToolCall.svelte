@@ -79,6 +79,7 @@
         tc.toolName === 'bash' && tc.isPending && effectiveResult && effectiveResult.length > 0
     );
 
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let scrollEl: HTMLPreElement | null = null;
     let userScrolledUp = $state(false);
     let prevResultLen = $state(0);

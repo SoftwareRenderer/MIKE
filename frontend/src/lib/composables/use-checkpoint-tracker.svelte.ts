@@ -51,10 +51,10 @@ export function useCheckpointTracker() {
     }
 
     return {
-        pendingCheckpoints,
-        checkpointLabels,
-        checkpointCommitHashes,
-        checkpointHashesVersion,
+        get pendingCheckpoints() { return pendingCheckpoints; },
+        get checkpointLabels() { return checkpointLabels; },
+        get checkpointCommitHashes() { return checkpointCommitHashes; },
+        get checkpointHashesVersion() { return checkpointHashesVersion; },
         addPending,
         completeCheckpoint,
         clearCheckpointState,

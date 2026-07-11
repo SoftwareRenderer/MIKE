@@ -69,7 +69,7 @@
     let expandedArgs = $state<Set<string>>(new Set());
 
     // Mobile detection
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
 
     // Timestamp info
     let timestampInfo = $derived(timestamp ? formatTimestamp(timestamp) : { display: '', tooltip: '' });
@@ -154,7 +154,7 @@
 
     function startEdit() {
         isEditing = true;
-        if (isMobile) {
+        if (isMobileCtx.isMobile) {
             setTimeout(() => {
                 mobileEditDialog?.showModal();
                 mobileEditTextarea?.focus();
@@ -219,7 +219,7 @@
 </div>
 
 <!-- Mobile edit dialog -->
-{#if isMobile && isEditing}
+{#if isMobileCtx.isMobile && isEditing}
     <dialog class="edit-dialog" bind:this={mobileEditDialog} onclick={(e) => { if (e.target === mobileEditDialog) cancelEdit(); }}>
         <div class="edit-modal">
             <div class="edit-modal-header">
@@ -259,7 +259,7 @@
 
 {#snippet userMessage()}
     <div class="message-wrapper user-wrapper">
-        {#if isEditing && !isMobile}
+        {#if isEditing && !isMobileCtx.isMobile}
             <EditForm
                 {content}
                 {attachments}
@@ -277,7 +277,7 @@
             {#if attachments && attachments.length > 0}
                 <div class="message-images">
                     {#each attachments as att}
-                        <img src={att.data} alt="Attached image" class="message-image" />
+                        <img src={att.data} alt="" class="message-image" />
                     {/each}
                 </div>
             {/if}
@@ -307,7 +307,7 @@
 
 {#snippet assistantMessage()}
     <div class="message-wrapper assistant-wrapper">
-        {#if isEditing && !isMobile}
+        {#if isEditing && !isMobileCtx.isMobile}
             <EditForm
                 {content}
                 {attachments}

@@ -62,7 +62,7 @@ export interface DiffFileApiResponse {
  * Uses Svelte 5 $state() for deep reactivity — no version bumper needed.
  *
  * Usage:
- *   const cache = new DiffCache(apis, projectId, taskId);
+ *   const cache = new DiffCache(apis, () => projectId, () => taskId);
  *   // Read directly from cache.state in templates:
  *   {#each Object.values(cache.state.files) as file}
  */
@@ -90,13 +90,13 @@ export class DiffCache {
     tracker = { hash: null as string | null, stagedPathsKey: '' };
 
     private _apis: DiffCacheApis;
-    private _projectId: string;
-    private _taskId: string;
+    private _getProjectId: () => string;
+    private _getTaskId: () => string;
 
-    constructor(apis: DiffCacheApis, projectId: string, taskId: string) {
+    constructor(apis: DiffCacheApis, getProjectId: () => string, getTaskId: () => string) {
         this._apis = apis;
-        this._projectId = projectId;
-        this._taskId = taskId;
+        this._getProjectId = getProjectId;
+        this._getTaskId = getTaskId;
     }
 
     /** Revert a stage/unstage operation after server failure. */
@@ -271,7 +271,7 @@ export class DiffCache {
         this.state.loading = true;
 
         try {
-            const result = await this._apis.getTaskDiff(this._projectId, this._taskId);
+            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId());
             const oldHashes = { ...this.fileHashes };
             this.updateDiff(result);
             // For manifest format, fetch individual files
@@ -318,7 +318,7 @@ export class DiffCache {
 
             fetches.push((async () => {
                 try {
-                    const data = await this._apis.getDiffFile(this._projectId, this._taskId, path);
+                    const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path);
                     if (data.rows) {
                         updatedDiff[path] = { path, rows: this._apis.enrichRows(data.rows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
                     } else if (data.lines) {
@@ -377,7 +377,7 @@ export class DiffCache {
             fetches.push((async () => {
                 try {
                     const existing = this.state.files[path];
-                    const data = await this._apis.getDiffFile(this._projectId, this._taskId, path, { signal: controller.signal });
+                    const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path, { signal: controller.signal });
                     const isStaged = stagedSet?.has(path) ?? existing?.staged ?? false;
                     if (data.rows) {
                         const rows = this._apis.enrichRows(data.rows);
@@ -424,7 +424,7 @@ export class DiffCache {
             this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: stage } };
         }
         try {
-            await this._apis.stageFile(this._projectId, this._taskId, path, stage);
+            await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, stage);
         } catch (e) {
             onRevert(path, stage);
             throw e;
@@ -439,7 +439,7 @@ export class DiffCache {
         ];
         for (const path of paths) {
             try {
-                await this._apis.stageFile(this._projectId, this._taskId, path, true);
+                await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, true);
             } catch { /* skip */ }
         }
     }
@@ -449,7 +449,7 @@ export class DiffCache {
         const paths = Object.keys(this.state.files).filter(p => this.state.files[p].staged);
         for (const path of paths) {
             try {
-                await this._apis.stageFile(this._projectId, this._taskId, path, false);
+                await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, false);
             } catch { /* skip */ }
         }
     }
@@ -464,9 +464,4 @@ export class DiffCache {
         this.initialLoaded = false;
     }
 
-    /** Update the task ID and project ID — called when switching tasks. */
-    setTask(projectId: string, taskId: string) {
-        this._projectId = projectId;
-        this._taskId = taskId;
-    }
 }

@@ -10,13 +10,14 @@ export interface SectionDragState {
 }
 
 /** Composable for board overview drag-and-drop.
- * Handles drag over/leave/drop on status sections with validation. */
-export function useBoardDnd(allTasks: Task[], projectId: string, onRefreshBoard?: () => void) {
+ * Handles drag over/leave/drop on status sections with validation.
+ * Accepts getter functions for reactive props so $derived/$effect see live values. */
+export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => string) {
     let sectionDragState = $state<Map<string, SectionDragState>>(new Map());
 
     /** Walk up the ancestor chain to check if any ancestor is In Progress. */
     function hasAncestorInProgress(task: Task): boolean {
-        const taskMap = new Map(allTasks.map(t => [t.id, t]));
+        const taskMap = new Map(getAllTasks().map(t => [t.id, t]));
         let current = task;
         while (current.parent_task_id) {
             const parent = taskMap.get(current.parent_task_id);
@@ -28,7 +29,7 @@ export function useBoardDnd(allTasks: Task[], projectId: string, onRefreshBoard?
     }
 
     function canDrop(taskId: string, targetStatus: string): boolean {
-        const task = allTasks.find(t => t.id === taskId);
+        const task = getAllTasks().find(t => t.id === taskId);
         if (!task) return false;
         if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) return false;
         return true;
@@ -56,16 +57,16 @@ export function useBoardDnd(allTasks: Task[], projectId: string, onRefreshBoard?
         sectionDragState = new Map(sectionDragState).set(sectionId, { isOver: false, isRejected: false });
         const taskId = e.dataTransfer?.getData('text/plain');
         if (!taskId) return;
-        const task = allTasks.find(t => t.id === taskId);
+        const task = getAllTasks().find(t => t.id === taskId);
         if (!task || task.status === targetStatus) return;
         if (!canDrop(taskId, targetStatus)) {
             showToast('Cannot move to Backlog: parent task is In Progress', 'error');
             return;
         }
         try {
-            const updated = await moveTask(projectId, taskId, targetStatus);
+            const updated = await moveTask(getProjectId(), taskId, targetStatus);
             const willConsolidate = task.parent_task_id &&
-                allTasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
+                getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
                 boardStore.update(b => {
                     if (!b) return b;
@@ -79,7 +80,7 @@ export function useBoardDnd(allTasks: Task[], projectId: string, onRefreshBoard?
     }
 
     return {
-        sectionDragState,
+        get sectionDragState() { return sectionDragState; },
         handleSectionDragOver,
         handleSectionDragLeave,
         handleSectionDrop,

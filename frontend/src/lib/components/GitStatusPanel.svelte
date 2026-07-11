@@ -332,7 +332,7 @@
                             </svg>
                             <span>Staged</span>
                             <span class="changes-section-count">{sortedStagedEntries.length}</span>
-                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} title="Unstage all" role="button" tabindex="0">
+                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleUnstageAll(); } }} title="Unstage all" role="button" tabindex="0">
                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                             </span>
                         </button>
@@ -378,7 +378,7 @@
                             </svg>
                             <span>Unstaged</span>
                             <span class="changes-section-count">{sortedUnstagedEntries.length}</span>
-                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} title="Stage all" role="button" tabindex="0">
+                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleStageAll(); } }} title="Stage all" role="button" tabindex="0">
                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                             </span>
                         </button>

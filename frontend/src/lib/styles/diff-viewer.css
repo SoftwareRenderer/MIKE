@@ -287,22 +287,22 @@
 :global(.diff-text .hl-constantkeyword) {
     color: #79C0FF;
 }
-:global(.diff-text .hl-definitionvariable,
-    .diff-text .hl-variable,
-    .diff-text .hl-classname,
-    .diff-text .hl-typename) {
+:global(.diff-text .hl-definitionvariable),
+:global(.diff-text .hl-variable),
+:global(.diff-text .hl-classname),
+:global(.diff-text .hl-typename) {
     color: #FFA657;
 }
 :global(.diff-text .hl-function) {
     color: #D2A8FF;
 }
-:global(.diff-text .hl-property,
-    .diff-text .hl-attribute) {
+:global(.diff-text .hl-property),
+:global(.diff-text .hl-attribute) {
     color: #79C0FF;
 }
-:global(.diff-text .hl-string,
-    .diff-text .hl-attributevalue,
-    .diff-text .hl-regexp) {
+:global(.diff-text .hl-string),
+:global(.diff-text .hl-attributevalue),
+:global(.diff-text .hl-regexp) {
     color: #A5D6FF;
 }
 :global(.diff-text .hl-number) {

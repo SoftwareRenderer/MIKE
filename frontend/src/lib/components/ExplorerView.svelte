@@ -28,7 +28,8 @@
     let commits = $state<GitCommit[]>([]);
     let originTip = $state(''); // commit hash where origin/<branch> points
     let branches = $state<string[]>([]);
-    let selectedBranch = $state(currentBranch);
+    let selectedBranch = $state('');
+    $effect(() => { selectedBranch = currentBranch; });
     let loadingCommits = $state(true);
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
@@ -52,7 +53,9 @@
 
     // Branch selector dropdown
     let showDropdown = $state(false);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let dropdownEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
 
     function toggleDropdown() {
         showDropdown = !showDropdown;
@@ -90,15 +93,18 @@
     }
 
     // Selected file state
-    let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
-    let selectedFilePath = $state(initialSafeFile);
+    let selectedFilePath = $state('');
+    let initialSafeFile = $derived(isPathSafe(initialFile) ? initialFile : '');
+    $effect(() => { if (!selectedFilePath) selectedFilePath = initialSafeFile; });
     // Target line for cursor positioning when opening from diff view
     let targetLine = $state(0);
     // O(1) lookup — replaces Array.includes/filter in handleHasChanges and close handler
     let unsavedFiles = $state(new Set<string>());
 
     // Load unsaved files from IndexedDB on init
-    loadUnsavedFiles(projectId).then(paths => { unsavedFiles = new Set(paths); }).catch(() => {});
+    $effect(() => {
+        loadUnsavedFiles(projectId).then(paths => { unsavedFiles = new Set(paths); }).catch(() => {});
+    });
 
     // Sync selected file from URL on mount and when initialFile updates
     $effect(() => {
@@ -116,7 +122,7 @@
     });
 
     // Mobile layout
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
     let activeTab = $state<'files' | 'editor' | 'symbols' | 'changes'>('files');
     let editorFullscreen = $state(false);
     let diffFullscreen = $state(false);
@@ -128,7 +134,12 @@
     function toggleDiffFullscreen() {
         diffFullscreen = !diffFullscreen;
     }
-    let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath));
+    let currentFolderPath = $state('');
+    $effect(() => {
+        if (!currentFolderPath) {
+            currentFolderPath = initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath);
+        }
+    });
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
@@ -236,7 +247,7 @@
         selectedFilePath = path;
         targetLine = 0;
         onUpdateFile(path);
-        if (isMobile) activeTab = 'editor';
+        if (isMobileCtx.isMobile) activeTab = 'editor';
     }
 
     /** Handle opening a file from the diff view (Review Changes panel). */
@@ -247,7 +258,7 @@
         selectedFilePath = path;
         targetLine = lineNumber;
         onUpdateFile(path);
-        if (isMobile) activeTab = 'editor';
+        if (isMobileCtx.isMobile) activeTab = 'editor';
     }
 
     // Commit diff overlay handlers
@@ -379,7 +390,7 @@
     function handleSplitDragEnd() { persistExplorerLayout(); }
 
     $effect(() => {
-        const mobile = isMobile;
+        const mobile = isMobileCtx.isMobile;
         if (mobile) {
             splitRatio = 0.75;
         }
@@ -495,7 +506,7 @@
     </div>
 
     <!-- Mobile Tab Bar -->
-    {#if isMobile && !showChanges && !diffCommit && !editorFullscreen && !diffFullscreen}
+    {#if isMobileCtx.isMobile && !showChanges && !diffCommit && !editorFullscreen && !diffFullscreen}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -533,7 +544,7 @@
                 projectId={projectId}
                 projectPath={projectPath}
                 onClose={() => showChanges = false}
-                isMobile={isMobile}
+                isMobile={isMobileCtx.isMobile}
                 onOpenFile={handleOpenFileFromDiff}
             />
         </div>
@@ -552,15 +563,15 @@
                     hasNext={diffCommitIndex > 0}
                     onToggleFullscreen={toggleDiffFullscreen}
                     mobileFullscreen={diffFullscreen}
-                    isMobile={isMobile}
+                    isMobile={isMobileCtx.isMobile}
                 />
             </div>
         {:else}
             <!-- Column 1: File browser + Git graph -->
-            <div class="explorer-left-column" class:hidden={isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
+            <div class="explorer-left-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
                 <div class="explorer-split-container">
                     <!-- Top: File browser -->
-                    <div class="explorer-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
+                    <div class="explorer-file-browser" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : splitRatio * 100 + '%'}>
                         <BranchFileBrowser
                             projectId={projectId}
                             projectPath={projectPath}
@@ -574,7 +585,7 @@
                     </div>
 
                     <!-- Drag handle (file browser / git graph split) -->
-                    {#if !isMobile}
+                    {#if !isMobileCtx.isMobile}
                     <ResizeHandle
                         axis="horizontal"
                         ariaLabel="Resize file browser and git graph panels"
@@ -585,7 +596,7 @@
                     {/if}
 
                     <!-- Bottom: Git graph -->
-                    <div class="explorer-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
+                    <div class="explorer-git-graph" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
                         <BranchGitGraph
                             projectId={projectId}
                             currentBranch={selectedBranch}
@@ -602,7 +613,7 @@
             </div>
 
             <!-- Resize handle: left column -->
-            {#if !isMobile}
+            {#if !isMobileCtx.isMobile}
             <ResizeHandle
                 ariaLabel="Resize left panel"
                 onDragStart={handleLeftDragStart}
@@ -612,7 +623,7 @@
             {/if}
 
             <!-- Column 2: File editor -->
-            <div class="explorer-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
+            <div class="explorer-center-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'editor'}>
                 <BranchEditor
                     projectId={projectId}
                     filePath={selectedFilePath}
@@ -620,15 +631,15 @@
                     onFocused={handleEditorFocused}
                     onSymbolsUpdate={handleSymbolsUpdate}
                     onHasChanges={handleHasChanges}
-                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
                     onToggleFullscreen={toggleEditorFullscreen}
                     mobileFullscreen={editorFullscreen}
-                    isMobile={isMobile}
+                    isMobile={isMobileCtx.isMobile}
                 />
             </div>
 
             <!-- Resize handle: right column (only when symbols exist) -->
-            {#if !isMobile && symbols.length > 0}
+            {#if !isMobileCtx.isMobile && symbols.length > 0}
             <ResizeHandle
                 ariaLabel="Resize right panel"
                 onDragStart={handleRightDragStart}
@@ -638,7 +649,7 @@
             {/if}
 
             <!-- Column 3: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
-            <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobile) || (isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
+            <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobileCtx.isMobile) || (isMobileCtx.isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
                     onSymbolClick={(line: number) => {
@@ -651,6 +662,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .explorer-view {
         display: flex;
         flex-direction: column;
@@ -708,8 +721,6 @@
     .explorer-header-spacer {
         flex: 1;
     }
-
-    @import '$lib/styles/shared.css';
 
     :global(.close-btn) {
         padding: 6px;

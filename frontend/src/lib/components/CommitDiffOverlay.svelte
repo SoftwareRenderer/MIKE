@@ -178,6 +178,7 @@ import { slide } from 'svelte/transition';
 
     // Full message tooltip — shown when subject is clicked
     let showFullMessage = $state(false);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let subjectBtnEl: HTMLButtonElement | null = null;
     let hasBody = $derived.by(() => commit.body && commit.body.length > 0);
     let fullMessage = $derived.by(() => {
@@ -200,7 +201,7 @@ import { slide } from 'svelte/transition';
     });
 </script>
 
-<div class="commit-diff-overlay" onkeydown={handleKeydown}>
+<div class="commit-diff-overlay" role="dialog" tabindex="-1" onkeydown={handleKeydown}>
     <!-- Header bar -->
     <div class="diff-header">
         <div class="diff-header-left">
@@ -321,7 +322,7 @@ import { slide } from 'svelte/transition';
                                         </div>
                                     </div>
                                     <!-- Scrollable columns -->
-                                    <div class="diff-sbs-columns" onclick={() => handleFileClick(file.path)}>
+                                    <div class="diff-sbs-columns" role="button" tabindex="0" onclick={() => handleFileClick(file.path)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(file.path); } }}>
                                     <!-- Left column (old) -->
                                     <div class="diff-sbs-column diff-sbs-left">
                                         <div class="diff-sbs-scroll">
@@ -366,6 +367,8 @@ import { slide } from 'svelte/transition';
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .commit-diff-overlay {
         display: flex;
         flex-direction: column;
@@ -531,11 +534,6 @@ import { slide } from 'svelte/transition';
         outline: 2px solid var(--color-accent);
         outline-offset: 1px;
     }
-    .nav-btn.disabled {
-        opacity: 0.3;
-        cursor: default;
-    }
-    @import '$lib/styles/shared.css';
 
     :global(.close-btn) {
         width: 24px;
@@ -797,16 +795,16 @@ import { slide } from 'svelte/transition';
     /* Syntax highlighting — GitHub Dark palette (matches DiffViewer) */
     :global(.diff-line-content .hl-keyword) { color: #ff7b72; }
     :global(.diff-line-content .hl-constantkeyword) { color: #79c0ff; }
-    :global(.diff-line-content .hl-definitionvariable,
-        .diff-line-content .hl-variable,
-        .diff-line-content .hl-classname,
-        .diff-line-content .hl-typename) { color: #ffa657; }
+    :global(.diff-line-content .hl-definitionvariable),
+    :global(.diff-line-content .hl-variable),
+    :global(.diff-line-content .hl-classname),
+    :global(.diff-line-content .hl-typename) { color: #ffa657; }
     :global(.diff-line-content .hl-function) { color: #d2a8ff; }
-    :global(.diff-line-content .hl-property,
-        .diff-line-content .hl-attribute) { color: #79c0ff; }
-    :global(.diff-line-content .hl-string,
-        .diff-line-content .hl-attributevalue,
-        .diff-line-content .hl-regexp) { color: #a5d6ff; }
+    :global(.diff-line-content .hl-property),
+    :global(.diff-line-content .hl-attribute) { color: #79c0ff; }
+    :global(.diff-line-content .hl-string),
+    :global(.diff-line-content .hl-attributevalue),
+    :global(.diff-line-content .hl-regexp) { color: #a5d6ff; }
     :global(.diff-line-content .hl-number) { color: #79c0ff; }
     :global(.diff-line-content .hl-comment) { color: #8b949e; font-style: italic; }
     :global(.diff-line-content .hl-operator) { color: #c9d1d9; }

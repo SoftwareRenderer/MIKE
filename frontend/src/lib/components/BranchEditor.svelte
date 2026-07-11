@@ -143,9 +143,13 @@
         }
     }
 
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let editorEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchContainerEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let view: EditorView | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchVisible = $state(false);
     let searchApp: any = null;
     let editorCreating = $state(false); // prevent race between loadFile() and $effect

@@ -37,13 +37,21 @@
         onCancel: () => void;
     } = $props();
 
-    let titleDraft = $state(taskTitle);
-    let modelDraft = $state(editModel);
-    let urlDraft = $state(editUrl);
-    let effortDraft = $state(editReasoningEffort);
-    let planModeDraft = $state(editPlanMode);
-    let autoMergeDraft = $state(editAutoMerge);
-    let subtasksAutoMergeDraft = $state(editSubtasksAutoMerge);
+    let titleDraft = $state('');
+    let modelDraft = $state('');
+    let urlDraft = $state('');
+    let effortDraft = $state('');
+    let planModeDraft = $state(false);
+    let autoMergeDraft = $state(true);
+    let subtasksAutoMergeDraft = $state(true);
+
+    $effect(() => { titleDraft = taskTitle; });
+    $effect(() => { modelDraft = editModel; });
+    $effect(() => { urlDraft = editUrl; });
+    $effect(() => { effortDraft = editReasoningEffort; });
+    $effect(() => { planModeDraft = editPlanMode; });
+    $effect(() => { autoMergeDraft = editAutoMerge; });
+    $effect(() => { subtasksAutoMergeDraft = editSubtasksAutoMerge; });
 
     let titleInput: HTMLInputElement | null = null;
 
@@ -137,10 +145,6 @@
     }
     :global(.modal-header) {
         padding: 14px 18px;
-    }
-    :global(.modal-header) h2 {
-        font-size: 0.9375rem;
-        color: var(--color-text-primary);
     }
     :global(.modal-body) {
         padding: 16px 18px 18px;

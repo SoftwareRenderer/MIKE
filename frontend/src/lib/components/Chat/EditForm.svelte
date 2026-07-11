@@ -18,9 +18,12 @@
 
     let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', messageId, projectId = '', taskId = '', isSubmitting = false, onSubmit, onCancel }: Props = $props();
 
-    let editContent = $state(content);
+    let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
-    let editAttachments = $state<Array<{ mimeType: string; data: string }>>(attachments ? [...attachments] : []);
+    let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
+
+    $effect(() => { editContent = content; });
+    $effect(() => { editAttachments = attachments ? [...attachments] : []; });
     let editFileInput: HTMLInputElement | null = $state(null);
     let canSubmit = $derived(editContent.trim().length > 0 || editAttachments.length > 0);
 

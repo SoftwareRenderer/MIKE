@@ -352,6 +352,7 @@
             </div>
         {:else if showNewFile}
             <div class="new-file-input-row">
+                <!-- svelte-ignore a11y_autofocus — intentional focus for new file input -->
                 <input
                     type="text"
                     class="new-file-input"
@@ -366,6 +367,7 @@
             </div>
         {:else}
             <div class="new-file-input-row">
+                <!-- svelte-ignore a11y_autofocus — intentional focus for new folder input -->
                 <input
                     type="text"
                     class="new-file-input"

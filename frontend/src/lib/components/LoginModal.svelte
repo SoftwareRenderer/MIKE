@@ -46,6 +46,7 @@
                 <div class="login-error" role="alert">{error}</div>
             {/if}
 
+            <!-- svelte-ignore a11y_autofocus — intentional focus on login form -->
             <input
                 type="password"
                 bind:value={password}

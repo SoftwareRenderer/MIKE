@@ -107,73 +107,76 @@
         {:else if commitDisplays.length === 0}
             <div class="git-graph-empty">No commits</div>
         {:else}
-            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} scrollTop={listScrollTop} let:item={d} let:index={idx}>
-                {@const commit = d.commit}
-                <div
-                    class="git-commit-row"
-                    class:selectable={!!onCommitSelected}
-                    class:selected={commit.hash === selectedCommitHash}
-                    class:unpushed={d.isUnpushed}
-                    role={onCommitSelected ? 'button' : 'listitem'}
-                    tabindex={onCommitSelected ? 0 : undefined}
-                    onclick={() => onCommitSelected?.(commit, idx)}
-                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCommitSelected?.(commit, idx); } }}
-                >
-                    <!-- Timeline line -->
-                    <div class="git-timeline">
-                        <div
-                            class="git-dot"
-                            class:unpushed={d.isUnpushed}
-                            title={commit.short}
-                        ></div>
-                    </div>
-
-                    <!-- Commit info -->
-                    <div class="git-commit-info">
-                        <!-- Subject + badges on one line -->
-                        <div class="git-commit-line">
-                            <span class="git-commit-subject" title={commit.subject}>{commit.subject}</span>
-
-                            <!-- Origin tip badge — shown before branch badge -->
-                            {#if d.isOriginTip}
-                                <span class="git-badge origin-badge" title="Pushed to origin">
-                                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <circle cx="6" cy="6" r="2"/>
-                                        <circle cx="10" cy="10" r="2"/>
-                                        <line x1="7.5" y1="7.5" x2="8.5" y2="8.5"/>
-                                        <line x1="6" y1="4" x2="6" y2="2"/>
-                                        <line x1="10" y1="12" x2="10" y2="14"/>
-                                    </svg>
-                                    origin
-                                </span>
-                            {/if}
-
-                            <!-- Branch badge -->
-                            {#if d.primaryBranch}
-                                <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title="Branch">
-                                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <circle cx="6" cy="6" r="2"/>
-                                        <circle cx="10" cy="10" r="2"/>
-                                        <line x1="7.5" y1="7.5" x2="8.5" y2="8.5"/>
-                                        <line x1="6" y1="4" x2="6" y2="2"/>
-                                        <line x1="10" y1="12" x2="10" y2="14"/>
-                                    </svg>
-                                    {d.primaryBranch}
-                                </span>
-                            {/if}
+            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} scrollTop={listScrollTop}>
+                {#snippet children({ item: d, index: idx })}
+                    {@const commit = d.commit}
+                    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                    <div
+                        class="git-commit-row"
+                        class:selectable={!!onCommitSelected}
+                        class:selected={commit.hash === selectedCommitHash}
+                        class:unpushed={d.isUnpushed}
+                        role={onCommitSelected ? 'button' : 'listitem'}
+                        tabindex={onCommitSelected ? 0 : undefined}
+                        onclick={() => onCommitSelected?.(commit, idx)}
+                        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCommitSelected?.(commit, idx); } }}
+                    >
+                        <!-- Timeline line -->
+                        <div class="git-timeline">
+                            <div
+                                class="git-dot"
+                                class:unpushed={d.isUnpushed}
+                                title={commit.short}
+                            ></div>
                         </div>
 
-                        <div class="git-commit-meta">
-                            {#if commit.author}
-                                <span class="git-commit-author" title={commit.author}>{commit.author}</span>
-                            {/if}
-                            {#if d.dateFormatted}
-                                <span class="git-commit-date">{d.dateFormatted}</span>
-                            {/if}
-                            <span class="git-commit-hash" title={commit.hash}>{commit.short}</span>
+                        <!-- Commit info -->
+                        <div class="git-commit-info">
+                            <!-- Subject + badges on one line -->
+                            <div class="git-commit-line">
+                                <span class="git-commit-subject" title={commit.subject}>{commit.subject}</span>
+
+                                <!-- Origin tip badge — shown before branch badge -->
+                                {#if d.isOriginTip}
+                                    <span class="git-badge origin-badge" title="Pushed to origin">
+                                        <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <circle cx="6" cy="6" r="2"/>
+                                            <circle cx="10" cy="10" r="2"/>
+                                            <line x1="7.5" y1="7.5" x2="8.5" y2="8.5"/>
+                                            <line x1="6" y1="4" x2="6" y2="2"/>
+                                            <line x1="10" y1="12" x2="10" y2="14"/>
+                                        </svg>
+                                        origin
+                                    </span>
+                                {/if}
+
+                                <!-- Branch badge -->
+                                {#if d.primaryBranch}
+                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title="Branch">
+                                        <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <circle cx="6" cy="6" r="2"/>
+                                            <circle cx="10" cy="10" r="2"/>
+                                            <line x1="7.5" y1="7.5" x2="8.5" y2="8.5"/>
+                                            <line x1="6" y1="4" x2="6" y2="2"/>
+                                            <line x1="10" y1="12" x2="10" y2="14"/>
+                                        </svg>
+                                        {d.primaryBranch}
+                                    </span>
+                                {/if}
+                            </div>
+
+                            <div class="git-commit-meta">
+                                {#if commit.author}
+                                    <span class="git-commit-author" title={commit.author}>{commit.author}</span>
+                                {/if}
+                                {#if d.dateFormatted}
+                                    <span class="git-commit-date">{d.dateFormatted}</span>
+                                {/if}
+                                <span class="git-commit-hash" title={commit.hash}>{commit.short}</span>
+                            </div>
                         </div>
                     </div>
-                </div>
+                {/snippet}
             </VirtualList>
         {/if}
     </div>

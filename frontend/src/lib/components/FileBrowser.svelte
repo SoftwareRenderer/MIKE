@@ -141,7 +141,8 @@
 </script>
 
 <BaseModal title="Select Project Directory" width="560px" zIndex={300} onClose={handleClose}>
-        <div slot="toolbar" class="path-bar">
+        {#snippet toolbar()}
+            <div class="path-bar">
             <div class="path-bar-row">
                 <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
                     <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
@@ -178,7 +179,8 @@
                     <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
                 </div>
             {/if}
-        </div>
+            </div>
+        {/snippet}
 
         <div class="body-wrapper">
             {#if error}
@@ -220,7 +222,8 @@
             {/if}
         </div>
 
-        <div slot="footer" class="footer-wrapper">
+        {#snippet footer()}
+            <div class="footer-wrapper">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
                 <label class="sandbox-toggle">
@@ -237,8 +240,9 @@
                         {initGitLoading ? 'Initializing...' : 'Initialize Git'}
                     </button>
                 {/if}
+                </div>
             </div>
-        </div>
+        {/snippet}
 </BaseModal>
 
 <style>

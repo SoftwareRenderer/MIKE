@@ -63,7 +63,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     }
 
     // Board overview drag-and-drop (extracted composable)
-    let dnd = useBoardDnd(allTasks, task.project_id, onRefreshBoard);
+    let dnd = useBoardDnd(() => allTasks, () => task.project_id);
 
     async function handleClearDone(count: number) {
         if (!task.project_id) return;
@@ -98,7 +98,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         getDiffFile,
         stageFile,
         enrichRows: enrichRowsWithInlineSegments,
-    }, task.project_id, task.id);
+    }, () => task.project_id, () => task.id);
     // Derived arrays for DiffViewer (sorted, split by staged status)
     let stagedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path]));
     let unstagedFiles = $derived(Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path]));
@@ -215,7 +215,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
      * Backend resolves stash refs to their common ancestor with baseRef.
      * Toggles closed if the same checkpoint is clicked again. */
     async function handleViewChanges(commitHash: string) {
-        if (isMobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
+        if (isMobileCtx.isMobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
         // Toggle: if same checkpoint is already open, close it
         if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
             closeCheckpointDiff();
@@ -254,7 +254,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     function closeCheckpointDiff() {
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
-        if (isMobile && activeTab === 'checkpoint') {
+        if (isMobileCtx.isMobile && activeTab === 'checkpoint') {
             activeTab = 'diff';
             onActiveTabChange?.('diff');
         }
@@ -297,15 +297,15 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     });
 
     // Mobile tab — synced with prop from App.svelte
-    let activeTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>(activeTabProp);
+    let activeTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
 
     $effect(() => {
         activeTab = activeTabProp;
     });
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
 
     // Subtask hierarchy (extracted composable)
-    let hierarchy = useSubtaskHierarchy(allTasks, expandedTasksContext, task.parent_task_id);
+    let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
 
     // Column resize (inline — matches ExplorerView pattern)
     let columnsRef: HTMLDivElement | null = $state(null);
@@ -600,7 +600,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
-            <div class="column column-context" class:hidden={isMobile && activeTab !== 'context'} style:width={boardWidth}>
+            <div class="column column-context" class:hidden={isMobileCtx.isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <BoardOverview
                     sections={overviewSections}
                     {allTasks}
@@ -626,7 +626,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             </div>
 
             <!-- Resize handle: Board ↔ Chat -->
-            {#if !isMobile}
+            {#if !isMobileCtx.isMobile}
                 <ResizeHandle
                     ariaLabel="Resize board and agent panels"
                     onDragStart={handleBoardDragStart}
@@ -636,7 +636,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             {/if}
 
             <!-- Column 2: Chat / Agent Interface -->
-            <div class="column column-chat" class:hidden={isMobile && activeTab !== 'chat'} style:width={chatWidth}>
+            <div class="column column-chat" class:hidden={isMobileCtx.isMobile && activeTab !== 'chat'} style:width={chatWidth}>
                 <div style="flex:1;min-height:0">
                     {#key task.id}
                         <TaskChat
@@ -666,7 +666,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             </div>
 
             <!-- Resize handle: Chat ↔ Checkpoint/Diff -->
-            {#if !isMobile}
+            {#if !isMobileCtx.isMobile}
                 <ResizeHandle
                     ariaLabel="Resize agent and changes panels"
                     onDragStart={handleChatDragStart}
@@ -677,7 +677,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
             <!-- Column 3: Checkpoint Diff (own panel with close button in header) -->
             {#if checkpointDiffOpen}
-                <div class="column column-checkpoint" class:hidden={isMobile && activeTab !== 'checkpoint'} style:width={checkpointWidth}>
+                <div class="column column-checkpoint" class:hidden={isMobileCtx.isMobile && activeTab !== 'checkpoint'} style:width={checkpointWidth}>
                     <CheckpointOverlay
                         files={checkpointDiffFiles}
                         untracked={checkpointDiffUntracked}
@@ -689,7 +689,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                 </div>
 
                 <!-- Resize handle: Checkpoint ↔ Diff -->
-                {#if !isMobile}
+                {#if !isMobileCtx.isMobile}
                     <ResizeHandle
                         ariaLabel="Resize checkpoint and changes panels"
                         onDragStart={handleCheckpointDragStart}
@@ -700,7 +700,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             {/if}
 
             <!-- Column 4: Working Changes (Diff) -->
-            <div class="column column-diff" class:hidden={isMobile && activeTab !== 'diff'} style:width={diffWidth}>
+            <div class="column column-diff" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff'} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
@@ -715,7 +715,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                                 onClose={closeFileEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
-                                isMobile={isMobile}
+                                isMobile={isMobileCtx.isMobile}
                             />
                         {:else}
                             <div class="file-editor-loading">Loading editor...</div>

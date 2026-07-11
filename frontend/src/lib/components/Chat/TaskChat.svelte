@@ -23,6 +23,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
     let connected = $state(false);
     let connecting = $state(true);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let scrollEl: HTMLElement | null = null;
 
     let atBottom = $state(true);
@@ -35,23 +36,27 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
     // Load draft text from IndexedDB on init
-    getDraftText(taskId).then(savedDraft => {
-        if (savedDraft !== null) {
-            inputValue = savedDraft;
-        }
-    }).catch(() => {});
+    $effect(() => {
+        getDraftText(taskId).then(savedDraft => {
+            if (savedDraft !== null) {
+                inputValue = savedDraft;
+            }
+        }).catch(() => {});
+    });
 
     // Load draft attachments from IndexedDB on init
-    loadDraftAttachments(taskId).then(atts => {
-        if (atts.length > 0) {
-            draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
-                file: new File([], '', { type: a.mimeType }),
-                preview: `data:${a.mimeType};base64,${a.data}`,
-                mimeType: a.mimeType,
-                base64: a.data,
-            }));
-        }
-    }).catch(() => {});
+    $effect(() => {
+        loadDraftAttachments(taskId).then(atts => {
+            if (atts.length > 0) {
+                draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
+                    file: new File([], '', { type: a.mimeType }),
+                    preview: `data:${a.mimeType};base64,${a.data}`,
+                    mimeType: a.mimeType,
+                    base64: a.data,
+                }));
+            }
+        }).catch(() => {});
+    });
 
     // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
     let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -122,7 +127,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let threadSwitching = $state(false); // true while a thread switch is in-flight
     // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
     // For in_progress tasks, buffer events are legitimate and must be replayed.
-    let suppressEvents = $state(taskStatus !== 'in_progress');
+    let suppressEvents = $state(true);
+    $effect(() => { suppressEvents = taskStatus !== 'in_progress'; });
     let commitQueueStatus = getCommitQueueContext();
     let taskEventContext = getTaskEventContext();
     let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
@@ -974,8 +980,10 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
     let chatFormRef: HTMLElement | null = $state(null);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let chatFormComp: { focus: () => void } | null = null;
 
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     function setupViewportListener() {
         const vv = window.visualViewport;
         if (!vv) return;

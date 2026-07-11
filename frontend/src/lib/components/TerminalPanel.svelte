@@ -28,7 +28,7 @@ import { showTerminal } from '$lib/stores/ui';
     let panelHeight = $state(DEFAULT_HEIGHT);
     let modCtrl = $state(false);
     let fullscreen = $state(false);
-    const { isMobile } = useIsMobile();
+    const isMobileCtx = useIsMobile();
 
     function toggleFullscreen() {
         fullscreen = !fullscreen;
@@ -797,7 +797,7 @@ import { showTerminal } from '$lib/stores/ui';
             {/if}
         </div>
         <div class="header-actions">
-            {#if !isMobile}
+            {#if !isMobileCtx.isMobile}
             <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title="Toggle fullscreen">
                 {#if fullscreen}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -812,35 +812,37 @@ import { showTerminal } from '$lib/stores/ui';
     <div class="terminal-container" bind:this={container}></div>
     <div class="mobile-keyboard" bind:this={kbContainer}>
         <div class="kb-row">
-            <div role="button" class="kb-btn" onclick={() => handleKey('Escape')}>esc</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('/')}>/</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('-')}>-</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('Home')}>home</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('ArrowUp')}>
+            <button type="button" class="kb-btn" onclick={() => handleKey('Escape')}>esc</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('/')}>/</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('-')}>-</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('Home')}>home</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowUp')} aria-label="Arrow up">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4l4 5H4l4-5z" fill="currentColor"/></svg>
-            </div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('End')}>end</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('PageUp')}>pgup</div>
+            </button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('End')}>end</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('PageUp')}>pgup</button>
         </div>
         <div class="kb-row">
-            <div role="button" class="kb-btn" onclick={() => handleKey('Tab')}>tab</div>
-            <div role="button" class="kb-btn kb-mod" class:kb-mod-active={!!modCtrl} onclick={() => toggleModifier('ctrl')}>ctrl</div>
-            <div role="button" class="kb-btn kb-mod" class:kb-mod-active={!!modAlt} onclick={() => toggleModifier('alt')}>alt</div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('ArrowLeft')}>
+            <button type="button" class="kb-btn" onclick={() => handleKey('Tab')}>tab</button>
+            <button type="button" class="kb-btn kb-mod" class:kb-mod-active={!!modCtrl} onclick={() => toggleModifier('ctrl')}>ctrl</button>
+            <button type="button" class="kb-btn kb-mod" class:kb-mod-active={!!modAlt} onclick={() => toggleModifier('alt')}>alt</button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowLeft')} aria-label="Arrow left">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8l5-4v8l-5-4z" fill="currentColor"/></svg>
-            </div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('ArrowDown')}>
+            </button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowDown')} aria-label="Arrow down">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 12l-4-5h8l-4 5z" fill="currentColor"/></svg>
-            </div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('ArrowRight')}>
+            </button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowRight')} aria-label="Arrow right">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M12 8l-5 4V4l5 4z" fill="currentColor"/></svg>
-            </div>
-            <div role="button" class="kb-btn" onclick={() => handleKey('PageDown')}>pgdn</div>
+            </button>
+            <button type="button" class="kb-btn" onclick={() => handleKey('PageDown')}>pgdn</button>
         </div>
     </div>
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .terminal-overlay {
         position: fixed;
         inset: 0;
@@ -953,20 +955,10 @@ import { showTerminal } from '$lib/stores/ui';
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
-    @import '$lib/styles/shared.css';
 
     :global(.close-btn) {
         font-size: 1rem;
         padding: 2px 6px;
-    }
-    .copy-btn {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        padding: 2px 4px;
-        display: flex;
-        align-items: center;
     }
     :global(.close-btn:hover) {
         color: var(--color-text-primary);

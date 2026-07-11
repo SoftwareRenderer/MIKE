@@ -170,15 +170,9 @@
         cursor: pointer;
         transition: all 0.15s ease;
     }
-    .btn-commit-done.has-changes {
-        border-color: var(--color-status-yellow);
-    }
     .btn-commit-done:hover:not(:disabled) {
         background: var(--color-surface-3);
         opacity: 0.9;
-    }
-    .btn-commit-done.has-changes:hover:not(:disabled) {
-        border-color: var(--color-status-yellow);
     }
     .btn-commit-done:disabled {
         opacity: 0.5;

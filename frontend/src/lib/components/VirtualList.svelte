@@ -3,8 +3,10 @@
      * Lightweight virtual scroller for fixed-height lists.
      *
      * Usage:
-     *   <VirtualList {items} itemHeight={28} minThreshold={50} let:item let:index>
-     *     <div>{item.name}</div>
+     *   <VirtualList {items} itemHeight={28} minThreshold={50}>
+     *     {#snippet children({ item, index })}
+     *       <div>{item.name}</div>
+     *     {/snippet}
      *   </VirtualList>
      */
     import { onMount, onDestroy } from 'svelte';
@@ -19,6 +21,7 @@
         scrollTop?: number; // external scroll position
     } = $props();
 
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let scrollEl: HTMLDivElement | null = null;
     let internalScrollTop = $state(0);
     let containerHeight = $state(0);
@@ -59,7 +62,7 @@
             <div class="virtual-content" style="transform: translateY({visibleOffset}px)">
                 {#each items as item, idx}
                     {#if idx >= startIndex && idx < endIndex}
-                        <slot {item} index={idx} />
+                        {@render children({ item, index: idx })}
                     {/if}
                 {/each}
             </div>
@@ -68,7 +71,7 @@
 {:else}
     <div class="virtual-scroll" bind:this={scrollEl} role={role} aria-label={ariaLabel}>
         {#each items as item, index}
-            <slot {item} {index} />
+            {@render children({ item, index })}
         {/each}
     </div>
 {/if}

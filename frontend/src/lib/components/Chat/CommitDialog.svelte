@@ -261,6 +261,7 @@
 </script>
 
 {#if open}
+    <!-- svelte-ignore a11y_click_events_have_key_events — overlay click dismisses dialog, not an activation -->
     <div
         bind:this={overlayRef}
         class="commit-overlay"

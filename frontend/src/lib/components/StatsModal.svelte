@@ -206,9 +206,6 @@
         max-height: 80dvh;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-    .modal-body {
-        padding: 20px;
-    }
     .loading, .empty {
         text-align: center;
         color: var(--color-text-secondary);

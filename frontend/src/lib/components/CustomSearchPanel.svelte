@@ -11,6 +11,7 @@
     let { view, onClose }: Props = $props();
 
     let inputEl: HTMLInputElement | null = null;
+// svelte-ignore non_reactive_update — DOM ref via bind:this
     let replaceEl: HTMLInputElement | null = null;
     let containerEl: HTMLDivElement | null = null;
     let visible = $state(false);

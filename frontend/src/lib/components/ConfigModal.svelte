@@ -646,27 +646,6 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    .modal-body {
-        padding: 20px 20px 0;
-        display: flex;
-        flex-direction: column;
-        gap: 24px;
-        overflow-y: auto;
-        flex: 1;
-        min-height: 0;
-        scroll-behavior: smooth;
-    }
-    .modal-body::-webkit-scrollbar {
-        width: 6px;
-    }
-    .modal-body::-webkit-scrollbar-track {
-        background: transparent;
-    }
-    .modal-body::-webkit-scrollbar-thumb {
-        background: var(--color-surface-4);
-        border-radius: 3px;
-    }
-
     /* Section fieldsets */
     .section {
         border: none;
@@ -751,9 +730,6 @@
         font-weight: 500;
         color: var(--color-text-primary);
     }
-    .field-label input {
-        width: 100%;
-    }
     .field-help {
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
@@ -773,20 +749,6 @@
         font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
-    }
-
-    /* Inputs */
-    input[type="text"], input[type="password"], input[type="number"], select {
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border-bright);
-        border-radius: var(--radius-md);
-        padding: 8px 12px;
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-    }
-    input:focus-visible, select:focus-visible {
-        border-color: var(--color-accent);
-        outline: none;
     }
 
     /* Buttons */
@@ -900,9 +862,4 @@
     }
 
 
-    @media (max-width: 768px) {
-        .modal-body {
-            padding-bottom: calc(56px + env(safe-area-inset-bottom));
-        }
-    }
-</style>
+    </style>
