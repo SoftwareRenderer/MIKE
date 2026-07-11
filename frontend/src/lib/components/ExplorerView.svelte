@@ -92,6 +92,8 @@
     // Selected file state
     let initialSafeFile = isPathSafe(initialFile) ? initialFile : '';
     let selectedFilePath = $state(initialSafeFile);
+    // Target line for cursor positioning when opening from diff view
+    let targetLine = $state(0);
     // O(1) lookup — replaces Array.includes/filter in handleHasChanges and close handler
     let unsavedFiles = $state(new Set<string>());
 
@@ -232,6 +234,18 @@
         if (!isPathSafe(path)) return;
         closeCommitDiff();
         selectedFilePath = path;
+        targetLine = 0;
+        onUpdateFile(path);
+        if (isMobile) activeTab = 'editor';
+    }
+
+    /** Handle opening a file from the diff view (Review Changes panel). */
+    function handleOpenFileFromDiff(path: string, lineNumber: number) {
+        if (!isPathSafe(path)) return;
+        showChanges = false;
+        closeCommitDiff();
+        selectedFilePath = path;
+        targetLine = lineNumber;
         onUpdateFile(path);
         if (isMobile) activeTab = 'editor';
     }
@@ -517,8 +531,10 @@
         <div class="explorer-changes-column">
             <GitStatusPanel
                 projectId={projectId}
+                projectPath={projectPath}
                 onClose={() => showChanges = false}
                 isMobile={isMobile}
+                onOpenFile={handleOpenFileFromDiff}
             />
         </div>
         {:else if diffCommit}
@@ -600,10 +616,11 @@
                 <BranchEditor
                     projectId={projectId}
                     filePath={selectedFilePath}
+                    targetLine={targetLine}
                     onFocused={handleEditorFocused}
                     onSymbolsUpdate={handleSymbolsUpdate}
                     onHasChanges={handleHasChanges}
-                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                    onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobile) activeTab = 'files'; editorFullscreen = false; }}
                     onToggleFullscreen={toggleEditorFullscreen}
                     mobileFullscreen={editorFullscreen}
                     isMobile={isMobile}

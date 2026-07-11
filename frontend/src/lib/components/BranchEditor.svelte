@@ -75,9 +75,10 @@
         '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     });
 
-    let { projectId, filePath, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
+    let { projectId, filePath, targetLine, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
         projectId: string;
         filePath: string;
+        targetLine: number;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
         onHasChanges: (hasChanges: boolean) => void;
@@ -344,6 +345,10 @@
 
         // Extract symbols after a short delay
         setTimeout(extractSymbols, 500);
+        // Jump to target line if set (from diff view click)
+        if (targetLine >= 1) {
+            requestAnimationFrame(() => jumpToLine(targetLine));
+        }
     }
 
     async function loadFile() {
@@ -445,9 +450,8 @@
         }
     }
 
-    // Handle jump-to-line events from symbol outline
-    function handleJumpToLine(e: Event) {
-        const line = (e as CustomEvent).detail.line;
+    /** Position cursor on a specific line and scroll it into view. */
+    function jumpToLine(line: number) {
         if (!view || line < 1) return;
         const editorView = view;
         const totalLines = editorView.state.doc.lines;
@@ -455,17 +459,30 @@
         const lineObj = editorView.state.doc.line(lineNum);
         editorView.dispatch({ selection: { anchor: lineObj.from, head: lineObj.from } });
         editorView.focus();
-        // Scroll into view
+        // Scroll into view — place line ~30% from top for context above
         requestAnimationFrame(() => {
+            const scroller = editorEl?.querySelector('.cm-scroller');
+            if (!scroller) return;
             const coords = editorView.coordsAtPos(lineObj.from);
-            if (coords) {
-                editorEl?.querySelector('.cm-scroller')?.scrollTo({
-                    top: (editorEl?.querySelector('.cm-scroller') as HTMLElement)?.scrollTop - (editorEl?.querySelector('.cm-scroller') as HTMLElement)?.clientHeight! / 3 + coords.top,
-                    behavior: 'smooth',
-                });
-            }
+            if (!coords) return;
+            const targetScroll = coords.top + scroller.scrollTop - scroller.clientHeight * 0.3;
+            scroller.scrollTop = Math.max(0, Math.min(targetScroll, scroller.scrollHeight - scroller.clientHeight));
         });
     }
+
+    // Handle jump-to-line events from symbol outline
+    function handleJumpToLine(e: Event) {
+        const line = (e as CustomEvent).detail.line;
+        jumpToLine(line);
+    }
+
+    // Jump to targetLine when editor is ready (from diff view click)
+    $effect(() => {
+        const line = targetLine;
+        if (line >= 1 && view && !loading && !fileTooLarge && !error && filePath) {
+            requestAnimationFrame(() => jumpToLine(line));
+        }
+    });
 
     // Re-create editor when file changes
     $effect(() => {

@@ -8,10 +8,12 @@
     import DiffViewer from './DiffViewer.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
 
-    let { projectId, onClose, isMobile }: {
+    let { projectId, projectPath, onClose, isMobile, onOpenFile }: {
         projectId: string;
+        projectPath: string;
         onClose: () => void;
         isMobile: boolean;
+        onOpenFile?: (path: string, lineNumber: number) => void;
     } = $props();
 
     // Parsed status entries for the sidebar file list
@@ -257,6 +259,15 @@
         }
     }
 
+    /** Handle line click from DiffViewer — open file in editor at the clicked line. */
+    function handleLineClick(filePath: string, lineNumber: number) {
+        if (onOpenFile) {
+            // Build absolute path from project root + relative diff path
+            const absPath = projectPath.endsWith('/') ? projectPath + filePath : projectPath + '/' + filePath;
+            onOpenFile(absPath, lineNumber);
+        }
+    }
+
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
             onClose();
@@ -425,6 +436,7 @@
                     onStageFile={handleStageFile}
                     onStageAll={handleStageAll}
                     onUnstageAll={handleUnstageAll}
+                    onLineClick={handleLineClick}
                 />
             </div>
         </div>
