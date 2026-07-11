@@ -58,9 +58,12 @@ export function computeDiffMarkers(originalContent: string, currentContent: stri
                     markers[currentLine] = { type: 'modified', removedText: pendingRemovals[i] };
                     currentLine++;
                 }
+                // Excess removals (more removed than added) — mark the line BEFORE the gap
+                if (pendingRemovals.length > paired && currentLine > 1) {
+                    markers[currentLine - 1] = { type: 'removed', text: pendingRemovals[paired] };
+                }
                 // Mark where unpaired added lines start
                 startIdx = paired;
-                // Excess removals (more removed than added) — skip them
                 pendingRemovals = [];
             }
             // Unpaired added lines
@@ -72,6 +75,10 @@ export function computeDiffMarkers(originalContent: string, currentContent: stri
         }
 
         // Context (unchanged) lines
+        if (pendingRemovals.length > 0 && lines.length > 0) {
+            // Mark the line BEFORE the gap (last line before the removal)
+            markers[currentLine - 1] = { type: 'removed', text: pendingRemovals[0] };
+        }
         flushRemovals();
         for (const _line of lines) {
             markers[currentLine] = { type: 'context' };
