@@ -203,11 +203,35 @@
             const rootPath = sandboxEnabled ? mountPath : projectPath;
             const absMap = new Map<string, string>();
             for (const [relPath, char] of map) {
-                absMap.set(rootPath + '/' + relPath, char);
+                const absPath = rootPath + '/' + relPath;
+                absMap.set(absPath, char);
+                // Propagate status to all parent directories
+                let dir = absPath.substring(0, absPath.lastIndexOf('/'));
+                while (dir.length > rootPath.length) {
+                    const existing = absMap.get(dir);
+                    if (!existing || statusPriority(char) > statusPriority(existing)) {
+                        absMap.set(dir, char);
+                    }
+                    dir = dir.substring(0, dir.lastIndexOf('/'));
+                }
             }
             gitStatusMap = absMap;
         } catch (e) {
             console.error('Failed to fetch git status:', e);
+        }
+    }
+
+    // Priority for status characters (higher = more significant)
+    function statusPriority(char: string): number {
+        switch (char) {
+            case 'U': return 7;  // unmerged (conflict)
+            case 'D': return 6;  // deleted
+            case 'R': return 5;  // renamed
+            case 'M': return 4;  // modified
+            case 'C': return 3;  // copied
+            case 'A': return 2;  // added
+            case '?': return 1;  // untracked
+            default: return 0;
         }
     }
 
@@ -399,12 +423,10 @@
                             <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
                         {/if}
                         <span class="file-name">{entry.name}</span>
-                        {#if !entry.isDir}
-                            {#if getGitStatusChar(entry.path)}
-                                <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}">
-                                    {getGitStatusChar(entry.path)}
-                                </span>
-                            {/if}
+                        {#if getGitStatusChar(entry.path)}
+                            <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}">
+                                {getGitStatusChar(entry.path)}
+                            </span>
                         {/if}
                         {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
                             <span class="unsaved-dot" title="Unsaved changes">
