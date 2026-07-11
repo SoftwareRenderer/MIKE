@@ -11,9 +11,9 @@ var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
 // phraseDetector tracks sentences/phrases seen within a single streaming response
 // to detect exact repetition in real-time.
 type phraseDetector struct {
-	seen    map[string]bool // normalized phrases already seen
-	pending string          // incomplete sentence waiting for more text
-	fired   bool            // already triggered for this response
+	seen    map[string]int // phrase -> occurrence count
+	pending string        // incomplete sentence waiting for more text
+	fired   bool          // already triggered for this response
 }
 
 // minPhraseWords is the minimum word count for a phrase to be tracked.
@@ -23,13 +23,16 @@ const minPhraseWords = 8
 // newPhraseDetector creates a new phraseDetector.
 func newPhraseDetector() *phraseDetector {
 	return &phraseDetector{
-		seen: make(map[string]bool),
+		seen: make(map[string]int),
 	}
 }
 
+// maxPhraseRepeats is the number of times a phrase must repeat before firing.
+const maxPhraseRepeats = 10
+
 // reset clears all tracked state for a new response.
 func (d *phraseDetector) reset() {
-	d.seen = make(map[string]bool)
+	d.seen = make(map[string]int)
 	d.pending = ""
 	d.fired = false
 }
@@ -77,11 +80,11 @@ func (d *phraseDetector) check(newText string) bool {
 			continue
 		}
 
-		if d.seen[phrase] {
+		d.seen[phrase]++
+		if d.seen[phrase] >= maxPhraseRepeats {
 			d.fired = true
 			return true
 		}
-		d.seen[phrase] = true
 	}
 
 	// Bound the pending buffer to prevent unbounded memory growth

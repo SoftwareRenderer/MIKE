@@ -17,11 +17,27 @@ import (
 
 // --- Phrase Detector Tests ---
 
+// testPhrase is the standard test sentence used across phrase detector tests.
+const testPhrase = "The quick brown fox jumps over the lazy dog."
+
+// repeatPhrase sends the same phrase to the detector enough times to reach the repeat threshold.
+// Returns true if the detector fired.
+func repeatPhrase(d *phraseDetector, phrase string) bool {
+	fired := false
+	for i := 0; i < maxPhraseRepeats; i++ {
+		if d.check(phrase) {
+			fired = true
+			break
+		}
+	}
+	return fired
+}
+
 func TestPhraseDetector_NoRepetition(t *testing.T) {
 	d := newPhraseDetector()
 
 	// Feed unique sentences
-	text := "The quick brown fox jumps over the lazy dog. Then the cat sat on the mat and slept all day long."
+	text := "The quick brown fox jumps over the lazy dog today. Then the cat sat on the mat and slept all day long."
 	if d.check(text) {
 		t.Error("should not detect repetition in unique text")
 	}
@@ -30,12 +46,7 @@ func TestPhraseDetector_NoRepetition(t *testing.T) {
 func TestPhraseDetector_ExactRepetition(t *testing.T) {
 	d := newPhraseDetector()
 
-	// First sentence
-	d.check("The quick brown fox jumps over the lazy dog.")
-
-	// Same sentence repeated (with period)
-	repeated := "The quick brown fox jumps over the lazy dog."
-	if !d.check(repeated) {
+	if !repeatPhrase(d, testPhrase) {
 		t.Error("should detect exact phrase repetition")
 	}
 }
@@ -43,9 +54,7 @@ func TestPhraseDetector_ExactRepetition(t *testing.T) {
 func TestPhraseDetector_CaseInsensitive(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.")
-	repeated := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG."
-	if !d.check(repeated) {
+	if !repeatPhrase(d, testPhrase) {
 		t.Error("should detect case-insensitive repetition")
 	}
 }
@@ -64,9 +73,7 @@ func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.")
-	repeated := "The  quick   brown    fox   jumps   over   the   lazy   dog."
-	if !d.check(repeated) {
+	if !repeatPhrase(d, testPhrase) {
 		t.Error("should detect repetition despite extra whitespace")
 	}
 }
@@ -74,27 +81,25 @@ func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
 func TestPhraseDetector_FiresOnce(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.")
-	d.check("The quick brown fox jumps over the lazy dog.") // fires
-	if !d.check("The quick brown fox jumps over the lazy dog.") {
-		// After first fire, should still return false (already fired)
-		// This is expected behavior - once fired, stays fired until reset
+	repeatPhrase(d, testPhrase) // fires
+	// After first fire, should still return false (already fired)
+	if d.check(testPhrase) {
+		t.Error("should not fire again after already fired")
 	}
 }
 
 func TestPhraseDetector_Reset(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.")
-	d.check("The quick brown fox jumps over the lazy dog.") // fires
+	repeatPhrase(d, testPhrase) // fires
 
 	d.reset()
-	// After reset, same text should not fire
-	if d.check("The quick brown fox jumps over the lazy dog.") {
+	// After reset, same text should not fire (first occurrence)
+	if d.check(testPhrase) {
 		t.Error("should not fire after reset with same text")
 	}
-	// Now it should fire on repeat
-	if !d.check("The quick brown fox jumps over the lazy dog.") {
+	// Now it should fire after enough repeats
+	if !repeatPhrase(d, testPhrase) {
 		t.Error("should fire on repeat after reset")
 	}
 }
@@ -102,8 +107,8 @@ func TestPhraseDetector_Reset(t *testing.T) {
 func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
 	d := newPhraseDetector()
 
-	// Feed two sentences, second repeats the first
-	text := "The quick brown fox jumps over the lazy dog. Some other unique text here that is long enough. The quick brown fox jumps over the lazy dog."
+	// Feed the phrase multiple times in one chunk to reach threshold
+	text := strings.Repeat(testPhrase+" ", maxPhraseRepeats-1) + testPhrase
 	if !d.check(text) {
 		t.Error("should detect repetition when repeated sentence appears later in same chunk")
 	}
@@ -112,9 +117,7 @@ func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
 func TestPhraseDetector_NewlineBoundary(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.\n")
-	repeated := "The quick brown fox jumps over the lazy dog."
-	if !d.check(repeated) {
+	if !repeatPhrase(d, testPhrase+"\n") {
 		t.Error("should detect repetition across newline boundary")
 	}
 }
@@ -122,9 +125,7 @@ func TestPhraseDetector_NewlineBoundary(t *testing.T) {
 func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("The quick brown fox jumps over the lazy dog.\n\n")
-	repeated := "The quick brown fox jumps over the lazy dog."
-	if !d.check(repeated) {
+	if !repeatPhrase(d, testPhrase+"\n\n") {
 		t.Error("should detect repetition across double newline boundary")
 	}
 }
@@ -143,9 +144,7 @@ func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
 func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("Wow this is really amazing and incredible stuff!")
-	repeated := "Wow this is really amazing and incredible stuff!"
-	if !d.check(repeated) {
+	if !repeatPhrase(d, "Wow this is really amazing and incredible stuff!") {
 		t.Error("should detect repetition with exclamation boundary")
 	}
 }
@@ -153,9 +152,7 @@ func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 func TestPhraseDetector_QuestionBoundary(t *testing.T) {
 	d := newPhraseDetector()
 
-	d.check("What do you think about this approach and implementation?")
-	repeated := "What do you think about this approach and implementation?"
-	if !d.check(repeated) {
+	if !repeatPhrase(d, "What do you think about this approach and implementation?") {
 		t.Error("should detect repetition with question boundary")
 	}
 }
@@ -163,12 +160,11 @@ func TestPhraseDetector_QuestionBoundary(t *testing.T) {
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	d := newPhraseDetector()
 
-	// Feed partial sentence
+	// Feed partial sentence, then complete it, then repeat enough times
 	d.check("The quick brown fox jumps")
-	// Complete it
 	d.check(" over the lazy dog.")
-	// Now repeat the full sentence
-	if !d.check("The quick brown fox jumps over the lazy dog.") {
+	// Repeat the full sentence to reach threshold
+	if !repeatPhrase(d, "The quick brown fox jumps over the lazy dog.") {
 		t.Error("should detect repetition when incomplete sentence is completed and then repeated")
 	}
 }
@@ -496,19 +492,19 @@ func TestLoopDetector_TextLoop(t *testing.T) {
 func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
 	d := newLoopDetector()
 
-	// Simulate streaming chunks
-	chunk1 := "Let me think about this problem carefully and analyze the requirements. "
-	chunk2 := "The best approach would be to implement the solution step by step. "
-	chunk3 := "Let me think about this problem carefully and analyze the requirements."
-
-	if d.checkStreamingText(chunk1) != LoopNone {
-		t.Error("first chunk should not trigger loop")
-	}
-	if d.checkStreamingText(chunk2) != LoopNone {
-		t.Error("second unique chunk should not trigger loop")
-	}
-	if d.checkStreamingText(chunk3) != LoopPhrase {
-		t.Error("repeated phrase should trigger LoopPhrase")
+	// Simulate streaming chunks — repeat the same phrase to reach threshold
+	chunk := "Let me think about this problem carefully and analyze the full requirements. "
+	for i := 0; i < maxPhraseRepeats; i++ {
+		loopType := d.checkStreamingText(chunk)
+		if i < maxPhraseRepeats-1 {
+			if loopType != LoopNone {
+				t.Errorf("chunk %d should not trigger loop yet", i)
+			}
+		} else {
+			if loopType != LoopPhrase {
+				t.Error("repeated phrase should trigger LoopPhrase after enough repeats")
+			}
+		}
 	}
 
 	if !d.phraseDetected() {
@@ -519,8 +515,10 @@ func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
 func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {
 	d := newLoopDetector()
 
-	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.")
-	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.") // fires
+	chunk := "Let me think about this problem carefully and analyze the full requirements. "
+	for i := 0; i < maxPhraseRepeats; i++ {
+		d.checkStreamingText(chunk)
+	}
 
 	d.reset()
 	if d.phraseDetected() {
@@ -531,8 +529,11 @@ func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {
 func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
 	d := newLoopDetector()
 
-	// Feed phrase that would normally repeat
-	d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.")
+	// Feed phrase multiple times (not quite enough to fire)
+	chunk := "Let me think about this problem carefully and analyze the full requirements. "
+	for i := 0; i < maxPhraseRepeats-1; i++ {
+		d.checkStreamingText(chunk)
+	}
 
 	// Tool call resets phrase tracker
 	args := map[string]string{"path": "src/main.go"}
@@ -540,8 +541,8 @@ func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
 	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
 	d.recordTurn(tc, "")
 
-	// Same phrase should not fire anymore
-	if d.checkStreamingText("Let me think about this problem carefully and analyze the requirements.") == LoopPhrase {
+	// Same phrase again — tracker was reset, so it won't fire
+	if d.checkStreamingText(chunk) == LoopPhrase {
 		t.Error("phrase should not fire after tool call reset")
 	}
 }
@@ -952,11 +953,12 @@ func TestPhraseDetector_UTF8Streaming(t *testing.T) {
 	d := newPhraseDetector()
 
 	// Feed chunks that contain UTF-8 characters
-	// "Let me analyze the café's approach to this problème.">
+	// Feed a UTF-8 phrase with 10+ words via streaming chunks
+	phrase := "Let me analyze the café's approach to this problème today."
 	chunks := []string{
 		"Let me analyze the caf",
 		"é's approach to this pr",
-		"oblème.",
+		"oblème today.",
 	}
 	for _, chunk := range chunks {
 		if d.check(chunk) {
@@ -964,15 +966,10 @@ func TestPhraseDetector_UTF8Streaming(t *testing.T) {
 		}
 	}
 
-	// Now repeat the same phrase
-	chunks2 := []string{
-		"Let me analyze the caf",
-		"é's approach to this pr",
-		"oblème.",
-	}
+	// Now repeat enough times to reach threshold
 	fired := false
-	for _, chunk := range chunks2 {
-		if d.check(chunk) {
+	for i := 1; i < maxPhraseRepeats; i++ {
+		if d.check(phrase) {
 			fired = true
 			break
 		}

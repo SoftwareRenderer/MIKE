@@ -561,6 +561,19 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         userInputPending = true;
     }
 
+    /** Scroll to the user message that is currently shown in the sticky header. */
+    function handleStickyClick() {
+        if (!scrollEl || !stickyUserMessage) return;
+        const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
+        for (let i = userMsgEls.length - 1; i >= 0; i--) {
+            const firstLine = userMsgEls[i].getAttribute('data-user-msg-first-line');
+            if (firstLine === stickyUserMessage) {
+                userMsgEls[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+        }
+    }
+
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
         if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
         // If LLM is streaming, cancel the current response by clearing partial assistant entry.
@@ -1204,6 +1217,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         {onViewChanges}
         {scrollEl}
         onScrollElChange={(el) => scrollEl = el}
+        onStickyClick={handleStickyClick}
     />
     {#if showStartButton}
         <StartPanel
