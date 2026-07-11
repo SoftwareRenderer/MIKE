@@ -163,9 +163,9 @@ export function gitGutter() {
                 };
                 for (const t of types) {
                     if (t === 'removed') {
-                        indicators.push({ color: colorMap[t], shape: 'triangle', pattern: [0, 0] });
+                        indicators.push({ color: colorMap[t], shape: 'triangle', pattern: [0, 0] as [number, number] });
                     } else {
-                        const pattern = t === 'added' ? [2, 0] : [2, 1];
+                        const pattern: [number, number] = t === 'added' ? [2, 0] : [2, 1];
                         indicators.push({ color: colorMap[t], shape: 'stripe', pattern });
                     }
                 }
