@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/types"
 )
@@ -384,6 +385,61 @@ func TestContainerRunning(t *testing.T) {
 	}
 }
 
+func TestContainerIsRunning_Cache(t *testing.T) {
+	sm := &SandboxManager{
+		active:        make(map[string]string),
+		mountPaths:    make(map[string]string),
+		agents:        make(map[string]*agentConn),
+		livenessCache: make(map[string]time.Time),
+		available:     true,
+	}
+
+	// Not in active map — returns false without podman inspect
+	if sm.ContainerIsRunning("nonexistent") {
+		t.Error("expected ContainerIsRunning to return false for unknown task")
+	}
+
+	// In active map but cache is empty — would call podman inspect (skip, needs real container)
+	// Instead, test the cache directly:
+	sm.active["task-cached"] = "sandbox-task-cached"
+	sm.livenessCache["task-cached"] = time.Now()
+
+	// Should return true from cache (no podman inspect needed)
+	if !sm.ContainerIsRunning("task-cached") {
+		t.Error("expected ContainerIsRunning to return true from cache")
+	}
+
+	// Stop should invalidate the cache
+	_ = sm.Stop("task-cached")
+	if _, stillCached := sm.livenessCache["task-cached"]; stillCached {
+		t.Error("expected liveness cache to be invalidated by Stop")
+	}
+}
+
+func TestContainerIsRunning_CacheExpired(t *testing.T) {
+	sm := &SandboxManager{
+		active:        make(map[string]string),
+		mountPaths:    make(map[string]string),
+		agents:        make(map[string]*agentConn),
+		livenessCache: make(map[string]time.Time),
+		available:     true,
+	}
+
+	sm.active["task-expired"] = "sandbox-task-expired"
+	// Set cache entry to expired (before livenessTTL)
+	sm.livenessCache["task-expired"] = time.Now().Add(-10 * time.Minute)
+
+	// Cache is expired — would call podman inspect.
+	// Since container doesn't actually exist, it returns false.
+	if sm.ContainerIsRunning("task-expired") {
+		t.Error("expected ContainerIsRunning to return false for expired cache with nonexistent container")
+	}
+	// Cache should be cleared after a failed check
+	if _, stillCached := sm.livenessCache["task-expired"]; stillCached {
+		t.Error("expected liveness cache to be cleared after failed check")
+	}
+}
+
 func TestStopProjectContainers(t *testing.T) {
 	sm := &SandboxManager{
 		active:     make(map[string]string),
@@ -691,6 +747,198 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	}
 	if output != "hello\n" {
 		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestExecProject_FullConfig(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	projectID := "test-execproj-fullcfg"
+	projectName := "test-execproj"
+
+	// Custom mount to verify full config is passed through
+	mountDir := filepath.Join(dir, "custom-mount")
+	os.MkdirAll(mountDir, 0755)
+	sandboxMounts := []types.SandboxMount{
+		{HostPath: mountDir, ContainerPath: "/mnt/custom", Mode: "rw"},
+	}
+	sandboxEnvs := []types.SandboxEnv{
+		{Key: "TEST_SANDBOX_VAR", Value: "hello"},
+	}
+
+	// ExecProject should create the container with full config
+	output, err := sm.ExecProject(projectID, dir, projectName, "echo $TEST_SANDBOX_VAR", "", false, 512, nil, "", "", sandboxMounts, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("ExecProject: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop("proj:" + projectID)
+	})
+
+	// Verify the env var was set (full config was used)
+	if !strings.Contains(output, "hello") {
+		t.Fatalf("expected env var TEST_SANDBOX_VAR=hello in output, got: %q", output)
+	}
+
+	// Verify the custom mount is accessible
+	output2, err := sm.ExecProject(projectID, dir, projectName, "ls /mnt/custom", "", false, 512, nil, "", "", sandboxMounts, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("ExecProject second call: %v", err)
+	}
+	t.Logf("custom mount listing: %s", output2)
+}
+
+func TestExecProjectWithInput_FullConfig(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	projectID := "test-execproj-input-fullcfg"
+	projectName := "test-execproj-input"
+
+	sandboxEnvs := []types.SandboxEnv{
+		{Key: "INPUT_TEST_VAR", Value: "works"},
+	}
+
+	// ExecProjectWithInput should create the container with full config
+	output, err := sm.ExecProjectWithInput(projectID, dir, projectName, "cat && echo $INPUT_TEST_VAR", "", []byte("stdin-data\n"), false, 256, nil, "", "", nil, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("ExecProjectWithInput: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop("proj:" + projectID)
+	})
+
+	// Verify both stdin data and env var are present
+	if !strings.Contains(output, "stdin-data") {
+		t.Fatalf("expected stdin data in output, got: %q", output)
+	}
+	if !strings.Contains(output, "works") {
+		t.Fatalf("expected env var INPUT_TEST_VAR=works in output, got: %q", output)
+	}
+}
+
+func TestExecTask_FullConfig(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-exectask-fullcfg"
+	projectName := "test-exectask"
+
+	sandboxEnvs := []types.SandboxEnv{
+		{Key: "TASK_TEST_VAR", Value: "task-value"},
+	}
+
+	// ExecTask should create the container with full config
+	output, err := sm.ExecTask(taskID, dir, projectName, "", "echo $TASK_TEST_VAR", false, 128, nil, "", "", nil, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("ExecTask: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	if !strings.Contains(output, "task-value") {
+		t.Fatalf("expected env var TASK_TEST_VAR=task-value in output, got: %q", output)
+	}
+}
+
+func TestExecTaskWithInput_FullConfig(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-exectask-input-fullcfg"
+	projectName := "test-exectask-input"
+
+	sandboxEnvs := []types.SandboxEnv{
+		{Key: "TASK_INPUT_VAR", Value: "input-value"},
+	}
+
+	output, err := sm.ExecTaskWithInput(taskID, dir, projectName, "", []byte("task-input\n"), "cat && echo $TASK_INPUT_VAR", false, 128, nil, "", "", nil, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("ExecTaskWithInput: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	if !strings.Contains(output, "task-input") {
+		t.Fatalf("expected stdin data in output, got: %q", output)
+	}
+	if !strings.Contains(output, "input-value") {
+		t.Fatalf("expected env var in output, got: %q", output)
+	}
+}
+
+func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	projectID := "test-recreate-proj"
+	projectName := "test-recreate"
+
+	sandboxEnvs := []types.SandboxEnv{
+		{Key: "RECREATE_VAR", Value: "v1"},
+	}
+
+	// First call creates the container
+	_, err := sm.ExecProject(projectID, dir, projectName, "echo ok", "", false, 0, nil, "", "", nil, sandboxEnvs)
+	if err != nil {
+		t.Fatalf("first ExecProject: %v", err)
+	}
+
+	// Stop the container
+	_ = sm.Stop("proj:" + projectID)
+
+	// Second call should recreate it with new config
+	sandboxEnvs2 := []types.SandboxEnv{
+		{Key: "RECREATE_VAR", Value: "v2"},
+	}
+	output, err := sm.ExecProject(projectID, dir, projectName, "echo $RECREATE_VAR", "", false, 0, nil, "", "", nil, sandboxEnvs2)
+	if err != nil {
+		t.Fatalf("second ExecProject (recreate): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop("proj:" + projectID)
+	})
+
+	if !strings.Contains(output, "v2") {
+		t.Fatalf("expected recreated container to have new env var v2, got: %q", output)
 	}
 }
 

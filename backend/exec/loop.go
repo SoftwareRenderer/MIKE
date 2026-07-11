@@ -303,9 +303,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		// Mount agent config dir if any coding agent is configured.
 		piAgentDir := te.configStore.GetAgentConfigDir()
-		// Reuse existing container (lazy-start). Create only if none exists.
-		hasExistingContainer := te.sandboxMgr.ContainerRunning(task.ID)
-		if !hasExistingContainer {
+		// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
+		// ContainerIsRunning checks both the active map and podman state (returns false if not tracked).
+		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
+			// Container doesn't exist or is not running — create (or recreate) it
 			var assignedPorts []types.AssignedPort
 			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs)
 			if createErr != nil {

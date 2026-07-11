@@ -35,6 +35,9 @@ const (
 	SkillsMount = "/mnt/skills"
 	// KeepAliveTimeout is how long to wait for container cleanup.
 	KeepAliveTimeout = 30 * time.Second
+	// livenessTTL is how long to cache the result of a container liveness check.
+	// Avoids expensive podman inspect calls on every FS operation.
+	livenessTTL = 5 * time.Minute
 )
 
 // agentConn holds the pipes to a running agent process.
@@ -46,21 +49,23 @@ type agentConn struct {
 
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
-	mu         sync.Mutex
-	active     map[string]string    // taskID -> containerName
-	mountPaths map[string]string    // taskID -> mount path inside container
-	agents     map[string]*agentConn // taskID -> agent pipes + process
-	clients    map[string]*sandbox.Client // taskID -> agent client (cached)
-	available  bool
+	mu            sync.Mutex
+	active        map[string]string    // taskID -> containerName
+	mountPaths    map[string]string    // taskID -> mount path inside container
+	agents        map[string]*agentConn // taskID -> agent pipes + process
+	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
+	livenessCache map[string]time.Time // taskID -> last time running was confirmed
+	available     bool
 }
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
 func NewSandboxManager() *SandboxManager {
 	sm := &SandboxManager{
-		active:     make(map[string]string),
-		mountPaths: make(map[string]string),
-		agents:     make(map[string]*agentConn),
-		clients:    make(map[string]*sandbox.Client),
+		active:        make(map[string]string),
+		mountPaths:    make(map[string]string),
+		agents:        make(map[string]*agentConn),
+		clients:       make(map[string]*sandbox.Client),
+		livenessCache: make(map[string]time.Time),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -541,9 +546,11 @@ func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, 
 // ExecProject runs a command inside the project's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for project-level filesystem operations (read, write, search, etc.).
-func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, command string, forwardPorts []types.PortForward) (string, error) {
+// Uses full project sandbox config: baseImage, networkIsolation, memoryLimit,
+// forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs.
+func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, command, baseImage string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (string, error) {
 	taskID := "proj:" + projectID
-	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, forwardPorts); err != nil {
+	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
 		return "", err
 	}
 	return sm.Exec(taskID, command, nil)
@@ -551,24 +558,12 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 
 // ensureProjectContainer ensures the project-level sandbox container exists and is running.
 // Creates it if missing, or recreates it if stopped/crashed.
-func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID string, forwardPorts []types.PortForward) error {
-	sm.mu.Lock()
-	containerName, exists := sm.active[taskID]
-	sm.mu.Unlock()
-	if !exists {
-		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", "", nil, nil); err != nil {
+// Uses ContainerIsRunning which has a TTL cache to avoid repeated podman inspect calls.
+func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID, baseImage string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) error {
+	if !sm.ContainerIsRunning(taskID) {
+		_ = sm.Stop(taskID) // clean up stale entry if any
+		if err, _ := sm.Create(taskID, projectPath, baseImage, projectName, "", projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
-		}
-		return nil
-	}
-	// Container exists in registry — check if it's actually running
-	out, err := sm.podmanExec("inspect", "-f", "{{.State.Running}}", containerName)
-	if err != nil || strings.TrimSpace(string(out)) != "true" {
-		// Container is stopped or crashed — recreate it
-		log.Printf("[sandbox] project=%s container %s not running, recreating", projectID, containerName)
-		_ = sm.Stop(taskID)
-		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", "", nil, nil); err != nil {
-			return fmt.Errorf("recreate sandbox container: %w", err)
 		}
 	}
 	return nil
@@ -576,9 +571,9 @@ func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectNam
 
 // ExecProjectWithInput runs a command inside the project's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectName, command string, stdin []byte, forwardPorts []types.PortForward) (string, error) {
+func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectName, command, baseImage string, stdin []byte, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (string, error) {
 	taskID := "proj:" + projectID
-	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, forwardPorts); err != nil {
+	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
 		return "", err
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
@@ -587,12 +582,12 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectNa
 // ExecTask runs a command inside a task's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for task-level filesystem operations (read, write, etc.) in the diff view editor.
-func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPath, command string) (string, error) {
+func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPath, command string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", "", nil, nil); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -601,12 +596,12 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPat
 
 // ExecTaskWithInput runs a command inside a task's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, projectPath string, stdin []byte, command string) (string, error) {
+func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, projectPath string, stdin []byte, command string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", false, 0, nil, "", "", nil, nil); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -624,11 +619,24 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		if !createIfMissing || worktreePath == "" {
 			return nil, nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
-		// Create container on demand (for project terminals)
+		// Create container on demand
 		var err error
 		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
+		}
+		sm.mu.Lock()
+		containerName = sm.active[taskID]
+		mountPath = sm.mountPaths[taskID]
+		sm.mu.Unlock()
+	} else if !sm.ContainerIsRunning(taskID) {
+		// Container exists in map but is not running — recreate it
+		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
+		_ = sm.Stop(taskID)
+		var err error
+		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("recreate sandbox container: %w", err)
 		}
 		sm.mu.Lock()
 		containerName = sm.active[taskID]
@@ -781,6 +789,7 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	if ac != nil {
 		delete(sm.agents, taskID)
 	}
+	delete(sm.livenessCache, taskID)
 	sm.mu.Unlock()
 
 	// Close agent client
@@ -817,6 +826,41 @@ func (sm *SandboxManager) ContainerRunning(taskID string) bool {
 	_, ok := sm.active[taskID]
 	sm.mu.Unlock()
 	return ok
+}
+
+// ContainerIsRunning returns true if the container is tracked in the active map
+// AND is actually running in podman (verified via podman inspect).
+// Results are cached for livenessTTL (5 min) to avoid expensive podman inspect
+// calls on every FS operation. Returns false if the container is not tracked
+// or is stopped/crashed.
+func (sm *SandboxManager) ContainerIsRunning(taskID string) bool {
+	sm.mu.Lock()
+	containerName, ok := sm.active[taskID]
+	// Check TTL cache: if we confirmed running recently, skip podman inspect.
+	if ok {
+		lastCheck := sm.livenessCache[taskID]
+		if time.Since(lastCheck) < livenessTTL {
+			sm.mu.Unlock()
+			return true
+		}
+	}
+	sm.mu.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	out, err := sm.podmanExec("inspect", "-f", "{{.State.Running}}", containerName)
+	running := err == nil && strings.TrimSpace(string(out)) == "true"
+
+	sm.mu.Lock()
+	if running {
+		sm.livenessCache[taskID] = time.Now()
+	} else {
+		delete(sm.livenessCache, taskID)
+	}
+	sm.mu.Unlock()
+	return running
 }
 
 // GetContainerPorts queries podman for the live port mappings of a container.
