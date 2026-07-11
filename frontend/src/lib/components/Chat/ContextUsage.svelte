@@ -10,8 +10,9 @@
     let { used = 0, limit = 0, onSummarize, onSummarizeCancel, isSummarizing = false }: Props = $props();
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
-    let isWarning = $derived(percentage >= 60 && percentage < 80);
-    let isDanger = $derived(percentage >= 80);
+    let isWarning = $derived(percentage > 70 && percentage <= 80);
+    let isOrange = $derived(percentage > 80 && percentage < 90);
+    let isDanger = $derived(percentage >= 90);
     let show = $derived(used > 0);
 
     function formatTokens(n: number): string {
@@ -22,6 +23,7 @@
 
     function getBarColor(): string {
         if (isDanger) return 'var(--color-status-red)';
+        if (isOrange) return '#DB5400';
         if (isWarning) return 'var(--color-status-amber, #f59e0b)';
         return 'var(--color-status-green, #3fb950)';
     }
@@ -52,7 +54,7 @@
                 <div class="usage-fill" style="width:{percentage}%;background:{getBarColor()}"></div>
             </div>
         {/if}
-        <span class="usage-text" class:warning={isWarning} class:danger={isDanger}>
+        <span class="usage-text" class:warning={isWarning || isOrange} class:danger={isDanger}>
             {#if isSummarizing}
                 Summarizing...
                 <span class="cancel-icon" aria-hidden="true">✕</span>
@@ -108,7 +110,7 @@
         transition: color 0.3s ease;
     }
     .usage-text.warning {
-        color: var(--color-status-amber, #f59e0b);
+        color: #DB5400;
     }
     .usage-text.danger {
         color: var(--color-status-red);
