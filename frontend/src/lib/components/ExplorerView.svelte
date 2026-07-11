@@ -474,7 +474,7 @@
             {/if}
         </div>
         <div class="explorer-header-spacer"></div>
-        <button class="icon-btn git-status-btn" onclick={() => showGitStatus = !showGitStatus} aria-label="View changes" title="View changes">
+        <button class="icon-btn git-status-btn" onclick={() => showGitStatus = !showGitStatus} aria-label="Review Changes" title="Review Changes">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v12"/><circle cx="4" cy="2" r="2" fill="currentColor" stroke="none"/><circle cx="4" cy="13.5" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="13.5" r="2" fill="currentColor" stroke="none"/><path d="M12.038 13.487l-.05-5.519c.015-4.475-.074-5.754-2.897-5.794l-1.449.05"/><path d="M9.164 4.323l-2.5-2.156 2.5-2.156" fill="currentColor" stroke="none"/></svg>
         </button>
         <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
