@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { parseUnifiedDiff, truncatePath } from '$lib/utils/diff-parser';
-    import { getGitStatus, getProjectDiff } from '$lib/api/git';
+    import { parseUnifiedDiff } from '$lib/utils/diff-parser';
+    import { getGitStatus, getProjectDiff, stageProjectFile, commitProject } from '$lib/api/git';
+    import { showCommitDialog, showConfirm, showToast } from '$lib/stores/dialogs';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import DiffViewer from './DiffViewer.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -17,8 +18,6 @@
     interface StatusEntry {
         path: string;
         status: string; // M, A, D, ?, R, U, C
-        staged: boolean;
-        origPath?: string;
     }
 
     let stagedEntries = $state<StatusEntry[]>([]);
@@ -30,6 +29,8 @@
 
     let loading = $state(true);
     let selectedPath = $state('');
+    // HEAD hash at last load — used to detect if repo changed while panel is open
+    let headHash = $state('');
 
     // Resizable sidebar width — persisted to IndexedDB
     const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -98,7 +99,8 @@
         loading = true;
         try {
             // Fetch git status for sidebar
-            const { status } = await getGitStatus(projectId);
+            const { status, head } = await getGitStatus(projectId);
+            headHash = head;
             const staged: StatusEntry[] = [];
             const unstaged: StatusEntry[] = [];
 
@@ -108,26 +110,20 @@
                 const pathPart = line.substring(3).trim();
 
                 const arrowIdx = pathPart.indexOf(' -> ');
-                let filePath: string, origPath: string | undefined;
-                if (arrowIdx >= 0) {
-                    origPath = pathPart.substring(0, arrowIdx);
-                    filePath = pathPart.substring(arrowIdx + 4);
-                } else {
-                    filePath = pathPart;
-                }
+                const filePath = arrowIdx >= 0 ? pathPart.substring(arrowIdx + 4) : pathPart;
 
                 // Index changes (staged)
                 if (indexChar !== ' ' && indexChar !== '?') {
-                    staged.push({ path: filePath, status: indexChar, staged: true, origPath });
+                    staged.push({ path: filePath, status: indexChar });
                 }
                 // Working tree changes (unstaged)
                 if (workChar !== ' ' && workChar !== '?' && workChar !== indexChar) {
                     const existing = staged.find(s => s.path === filePath);
                     if (!existing) {
-                        unstaged.push({ path: filePath, status: workChar, staged: false, origPath });
+                        unstaged.push({ path: filePath, status: workChar });
                     }
                 } else if (workChar === '?' && indexChar === ' ') {
-                    unstaged.push({ path: filePath, status: '?', staged: false });
+                    unstaged.push({ path: filePath, status: '?' });
                 }
             }
 
@@ -189,7 +185,70 @@
         }
     }
 
+    /** Stage or unstage a single file. */
+    async function handleStageFile(path: string, stage: boolean) {
+        try {
+            await stageProjectFile(projectId, path, stage);
+            await loadData();
+        } catch (e) {
+            console.error('Failed to stage/unstage file:', e);
+        }
+    }
 
+    /** Stage all unstaged files. */
+    async function handleStageAll() {
+        try {
+            await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
+            await loadData();
+        } catch (e) {
+            console.error('Failed to stage all:', e);
+        }
+    }
+
+    /** Unstage all staged files. */
+    async function handleUnstageAll() {
+        try {
+            await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
+            await loadData();
+        } catch (e) {
+            console.error('Failed to unstage all:', e);
+        }
+    }
+
+    /** Open the commit dialog, with HEAD staleness check first. */
+    async function openCommitDialog() {
+        // Check if HEAD has changed since we last loaded data
+        if (headHash) {
+            try {
+                const { head: currentHead } = await getGitStatus(projectId);
+                if (currentHead !== headHash) {
+                    const proceed = await showConfirm({
+                        title: 'Repository has changed',
+                        message: 'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
+                        confirmText: 'Refresh and commit',
+                        cancelText: 'Commit anyway',
+                    });
+                    if (proceed) {
+                        await loadData();
+                    }
+                }
+            } catch {
+                // If status check fails, proceed with commit anyway
+            }
+        }
+        const message = await showCommitDialog({
+            message: '',
+            confirmText: 'Commit',
+            cancelText: 'Cancel',
+        });
+        if (!message) return;
+        try {
+            await commitProject(projectId, message.trim());
+            await loadData();
+        } catch (e: any) {
+            showToast(e.message || 'Commit failed', 'error');
+        }
+    }
 
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
@@ -199,6 +258,11 @@
 
     onMount(() => {
         loadData();
+        window.addEventListener('keydown', handleKeydown);
+    });
+
+    onDestroy(() => {
+        window.removeEventListener('keydown', handleKeydown);
     });
 </script>
 
@@ -206,6 +270,15 @@
     <!-- Header -->
     <div class="panel-header">
         <span class="panel-title">Changes</span>
+        {#if stagedEntries.length > 0}
+            <button class="panel-commit-btn" onclick={openCommitDialog} title="Commit staged changes" aria-label="Commit staged changes">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
+                    <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Commit</span>
+            </button>
+        {/if}
         <button class="panel-icon-btn" onclick={loadData} title="Refresh" aria-label="Refresh">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -241,23 +314,37 @@
                             </svg>
                             <span>Staged</span>
                             <span class="changes-section-count">{sortedStagedEntries.length}</span>
+                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} title="Unstage all" role="button" tabindex="0">
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                            </span>
                         </button>
                         {#if !collapsedSections.has('staged-files')}
                         <div class="changes-section-body">
                             {#each sortedStagedEntries as entry}
                                 {@const { folder, name } = splitPath(entry.path)}
-                                <button
-                                    class="changes-file-item"
-                                    class:selected={selectedPath === entry.path}
-                                    onclick={() => selectedPath = entry.path}
-                                    title={entry.path}
-                                >
-                                    <span class="changes-file-basename">{name}</span>
-                                    {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                    <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
-                                        {entry.status}
-                                    </span>
-                                </button>
+                                <div class="changes-file-row">
+                                    <button
+                                        class="changes-file-item"
+                                        class:selected={selectedPath === entry.path}
+                                        onclick={() => selectedPath = entry.path}
+                                        title={entry.path}
+                                    >
+                                        <span class="changes-file-basename">{name}</span>
+                                        {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
+                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
+                                            {entry.status}
+                                        </span>
+                                    </button>
+                                    <button
+                                        class="changes-stage-btn"
+                                        type="button"
+                                        onclick={() => handleStageFile(entry.path, false)}
+                                        title="Unstage {entry.path}"
+                                        aria-label="Unstage {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                </div>
                             {/each}
                         </div>
                         {/if}
@@ -273,23 +360,37 @@
                             </svg>
                             <span>Unstaged</span>
                             <span class="changes-section-count">{sortedUnstagedEntries.length}</span>
+                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} title="Stage all" role="button" tabindex="0">
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                            </span>
                         </button>
                         {#if !collapsedSections.has('unstaged-files')}
                         <div class="changes-section-body">
                             {#each sortedUnstagedEntries as entry}
                                 {@const { folder, name } = splitPath(entry.path)}
-                                <button
-                                    class="changes-file-item"
-                                    class:selected={selectedPath === entry.path}
-                                    onclick={() => selectedPath = entry.path}
-                                    title={entry.path}
-                                >
-                                    <span class="changes-file-basename">{name}</span>
-                                    {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                    <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
-                                        {entry.status === '?' ? '??' : entry.status}
-                                    </span>
-                                </button>
+                                <div class="changes-file-row">
+                                    <button
+                                        class="changes-file-item"
+                                        class:selected={selectedPath === entry.path}
+                                        onclick={() => selectedPath = entry.path}
+                                        title={entry.path}
+                                    >
+                                        <span class="changes-file-basename">{name}</span>
+                                        {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
+                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
+                                            {entry.status === '?' ? '??' : entry.status}
+                                        </span>
+                                    </button>
+                                    <button
+                                        class="changes-stage-btn"
+                                        type="button"
+                                        onclick={() => handleStageFile(entry.path, true)}
+                                        title="Stage {entry.path}"
+                                        aria-label="Stage {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                </div>
                             {/each}
                         </div>
                         {/if}
@@ -314,6 +415,9 @@
                     stagedFiles={sortedStagedFiles}
                     unstagedFiles={sortedUnstagedFiles}
                     selectedPath={selectedPath}
+                    onStageFile={handleStageFile}
+                    onStageAll={handleStageAll}
+                    onUnstageAll={handleUnstageAll}
                 />
             </div>
         </div>
@@ -364,6 +468,25 @@
     .panel-icon-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+
+    /* Commit button in header */
+    .panel-commit-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border: none;
+        background: var(--color-accent);
+        color: white;
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 4px;
+        white-space: nowrap;
+    }
+    .panel-commit-btn:hover {
+        opacity: 0.9;
     }
 
     /* Loading / Empty */
@@ -451,8 +574,37 @@
         font-weight: 500;
         color: var(--color-text-tertiary);
     }
+    .changes-section-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 3px;
+        flex-shrink: 0;
+    }
+    .changes-section-action:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .changes-section-action:focus-visible {
+        outline: 1px solid var(--color-accent);
+        outline-offset: 1px;
+    }
     .changes-section-body {
         padding: 0 4px;
+    }
+
+    /* File row: item + stage button */
+    .changes-file-row {
+        display: flex;
+        align-items: center;
+        gap: 2px;
     }
 
     /* File items */
@@ -460,7 +612,8 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        width: 100%;
+        flex: 1;
+        min-width: 0;
         padding: 3px 6px;
         border: none;
         background: transparent;
@@ -506,6 +659,31 @@
         user-select: none;
     }
 
+    /* Stage/unstage button in sidebar */
+    .changes-stage-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 3px;
+        flex-shrink: 0;
+        opacity: 0;
+        transition: opacity 0.1s ease;
+    }
+    .changes-file-row:hover .changes-stage-btn {
+        opacity: 1;
+    }
+    .changes-stage-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+
     /* Diff viewer area */
     .changes-diff {
         flex: 1;
@@ -529,6 +707,15 @@
         }
         .panel-body {
             flex-direction: column;
+        }
+        /* Larger touch targets on mobile */
+        .panel-icon-btn {
+            width: 44px;
+            height: 44px;
+        }
+        .panel-commit-btn {
+            padding: 8px 14px;
+            min-height: 44px;
         }
     }
 </style>

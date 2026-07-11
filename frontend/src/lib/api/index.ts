@@ -103,6 +103,9 @@ export {
     getGitBranches,
     checkoutBranch,
     getGitStatus,
+    getProjectDiff,
+    stageProjectFile,
+    commitProject,
 } from './git';
 
 // -- Stream --

@@ -325,12 +325,9 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 			c = exec.Command("git", "-C", project.Path, "diff", base+".."+head)
 		}
 	} else {
-		// Legacy: working tree vs ref
-		ref := r.URL.Query().Get("ref")
-		if ref == "" {
-			ref = "HEAD"
-		}
-		c = exec.Command("git", "-C", project.Path, "diff", ref)
+		// Unstaged changes: working tree vs index (git diff with no args)
+		// This excludes staged changes, which are shown separately via cached=1
+		c = exec.Command("git", "-C", project.Path, "diff")
 	}
 
 	out, err := c.CombinedOutput()
@@ -347,7 +344,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	w.Write(out)
 }
 
-// HandleStatus returns working tree status.
+// HandleStatus returns working tree status and current HEAD hash.
 func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -362,7 +359,12 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean := len(strings.TrimSpace(string(out))) == 0
-	httputil.JSONResponse(w, http.StatusOK, map[string]any{"clean": clean, "status": string(out)})
+	// Fetch HEAD hash for staleness detection
+	var headHash string
+	if headOut, err := exec.Command("git", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
+		headHash = strings.TrimSpace(string(headOut))
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"clean": clean, "status": string(out), "head": headHash})
 }
 
 // HandleProjectDiffFile returns the diff for a single file in the project.
@@ -1086,4 +1088,87 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": map[bool]string{true: "staged", false: "unstaged"}[req.Stage]})
+}
+
+// HandleProjectStageFile stages or unstages a single file in the project repo.
+// POST /api/projects/{projectID}/git/stage
+// Body: {"path": "file.c", "stage": true}
+func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	project, err := h.store.GetProject(projectID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	var req struct {
+		Path  string `json:"path"`
+		Stage bool   `json:"stage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path required")
+		return
+	}
+	// Acquire per-project mutex to serialize index-modifying operations.
+	if h.getProjectMutex != nil {
+		mu := h.getProjectMutex(projectID)
+		mu.Lock()
+		defer mu.Unlock()
+	}
+	if req.Stage {
+		cmd := exec.Command("git", "-C", project.Path, "add", req.Path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", string(out)))
+			return
+		}
+	} else {
+		cmd := exec.Command("git", "-C", project.Path, "reset", "HEAD", "--", req.Path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git reset failed: %s", string(out)))
+			return
+		}
+		// Restore deleted file from HEAD if it no longer exists on disk
+		fullPath := filepath.Join(project.Path, req.Path)
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			exec.Command("git", "-C", project.Path, "checkout", "HEAD", "--", req.Path).CombinedOutput()
+		}
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": map[bool]string{true: "staged", false: "unstaged"}[req.Stage]})
+}
+
+// HandleProjectCommit commits staged changes in the project repo.
+// POST /api/projects/{projectID}/git/commit
+// Body: {"message": "commit message"}
+func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	project, err := h.store.GetProject(projectID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "message required")
+		return
+	}
+	// Acquire per-project mutex to serialize project-level git operations.
+	if h.getProjectMutex != nil {
+		mu := h.getProjectMutex(projectID)
+		mu.Lock()
+		defer mu.Unlock()
+	}
+	// Check if there are staged changes
+	cmd := exec.Command("git", "-C", project.Path, "diff", "--cached", "--quiet")
+	if err := cmd.Run(); err == nil {
+		// Exit code 0 means no staged changes
+		httputil.JSONError(w, http.StatusBadRequest, "no staged changes to commit")
+		return
+	}
+	cmd = exec.Command("git", "-C", project.Path, "commit", "-m", req.Message)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", string(out)))
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "committed"})
 }

@@ -543,30 +543,43 @@ func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, baseImage, 
 // This is for project-level filesystem operations (read, write, search, etc.).
 func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, command string, forwardPorts []types.PortForward) (string, error) {
 	taskID := "proj:" + projectID
-	// Check if container already exists
+	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, forwardPorts); err != nil {
+		return "", err
+	}
+	return sm.Exec(taskID, command, nil)
+}
+
+// ensureProjectContainer ensures the project-level sandbox container exists and is running.
+// Creates it if missing, or recreates it if stopped/crashed.
+func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID string, forwardPorts []types.PortForward) error {
 	sm.mu.Lock()
-	_, exists := sm.active[taskID]
+	containerName, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
 		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", "", nil, nil); err != nil {
-			return "", fmt.Errorf("create sandbox container: %w", err)
+			return fmt.Errorf("create sandbox container: %w", err)
+		}
+		return nil
+	}
+	// Container exists in registry — check if it's actually running
+	out, err := sm.podmanExec("inspect", "-f", "{{.State.Running}}", containerName)
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		// Container is stopped or crashed — recreate it
+		log.Printf("[sandbox] project=%s container %s not running, recreating", projectID, containerName)
+		_ = sm.Stop(taskID)
+		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", "", nil, nil); err != nil {
+			return fmt.Errorf("recreate sandbox container: %w", err)
 		}
 	}
-	return sm.Exec(taskID, command, nil)
+	return nil
 }
 
 // ExecProjectWithInput runs a command inside the project's sandbox container
 // with stdin input, creating the container on demand if needed.
 func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectName, command string, stdin []byte, forwardPorts []types.PortForward) (string, error) {
 	taskID := "proj:" + projectID
-	// Check if container already exists
-	sm.mu.Lock()
-	_, exists := sm.active[taskID]
-	sm.mu.Unlock()
-	if !exists {
-		if err, _ := sm.Create(taskID, projectPath, BaseImage, projectName, "", projectID, false, 0, forwardPorts, "", "", nil, nil); err != nil {
-			return "", fmt.Errorf("create sandbox container: %w", err)
-		}
+	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, forwardPorts); err != nil {
+		return "", err
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
 }

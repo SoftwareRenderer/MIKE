@@ -49,7 +49,7 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
 
 /** Fetch git status (porcelain format) for a project.
  * Returns { clean: boolean, status: string } where status is the raw `git status --porcelain` output. */
-export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string }> {
+export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
     return res.json();
@@ -77,6 +77,30 @@ export async function getProjectDiff(projectId: string, options?: { base?: strin
     const res = await apiFetch(url);
     if (!res.ok) throw await apiError(res, 'Failed to fetch project diff');
     return res.text();
+}
+
+/** Stage or unstage a single file in the project repo. */
+export async function stageProjectFile(projectId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ path, stage }),
+    });
+    if (!res.ok) throw await apiError(res, stage ? 'Failed to stage file' : 'Failed to unstage file');
+    return res.json();
+}
+
+/** Commit staged changes in the project repo. */
+export async function commitProject(projectId: string, message: string): Promise<{ status: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ message }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to commit');
+    return res.json();
 }
 
 // -- Task Git endpoints --
