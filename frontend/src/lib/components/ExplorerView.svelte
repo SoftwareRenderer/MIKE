@@ -9,6 +9,7 @@
     import BranchEditor from './BranchEditor.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
+    import GitStatusOverlay from './GitStatusOverlay.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
 
@@ -28,7 +29,6 @@
     let originTip = $state(''); // commit hash where origin/<branch> points
     let branches = $state<string[]>([]);
     let selectedBranch = $state(currentBranch);
-    let currentBranchRef = $derived(currentBranch);
     let loadingCommits = $state(true);
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
@@ -39,6 +39,10 @@
     let diffUnified = $state('');
     let diffLoading = $state(false);
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
+
+    // Git Status overlay state
+    let showGitStatus = $state(false);
+    let gitStatusTab = $state<'files' | 'diff'>('files');
 
     // Sync selectedBranch when parent updates currentBranch via WebSocket
     $effect(() => {
@@ -124,7 +128,6 @@
         diffFullscreen = !diffFullscreen;
     }
     let currentFolderPath = $state(initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath));
-    let projectPathRef = $derived(projectPath);
 
     // Symbol outline state
     let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
@@ -228,6 +231,7 @@
 
     function handleFileSelected(path: string) {
         if (!isPathSafe(path)) return;
+        showGitStatus = false;
         closeCommitDiff();
         selectedFilePath = path;
         onUpdateFile(path);
@@ -312,16 +316,22 @@
         }
     });
 
-    // Handle Escape key — only close if editor is not focused
+    // Handle Escape key — close overlays in order: git status → commit diff → branch view
     function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape' && !editorFocused) {
-            onClose();
+        if (e.key === 'Escape') {
+            if (showGitStatus) {
+                showGitStatus = false;
+            } else if (diffCommit) {
+                closeCommitDiff();
+            } else if (!editorFocused) {
+                onClose();
+            }
         }
     }
 
     // Resize handlers
     function handleLeftDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        const body = document.querySelector('.branch-body');
+        const body = document.querySelector('.explorer-body');
         if (!body) return;
         leftDragStartX = startX;
         leftDragBodyLeft = body.getBoundingClientRect().left;
@@ -329,7 +339,7 @@
     let leftDragStartX = 0;
     let leftDragBodyLeft = 0;
     function handleLeftDragMove(pointerX: number) {
-        const body = document.querySelector('.branch-body');
+        const body = document.querySelector('.explorer-body');
         if (!body) return;
         const posX = pointerX - body.getBoundingClientRect().left;
         leftWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, posX));
@@ -337,7 +347,7 @@
     function handleLeftDragEnd() { persistExplorerLayout(); }
 
     function handleRightDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        const body = document.querySelector('.branch-body');
+        const body = document.querySelector('.explorer-body');
         if (!body) return;
         rightDragStartX = startX;
         rightDragBodyRight = body.getBoundingClientRect().right;
@@ -345,7 +355,7 @@
     let rightDragStartX = 0;
     let rightDragBodyRight = 0;
     function handleRightDragMove(pointerX: number) {
-        const body = document.querySelector('.branch-body');
+        const body = document.querySelector('.explorer-body');
         if (!body) return;
         const posX = body.getBoundingClientRect().right - pointerX;
         rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, posX));
@@ -353,7 +363,7 @@
     function handleRightDragEnd() { persistExplorerLayout(); }
 
     function handleSplitDragStart(_e: MouseEvent | TouchEvent, startY: number) {
-        const container = document.querySelector('.branch-split-container');
+        const container = document.querySelector('.explorer-split-container');
         if (!container) return;
         splitDragStartY = startY;
         splitDragContainerTop = container.getBoundingClientRect().top;
@@ -363,7 +373,7 @@
     let splitDragContainerTop = 0;
     let splitDragContainerHeight = 0;
     function handleSplitDragMove(pointerY: number) {
-        const container = document.querySelector('.branch-split-container');
+        const container = document.querySelector('.explorer-split-container');
         if (!container) return;
         const rect = container.getBoundingClientRect();
         const posY = pointerY - rect.top;
@@ -399,23 +409,23 @@
     });
 </script>
 
-<div class="branch-view" class:fullscreen={(editorFullscreen && selectedFilePath) || (diffFullscreen && diffCommit)} role="dialog" aria-label="Branch view">
+<div class="explorer-view" class:fullscreen={(editorFullscreen && selectedFilePath) || (diffFullscreen && diffCommit)} role="dialog" aria-label="Explorer view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
-    <div class="branch-header">
+    <div class="explorer-header">
         <button class="close-btn" onclick={() => { editorFullscreen = false; diffFullscreen = false; onClose(); }} aria-label="Close branch view" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
         </button>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="branch-view-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="explorer-view-icon">
             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
         <span class="project-path">{toHomeRelative(projectPath)}</span>
 
         <!-- Branch selector dropdown -->
-        <div class="branch-selector" class:open={showDropdown} bind:this={dropdownEl}>
+        <div class="explorer-selector" class:open={showDropdown} bind:this={dropdownEl}>
             <button
-                class="branch-dropdown-btn"
+                class="explorer-dropdown-btn"
                 onclick={toggleDropdown}
                 title="Switch branch"
                 disabled={checkoutLoading}
@@ -427,20 +437,20 @@
                     <line x1="6" y1="3.5" x2="6" y2="2"/>
                     <line x1="10" y1="12.5" x2="10" y2="14"/>
                 </svg>
-                <span class="branch-name">{selectedBranch}</span>
+                <span class="explorer-name">{selectedBranch}</span>
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="2,3.5 5,6.5 8,3.5"/>
                 </svg>
             </button>
 
             {#if showDropdown}
-                <div class="branch-dropdown-list" role="listbox">
+                <div class="explorer-dropdown-list" role="listbox">
                     {#if loadingBranches}
-                        <div class="branch-dropdown-item loading">Loading...</div>
+                        <div class="explorer-dropdown-item loading">Loading...</div>
                     {:else}
                         {#each branches as branch}
                             <button
-                                class="branch-dropdown-item"
+                                class="explorer-dropdown-item"
                                 class:active={branch === selectedBranch}
                                 onclick={() => handleBranchSelect(branch)}
                                 role="option"
@@ -451,19 +461,22 @@
                                         <polyline points="1.5,5 4,7.5 8.5,2.5"/>
                                     </svg>
                                 {:else}
-                                    <span class="branch-check-empty"></span>
+                                    <span class="explorer-check-empty"></span>
                                 {/if}
                                 <span>{branch}</span>
                             </button>
                         {/each}
                         {#if branches.length === 0}
-                            <div class="branch-dropdown-item empty">No branches</div>
+                            <div class="explorer-dropdown-item empty">No branches</div>
                         {/if}
                     {/if}
                 </div>
             {/if}
         </div>
-        <div class="branch-header-spacer"></div>
+        <div class="explorer-header-spacer"></div>
+        <button class="icon-btn git-status-btn" onclick={() => showGitStatus = !showGitStatus} aria-label="View changes" title="View changes">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v12"/><circle cx="4" cy="2" r="2" fill="currentColor" stroke="none"/><circle cx="4" cy="13.5" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="13.5" r="2" fill="currentColor" stroke="none"/><path d="M12.038 13.487l-.05-5.519c.015-4.475-.074-5.754-2.897-5.794l-1.449.05"/><path d="M9.164 4.323l-2.5-2.156 2.5-2.156" fill="currentColor" stroke="none"/></svg>
+        </button>
         <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
@@ -472,8 +485,30 @@
         </button>
     </div>
 
+    <!-- Mobile Tab Bar: Git Status -->
+    {#if isMobile && showGitStatus}
+        <div class="mobile-tab-bar">
+            <button
+                class="tab-btn {gitStatusTab === 'files' ? 'active' : ''}"
+                onclick={() => gitStatusTab = 'files'}
+                title="File list"
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h4l2 2v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2h4l2 2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                Changes
+            </button>
+            <button
+                class="tab-btn {gitStatusTab === 'diff' ? 'active' : ''}"
+                onclick={() => gitStatusTab = 'diff'}
+                title="Diff view"
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                Diff
+            </button>
+        </div>
+    {/if}
+
     <!-- Mobile Tab Bar -->
-    {#if isMobile && !diffCommit && !editorFullscreen && !diffFullscreen}
+    {#if isMobile && !showGitStatus && !diffCommit && !editorFullscreen && !diffFullscreen}
         <div class="mobile-tab-bar">
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
@@ -503,12 +538,12 @@
     {/if}
 
     <!-- 3-column layout -->
-    <div class="branch-body">
+    <div class="explorer-body">
         <!-- Left column: file browser + git graph -->
-        <div class="branch-left-column" class:hidden={isMobile && (activeTab !== 'files' || diffCommit)} style="width: {leftWidth}px">
-            <div class="branch-split-container">
+        <div class="explorer-left-column" class:hidden={isMobile && (activeTab !== 'files' || diffCommit || showGitStatus)} style="width: {leftWidth}px">
+            <div class="explorer-split-container">
                 <!-- Top: File browser -->
-                <div class="branch-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
+                <div class="explorer-file-browser" class:mobile={isMobile} style:height={isMobile ? undefined : splitRatio * 100 + '%'}>
                     <BranchFileBrowser
                         projectId={projectId}
                         projectPath={projectPath}
@@ -533,7 +568,7 @@
                 {/if}
 
                 <!-- Bottom: Git graph -->
-                <div class="branch-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
+                <div class="explorer-git-graph" class:mobile={isMobile} style:height={isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
                     <BranchGitGraph
                         projectId={projectId}
                         currentBranch={selectedBranch}
@@ -557,9 +592,20 @@
             onDragEnd={handleLeftDragEnd}
         />
 
-        {#if diffCommit}
+        {#if showGitStatus}
+            <!-- Git Status overlay (replaces editor + symbols columns) -->
+            <div class="explorer-git-status-overlay">
+                <GitStatusOverlay
+                    projectId={projectId}
+                    projectPath={projectPath}
+                    onClose={() => showGitStatus = false}
+                    activeTab={gitStatusTab}
+                    isMobile={isMobile}
+                />
+            </div>
+        {:else if diffCommit}
             <!-- Commit diff overlay (replaces editor + symbols columns) -->
-            <div class="branch-diff-overlay">
+            <div class="explorer-diff-overlay">
                 <CommitDiffOverlay
                     commit={diffCommit}
                     diff={diffUnified}
@@ -577,7 +623,7 @@
             </div>
         {:else}
             <!-- Center column: File editor -->
-            <div class="branch-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
+            <div class="explorer-center-column" class:hidden={isMobile && activeTab !== 'editor'}>
                 <BranchEditor
                     projectId={projectId}
                     filePath={selectedFilePath}
@@ -602,7 +648,7 @@
             {/if}
 
             <!-- Right column: Symbol outline (hidden when no symbols, always visible on mobile via tab) -->
-            <div class="branch-right-column" class:hidden={(symbols.length === 0 && !isMobile) || (isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
+            <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobile) || (isMobile && activeTab !== 'symbols')} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
                     onSymbolClick={(line: number) => {
@@ -615,7 +661,7 @@
 </div>
 
 <style>
-    .branch-view {
+    .explorer-view {
         display: flex;
         flex-direction: column;
         height: 100%;
@@ -623,7 +669,7 @@
         overflow: hidden;
     }
 
-    .branch-header {
+    .explorer-header {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -634,7 +680,7 @@
     }
 
     /* Fullscreen mode: hide header and tab bar, expand to cover sidebar */
-    .branch-view.fullscreen {
+    .explorer-view.fullscreen {
         position: fixed;
         top: 0;
         left: 0;
@@ -644,20 +690,20 @@
         margin: 0;
         border-radius: 0;
     }
-    .branch-view.fullscreen .branch-header {
+    .explorer-view.fullscreen .explorer-header {
         display: none;
     }
-    .branch-view.fullscreen .mobile-tab-bar {
+    .explorer-view.fullscreen .mobile-tab-bar {
         display: none !important;
     }
-    .branch-view.fullscreen .branch-left-column {
+    .explorer-view.fullscreen .explorer-left-column {
         display: none !important;
     }
-    .branch-view.fullscreen .branch-body {
+    .explorer-view.fullscreen .explorer-body {
         height: 100%;
     }
 
-    .branch-view-icon {
+    .explorer-view-icon {
         color: var(--color-text-secondary);
         flex-shrink: 0;
     }
@@ -669,7 +715,7 @@
         align-self: center;
     }
 
-    .branch-header-spacer {
+    .explorer-header-spacer {
         flex: 1;
     }
 
@@ -695,12 +741,28 @@
         color: white;
     }
 
+    .git-status-btn {
+        padding: 6px 12px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        cursor: pointer;
+    }
+    .git-status-btn:hover {
+        background: var(--color-accent);
+        color: white;
+    }
+
     /* Branch selector */
-    .branch-selector {
+    .explorer-selector {
         position: relative;
     }
 
-    .branch-dropdown-btn {
+    .explorer-dropdown-btn {
         display: flex;
         align-items: center;
         gap: 4px;
@@ -713,24 +775,24 @@
         cursor: pointer;
         border: none;
     }
-    .branch-dropdown-btn:hover {
+    .explorer-dropdown-btn:hover {
         background: var(--color-surface-4);
         color: var(--color-text-primary);
         opacity: 1;
     }
-    .branch-dropdown-btn:disabled {
+    .explorer-dropdown-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
 
-    .branch-name {
+    .explorer-name {
         max-width: 120px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    .branch-dropdown-list {
+    .explorer-dropdown-list {
         position: absolute;
         top: 100%;
         right: 0;
@@ -745,7 +807,7 @@
         margin-top: 2px;
     }
 
-    .branch-dropdown-item {
+    .explorer-dropdown-item {
         display: flex;
         align-items: center;
         gap: 6px;
@@ -758,30 +820,30 @@
         text-align: left;
         cursor: pointer;
     }
-    .branch-dropdown-item:hover {
+    .explorer-dropdown-item:hover {
         background: var(--color-surface-3);
         opacity: 1;
     }
-    .branch-dropdown-item.active {
+    .explorer-dropdown-item.active {
         color: var(--color-status-purple);
     }
-    .branch-dropdown-item.loading,
-    .branch-dropdown-item.empty {
+    .explorer-dropdown-item.loading,
+    .explorer-dropdown-item.empty {
         color: var(--color-text-tertiary);
         cursor: default;
     }
-    .branch-check-empty {
+    .explorer-check-empty {
         display: inline-block;
         width: 10px;
     }
 
-    .branch-body {
+    .explorer-body {
         display: flex;
         flex: 1;
         overflow: hidden;
     }
 
-    .branch-left-column {
+    .explorer-left-column {
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
@@ -790,7 +852,7 @@
         overflow: hidden;
     }
 
-    .branch-split-container {
+    .explorer-split-container {
         flex: 1;
         display: flex;
         flex-direction: column;
@@ -798,19 +860,19 @@
         position: relative;
     }
 
-    .branch-file-browser {
+    .explorer-file-browser {
         overflow: hidden;
         display: flex;
         flex-direction: column;
     }
 
-    .branch-git-graph {
+    .explorer-git-graph {
         overflow: hidden;
         display: flex;
         flex-direction: column;
     }
 
-    .branch-center-column {
+    .explorer-center-column {
         flex: 1;
         min-width: 0;
         display: flex;
@@ -818,7 +880,7 @@
         overflow: hidden;
     }
 
-    .branch-right-column {
+    .explorer-right-column {
         flex-shrink: 0;
         border-left: 1px solid var(--color-border);
         background: var(--color-surface-1);
@@ -826,15 +888,25 @@
         display: flex;
         flex-direction: column;
     }
-    .branch-right-column.hidden {
+    .explorer-right-column.hidden {
+        display: none;
+    }
+    .explorer-left-column.hidden {
         display: none;
     }
 
-    .branch-diff-overlay {
+    .explorer-diff-overlay {
         flex: 1;
         display: flex;
         overflow: hidden;
         border-left: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+    }
+
+    .explorer-git-status-overlay {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
         background: var(--color-surface-1);
     }
 
@@ -871,39 +943,45 @@
         .tab-btn:hover:not(.active) {
             color: var(--color-text-primary);
         }
-        .branch-left-column {
+        .explorer-left-column {
             width: 100% !important;
             border-right: none;
             flex: 1 !important;
             min-height: 0;
         }
-        .branch-file-browser.mobile {
+        .explorer-file-browser.mobile {
             flex: 0 0 75% !important;
             min-height: 100px;
         }
-        .branch-git-graph.mobile {
+        .explorer-git-graph.mobile {
             flex: 1;
             min-height: 0;
         }
-        .branch-center-column {
+        .explorer-center-column {
             width: 100% !important;
             flex: 1 !important;
             min-height: 0;
         }
-        .branch-right-column {
+        .explorer-right-column {
             width: 100% !important;
             border-left: none;
         }
-        .branch-left-column.hidden,
-        .branch-center-column.hidden,
-        .branch-right-column.hidden {
+        .explorer-left-column.hidden,
+        .explorer-center-column.hidden,
+        .explorer-right-column.hidden {
             display: none;
         }
-        .branch-body {
+        .explorer-body {
             flex-direction: column;
             min-height: 0;
         }
-        .branch-diff-overlay {
+        .explorer-diff-overlay {
+            width: 100% !important;
+            border-left: none;
+            flex: 1 !important;
+            min-height: 0;
+        }
+        .explorer-git-status-overlay {
             width: 100% !important;
             border-left: none;
             flex: 1 !important;

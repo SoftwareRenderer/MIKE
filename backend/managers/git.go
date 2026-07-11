@@ -297,6 +297,7 @@ func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request)
 // Supports:
 //   - ?ref=X         — git diff X (working tree vs ref, legacy)
 //   - ?base=A&head=B — git diff A..B (commit-to-commit comparison)
+//   - ?cached=1      — git diff --cached (staged changes only)
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -307,9 +308,13 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 
 	base := r.URL.Query().Get("base")
 	head := r.URL.Query().Get("head")
+	cached := r.URL.Query().Get("cached") == "1"
 
 	var c *exec.Cmd
-	if base != "" && head != "" {
+	if cached {
+		// Staged changes only
+		c = exec.Command("git", "-C", project.Path, "diff", "--cached")
+	} else if base != "" && head != "" {
 		// Commit-to-commit comparison
 		// Special case: empty tree hash is a virtual constant, not a real git object.
 		// git diff EMPTY_TREE..HEAD fails with "Invalid revision range".
@@ -330,8 +335,13 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 
 	out, err := c.CombinedOutput()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
-		return
+		// git diff exits 1 when there are changes — output is still valid
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Changes exist, output is valid
+		} else {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(out)
@@ -353,6 +363,102 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	clean := len(strings.TrimSpace(string(out))) == 0
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{"clean": clean, "status": string(out)})
+}
+
+// HandleProjectDiffFile returns the diff for a single file in the project.
+// Query params: path (file path relative to project root), staged (true/false).
+// When staged=true, returns staged (index) diff. When false/omitted, returns working tree diff.
+// Also returns the full file content (from working tree or index) so the frontend can render it.
+func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	projectID := r.PathValue("projectID")
+	project, err := h.store.GetProject(projectID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	staged := r.URL.Query().Get("staged") == "true"
+
+	// Get the diff for this file
+	var c *exec.Cmd
+	if staged {
+		c = exec.Command("git", "-C", project.Path, "diff", "--cached", "--", filePath)
+	} else {
+		c = exec.Command("git", "-C", project.Path, "diff", "--", filePath)
+	}
+	out, err := c.CombinedOutput()
+	if err != nil {
+		// git diff exits 1 when there are changes — output is still valid
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Changes exist, output is valid
+		} else {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
+			return
+		}
+	}
+
+	// Get file content from working tree or index
+	var fileContent string
+	var lineCount int
+	var isBinary bool
+	if staged {
+		// Read from index (staged version)
+		c = exec.Command("git", "-C", project.Path, "show", ":"+filePath)
+		contentOut, contentErr := c.CombinedOutput()
+		if contentErr == nil {
+			fileContent = string(contentOut)
+			lineCount = strings.Count(fileContent, "\n")
+			if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
+				lineCount++
+			}
+		}
+	} else {
+		// Read from working tree
+		fullPath := filepath.Join(project.Path, filePath)
+		contentOut, contentErr := os.ReadFile(fullPath)
+		if contentErr == nil {
+			fileContent = string(contentOut)
+			lineCount = strings.Count(fileContent, "\n")
+			if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
+				lineCount++
+			}
+		}
+	}
+
+	// Check if binary
+	if fileContent != "" {
+		for i := 0; i < len(fileContent) && i < 8192; i++ {
+			if fileContent[i] == 0 {
+				isBinary = true
+				break
+			}
+		}
+	}
+
+	// Split content into lines
+	var lines []string
+	if !isBinary && fileContent != "" {
+		lines = strings.Split(fileContent, "\n")
+		// Remove trailing empty element from final newline
+		if len(lines) > 0 && lines[len(lines)-1] == "" && strings.HasSuffix(fileContent, "\n") {
+			lines = lines[:len(lines)-1]
+		}
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{
+		"diff":       string(out),
+		"lines":      lines,
+		"line_count": lineCount,
+		"isBinary":   isBinary,
+	})
 }
 
 // HandleCheckout checks out a branch.

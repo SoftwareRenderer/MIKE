@@ -303,7 +303,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(allTasks, expandedTasksContext, task.parent_task_id);
 
-    // Column resize (inline — matches BranchView pattern)
+    // Column resize (inline — matches ExplorerView pattern)
     let columnsRef: HTMLDivElement | null = $state(null);
     const DEFAULT_BOARD_RATIO = 0.22;
     const DEFAULT_CHAT_RATIO = 0.55;

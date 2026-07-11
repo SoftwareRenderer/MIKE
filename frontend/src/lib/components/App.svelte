@@ -27,7 +27,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import CommitDialog from './Chat/CommitDialog.svelte';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
-    import BranchView from './BranchView.svelte';
+    import ExplorerView from './ExplorerView.svelte';
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
 
@@ -124,7 +124,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let showEditTaskVal = $state(false);
     let editTaskDataVal: import('$lib/stores/app').EditTaskData | null = $state(null);
     let showFileBrowserVal = $state(false);
-    let showBranchViewVal = $state(false);
+    let showExplorerViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff'>('chat');
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
@@ -235,12 +235,12 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             selectedTask.set(null);
             showCardDetail.set(false);
         }
-        // Restore branch view from URL
+        // Restore explorer view from URL
         const viewParam = params.get('view');
-        if (viewParam === 'branch') {
-            showBranchViewVal = true;
+        if (viewParam === 'explorer') {
+            showExplorerViewVal = true;
         } else {
-            showBranchViewVal = false;
+            showExplorerViewVal = false;
         }
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
@@ -375,16 +375,16 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     },
                     onBranch: (branch) => {
                         currentBranch = branch;
-                        // Restore branch view from URL when branch becomes available
-                        if (branch && !showBranchViewVal) {
+                        // Restore explorer view from URL when branch becomes available
+                        if (branch && !showExplorerViewVal) {
                             const params = new URLSearchParams(location.search);
-                            if (params.get('view') === 'branch') {
-                                showBranchViewVal = true;
+                            if (params.get('view') === 'explorer') {
+                                showExplorerViewVal = true;
                             }
                         }
                     },
                     onFsEvent: (op, path) => {
-                        if (showBranchViewVal) {
+                        if (showExplorerViewVal) {
                             fsEventQueue = [...fsEventQueue, { op, path }];
                         }
                     },
@@ -448,10 +448,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 });
                 // Expose appStream so TaskChat can subscribe after handler setup
                 setAppStreamRef(appStream);
-                // Restore branch view state before loadAppData (which calls selectProject)
+                // Restore explorer view state before loadAppData (which calls selectProject)
                 const urlParams = new URLSearchParams(location.search);
-                if (urlParams.get('view') === 'branch') {
-                    showBranchViewVal = true;
+                if (urlParams.get('view') === 'explorer') {
+                    showExplorerViewVal = true;
                 }
                 await loadAppData();
             }
@@ -668,22 +668,22 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 
     async function selectProject(p: Project) {
         disconnectBoardStream();
-        const wasBranchViewOpen = showBranchViewVal;
+        const wasExplorerViewOpen = showExplorerViewVal;
         const wasProjectSwitch = !!currentProject;
         currentProject = p;
         currentBranch = '';
         selectedProject.set(p);
-        // Re-mount branch view for the new project (only on project switch, not initial load)
-        if (wasProjectSwitch && wasBranchViewOpen) {
-            showBranchViewVal = false;
+        // Re-mount explorer view for the new project (only on project switch, not initial load)
+        if (wasProjectSwitch && wasExplorerViewOpen) {
+            showExplorerViewVal = false;
             fsEventQueue = [];
         }
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId, view: wasBranchViewOpen ? 'branch' : null, file: urlFileId || null }, false, true);
-        if (wasProjectSwitch && wasBranchViewOpen) {
-            queueMicrotask(() => { showBranchViewVal = true; });
+        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId, view: wasExplorerViewOpen ? 'explorer' : null, file: urlFileId || null }, false, true);
+        if (wasProjectSwitch && wasExplorerViewOpen) {
+            queueMicrotask(() => { showExplorerViewVal = true; });
         }
         try {
             const b = await getBoard(p.id);
@@ -759,7 +759,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     function handleExplorerFileChange(path: string | null) {
         const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'));
         if (isFileOpen) {
-            updateUrl({ project: currentProject?.id, view: 'branch', file: path });
+            updateUrl({ project: currentProject?.id, view: 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
@@ -767,7 +767,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 sidebarAutoCollapsed = true;
             }
         } else {
-            updateUrl({ project: currentProject?.id, view: 'branch', file: null });
+            updateUrl({ project: currentProject?.id, view: 'explorer', file: null });
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
@@ -913,7 +913,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !(showCardDetailVal && selectedTaskVal) && !showBranchViewVal}
+            {#if !(showCardDetailVal && selectedTaskVal) && !showExplorerViewVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -921,15 +921,15 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 hasPortConflict={portConflict?.project_id === currentProject?.id}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
-                onOpenBranchView={() => { showBranchViewVal = true; updateUrl({ project: currentProject?.id, view: 'branch' }, false, true); }}
+                onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
                 onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
                 onShowStats={() => showStats.set(true)}
                 onShowConfig={() => showConfig.set(true)}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
-                {#if showBranchViewVal && currentProject}
-                    <BranchView
+                {#if showExplorerViewVal && currentProject}
+                    <ExplorerView
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
@@ -938,7 +938,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
                         onUpdateFile={handleExplorerFileChange}
-                        onClose={() => { restoreExplorerSidebar(); showBranchViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff') => cardDetailActiveTab = tab} onClose={() => {

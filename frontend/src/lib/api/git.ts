@@ -55,6 +55,30 @@ export async function getGitStatus(projectId: string): Promise<{ clean: boolean;
     return res.json();
 }
 
+/** Fetch the unified diff for a single file in the project (staged or working tree).
+ * Returns { diff: string, lines: string[], line_count: number, isBinary: boolean }.
+ * When staged=true, returns staged (index) diff. When false/omitted, returns working tree diff. */
+export async function getProjectFileDiff(projectId: string, path: string, staged: boolean): Promise<{ diff: string; lines: string[]; line_count: number; isBinary: boolean }> {
+    const params = new URLSearchParams({ path, staged: String(staged) });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff/file?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch file diff');
+    return res.json();
+}
+
+/** Fetch the unified diff between two commits (or working tree vs ref) as raw text.
+ * When cached=true, returns staged changes only (git diff --cached). */
+export async function getProjectDiff(projectId: string, options?: { base?: string; head?: string; ref?: string; cached?: boolean }): Promise<string> {
+    const params = new URLSearchParams();
+    if (options?.base) params.set('base', options.base);
+    if (options?.head) params.set('head', options.head);
+    if (options?.ref) params.set('ref', options.ref);
+    if (options?.cached) params.set('cached', '1');
+    const url = params.toString() ? `${API_BASE}/projects/${projectId}/git/diff?${params}` : `${API_BASE}/projects/${projectId}/git/diff`;
+    const res = await apiFetch(url);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch project diff');
+    return res.text();
+}
+
 // -- Task Git endpoints --
 
 /** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content. */
