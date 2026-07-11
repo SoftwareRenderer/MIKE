@@ -29,7 +29,7 @@ class GitLineMarker extends GutterMarker {
         // Overlay of indicators (positioned on top of each other)
         const overlay = document.createElement('span');
         overlay.style.cssText =
-            'position:relative;display:inline-block;width:12px;height:100%;flex-shrink:0';
+            'position:relative;display:inline-block;width:10px;height:100%;flex-shrink:0';
 
         for (const ind of this.indicators) {
             const indicator = document.createElement('span');
@@ -68,7 +68,8 @@ class GitLineMarker extends GutterMarker {
         for (let i = 0; i < this.indicators.length; i++) {
             const a = this.indicators[i];
             const b = other.indicators[i];
-            if (a.color !== b.color || a.shape !== b.shape) return false;
+            if (a.color !== b.color || a.shape !== b.shape || a.pattern[0] !== b.pattern[0] || a.pattern[1] !== b.pattern[1])
+                return false;
         }
         return true;
     }
@@ -87,7 +88,7 @@ class PlainLineMarker extends GutterMarker {
         const el = document.createElement('div');
         el.style.cssText = 'display:flex;align-items:center;gap:4px;height:100%';
         const spacer = document.createElement('span');
-        spacer.style.cssText = 'width:4px;flex-shrink:0';
+        spacer.style.cssText = 'width:10px;flex-shrink:0';
         const num = document.createElement('span');
         num.textContent = String(this.lineNum);
         el.appendChild(spacer);
@@ -128,16 +129,14 @@ export function gitGutter() {
         class: 'cm-gitGutter',
         lineMarker: (view, line) => {
             const ln = view.state.doc.lineAt(line.from).number;
-            const original = state.original;
             const current = view.state.doc.toString();
 
             // Recompute when content changes
-            if (original !== state.original || current !== state.current) {
-                state.original = original;
+            if (current !== state.current) {
                 state.current = current;
                 const map = new Map<number, ('added' | 'modified' | 'removed')[]>();
-                if (original && original !== current) {
-                    const markers = computeDiffMarkers(original, current);
+                if (state.original && state.original !== current) {
+                    const markers = computeDiffMarkers(state.original, current);
                     for (let i = 1; i < markers.length; i++) {
                         const markerList = markers[i];
                         if (markerList) {
@@ -178,7 +177,7 @@ export function gitGutter() {
 
     const theme = EditorView.baseTheme({
         '.cm-gutter.cm-gitGutter': {
-            minWidth: '48px',
+            minWidth: '36px',
             fontSize: 'inherit',
             color: 'inherit',
         },

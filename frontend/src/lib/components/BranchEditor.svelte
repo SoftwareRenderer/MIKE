@@ -258,7 +258,27 @@
             highlightActiveLineGutter(),
             highlightSpecialChars(),
             history(),
-            foldGutter(),
+            foldGutter({
+                markerDOM: (open) => {
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('width', '12');
+                    svg.setAttribute('height', '12');
+                    svg.setAttribute('viewBox', '0 0 16 16');
+                    svg.setAttribute('fill', 'none');
+                    const transform = open ? 'translateY(2px)' : 'translateY(2px) rotate(-90deg)';
+                    svg.style.cssText =
+                        'cursor:pointer;opacity:0.8;transition:transform 0.15s ease;transform:' + transform;
+                    svg.style.transformOrigin = 'center';
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', 'M4 6l4 4 4-4');
+                    path.setAttribute('stroke', 'currentColor');
+                    path.setAttribute('stroke-width', '1.5');
+                    path.setAttribute('stroke-linecap', 'round');
+                    path.setAttribute('stroke-linejoin', 'round');
+                    svg.appendChild(path);
+                    return svg;
+                },
+            }),
             drawSelection(),
             dropCursor(),
             EditorState.allowMultipleSelections.of(true),
