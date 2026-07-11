@@ -109,6 +109,8 @@
         return prefixes;
     });
 
+
+
     // Git status map: absolute_path -> single-char status (M, A, D, ?, etc.)
     let gitStatusMap = $state(new Map<string, string>());
 
@@ -257,23 +259,25 @@
         }
     }
 
-    // Called from parent when fs events arrive
+    // Called from parent when fs events arrive.
+    // Any file change in the project can affect git status, so always refresh it.
+    // Directory listing is only refreshed when the event affects the current directory.
     function handleFsEvent(op: 'create' | 'delete', relPath: string) {
-        // Only refresh if the event would change the current directory listing.
-        // Skip 'create' events for files that may already be in the listing
-        // (e.g. from the initial load triggering the server-side fs watcher).
         const basePath = sandboxEnabled ? mountPath : projectPath;
         const currentPrefix = currentPath + '/';
         const eventFullPath = basePath + '/' + relPath;
         const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));
 
+        // Always refresh git status — any file change affects the whole-repo status
+        loadGitStatus();
+
+        // Only refresh directory listing when the event affects the current directory
         // Event is for something directly in the current directory
         if (eventDir === currentPath) {
             // Always refresh on delete (entry removed)
             // For create, check if it's already in the listing (skip redundant refresh)
             if (op === 'delete' || !entryPaths.has(eventFullPath)) {
                 loadDir(currentPath);
-                loadGitStatus();
             }
             return;
         }
@@ -282,7 +286,6 @@
         const childName = eventFullPath.substring(currentPrefix.length);
         if (op === 'create' && childName && !childName.includes('/') && !entries.some(e => e.name === childName && e.isDir)) {
             loadDir(currentPath);
-            loadGitStatus();
         }
     }
 
