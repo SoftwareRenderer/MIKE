@@ -100,6 +100,7 @@
         style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:1000;"
         role="listbox"
         aria-label="File suggestions"
+        onclick={(e) => e.stopPropagation()}
     >
         {#each results as result, i}
             <li

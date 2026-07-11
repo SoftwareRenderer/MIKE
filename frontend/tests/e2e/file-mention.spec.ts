@@ -120,6 +120,28 @@ test.describe.serial('File @ Mention', () => {
     expect(value).toBe('@');
   });
 
+  test('should select a file by clicking without closing the modal', async ({ page }) => {
+    await page.locator('.add-task-btn').click();
+    await expect(page.locator('#task-description')).toBeVisible();
+
+    const textarea = page.locator('#task-description');
+    await typeAtSign(page, textarea);
+    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
+
+    // Click the first result
+    await page.locator('.mention-item').first().click();
+
+    // Dropdown should disappear
+    await expect(page.locator('.mention-dropdown')).not.toBeVisible();
+
+    // Modal should STILL be open (not closed by the click)
+    await expect(page.locator('#task-description')).toBeVisible();
+
+    // Textarea should contain @path of first item
+    const value = await textarea.inputValue();
+    expect(value).toBe('@README.md');
+  });
+
   test('should filter results by query after @', async ({ page }) => {
     // Update mock to filter based on query
     await page.route('/api/fs/search*', async (route) => {
