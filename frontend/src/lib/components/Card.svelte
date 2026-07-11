@@ -946,6 +946,10 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         background: var(--col-color, var(--color-accent));
         color: white !important;
     }
+    .action-icon.action-delete:hover {
+        background: var(--color-status-red);
+        color: white;
+    }
     .action-idle {
         display: flex;
         align-items: center;
