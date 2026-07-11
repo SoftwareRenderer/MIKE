@@ -943,7 +943,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         color: white;
     }
     .action-icon.action-move:hover {
-        background: var(--col-color, var(--color-accent));
+        background: var(--color-accent);
         color: white !important;
     }
     .action-icon.action-delete:hover {
