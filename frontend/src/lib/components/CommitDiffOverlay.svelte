@@ -540,9 +540,7 @@ import { slide } from 'svelte/transition';
     :global(.close-btn) {
         width: 24px;
         height: 24px;
-        border-radius: 4px;
         padding: 0;
-        flex-shrink: 0;
     }
     :global(.close-btn:focus-visible) {
         outline: 2px solid var(--color-accent);

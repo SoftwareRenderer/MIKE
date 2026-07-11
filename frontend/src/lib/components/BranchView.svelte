@@ -677,7 +677,6 @@
 
     :global(.close-btn) {
         padding: 6px;
-        flex-shrink: 0;
     }
 
     .terminal-btn {

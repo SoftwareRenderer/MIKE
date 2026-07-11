@@ -1,8 +1,12 @@
-/* Shared utility styles — imported via :global() in components */
+/* Shared utility styles — imported via @import in components
+   :global() rules stay unscoped so they match elements across all components */
 
 
 /* Close button — used in modals, dialogs, overlays */
-.close-btn {
+:global(.close-btn) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--color-text-secondary);
@@ -11,8 +15,9 @@
     padding: 4px;
     border-radius: var(--radius-sm);
     line-height: 1;
+    flex-shrink: 0;
 }
-.close-btn:hover {
+:global(.close-btn:hover) {
     color: var(--color-text-primary);
     background: var(--color-surface-3);
 }
