@@ -113,6 +113,35 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let wsConnected = $state(false);
+    let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
+    let countdownSeconds = $state(0);
+    let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+    function startCountdown() {
+        stopCountdown();
+        updateCountdown();
+        countdownTimer = setInterval(updateCountdown, 250);
+    }
+    function stopCountdown() {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+    }
+    function updateCountdown() {
+        const remaining = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
+        countdownSeconds = remaining;
+        if (remaining <= 0) stopCountdown();
+    }
+
+    function tryReconnectNow() {
+        if (appStream) {
+            appStream.reconnectNow();
+            stopCountdown();
+            nextReconnectAt = 0;
+            countdownSeconds = 0;
+        }
+    }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
@@ -436,10 +465,21 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     onConnected: (connected) => {
                         wsConnected = connected;
                         setOfflineStatus(!connected);
-                        // Auto-refresh cached data on reconnect
-                        if (connected && servingFromCache) {
-                            silentRefresh().catch(() => {});
+                        if (!connected) {
+                            startCountdown();
+                        } else {
+                            stopCountdown();
+                            nextReconnectAt = 0;
+                            countdownSeconds = 0;
+                            // Auto-refresh cached data on reconnect
+                            if (servingFromCache) {
+                                silentRefresh().catch(() => {});
+                            }
                         }
+                    },
+                    onReconnectScheduled: (nextAttemptAt) => {
+                        nextReconnectAt = nextAttemptAt;
+                        startCountdown();
                     },
                     onPortConflict: (project_id, conflicted_ports) => {
                         portConflict = { project_id, ports: conflicted_ports };
@@ -487,6 +527,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     window.addEventListener('visibilitychange', handleVisibilityChange);
 
     onDestroy(() => {
+        stopCountdown();
         window.removeEventListener('visibilitychange', handleVisibilityChange);
         disconnectBoardStream();
         if (appStream) {
@@ -516,9 +557,20 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             onConnected: (connected) => {
                 wsConnected = connected;
                 setOfflineStatus(!connected);
-                if (connected && servingFromCache) {
-                    silentRefresh().catch(() => {});
+                if (!connected) {
+                    startCountdown();
+                } else {
+                    stopCountdown();
+                    nextReconnectAt = 0;
+                    countdownSeconds = 0;
+                    if (servingFromCache) {
+                        silentRefresh().catch(() => {});
+                    }
                 }
+            },
+            onReconnectScheduled: (nextAttemptAt) => {
+                nextReconnectAt = nextAttemptAt;
+                startCountdown();
             },
             onPortConflict: () => {},
         });
@@ -875,6 +927,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
         Reconnecting to stream...
+        {#if countdownSeconds > 0}
+            <span class="reconnecting-countdown">({countdownSeconds}s)</span>
+        {/if}
+        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Try now</button>
     </div>
 {/if}
 <!-- Offline cache banner -->
@@ -1185,6 +1241,25 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         gap: 8px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         animation: slide-down 0.2s ease-out;
+    }
+    .reconnecting-countdown {
+        font-weight: 400;
+        opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+    }
+    .reconnecting-btn {
+        background: rgba(214, 211, 209, 0.15);
+        border: 1px solid rgba(214, 211, 209, 0.3);
+        color: #d6d3d1;
+        padding: 2px 10px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    .reconnecting-btn:hover {
+        background: rgba(214, 211, 209, 0.25);
     }
     .reconnecting-spinner {
         display: inline-block;

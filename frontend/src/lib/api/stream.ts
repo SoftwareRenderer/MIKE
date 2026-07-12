@@ -20,11 +20,13 @@ export interface AppStreamCallbacks {
     onPortConflict?: (project_id: string, conflicted_ports: number[]) => void; // host ports already in use
     onProjectPorts?: (ports: Array<{ host_port: number; container_port: number }>) => void; // project-level terminal port mappings
     onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
+    onReconnectScheduled?: (nextAttemptAt: number) => void; // epoch ms of next reconnect attempt
 }
 
 export interface AppStream {
     close: () => void;
     checkStale: () => void;
+    reconnectNow: () => void;
     subscribeProject: (projectId: string) => void;
     unsubscribeProject: (projectId: string) => void;
     subscribeTask: (projectId: string, taskId: string) => void;
@@ -177,6 +179,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             callbacks.onConnected?.(false);
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
             reconnectAttempts++;
+            callbacks.onReconnectScheduled?.(Date.now() + delay);
             reconnectTimer = setTimeout(() => connect(), delay);
         };
 
@@ -199,6 +202,13 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
                 currentWs.close();
                 currentWs = null;
             }
+        },
+        reconnectNow: () => {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            connect();
         },
         checkStale,
         subscribeProject: (projectId: string) => {
