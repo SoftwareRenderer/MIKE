@@ -165,6 +165,8 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     if (urlTask !== t.id) {
                         updateUrl({ project: currentProject.id, task: t.id });
                     }
+                    // On mobile, auto-switch to Agent tab when opening a task
+                    if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                 }
             }),
             taskDiffStatsContext.subscribe(v => taskDiffStats = v),
