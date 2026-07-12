@@ -187,6 +187,12 @@
         background: var(--color-accent);
         color: white;
     }
+    @media (max-width: 768px) {
+        .add-btn {
+            width: 44px;
+            height: 44px;
+        }
+    }
     .clear-btn {
         display: flex;
         align-items: center;
@@ -205,6 +211,12 @@
     .clear-btn:hover {
         background: var(--color-status-red);
         color: white;
+    }
+    @media (max-width: 768px) {
+        .clear-btn {
+            width: 44px;
+            height: 44px;
+        }
     }
     .card-list {
         flex: 1;

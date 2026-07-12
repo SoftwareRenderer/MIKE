@@ -200,7 +200,9 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 2px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
         border: none;
         border-radius: var(--radius-sm);
         background: none;
@@ -217,7 +219,9 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 2px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
         border-radius: var(--radius-sm);
         color: var(--color-text-tertiary);
         cursor: pointer;
@@ -226,6 +230,13 @@
     .clear-btn:hover {
         background: var(--color-status-red, #f85149);
         color: white;
+    }
+    @media (max-width: 768px) {
+        .add-btn,
+        .clear-btn {
+            width: 44px;
+            height: 44px;
+        }
     }
     .section-chevron {
         flex-shrink: 0;
