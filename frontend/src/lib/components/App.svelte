@@ -393,12 +393,12 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         if (idx !== -1) {
                             tasks[idx] = updatedTask;
                         } else {
-                            // New task from server — replace optimistic (queued) task in-place to avoid flicker
+                            // Replace optimistic (queued) task in-place to avoid flicker.
+                            // Do NOT push unknown tasks — they could be stale events for deleted tasks.
+                            // Genuinely new tasks are picked up by refreshBoard() / board_refresh.
                             const optIdx = tasks.findIndex(t => (t as any).queued);
                             if (optIdx !== -1) {
                                 tasks[optIdx] = updatedTask;
-                            } else {
-                                tasks.push(updatedTask);
                             }
                         }
                         // Spread into a new array so boardStore subscribers (e.g., CardDetail allTasks)

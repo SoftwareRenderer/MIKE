@@ -247,7 +247,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             }}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
             onCreateChildTask={onCreateChildTask}
-            onClearAll={col.id === 'done' ? () => { handleClearDone(); onRefreshBoard?.(); } : undefined}
+            onClearAll={col.id === 'done' ? async () => { await handleClearDone(); onRefreshBoard?.(); } : undefined}
             onSelect={handleSelectTask}
             {projectId}
             onRefreshBoard={onRefreshBoard}

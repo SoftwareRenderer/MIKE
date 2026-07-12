@@ -160,4 +160,54 @@ test.describe.serial('Clear All Done Tasks', () => {
     }, { pid: projectId });
     expect(doneCountAfter).toBe(0);
   });
+
+  test('should not reappear in Review after move-to-done then clear', async ({ page }) => {
+    // Exact reproduction: task in Review -> move to Done -> click "Clear all" -> task gone.
+    // Regression: tasks were reappearing in Review column after clear-done
+    // due to a race between refreshBoard() and task_deleted WebSocket events.
+    const taskId = await createTaskViaApi(page, projectId, `clear-done-no-reappear-${Date.now()}`);
+    expect(taskId).not.toBe('');
+
+    // Step 1: Move task to Review via API
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST',
+      body: { status: 'review' },
+    });
+
+    // Step 2: Move task to Done via API (simulates clicking "Move to Done" on the card)
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST',
+      body: { status: 'done' },
+    });
+
+    // Step 3: Navigate to board and verify task is in Done
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    await expect(async () => {
+      const task = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.json();
+      }, { pid: projectId, tid: taskId });
+      expect(task.status).toBe('done');
+    }).toPass({ timeout: 10000 });
+
+    // Step 4: Click "Clear all" in Done column and confirm
+    await page.click('.clear-btn');
+    await expect(page.locator('.confirm-dialog')).toBeVisible();
+    await page.click('.confirm-dialog .btn-confirm');
+
+    // Step 5: Wait for the task card to disappear from the board (no page reload)
+    await expect(page.locator(`.card[data-task-id="${taskId}"]`)).not.toBeVisible({ timeout: 10000 });
+
+    // Step 6: Verify via API: task does not exist on the server
+    await expect(async () => {
+      const task = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/board`);
+        const board = await res.json();
+        return board.tasks.find((t: any) => t.id === tid);
+      }, { pid: projectId, tid: taskId });
+      expect(task).toBeUndefined();
+    }).toPass({ timeout: 10000 });
+  });
 });
