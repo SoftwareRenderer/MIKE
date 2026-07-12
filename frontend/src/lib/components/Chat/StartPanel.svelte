@@ -45,6 +45,7 @@
             type="button"
             class="btn-plan-toggle"
             class:active={operatingMode === 'plan'}
+            class:ideate={operatingMode === 'ideate'}
             onclick={onOperatingModeToggle}
             title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. AI is not required to take formal actions. Click to switch.'}
             aria-label="Toggle operating mode"
@@ -112,6 +113,11 @@
         padding: 4px 10px;
         border: 2px dotted var(--color-accent);
         color: var(--color-accent);
+    }
+    .btn-plan-toggle.ideate {
+        padding: 4px 10px;
+        border: 2px dotted var(--color-status-yellow);
+        color: var(--color-status-yellow);
     }
     .btn-start-task {
         display: inline-flex;

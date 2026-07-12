@@ -308,6 +308,7 @@
                     type="button"
                     class="btn-plan-toggle"
                     class:active={operatingMode === 'plan'}
+                    class:ideate={operatingMode === 'ideate'}
                     onclick={onOperatingModeToggle}
                     title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. AI is not required to take formal actions. Click to switch.'}
                     aria-label="Toggle operating mode"
@@ -424,6 +425,11 @@
         background: var(--color-accent)22;
         border-color: var(--color-accent);
         color: var(--color-accent);
+    }
+    .btn-plan-toggle.ideate {
+        background: color-mix(in srgb, var(--color-status-yellow) 15%, transparent);
+        border-color: var(--color-status-yellow);
+        color: var(--color-status-yellow);
     }
     .chat-form-inner {
         display: flex;
