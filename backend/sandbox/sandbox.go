@@ -197,7 +197,8 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 }
 
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted read-write at /home/sandbox/<projectName> inside the container.
+// The worktree is bind-mounted at /home/sandbox/<projectName> inside the container.
+// When ideationMode is true, the worktree is mounted read-only (ro); otherwise read-write (rw).
 // If projectPath is non-empty, the .git/ directory is also mounted read-only
 // at the same absolute path (so git can resolve refs, objects, worktree metadata, etc.).
 // If baseImage is empty, the default BaseImage constant is used.
@@ -211,7 +212,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
 // If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
 // Returns (error, assignedPorts) where assignedPorts lists the host→container mappings.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (error, []types.AssignedPort) {
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv, ideationMode bool) (error, []types.AssignedPort) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -281,10 +282,16 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 		"--cap-add", "CAP_FOWNER", // apt chmod on /var/lib/apt/lists/
 		"--security-opt", "no-new-privileges",
 		"--workdir", mountPath,
-		"-v", absWorktree + ":" + mountPath + ":rprivate,rw",
+	}
+	worktreeMode := "rw"
+	if ideationMode {
+		worktreeMode = "ro"
+	}
+	createArgs = append(createArgs,
+		"-v", absWorktree+":"+mountPath+":rprivate,"+worktreeMode,
 		"-e", "TERM=xterm-256color",
 		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-	}
+	)
 	if networkIsolation {
 		createArgs = append(createArgs, "--network", "none")
 	}
@@ -562,7 +569,7 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID, baseImage string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) error {
 	if !sm.ContainerIsRunning(taskID) {
 		_ = sm.Stop(taskID) // clean up stale entry if any
-		if err, _ := sm.Create(taskID, projectPath, baseImage, projectName, "", projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
+		if err, _ := sm.Create(taskID, projectPath, baseImage, projectName, "", projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs, false); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -587,7 +594,7 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPat
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs, false); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -601,7 +608,7 @@ func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, p
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs); err != nil {
+		if err, _ := sm.Create(taskID, worktreePath, BaseImage, projectName, projectPath, "", networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs, false); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -621,7 +628,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		}
 		// Create container on demand
 		var err error
-		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}
@@ -634,7 +641,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
 		_ = sm.Stop(taskID)
 		var err error
-		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+		err, assignedPorts = sm.Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("recreate sandbox container: %w", err)
 		}

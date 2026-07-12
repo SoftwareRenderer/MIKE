@@ -59,6 +59,9 @@ type executionState struct {
 	sandboxWrite      writeFunc
 	// Sandbox client reference for liveness checks (nil when sandbox is disabled).
 	sandboxClient *sandbox.Client
+	// Operating mode at container creation time — used to detect mode changes
+	// and recreate the container with the correct mount mode (ro vs rw).
+	sandboxOperatingMode string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 }

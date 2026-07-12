@@ -310,7 +310,7 @@
                     class:active={operatingMode === 'plan'}
                     class:ideate={operatingMode === 'ideate'}
                     onclick={onOperatingModeToggle}
-                    title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. AI is not required to take formal actions. Click to switch.'}
+                    title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. Storage is mounted read-only. AI is not required to take formal actions. Click to switch.'}
                     aria-label="Toggle operating mode"
                     style="margin-left: auto"
                 >

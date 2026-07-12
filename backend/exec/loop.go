@@ -252,6 +252,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	state := te.tasks[task.ID]
 	te.taskMu.Unlock()
 
+	// Resolve image and agent config dir early — needed for both initial creation and mid-execution recreation.
+	imageToUse := ""
+	piAgentDir := te.configStore.GetAgentConfigDir()
 	if sandboxEnabled {
 		if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
 			task.ExecutionState = "failed"
@@ -263,7 +266,6 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			return
 		}
 		// Determine image to use: Dockerfile build takes precedence over pre-built image
-		imageToUse := ""
 		if sandboxDockerfilePath != "" {
 			imageToUse = sandbox.ProjectImageName(projectName)
 			if !te.sandboxMgr.ImageReadyForProject(projectName) {
@@ -301,14 +303,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 		}
-		// Mount agent config dir if any coding agent is configured.
-		piAgentDir := te.configStore.GetAgentConfigDir()
 		// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
 		// ContainerIsRunning checks both the active map and podman state (returns false if not tracked).
 		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 			// Container doesn't exist or is not running — create (or recreate) it
 			var assignedPorts []types.AssignedPort
-			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs)
+			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, task.IsIdeationMode())
 			if createErr != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"
@@ -344,6 +344,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
 		state.sandboxClient = agentClient
+		state.sandboxOperatingMode = task.OperatingMode
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
 		// Read uses plain os.ReadFile (no isolation).
@@ -457,6 +458,67 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 					lc.detector.reset() // model changed, clear stale text window
 					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, lc.contextWindow)
+				}
+			}
+
+			// Check for operating mode change — recreate sandbox with correct mount mode
+			if sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(task.ID) {
+				te.taskMu.Lock()
+				currentOperatingMode := state.sandboxOperatingMode
+				te.taskMu.Unlock()
+				newOperatingMode := updatedTask.OperatingMode
+				if newOperatingMode != currentOperatingMode {
+					log.Printf("[mode-switch] task=%s operating mode changed (%s → %s), recreating sandbox", task.ID, currentOperatingMode, newOperatingMode)
+					// Stop old container
+					if err := te.sandboxMgr.Stop(task.ID); err != nil {
+						log.Printf("[mode-switch] task=%s failed to stop old sandbox: %v", task.ID, err)
+					}
+					// Create new container with updated mode
+					var assignedPorts []types.AssignedPort
+					createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, updatedTask.IsIdeationMode())
+					if createErr != nil {
+						log.Printf("[mode-switch] task=%s failed to recreate sandbox: %v", task.ID, createErr)
+						task.ExecutionState = "failed"
+						task.Status = "review"
+						task.Output = fmt.Sprintf("Failed to recreate sandbox for mode change: %v", createErr)
+						te.store.UpdateTask(task)
+						te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+						te.sendAndPersistError(task.ID, fmt.Sprintf("Sandbox recreation failed: %v", createErr), "sandbox_recreate_failed")
+						return
+					}
+					// Get new agent client and update callbacks
+					newAgentClient, clientErr := te.sandboxMgr.GetClient(task.ID)
+					if clientErr != nil {
+						log.Printf("[mode-switch] task=%s failed to connect to new sandbox bridge: %v", task.ID, clientErr)
+						task.ExecutionState = "failed"
+						task.Status = "review"
+						task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after mode change: %v", clientErr)
+						te.store.UpdateTask(task)
+						te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+						te.sendAndPersistError(task.ID, fmt.Sprintf("Agent connection failed after mode change: %v", clientErr), "agent_connection_failed")
+						return
+					}
+					te.taskMu.Lock()
+					state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newAgentClient)
+					state.sandboxClient = newAgentClient
+					state.sandboxOperatingMode = newOperatingMode
+					te.taskMu.Unlock()
+					// Update task reference with latest mode
+					task.OperatingMode = updatedTask.OperatingMode
+					// Update tools if mode affects them (plan mode restricts tools)
+					if updatedTask.IsPlanMode() {
+						tools = llama.GetPlanModeToolDefinitions()
+					} else {
+						tools = llama.GetToolDefinitions()
+					}
+					// Broadcast assigned ports if any changed
+					if len(assignedPorts) > 0 {
+						task.AssignedPorts = assignedPorts
+						te.store.UpdateTask(task)
+						te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: task.ID, Ports: assignedPorts}})
+					}
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
 				}
 			}
 		}

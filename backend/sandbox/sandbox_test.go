@@ -125,7 +125,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	err, _ := sm.Create("task-1", t.TempDir(), "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create("task-1", t.TempDir(), "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -620,7 +620,7 @@ func TestPiAvailable(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-pi-available-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -652,7 +652,7 @@ func TestStartProcess(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-startprocess-task"
 
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -723,7 +723,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
-	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 512, nil, "", "", nil, nil)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 512, nil, "", "", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
@@ -966,7 +966,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 		t.Fatal("host path should not exist before Create")
 	}
 
-	err, _ := sm.Create(taskID, baseDir, "", "test-proj", "", "", false, 0, nil, "", "", sandboxMounts, nil)
+	err, _ := sm.Create(taskID, baseDir, "", "test-proj", "", "", false, 0, nil, "", "", sandboxMounts, nil, false)
 	if err != nil {
 		t.Fatalf("create sandbox with custom mount: %v", err)
 	}
@@ -981,5 +981,52 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatal("expected host path to be a directory")
+	}
+}
+
+func TestCreate_IdeationModeReadonlyMount(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	// Create a temp directory to use as worktree
+	dir := t.TempDir()
+	taskID := "test-ideation-task"
+
+	// Create with ideation mode (read-only mount)
+	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, true)
+	if err != nil {
+		t.Fatalf("create sandbox with ideation mode: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Verify the worktree is mounted read-only by trying to write a file
+	out, err := sm.Exec(taskID, "touch /home/sandbox/test-proj/test-file", nil)
+	if err == nil {
+		t.Fatal("expected write to fail in ideation mode (read-only mount)")
+	}
+	if !strings.Contains(out, "Read-only file system") && !strings.Contains(out, "Read-only") {
+		t.Logf("output: %s", out)
+		t.Errorf("expected read-only error, got: %v", err)
+	}
+
+	// Verify reading still works
+	testFile := filepath.Join(dir, "existing-file.txt")
+	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	out, err = sm.Exec(taskID, "cat /home/sandbox/test-proj/existing-file.txt", nil)
+	if err != nil {
+		t.Fatalf("read should work in ideation mode: %v", err)
+	}
+	if out != "test content" {
+		t.Errorf("expected 'test content', got %q", out)
 	}
 }
