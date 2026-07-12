@@ -784,8 +784,8 @@ import { slide } from 'svelte/transition';
                                 <span class="diff-added">+{entry.origAdded ?? ufile.added ?? 0}</span>
                             </span>
                         {/if}
-                        <span class="diff-untracked-badge">untracked</span>
                     </button>
+                    <span class="diff-untracked-badge">untracked</span>
                     <span class="diff-status-badge diff-status-added" title="Added">A</span>
                     {#if onStageFile}
                         <button type="button" class="diff-stage-btn" onclick={() => onStageFile(entry.path, true)} title="Stage file">

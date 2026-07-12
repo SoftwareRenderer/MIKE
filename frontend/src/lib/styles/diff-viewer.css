@@ -437,13 +437,21 @@
 /* Untracked file entries */
 
 .diff-untracked-badge {
-    font-size: 0.75rem;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: rgba(250,204,21,0.15);
+    display: flex;
+    align-items: center;
+    height: 28px;
+    font-size: 0.6875rem;
+    padding: 1px 8px;
+    border-radius: 0;
+    background: rgba(250,204,21,0.1);
     color: rgba(250,204,21,0.9);
-    font-weight: 500;
+    font-weight: 600;
+    font-family: var(--font-mono);
     flex-shrink: 0;
+    user-select: none;
+    border: 1px solid var(--color-border);
+    border-left: none;
+    border-right: none;
 }
 
 /* Expand button for truncated files */
