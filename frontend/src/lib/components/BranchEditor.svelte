@@ -6,14 +6,14 @@
     import { EditorState } from '@codemirror/state';
     import { keymap, ViewPlugin } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-    import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle } from '@codemirror/language';
+    import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { gitGutter } from '$lib/utils/git-gutter';
-    import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
-    import { tags } from '@lezer/highlight';
+    import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
+    import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
     import { javascript } from '@codemirror/lang-javascript';
     import { python } from '@codemirror/lang-python';
@@ -28,53 +28,6 @@
     import { css } from '@codemirror/lang-css';
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
-
-    // GitHub Dark theme — matches app colors
-    const githubDarkHighlight = HighlightStyle.define([
-        { tag: tags.keyword, color: '#F97583' },
-        { tag: tags.constant(tags.keyword), color: '#79C0FF' },
-        { tag: tags.definition(tags.variableName), color: '#FFA657' },
-        { tag: tags.variableName, color: '#FFA657' },
-        { tag: tags.function(tags.variableName), color: '#D2A8FF' },
-        { tag: tags.propertyName, color: '#79C0FF' },
-        { tag: tags.string, color: '#A5D6FF' },
-        { tag: tags.number, color: '#79C0FF' },
-        { tag: tags.comment, color: '#8B949E', fontStyle: 'italic' },
-        { tag: tags.operator, color: '#FF7B72' },
-        { tag: tags.punctuation, color: '#C9D1D9' },
-        { tag: tags.className, color: '#FFA657' },
-        { tag: tags.typeName, color: '#FFA657' },
-        { tag: tags.tagName, color: '#7EE787' },
-        { tag: tags.attributeName, color: '#79C0FF' },
-        { tag: tags.attributeValue, color: '#A5D6FF' },
-    ]);
-
-    const githubDarkTheme = EditorView.theme({
-        '&': { backgroundColor: 'transparent', color: '#C9D1D9', height: '100%' },
-        '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': {
-            fontFamily: 'var(--font-mono)',
-            fontSize: '14px',
-            lineHeight: '1.5',
-            tabSize: 4,
-            overflow: 'auto',
-            height: '100%',
-        },
-        '.cm-gutters': {
-            background: 'var(--color-surface-1)',
-            borderRight: '1px solid var(--color-border)',
-            color: '#484F58',
-            padding: '0 6px 0 0',
-        },
-        '.cm-activeLineGutter': {
-            color: '#8B949E',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-        },
-        '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.04)' },
-        '.cm-selectionBackground': { backgroundColor: 'rgba(88,166,255,0.3)' },
-        '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(88,166,255,0.3)' },
-        '.cm-cursor': { borderLeftColor: '#C9D1D9' },
-    });
 
     let { projectId, filePath, targetLine, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
         projectId: string;
@@ -305,8 +258,8 @@
                 ...foldKeymap,
                 ...completionKeymap,
             ]),
-            githubDarkTheme,
-            syntaxHighlighting(githubDarkHighlight),
+            darkTheme,
+            darkSyntax,
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     // Sync content first, then compute hasChanges vs disk
@@ -640,24 +593,14 @@
 
     <!-- Footer with line/char count -->
     {#if !loading && !error && !fileTooLarge && filePath}
-        <div class="editor-footer">
-            <div class="footer-left">
-                <span class="cursor-info">Ln {cursorLine}, Col {cursorCol}</span>
-                {#if hasChanges}
-                    <span class="unsaved-info">Unsaved changes</span>
-                {/if}
-            </div>
-            <div class="footer-right">
-                <span class="line-info">{lineCount} lines · {charCount} chars</span>
-                <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={openSearchPanel}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-                Find
-            </button>
-            </div>
-        </div>
+        <EditorFooter
+            {cursorLine}
+            {cursorCol}
+            {lineCount}
+            {charCount}
+            {hasChanges}
+            onFind={openSearchPanel}
+        />
     {/if}
 
     <!-- Confirm close dialog -->
@@ -813,56 +756,6 @@
         display: flex;
         flex-direction: column;
         position: relative;
-    }
-
-    .editor-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 4px 10px;
-        border-top: 1px solid var(--color-border);
-        flex-shrink: 0;
-        font-size: 12px;
-        color: var(--color-text-tertiary);
-        background: var(--color-surface-2);
-    }
-    .footer-left {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-    .footer-right {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-    .cursor-info {
-        font-family: var(--font-mono);
-    }
-    .line-info {
-        font-family: var(--font-mono);
-    }
-    .unsaved-info {
-        color: var(--color-status-yellow, #f0c000);
-    }
-    .footer-find-btn {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        background: var(--color-surface-3);
-        border: none;
-        color: var(--color-text-secondary);
-        border-radius: var(--radius-sm);
-        padding: 3px 8px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: inherit;
-        flex-shrink: 0;
-    }
-    .footer-find-btn:hover {
-        background: var(--color-surface-4);
-        color: var(--color-text-primary);
     }
 
     .editor-placeholder {
