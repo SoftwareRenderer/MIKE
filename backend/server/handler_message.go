@@ -31,8 +31,12 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Notify running executor to reset loop detector and re-sync messages.
+			// Only when actively running — waking an idle executor triggers an unwanted LLM call.
 			if s.executor != nil {
-				s.executor.NotifyContextChanged(projectID, taskID)
+				task, _ := s.store.GetTask(projectID, taskID)
+				if task != nil && task.ExecutionState == "running" {
+					s.executor.NotifyContextChanged(projectID, taskID)
+				}
 			}
 			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
@@ -52,9 +56,14 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Fetch task early to check execution state for executor notification.
+		task, _ := s.store.GetTask(projectID, taskID)
 		// Notify running executor to reset loop detector and re-sync messages.
 		// Skip during regeneration — the regenerate message itself triggers a re-sync.
-		if !req.Regenerate && s.executor != nil {
+		// Skip when executor is idle — waking it would trigger an unwanted LLM call.
+		// (The non-blocking select before each LLM call in the active loop already
+		// picks up context changes via NotifyContextChanged when the agent is running.)
+		if !req.Regenerate && s.executor != nil && task != nil && task.ExecutionState == "running" {
 			s.executor.NotifyContextChanged(projectID, taskID)
 		}
 		// Clear buffered task events so reconnecting clients don't replay
@@ -62,11 +71,6 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if !req.Regenerate {
 			s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
 		}
-		// Check if the deleted message was a checkpoint for any fork threads.
-		// If so, delete those orphaned fork threads and switch to parent if needed.
-		// Skip during regeneration — the message is being re-sent, not permanently removed.
-		// Skip fork cleanup for summarization — it doesn't change files.
-		task, _ := s.store.GetTask(projectID, taskID)
 		if !req.Regenerate && msgRole != "summarization" {
 			s.cleanupDeletedMessageForks(projectID, taskID, task, msgThreadID, req.MessageID, msgCreatedAt, msgTimeErr, msgRole)
 		} else {
