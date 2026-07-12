@@ -387,7 +387,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // DB entries have backend UUIDs; buffer entries have random genId() IDs.
             // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
             const dbIds = new Set(messages.map(m => m.id));
-            const existingNonDb = entries.filter(e => !dbIds.has(e.id));
+            const existingNonDb = stream.state.entries.filter(e => !dbIds.has(e.id));
             // Collect tool_ids from DB entries to deduplicate buffer entries.
             const dbToolIds = new Set<string>();
             for (const e of mergedDbEntries) {
@@ -405,15 +405,24 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                 return true;
             });
             stream.state.entries = [...mergedDbEntries, ...dedupedNonDb];
+            // Deduplicate by ID — keeps first occurrence (DB entries come first and are authoritative).
+            // Catches edge cases where a streaming entry's temp ID was swapped to a backend ID
+            // that already exists in the DB (e.g., complete event arrives after loadHistory).
+            const seenIds = new Set<string>();
+            stream.state.entries = stream.state.entries.filter(e => {
+                if (seenIds.has(e.id)) return false;
+                seenIds.add(e.id);
+                return true;
+            });
             // Remove entries with pending tool calls from non-running tasks.
             // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
             // For stopped/completed tasks, pending calls are stale leftovers.
             if (taskStatus !== 'in_progress') {
-                stream.state.entries = entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+                stream.state.entries = stream.state.entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
             }
             // Restore context usage from the last assistant message.
             // Use total context (prompt + predicted) to reflect full window consumed.
-            const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
+            const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
             if (lastAssistant?.stats) {
                 stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
                 stream.state.contextState.used = stream.state.lastPromptTokens;
@@ -578,7 +587,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
         // If LLM is streaming, cancel the current response by clearing partial assistant entry.
         if (isLoading) {
-            stream.state.entries = entries.filter(e => !e.isStreaming);
+            stream.state.entries = stream.state.entries.filter(e => !e.isStreaming);
             if (currentAssistantId) {
                 stream.state.currentAssistantId = null;
             }
@@ -597,16 +606,16 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             }
         }
         // Remove all error entries (cleared by next user action)
-        stream.state.entries = entries.filter(e => e.role !== 'error');
+        stream.state.entries = stream.state.entries.filter(e => e.role !== 'error');
         // Add message optimistically with current thread context
         const entryId = genId();
         const isOfflineNow = getOfflineStatus();
-        stream.state.entries = [...entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
+        stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
         // Send with model info for lazy-start
         if (!await sendWithTracking(msg, attachments)) {
             const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
-            stream.state.entries = entries.filter(e => !(e.role === 'user' && e.content === msg));
-            stream.state.entries = [...entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
+            stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
+            stream.state.entries = [...stream.state.entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
             return;
         }
         scroll();
@@ -707,7 +716,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             console.error('Failed to regenerate messages:', e);
         }
         // Trim local entries: keep everything up to and including the last user message
-        stream.state.entries = trimEntriesForRegenerate(entries, idx);
+        stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
         isRegenerating = true;
         if (!await sendWithTracking(lastUser.content, undefined, true)) {
             showToast('Failed to regenerate');
@@ -766,7 +775,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         const streamingId = currentAssistantId;
         stream.closeCurrentAssistant();
         // Remove the streaming assistant entry and entries with pending tool calls.
-        stream.state.entries = entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
+        stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
         // Clear active tool calls (immediate UI update)
         stream.state.activeToolCalls.clear();
         stream.state.processedToolIds.clear();
@@ -871,7 +880,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
 
             // Discard deleted entries so loadHistory doesn't merge them back as non-DB entries.
-            stream.state.entries = entries.filter((_, i) => i < idx);
+            stream.state.entries = stream.state.entries.filter((_, i) => i < idx);
 
             // Reload from DB — restores pre-summary messages if summary was deleted.
             await loadHistory(true);
@@ -930,14 +939,14 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {
-            stream.state.entries = entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
+            stream.state.entries = stream.state.entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
             updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
             return;
         }
 
         if (isLoading || disabled) return;
-        stream.state.entries = entries.slice(0, idx);
+        stream.state.entries = stream.state.entries.slice(0, idx);
         stream.closeCurrentAssistant();
         try {
             await deleteTaskMessagesAfter(projectId, taskId, entryId);
@@ -954,7 +963,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             return;
         }
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
-        stream.state.entries = [...entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
+        stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         await sendWithTracking(newContent, attachments);
         scroll();
     }

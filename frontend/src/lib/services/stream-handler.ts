@@ -196,8 +196,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
                 if (data.assistant_message_id && s.currentAssistantId) {
                     const entry = s.entries.find(e => e.id === s.currentAssistantId);
-                    if (entry && entry.id !== data.assistant_message_id && !s.entries.some(e => e.id === data.assistant_message_id)) {
-                        entry.id = data.assistant_message_id;
+                    if (entry && entry.id !== data.assistant_message_id) {
+                        if (s.entries.some(e => e.id === data.assistant_message_id)) {
+                            s.entries = s.entries.filter(e => e.id !== s.currentAssistantId);
+                        } else {
+                            entry.id = data.assistant_message_id;
+                        }
                     }
                 }
                 stream.closeCurrentAssistant();

@@ -1072,8 +1072,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.messages = append(lc.messages, assistantMsg)
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String(), lc.startTime)
 			duration := time.Since(lc.startTime).Milliseconds()
+			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
+				ID: assistantMsgID, TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
 				Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
 				ModelName: activeModel, ProviderName: lc.providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
@@ -1134,6 +1135,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
+				"assistant_message_id": assistantMsgID,
 				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
 				"cache_tokens": cacheTokens,
 				"prompt_ms":    promptMs, "predicted_ms": predictedMs,

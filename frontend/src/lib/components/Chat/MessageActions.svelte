@@ -74,7 +74,7 @@
                 </svg>
             </button>
         {/if}
-        {#if onDelete}
+        {#if onDelete && !isStreaming}
             <button class="action-btn" onclick={onDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
