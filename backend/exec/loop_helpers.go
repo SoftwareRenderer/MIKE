@@ -234,10 +234,10 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 
 	hint := buildHint(loopType, target)
 	log.Printf("[loop] task=%s detected loop type=%d (streak %d/%d), target=%s", taskID, loopType, detector.loopStreak, maxLoopHints, target)
-	*messages = append(*messages, types.ChatMessage{Role: "system", Content: hint})
-	// Persist the hint as a visible system message so it appears in the chat UI
+	*messages = append(*messages, types.ChatMessage{Role: "user", Content: hint})
+	// Persist the hint as a visible user message so it appears in the chat UI
 	te.store.CreateTaskMessage(&types.TaskMessage{
-		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
+		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user",
 		Content: hint, CreatedAt: time.Now().UTC(),
 	})
 	// Preserve loopStreak across hint cycles so consecutive loops accumulate.

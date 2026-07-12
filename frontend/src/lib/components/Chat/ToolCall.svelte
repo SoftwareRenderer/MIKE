@@ -7,6 +7,7 @@
     import fileTextIcon from '$lib/assets/icons/file-text.svg';
     import editIcon from '$lib/assets/icons/edit.svg';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
+    import questionIcon from '$lib/assets/icons/question.svg';
     import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
     import { getTaskMessageFull } from '$lib/api';
 
@@ -191,6 +192,7 @@
         tc.toolName === 'read_file' ? fileTextIcon :
         tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
         tc.toolName === 'request_review' ? checkCircleIcon :
+        tc.toolName === 'ask_question' ? questionIcon :
         zapIcon
     );
 
@@ -247,7 +249,7 @@
 </script>
 
 <div class="tool-call-entry">
-    <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
+    <div class="tool-call-card" class:tool-call-question={tc.toolName === 'ask_question'} style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
                 <img class="tool-sandbox-icon" src={shieldGreenIcon} width="14" height="14" alt="" title="Sandboxed" />
@@ -281,7 +283,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Awaiting answer{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {/if}
@@ -326,6 +328,8 @@
             {:else}
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
             {/if}
+        {:else if tc.toolName === 'ask_question' && tc.args && tc.args.question}
+            <div class="tool-result tool-result-question">{tc.args.question as string}</div>
         {:else if tc.toolName === 'request_review' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
         {:else if tc.result && tc.result.trim()}
@@ -340,7 +344,7 @@
                 <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
-        {#if tc.duration !== undefined && tc.toolName !== 'request_review'}
+        {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question'}
             <span class="tool-duration">{tc.duration}ms</span>
         {/if}
     </div>
@@ -354,6 +358,9 @@
         border-left: 3px solid var(--color-accent);
         border-radius: var(--radius-md);
         padding: 8px;
+    }
+    .tool-call-question {
+        background: var(--color-surface-3);
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     .tool-name {
@@ -459,6 +466,21 @@
         word-break: break-word;
         max-height: none;
         overflow-y: visible;
+    }
+    .tool-result-question {
+        font-family: inherit;
+        font-size: 0.875rem;
+        line-height: 1.875rem;
+        color: var(--color-text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: none;
+        overflow-y: visible;
+        background: var(--color-surface-0);
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        border-left: 3px solid var(--color-accent);
+        margin: 4px 0 0;
     }
     .tool-create-task {
         display: flex;

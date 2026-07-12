@@ -9,9 +9,9 @@ import (
 func TestGetPlanModeToolDefinitions(t *testing.T) {
 	tools := GetPlanModeToolDefinitions()
 
-	// Should have exactly 4 tools: read_file, bash, create_task, request_review
-	if len(tools) != 4 {
-		t.Fatalf("expected 4 tools in plan mode, got %d", len(tools))
+	// Should have exactly 5 tools: read_file, bash, create_task, ask_question, request_review
+	if len(tools) != 5 {
+		t.Fatalf("expected 5 tools in plan mode, got %d", len(tools))
 	}
 
 	toolNames := make(map[string]bool)
@@ -19,8 +19,8 @@ func TestGetPlanModeToolDefinitions(t *testing.T) {
 		toolNames[tool.Function.Name] = true
 	}
 
-	// Should have read_file, bash, create_task, request_review
-	expectedTools := []string{"read_file", "bash", "create_task", "request_review"}
+	// Should have read_file, bash, create_task, ask_question, request_review
+	expectedTools := []string{"read_file", "bash", "create_task", "ask_question", "request_review"}
 	for _, name := range expectedTools {
 		if !toolNames[name] {
 			t.Errorf("expected tool %q in plan mode, not found", name)
@@ -45,7 +45,7 @@ func TestGetToolDefinitions_Standard(t *testing.T) {
 	}
 
 	// Standard mode should have all tools
-	expectedTools := []string{"read_file", "write_file", "edit_file", "bash", "request_review", "create_task"}
+	expectedTools := []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review", "create_task"}
 	for _, name := range expectedTools {
 		if !toolNames[name] {
 			t.Errorf("expected tool %q in standard mode, not found", name)

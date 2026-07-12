@@ -276,7 +276,8 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'hint': {
                 const data = event.data as { content: string; created_at: string };
                 if (data.content) {
-                    s.entries = [...s.entries, { id: genId(), role: 'system', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                    stream.closeCurrentAssistant();
+                    s.entries = [...s.entries, { id: genId(), role: 'user', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
                 }
                 break;
             }

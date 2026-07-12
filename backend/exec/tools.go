@@ -402,6 +402,12 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			out = out[:maxOutputSize] + "\n\n... (output truncated at 50KB) ..."
 		}
 		return out, true
+	case "ask_question":
+		question, _ := args["question"].(string)
+		if question == "" {
+			return "Error: question is required", false
+		}
+		return question, true
 	case "request_review":
 		// In plan mode, require at least one task created during planning before allowing completion
 		if task.PlanMode {

@@ -341,23 +341,26 @@ func TestLoopDetector_ResetClearsLoopStreak(t *testing.T) {
 func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
 	d := newLoopDetector()
 
-	// Simulate 2 consecutive text loop hints
+	// Simulate 2 consecutive loop hints
 	d.loopStreak = 2
 
-	// Valid text-only responses reset streak
-	validTexts := []string{
+	// Text-only responses now trigger LoopStatement (not LoopNone)
+	// This means the streak is NOT reset by text-only responses
+	texts := []string{
 		"The database migration completed successfully and all tables are now created with the correct schema definitions",
 		"I wrote comprehensive unit tests covering edge cases and boundary conditions for the authentication module",
 		"The deployment pipeline is configured with proper error handling and notification hooks for the staging environment",
 	}
-	for _, text := range validTexts {
+	for _, text := range texts {
 		loopType, _, _ := d.recordTurn(nil, text)
-		if loopType != LoopNone {
-			t.Fatalf("expected LoopNone, got %v", loopType)
+		if loopType != LoopStatement {
+			t.Fatalf("expected LoopStatement, got %v", loopType)
 		}
 	}
-	if d.loopStreak != 0 {
-		t.Errorf("expected loopStreak=0 after valid text turns, got %d", d.loopStreak)
+	// loopStreak is preserved (not reset) because LoopStatement is a loop detection
+	// The streak counter is managed by handleLoopDetected (increment + preserve across reset)
+	if d.loopStreak != 2 {
+		t.Errorf("expected loopStreak=2 (preserved across LoopStatement), got %d", d.loopStreak)
 	}
 }
 
@@ -474,18 +477,36 @@ func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 func TestLoopDetector_TextLoop(t *testing.T) {
 	d := newLoopDetector()
 
-	// Two very similar responses (same key words, slight rewording)
+	// Statements (no question mark) trigger LoopStatement
 	text1 := "I need to carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
 	text2 := "I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
 
-	// First text response
-	if loopType, _, _ := d.recordTurn(nil, text1); loopType != LoopNone {
-		t.Error("first text should not trigger loop")
+	if loopType, _, _ := d.recordTurn(nil, text1); loopType != LoopStatement {
+		t.Errorf("expected LoopStatement for first text, got %v", loopType)
 	}
+	if loopType, _, _ := d.recordTurn(nil, text2); loopType != LoopStatement {
+		t.Errorf("expected LoopStatement for second text, got %v", loopType)
+	}
+}
 
-	// Second similar text response (Jaccard > 0.6)
-	if loopType, _, _ := d.recordTurn(nil, text2); loopType != LoopText {
-		t.Error("similar text should trigger LoopText")
+func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
+	d := newLoopDetector()
+
+	// Text containing a question mark should NOT trigger LoopStatement
+	questions := []string{
+		"Should I use React or Vue for this project?",
+		"What framework would you recommend? Let me know your preference.",
+		"Could you clarify the requirements?",
+	}
+	for _, q := range questions {
+		loopType, _, _ := d.recordTurn(nil, q)
+		if loopType != LoopNone {
+			t.Errorf("expected LoopNone for question %q, got %v", q, loopType)
+		}
+	}
+	// loopStreak should be reset to 0
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after question, got %d", d.loopStreak)
 	}
 }
 
@@ -591,7 +612,7 @@ func TestBuildHint_ReasoningOnly(t *testing.T) {
 		t.Error("hint should mention reasoning")
 	}
 	// Verify it lists available tools
-	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "request_review", "create_task"} {
+	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review", "create_task"} {
 		if !strings.Contains(hint, tool) {
 			t.Errorf("hint should mention tool %q, got: %s", tool, hint)
 		}
@@ -599,6 +620,17 @@ func TestBuildHint_ReasoningOnly(t *testing.T) {
 	// Verify it mentions function calling format
 	if !strings.Contains(hint, "function calling") {
 		t.Error("hint should mention function calling format")
+	}
+}
+
+func TestBuildHint_Statement(t *testing.T) {
+	hint := buildHint(LoopStatement, "")
+	if hint == "" {
+		t.Fatal("LoopStatement should have a hint message")
+	}
+	expected := "You made a statement without taking any explicit action. Either continue your progress, use the `ask_question` tool if clarification is needed, or `request_review` if the task is complete."
+	if hint != expected {
+		t.Errorf("unexpected hint: %s", hint)
 	}
 }
 

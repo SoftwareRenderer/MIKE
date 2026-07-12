@@ -291,6 +291,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         const streaming = get(streamingIds).has(task.id);
         const state = $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
+        if (state === 'idle' && task.status === 'in_progress') return { text: 'Awaiting answer', color: 'var(--color-status-orange)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
         if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return { text: 'Idle', color: 'var(--color-text-tertiary)' };

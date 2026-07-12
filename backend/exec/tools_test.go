@@ -260,6 +260,28 @@ func TestExecuteTool_TaskComplete(t *testing.T) {
 	}
 }
 
+func TestExecuteTool_AskQuestion(t *testing.T) {
+	te := &TaskExecutor{}
+	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": "What framework should I use?"}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+	if result != "What framework should I use?" {
+		t.Errorf("expected question text, got %q", result)
+	}
+}
+
+func TestExecuteTool_AskQuestion_Empty(t *testing.T) {
+	te := &TaskExecutor{}
+	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": ""}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
+	if ok {
+		t.Fatalf("expected failure for empty question, got success: %s", result)
+	}
+	if result != "Error: question is required" {
+		t.Errorf("expected 'Error: question is required', got %q", result)
+	}
+}
+
 func TestExecuteTool_UnknownTool(t *testing.T) {
 	te := &TaskExecutor{}
 	result, ok := te.executeTool(context.Background(), "unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)

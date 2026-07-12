@@ -536,6 +536,8 @@ func MapPiToolName(piToolName string) string {
 		return "bash"
 	case "request_review":
 		return "request_review"
+	case "ask_question":
+		return "ask_question"
 	case "final_answer":
 		return "request_review"
 	default:

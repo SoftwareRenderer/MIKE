@@ -19,6 +19,7 @@ var toolDisplayNames = map[string]string{
 	"write_file":     "Write",
 	"edit_file":      "Edit",
 	"bash":           "Execute",
+	"ask_question":   "Question",
 	"request_review": "Done",
 	"create_task":    "Create Task",
 }
@@ -83,6 +84,21 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a primary task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "ask_question",
+				DisplayName: "Question",
+				Description: "Ask the user a clarifying question when you need more information to proceed. Use this instead of making assumptions when requirements are unclear.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"question": map[string]any{"type": "string", "description": "The question to ask the user"},
+					},
+					"required": []string{"question"},
 				},
 			},
 		},
@@ -164,6 +180,21 @@ func GetToolDefinitions() []types.ChatTool {
 						"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
 					},
 					"required": []string{"command"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "ask_question",
+				DisplayName: "Question",
+				Description: "Ask the user a clarifying question when you need more information to proceed. Use this instead of making assumptions when requirements are unclear.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"question": map[string]any{"type": "string", "description": "The question to ask the user"},
+					},
+					"required": []string{"question"},
 				},
 			},
 		},

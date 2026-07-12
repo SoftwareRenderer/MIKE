@@ -998,6 +998,28 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.broadcastDiffIfGitCmd(projectID, task.ID, task)
 			}
 
+			// Check if ask_question was called — stop executor, wait for user to restart
+			for i, tc := range lc.pendingToolCalls {
+				if tc.Function.Name == "ask_question" {
+					question := toolResults[i].output
+					task.ExecutionState = "idle"
+					task.Status = "in_progress"
+					te.store.UpdateTask(task)
+					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+						"state":    "idle",
+						"question": question,
+						"summary":  "Agent has a question",
+					}})
+					log.Printf("[ask_question] task=%s stopping executor, awaiting user answer", task.ID)
+					// Remove from task registry so next user message triggers handleLazyStart
+					te.taskMu.Lock()
+					delete(te.tasks, task.ID)
+					te.taskMu.Unlock()
+					return
+				}
+			}
+
 			// Check consecutive identical tool call failures (turn-level).
 			if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
 				task.ExecutionState = "failed"
@@ -1086,8 +1108,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 			// Loop detection for text-only responses
 			loopType, _, _ := lc.detector.recordTurn(nil, assistantText)
-			// Also check for phrase repetition detected during streaming
-			if loopType == LoopNone && lc.detector.phraseDetected() {
+			// Also check for phrase repetition detected during streaming.
+			// Skip if the response contains a question (natural question, not a loop).
+			if loopType == LoopNone && lc.detector.phraseDetected() && !strings.Contains(assistantText, "?") {
 				loopType = LoopPhrase
 			}
 			if loopType != LoopNone {

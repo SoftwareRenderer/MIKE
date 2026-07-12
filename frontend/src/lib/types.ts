@@ -6,6 +6,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
     write_file: 'Write',
     edit_file: 'Edit',
     bash: 'Execute',
+    ask_question: 'Question',
     request_review: 'Done',
 };
 

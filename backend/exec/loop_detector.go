@@ -75,6 +75,7 @@ const (
 	LoopText                   // repeated similar text-only responses
 	LoopPhrase                 // exact phrase repetition within a response
 	LoopReasoningOnly          // reasoning-only response with no content or tool calls
+	LoopStatement              // text-only response without ask_question or request_review
 )
 
 const maxLoopHints = 3
@@ -147,14 +148,13 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 			}
 		}
 	} else if strings.TrimSpace(assistantText) != "" {
-		// Text-only response: add to window and check for repetition
-		trimmed := strings.TrimSpace(assistantText)
-		d.textWindow = append(d.textWindow, trimmed)
-		if len(d.textWindow) >= 2 {
-			if d.detectTextLoop() {
-				return LoopText, "", ""
-			}
+		// Text-only response: if it contains a question, let it through naturally.
+		// Only trigger LoopStatement when the LLM makes a statement without action.
+		if strings.Contains(assistantText, "?") {
+			d.loopStreak = 0
+			return LoopNone, "", ""
 		}
+		return LoopStatement, "", ""
 	}
 
 	// No loop detected: reset consecutive loop counter
@@ -368,7 +368,7 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 		return true
 	case "write_file", "edit_file":
 		return false
-	case "request_review":
+	case "ask_question", "request_review":
 		return false
 	case "bash":
 		var args map[string]any
@@ -446,10 +446,12 @@ func buildHint(loopType LoopType, target string) string {
 		return fmt.Sprintf("You've read/checked `%s` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action \u2014 edit the file, run a command, or mark the task complete.", target)
 	case LoopText:
 		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `request_review` if the task is done."
+	case LoopStatement:
+		return "You made a statement without taking any explicit action. Either continue your progress, use the `ask_question` tool if clarification is needed, or `request_review` if the task is complete."
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	case LoopReasoningOnly:
-		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, request_review, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
+		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, ask_question, request_review, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
 	default:
 		return ""
 	}
