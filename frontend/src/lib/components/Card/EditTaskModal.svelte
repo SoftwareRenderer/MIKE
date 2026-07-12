@@ -86,7 +86,12 @@
     }[operatingModeDraft] || '');
 </script>
 
-<BaseModal title="Edit Task" width="440px" onClose={handleClose}>
+{#snippet footer()}
+            <button type="button" class="btn-secondary" onclick={handleClose}>Cancel</button>
+            <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>Save</button>
+        {/snippet}
+
+        <BaseModal title="Edit Task" width="440px" footer={footer} onClose={handleClose}>
             <label for="edit-task-title-input">
                 <span class="field-label">Title</span>
                 <input
@@ -140,10 +145,6 @@
                 </div>
                 {/if}
             </div>
-            <div slot="footer" class="footer-wrapper">
-                <button type="button" class="btn-secondary" onclick={handleClose}>Cancel</button>
-                <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>Save</button>
-            </div>
 </BaseModal>
 
 <style>
@@ -158,9 +159,6 @@
         display: flex;
         flex-direction: column;
         gap: 14px;
-    }
-    .footer-wrapper {
-        display: contents;
     }
     label {
         display: flex;

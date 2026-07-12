@@ -853,7 +853,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 <!-- Login gate -->
 {#if isLoadingAuth}
     <div class="loading-screen">
-        <img class="loading-icon" src={kanbanIcon} width="64" height="64" alt="Loading" />
+        <img class="loading-icon" src={kanbanIcon} width="96" height="96" alt="Loading" />
     </div>
 {:else if hasLocalCache}
     <div class="offline-screen">
