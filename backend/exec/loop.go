@@ -1082,7 +1082,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if tc.Function.Name == "ask_question" {
 					question := toolResults[i].output
 					task.ExecutionState = "idle"
-					task.Status = "in_progress"
+					task.Status = "review"
 					te.store.UpdateTask(task)
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{

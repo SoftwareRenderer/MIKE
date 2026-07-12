@@ -487,7 +487,7 @@ func buildHint(loopType LoopType, target string) string {
 	case LoopText:
 		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `request_review` if the task is done."
 	case LoopStatement:
-		return "You made a statement without taking any explicit action. Either continue your progress, use the `ask_question` tool if clarification is needed, or `request_review` if the task is complete."
+		return "You made a statement without using a tool. Take action — use `read_file`, `write_file`, `edit_file`, or `bash` to make progress, `ask_question` if clarification/approval is needed, or `request_review` if the task is complete."
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	case LoopReasoningOnly:

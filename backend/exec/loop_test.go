@@ -755,7 +755,7 @@ func TestBuildHint_Statement(t *testing.T) {
 	if hint == "" {
 		t.Fatal("LoopStatement should have a hint message")
 	}
-	expected := "You made a statement without taking any explicit action. Either continue your progress, use the `ask_question` tool if clarification is needed, or `request_review` if the task is complete."
+	expected := "You made a statement without using a tool. Take action — use `read_file`, `write_file`, `edit_file`, or `bash` to make progress, `ask_question` if clarification/approval is needed, or `request_review` if the task is complete."
 	if hint != expected {
 		t.Errorf("unexpected hint: %s", hint)
 	}
