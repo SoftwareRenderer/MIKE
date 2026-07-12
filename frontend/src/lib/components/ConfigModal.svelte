@@ -156,7 +156,7 @@
     $effect(() => {
         defaultProvider = config?.default_provider || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
-        defaultAutoMerge = config?.default_auto_merge ?? true;
+        defaultAutoMerge = config?.default_auto_merge ?? false;
         defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
         defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;

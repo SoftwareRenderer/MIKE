@@ -18,7 +18,7 @@ import { showCreateTask } from '$lib/stores/ui';
     let autoCommit = $state(false);
 
     let operatingMode = $state('act'); // "act", "plan", or "ideate"
-    let autoMerge = $state(true);
+    let autoMerge = $state(false);
     let subtasksAutoMerge = $state(true);
     let loading = $state(false);
     let error = $state('');
@@ -185,7 +185,7 @@ import { showCreateTask } from '$lib/stores/ui';
         if (cfg && !configLoaded) {
             configLoaded = true;
             autoCommit = cfg.default_auto_commit ?? false;
-            autoMerge = cfg.default_auto_merge ?? true;
+            autoMerge = cfg.default_auto_merge ?? false;
             operatingMode = cfg.default_operating_mode ?? 'act';
         }
     });
@@ -448,6 +448,11 @@ import { showCreateTask } from '$lib/stores/ui';
         padding: 16px 20px;
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
+    }
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
     }
     .modal-body {
         padding: 20px;

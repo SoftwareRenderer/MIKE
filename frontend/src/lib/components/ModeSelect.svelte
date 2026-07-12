@@ -45,7 +45,7 @@
 </script>
 
 <div class="mode-select" bind:this={dropdownRef}>
-    <button class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label="Operating mode" aria-expanded={open}>
+    <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label="Operating mode" aria-expanded={open}>
         <span class="mode-icon active">{@html renderIcon(selected.icon)}</span>
         <span class="mode-label">{selected.label}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
