@@ -380,7 +380,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 </script>
 
-<BaseModal title="Sandbox Configuration" width="560px" onClose={onClose}>
+<BaseModal title="Sandbox Configuration" width="560px" footer={footer} onClose={onClose}>
 
         {#if isLocked}
             <div class="locked-notice">
@@ -801,14 +801,16 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         {#if error}
             <div class="error-message">{error}</div>
         {/if}
-
-        <div slot="footer" class="footer-wrapper">
-            <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>Cancel</button>
-            <button type="button" class="btn-primary" onclick={handleSave} disabled={saving || isLocked}>
-                {saving ? 'Saving...' : 'Save'}
-            </button>
-        </div>
 </BaseModal>
+
+{#snippet footer()}
+    <div class="footer-wrapper">
+        <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>Cancel</button>
+        <button type="button" class="btn-primary" onclick={handleSave} disabled={saving || isLocked}>
+            {saving ? 'Saving...' : 'Save'}
+        </button>
+    </div>
+{/snippet}
 
 {#if showDockerfilePicker}
     <DockerfilePicker initialPath={project.path} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />

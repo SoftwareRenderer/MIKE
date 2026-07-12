@@ -520,7 +520,7 @@
     }
 </script>
 
-<BaseModal title="Settings" onClose={handleClose}>
+<BaseModal title="Settings" footer={footer} onClose={handleClose}>
             <!-- Providers Section -->
             <fieldset class="section">
                 <div class="section-header">
@@ -630,18 +630,19 @@
             {#if error}
                 <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
             {/if}
-        <div slot="footer" class="footer-slot-wrapper">
-            {#if onSignOut}
-                <button type="button" class="btn-signout" onclick={handleSignOut} title="Sign out of Kanban">Sign out</button>
-            {/if}
-            <div class="modal-footer-right">
-                <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
-                <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
-                    {loading ? 'Saving...' : 'Save'}
-                </button>
-            </div>
-        </div>
 </BaseModal>
+
+{#snippet footer()}
+    {#if onSignOut}
+        <button type="button" class="btn-signout" onclick={handleSignOut} title="Sign out of Kanban">Sign out</button>
+    {/if}
+    <div class="modal-footer-right">
+        <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+        <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
+            {loading ? 'Saving...' : 'Save'}
+        </button>
+    </div>
+{/snippet}
 
 <style>
     @import '$lib/styles/shared.css';
@@ -824,9 +825,6 @@
         display: flex;
         gap: 8px;
         margin-left: auto;
-    }
-    .footer-slot-wrapper {
-        display: contents;
     }
     .btn-signout {
         padding: 8px 16px;

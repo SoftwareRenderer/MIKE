@@ -128,7 +128,7 @@
         font-weight: 600;
     }
     .modal-body {
-        padding: 20px;
+        padding: 8px 20px;
         overflow-y: auto;
         flex: 1;
     }

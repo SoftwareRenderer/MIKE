@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { commitDialog, type CommitDialogOptions } from '$lib/stores/dialogs';
+    import BaseModal from '../BaseModal.svelte';
 
     let open = $state(false);
     let streaming = $state(false);
@@ -14,9 +15,6 @@
     let promptProgress = $state(0);
     let resolveFn: ((value: string | null) => void) | null = $state(null);
     let textareaRef: HTMLTextAreaElement | null = $state(null);
-    let overlayRef: HTMLDivElement | null = $state(null);
-    // Track the element that had focus before the dialog opened, so we can restore it.
-    let triggerElement: Element | null = $state(null);
     // Abort controller for streaming cancellation
     let abortController: AbortController | null = null;
 
@@ -32,11 +30,6 @@
             resolveFn = null;
         }
         commitDialog.set(null);
-        // Restore focus to the element that opened the dialog.
-        // Use a short delay so the DOM has time to update after the dialog is removed.
-        setTimeout(() => {
-            triggerElement?.focus();
-        }, 0);
     }
 
     function handleConfirm() {
@@ -47,45 +40,11 @@
         dismiss(null);
     }
 
-    function handleOverlayClick(e: MouseEvent) {
-        if (e.target === e.currentTarget) {
-            handleCancel();
-        }
-    }
-
     function handleKeydown(e: KeyboardEvent) {
         if (!open) return;
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            handleCancel();
-        } else if (e.key === 'Enter' && e.ctrlKey) {
+        if (e.key === 'Enter' && e.ctrlKey) {
             e.preventDefault();
             handleConfirm();
-        } else if (e.key === 'Tab') {
-            // Focus trap: keep Tab/Shift+Tab inside the dialog.
-            trapFocus(e);
-        }
-    }
-
-    function trapFocus(e: KeyboardEvent) {
-        const el = overlayRef;
-        if (!el) return;
-        const focusable = el.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
-        );
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-
-        if (e.shiftKey) {
-            if (document.activeElement === first) {
-                e.preventDefault();
-                last?.focus();
-            }
-        } else {
-            if (document.activeElement === last) {
-                e.preventDefault();
-                first?.focus();
-            }
         }
     }
 
@@ -209,8 +168,6 @@
     onMount(() => {
         unsub = commitDialog.subscribe((value) => {
             if (value) {
-                // Capture the currently focused element for later restoration.
-                triggerElement = document.activeElement;
                 message = value.message || '';
                 editedMessage = value.message || '';
                 confirmText = value.confirmText ?? 'Commit and move to Done';
@@ -261,80 +218,66 @@
 </script>
 
 {#if open}
-    <!-- svelte-ignore a11y_click_events_have_key_events — overlay click dismisses dialog, not an activation -->
-    <div
-        bind:this={overlayRef}
-        class="commit-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="commit-dialog-title"
-        aria-describedby="commit-dialog-desc"
-        tabindex="-1"
-        onmousedown={handleOverlayClick}
-        onclick={handleOverlayClick}
-    >
-        <div class="commit-dialog">
-            <h3 id="commit-dialog-title">Commit changes</h3>
-            <p id="commit-dialog-desc" class="sr-only">
-                Review and edit the commit message, then confirm to commit changes and move the task to Done.
-            </p>
+    {#snippet footer()}
+        <button type="button" class="btn-secondary" onclick={handleCancel}>{cancelText}</button>
+        <button
+            type="button"
+            class="btn-primary"
+            onclick={handleConfirm}
+            disabled={!editedMessage.trim() || streaming}
+        >
+            {confirmText}
+        </button>
+    {/snippet}
 
-            <textarea
-                bind:this={textareaRef}
-                bind:value={message}
-                oninput={handleMessageChange}
-                class="commit-textarea"
-                rows="7"
-                placeholder={placeholderText}
-                aria-label="Commit message"
-            ></textarea>
+    <BaseModal title="Commit changes" width="560px" zIndex={1000} footer={footer} onClose={handleCancel}>
+        <p id="commit-dialog-desc" class="sr-only">
+            Review and edit the commit message, then confirm to commit changes and move the task to Done.
+        </p>
 
-            {#if streaming}
-                <div class="commit-progress" role="status" aria-busy={streaming}>
-                    <svg
-                        class="progress-spinner"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        aria-hidden="true"
-                    >
-                        <path d="M12 2a10 10 0 0 1 10 10"/>
-                    </svg>
-                    {#if promptProgress > 0 && promptProgress < 100}
-                        <span class="progress-text">Processing prompt: {promptProgress}%</span>
-                    {:else}
-                        <span class="progress-text">Generating...</span>
-                    {/if}
-                </div>
-            {/if}
+        <textarea
+            bind:this={textareaRef}
+            bind:value={message}
+            oninput={handleMessageChange}
+            class="commit-textarea"
+            rows="7"
+            placeholder={placeholderText}
+            aria-label="Commit message"
+        ></textarea>
 
-            {#if authorName || authorEmail}
-                <div class="commit-meta">
-                    Committing as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
-                </div>
-            {/if}
-            {#if mergeTarget}
-                <div class="commit-meta">
-                    Merge into: <code>{mergeTarget}</code>
-                </div>
-            {/if}
-
-            <div class="commit-actions">
-                <button class="btn-cancel" onclick={handleCancel}>{cancelText}</button>
-                <button
-                    class="btn-confirm"
-                    onclick={handleConfirm}
-                    disabled={!editedMessage.trim() || streaming}
-                    aria-disabled={!editedMessage.trim() || streaming}
+        {#if streaming}
+            <div class="commit-progress" role="status" aria-busy={streaming}>
+                <svg
+                    class="progress-spinner"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    aria-hidden="true"
                 >
-                    {confirmText}
-                </button>
+                    <path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>
+                {#if promptProgress > 0 && promptProgress < 100}
+                    <span class="progress-text">Processing prompt: {promptProgress}%</span>
+                {:else}
+                    <span class="progress-text">Generating...</span>
+                {/if}
             </div>
-        </div>
-    </div>
+        {/if}
+
+        {#if authorName || authorEmail}
+            <div class="commit-meta">
+                Committing as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
+            </div>
+        {/if}
+        {#if mergeTarget}
+            <div class="commit-meta">
+                Merge into: <code>{mergeTarget}</code>
+            </div>
+        {/if}
+    </BaseModal>
 {/if}
 
 <style>
@@ -351,32 +294,11 @@
         border: 0;
     }
 
-    .commit-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
+    :global(.overlay) {
         animation: fade-in 0.15s ease-out;
     }
-
-    .commit-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 24px 28px;
-        max-width: 560px;
-        width: 90%;
+    :global(.modal) {
         animation: scale-in 0.15s ease-out;
-    }
-
-    .commit-dialog h3 {
-        font-size: 0.875rem;
-        font-weight: 600;
-        margin: 0 0 12px;
-        color: var(--color-text-primary);
     }
 
     .commit-textarea {
@@ -435,59 +357,6 @@
         border-radius: 3px;
         font-family: var(--font-mono);
         font-size: 0.75rem;
-    }
-
-    .commit-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-        margin-top: 16px;
-    }
-
-    .btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        cursor: pointer;
-        transition: background 0.15s;
-    }
-
-    .btn-cancel:hover {
-        background: var(--color-surface-3);
-    }
-
-    .btn-cancel:focus-visible {
-        outline: 2px solid var(--color-accent);
-        outline-offset: 2px;
-    }
-
-    .btn-confirm {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: none;
-        background: var(--color-accent);
-        color: white;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: opacity 0.15s;
-    }
-
-    .btn-confirm:hover:not(:disabled) {
-        opacity: 0.85;
-    }
-
-    .btn-confirm:focus-visible {
-        outline: 2px solid var(--color-accent);
-        outline-offset: 2px;
-    }
-
-    .btn-confirm:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 
     @keyframes fade-in {

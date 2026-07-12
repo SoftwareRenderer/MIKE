@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { confirmation, type ConfirmOptions } from '$lib/stores/dialogs';
+    import BaseModal from './BaseModal.svelte';
 
     let open = $state(false);
     let title = $state('');
@@ -27,18 +28,9 @@
         dismiss(false);
     }
 
-    function handleOverlayClick(e: MouseEvent) {
-        if (e.target === e.currentTarget) {
-            handleCancel();
-        }
-    }
-
     function handleKeydown(e: KeyboardEvent) {
         if (!open) return;
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            handleCancel();
-        } else if (e.key === 'Enter') {
+        if (e.key === 'Enter') {
             e.preventDefault();
             handleConfirm();
         }
@@ -69,76 +61,41 @@
 </script>
 
 {#if open}
-    <div class="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" tabindex="-1" onmousedown={handleOverlayClick}>
-        <div class="confirm-dialog">
-            <h3 id="confirm-dialog-title">{title}</h3>
-            <p>{message}</p>
-            <div class="confirm-actions">
-                <button class="btn-cancel" onclick={handleCancel}>{cancelText}</button>
-                <button class:btn-confirm={true} class:destructive={variant === 'destructive'} onclick={handleConfirm}>
-                    {confirmText}
-                </button>
-            </div>
-        </div>
-    </div>
+    {#snippet footer()}
+        <button type="button" class="btn-secondary" onclick={handleCancel}>{cancelText}</button>
+        <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={handleConfirm}>
+            {confirmText}
+        </button>
+    {/snippet}
+
+    <BaseModal title={title} width="360px" zIndex={1000} footer={footer} onClose={handleCancel}>
+        <p class="confirm-message">{message}</p>
+    </BaseModal>
 {/if}
 
 <style>
-    .confirm-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
+    :global(.overlay) {
         animation: fade-in 0.15s ease-out;
     }
-
-    .confirm-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 20px 24px;
-        max-width: 360px;
-        width: 90%;
+    :global(.modal) {
         animation: scale-in 0.15s ease-out;
+        padding: 4px;
     }
-
-    .confirm-dialog h3 {
-        font-size: 0.875rem;
-        font-weight: 600;
-        margin: 0 0 8px;
-        color: var(--color-text-primary);
+    :global(.modal-body) {
+        padding: 0;
     }
-
-    .confirm-dialog p {
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        margin: 0 0 16px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-    }
-
-    .confirm-actions {
-        display: flex;
-        gap: 8px;
+    :global(.modal-footer) {
+        margin-top: 16px;
+        padding-top: 16px;
         justify-content: flex-end;
     }
 
-    .btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
+    .confirm-message {
         font-size: 0.8125rem;
-        cursor: pointer;
-        transition: background 0.15s;
-    }
-
-    .btn-cancel:hover {
-        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        margin: 0;
+        line-height: 1.5;
+        white-space: pre-wrap;
     }
 
     .btn-confirm {
@@ -152,11 +109,9 @@
         cursor: pointer;
         transition: opacity 0.15s;
     }
-
     .btn-confirm:hover {
         opacity: 0.85;
     }
-
     .btn-confirm.destructive {
         background: var(--color-status-red);
     }

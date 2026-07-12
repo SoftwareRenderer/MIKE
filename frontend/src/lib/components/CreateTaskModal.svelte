@@ -4,12 +4,12 @@
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
     import { config as configStore, board as boardStore, selectedProject } from '$lib/stores/app';
-import { showCreateTask } from '$lib/stores/ui';
+    import { showCreateTask } from '$lib/stores/ui';
+    import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModeSelect from './ModeSelect.svelte';
-    import { createFocusTrap } from '$lib/a11y';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
     let { projectId, onClose, onTaskCreated, parentId, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
@@ -159,7 +159,6 @@ import { showCreateTask } from '$lib/stores/ui';
     });
 
     // Subscribe to config store to pick up providers (may load after modal opens)
-    // $configStore syntax auto-subscribes to store changes
     let cfg: Config | null = $state(null);
     const unsubConfig = configStore.subscribe(val => { cfg = val; });
     let targetBranch = $derived($selectedProject?.origin_branch || 'main');
@@ -191,7 +190,6 @@ import { showCreateTask } from '$lib/stores/ui';
     });
 
     onMount(async () => {
-        triggerEl = document.activeElement as HTMLElement;
         // Fetch parent task title and defaults if creating a subtask
         if (parentId && projectId) {
             try {
@@ -203,15 +201,6 @@ import { showCreateTask } from '$lib/stores/ui';
             } catch {
                 parentTitle = 'Parent task';
             }
-        }
-        // Setup focus trap after modal is rendered
-        if (modalEl) {
-            trap = createFocusTrap(modalEl, handleClose);
-            // Focus the description textarea
-            setTimeout(() => {
-                const textarea = modalEl?.querySelector('textarea') as HTMLElement;
-                textarea?.focus();
-            }, 50);
         }
     });
 
@@ -292,170 +281,126 @@ import { showCreateTask } from '$lib/stores/ui';
     }
 
     function handleClose() {
-        trap?.destroy();
-        trap = null;
         onClose();
-        setTimeout(() => triggerEl?.focus(), 50);
     }
-
-    let modalEl: HTMLDivElement | null = null;
-    let trap: ReturnType<typeof createFocusTrap> | null = null;
-    let triggerEl: HTMLElement | null = null;
 </script>
 
-<div class="overlay" onclick={handleClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }} bind:this={modalEl} role="dialog" aria-modal="true" aria-labelledby="create-task-title" tabindex="-1">
-        <div class="modal-header">
-            <h2 id="create-task-title">{parentId ? 'Create Subtask' : 'Create Task'}</h2>
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+{#snippet footer()}
+    <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
+    <button type="button" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)} onclick={handleSubmit} title="Create the task">
+        {loading ? 'Creating...' : 'Create Task'}
+    </button>
+{/snippet}
+
+<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={handleClose}>
+    {#if parentId}
+        <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
+    {/if}
+    <label for="task-description">
+        <span class="label-row">
+            Description
+            <button type="button" class="btn-attach" onclick={() => fileInput?.click()} aria-label="Attach image" title="Attach image">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                </svg>
+            </button>
+        </span>
+        {#if attachments.length > 0}
+            <div class="task-attachments">
+                {#each attachments as att, i}
+                    <div class="task-attachment-chip">
+                        <img src={att.data} alt="Attachment" />
+                        <button class="remove-attachment" onclick={() => removeAttachment(i)} title="Remove">&times;</button>
+                    </div>
+                {/each}
+            </div>
+        {/if}
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown}></textarea>
+    </label>
+    <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
+    {#if hasProviders}
+        <div class="model-select-row">
+            <span id="model-label" class="model-label" style="margin:0">Model</span>
+            <ModelSelector
+                providers={providers}
+                currentModel={selectedModel}
+                currentUrl={selectedUrl}
+                currentReasoningEffort={selectedReasoningEffort}
+                onSelect={handleModelSelect}
+            />
         </div>
-        <form class="modal-body" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-            {#if parentId}
-                <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
-            {/if}
-            <label for="task-description">
-                <span class="label-row">
-                    Description
-                    <button type="button" class="btn-attach" onclick={() => fileInput?.click()} aria-label="Attach image" title="Attach image">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-                        </svg>
-                    </button>
-                </span>
-                {#if attachments.length > 0}
-                    <div class="task-attachments">
-                        {#each attachments as att, i}
-                            <div class="task-attachment-chip">
-                                <img src={att.data} alt="Attachment" />
-                                <button class="remove-attachment" onclick={() => removeAttachment(i)} title="Remove">&times;</button>
-                            </div>
-                        {/each}
-                    </div>
-                {/if}
-                <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown}></textarea>
-            </label>
-            <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
-            {#if hasProviders}
-                <div class="model-select-row">
-                    <span id="model-label" class="model-label" style="margin:0">Model</span>
-                    <ModelSelector
-                        providers={providers}
-                        currentModel={selectedModel}
-                        currentUrl={selectedUrl}
-                        currentReasoningEffort={selectedReasoningEffort}
-                        onSelect={handleModelSelect}
-                    />
+    {/if}
+    <div class="options">
+        {#if !isAgentSelected()}
+        <div class="config-row">
+            <div class="config-info">
+                <div class="config-text">
+                    <span class="config-label">Operating mode</span>
+                    <span class="config-desc">
+                        {#if operatingMode === 'act'}
+                        AI is required to take formal actions
+                        {:else if operatingMode === 'plan'}
+                        AI decomposes work into subtasks on the board, then executes after approval
+                        {:else}
+                        Free-form brainstorming. AI is not required to take formal actions
+                        {/if}
+                    </span>
                 </div>
-            {/if}
-            <div class="options">
-                {#if !isAgentSelected()}
-                <div class="config-row">
-                    <div class="config-info">
-                        <div class="config-text">
-                            <span class="config-label">Operating mode</span>
-                            <span class="config-desc">
-                                {#if operatingMode === 'act'}
-                                AI is required to take formal actions
-                                {:else if operatingMode === 'plan'}
-                                AI decomposes work into subtasks on the board, then executes after approval
-                                {:else}
-                                Free-form brainstorming. AI is not required to take formal actions
-                                {/if}
-                            </span>
-                        </div>
-                    </div>
-                    <ModeSelect value={operatingMode} onChange={(m: string) => operatingMode = m} />
-                </div>
-                {/if}
             </div>
-            <div class="options-section">
-                <div class="section-label">Repository</div>
-                <div class="config-row">
-                    <div class="config-info">
-                        <div class="config-text">
-                            <span class="config-label">Auto-merge</span>
-                            <span class="config-desc">
-                                {#if parentId}
-                                Merge changes into parent task when complete
-                                {:else}
-                                Merge changes into <span class="branch-badge" title={`Branch: ${targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{targetBranch}</span> when complete
-                                {/if}
-                            </span>
-                        </div>
-                    </div>
-                    <ToggleSwitch bind:checked={autoMerge} ariaLabel="Auto-merge on completion" />
-                </div>
-                {#if !parentId}
-                <div class="config-row">
-                    <div class="config-info">
-                        <div class="config-text">
-                            <span class="config-label">Allow subtasks to auto-merge</span>
-                            <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
-                        </div>
-                    </div>
-                    <ToggleSwitch bind:checked={subtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" />
-                </div>
-                {/if}
-            </div>
-            {#if error}
-                <div id="task-error" class="error" role="alert">{error}</div>
-            {/if}
-            <div class="modal-footer">
-                <button type="button" onclick={handleClose} title="Cancel">Cancel</button>
-                <button type="submit" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)} title="Create the task">
-                    {loading ? 'Creating...' : 'Create Task'}
-                </button>
-            </div>
-        </form>
+            <ModeSelect value={operatingMode} onChange={(m: string) => operatingMode = m} />
+        </div>
+        {/if}
     </div>
-    <!-- @ file mention dropdown -->
-    <FileMentionDropdown
-        results={mentionResults}
-        position={mentionPosition}
-        activeIndex={mentionActiveIndex}
-        onSelect={handleMentionSelect}
-        onClose={handleMentionClose}
-    />
-</div>
+    <div class="options-section">
+        <div class="section-label">Repository</div>
+        <div class="config-row">
+            <div class="config-info">
+                <div class="config-text">
+                    <span class="config-label">Auto-merge</span>
+                    <span class="config-desc">
+                        {#if parentId}
+                        Merge changes into parent task when complete
+                        {:else}
+                        Merge changes into <span class="branch-badge" title={`Branch: ${targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{targetBranch}</span> when complete
+                        {/if}
+                    </span>
+                </div>
+            </div>
+            <ToggleSwitch bind:checked={autoMerge} ariaLabel="Auto-merge on completion" />
+        </div>
+        {#if !parentId}
+        <div class="config-row">
+            <div class="config-info">
+                <div class="config-text">
+                    <span class="config-label">Allow subtasks to auto-merge</span>
+                    <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
+                </div>
+            </div>
+            <ToggleSwitch bind:checked={subtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" />
+        </div>
+        {/if}
+    </div>
+    {#if error}
+        <div id="task-error" class="error" role="alert">{error}</div>
+    {/if}
+</BaseModal>
+
+<!-- @ file mention dropdown — must be outside BaseModal (floating element) -->
+<FileMentionDropdown
+    results={mentionResults}
+    position={mentionPosition}
+    activeIndex={mentionActiveIndex}
+    onSelect={handleMentionSelect}
+    onClose={handleMentionClose}
+/>
 
 <style>
     @import '$lib/styles/shared.css';
 
-    :global(.overlay) {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-    }
     :global(.modal) {
-        width: 480px;
-        max-width: 90vw;
-        max-height: 90vh;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.3);
     }
-    .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 16px 20px;
-        border-bottom: 1px solid var(--color-border);
-        flex-shrink: 0;
-    }
-    .modal-header h2 {
-        margin: 0;
-        font-size: 1rem;
-        font-weight: 600;
-    }
-    .modal-body {
-        padding: 20px;
+    :global(.modal-body) {
         display: flex;
         flex-direction: column;
         gap: 16px;
@@ -475,14 +420,13 @@ import { showCreateTask } from '$lib/stores/ui';
         padding: 8px 12px;
         color: var(--color-text-primary);
         font-size: 0.875rem;
+        resize: vertical;
+        min-height: 80px;
+        font-family: inherit;
     }
     textarea:focus-visible {
         border-color: var(--color-accent);
         outline: none;
-    }
-    textarea {
-        resize: vertical;
-        min-height: 80px;
     }
     .task-attachments {
         display: flex;
@@ -621,49 +565,10 @@ import { showCreateTask } from '$lib/stores/ui';
         color: var(--color-status-red);
         font-size: 0.875rem;
     }
-    .modal-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-    .btn-primary {
-        padding: 8px 20px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent);
-        color: white;
-        font-weight: 500;
-    }
-    .btn-primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    button[type="button"] {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-    }
 
     @media (max-width: 768px) {
-        .modal {
-            width: 100vw;
-            max-width: none;
-            max-height: 100dvh;
-            height: 100dvh;
-            top: 0;
-            border-radius: 0;
-            border: none;
-        }
-        .modal-header {
+        :global(.modal-body) {
             padding: 16px;
-        }
-        .modal-body {
-            padding: 16px;
-        }
-        button[type="button"],
-        .btn-primary {
-            min-height: 44px;
         }
     }
 </style>
