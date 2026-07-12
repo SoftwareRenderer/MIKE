@@ -101,6 +101,7 @@
         role="listbox"
         aria-label="File suggestions"
         onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
         {#each results as result, i}
             <li
