@@ -113,6 +113,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let wsConnected = $state(false);
+    let lastSyncedAt = $state(Date.now()); // epoch ms of last successful data sync
     let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
     let countdownSeconds = $state(0);
     let countdownTimer: ReturnType<typeof setInterval> | null = null;
@@ -132,6 +133,21 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         const remaining = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
         countdownSeconds = remaining;
         if (remaining <= 0) stopCountdown();
+    }
+
+    /** Format seconds as a human-readable relative time string. */
+    function timeAgo(seconds: number): string {
+        if (seconds < 5) return 'just now';
+        if (seconds < 60) return `${seconds}s ago`;
+        const mins = Math.floor(seconds / 60);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        return `${hrs}h ago`;
+    }
+
+    /** Get relative time since last data sync. */
+    function lastSyncedAgo(): string {
+        return timeAgo(Math.floor((Date.now() - lastSyncedAt) / 1000));
     }
 
     function tryReconnectNow() {
@@ -471,6 +487,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                             stopCountdown();
                             nextReconnectAt = 0;
                             countdownSeconds = 0;
+                            lastSyncedAt = Date.now();
                             // Auto-refresh cached data on reconnect
                             if (servingFromCache) {
                                 silentRefresh().catch(() => {});
@@ -518,17 +535,28 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     });
 
     // Detect when the tab becomes visible again (e.g. phone wakes from sleep).
-    // Check the WebSocket for zombie connections and force reconnect if stale.
+    // Check the WebSocket for zombie connections, force reconnect if stale,
+    // try immediate reconnect if disconnected, and refresh stale data.
     function handleVisibilityChange() {
         if (!document.hidden && appStream) {
             appStream.checkStale();
+            if (!wsConnected) {
+                appStream.reconnectNow();
+            }
+            // Refresh board data if it's stale (>30s since last sync)
+            if (Date.now() - lastSyncedAt > 30_000) {
+                refreshBoard().catch(() => {});
+            }
         }
     }
     window.addEventListener('visibilitychange', handleVisibilityChange);
+    // Backup: some browsers (Safari iOS) don't fire visibilitychange reliably.
+    window.addEventListener('focus', handleVisibilityChange);
 
     onDestroy(() => {
         stopCountdown();
         window.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('focus', handleVisibilityChange);
         disconnectBoardStream();
         if (appStream) {
             appStream.close();
@@ -563,6 +591,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     stopCountdown();
                     nextReconnectAt = 0;
                     countdownSeconds = 0;
+                    lastSyncedAt = Date.now();
                     if (servingFromCache) {
                         silentRefresh().catch(() => {});
                     }
@@ -669,6 +698,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             }
             // Live data received — clear cache indicator
             servingFromCache = false;
+            lastSyncedAt = Date.now();
         } catch (e) {
             // When offline, sync tasks from boardStore (has optimistic updates)
             const b = (boardStore as any).get();
@@ -705,6 +735,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             cfg = c;
             configStore.set(c);
             servingFromCache = false;
+            lastSyncedAt = Date.now();
         } catch {
             // Still offline — keep cached data
         }
@@ -742,6 +773,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
             boardStore.set(b);
+            lastSyncedAt = Date.now();
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Subscribe to project for real-time updates
@@ -927,6 +959,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
         Reconnecting to stream...
+        <span class="reconnecting-stale">Data from {lastSyncedAgo()}</span>
         {#if countdownSeconds > 0}
             <span class="reconnecting-countdown">({countdownSeconds}s)</span>
         {/if}
@@ -1246,6 +1279,11 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         font-weight: 400;
         opacity: 0.7;
         font-variant-numeric: tabular-nums;
+    }
+    .reconnecting-stale {
+        font-weight: 400;
+        opacity: 0.6;
+        font-size: 0.75rem;
     }
     .reconnecting-btn {
         background: rgba(214, 211, 209, 0.15);
