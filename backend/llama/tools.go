@@ -187,7 +187,7 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "create_task",
 				DisplayName: "Create Task",
-				Description: "Create a new task on the Kanban board. In plan mode, use this to decompose work into subtasks. The new task inherits the parent's settings (model, provider, auto_commit). Returns the created task_id, which can be used as parent_task_id for nested subtasks.",
+				Description: "This creates a new task on the Kanban board. You MUST ask the user for explicit approval before using this tool.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
