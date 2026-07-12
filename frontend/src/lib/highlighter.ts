@@ -12,6 +12,7 @@ import { sql } from '@codemirror/lang-sql';
 import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
 import { yaml } from '@codemirror/lang-yaml';
+import { svelte } from '@replit/codemirror-lang-svelte';
 
 /**
  * GitHub Dark highlighter — matches the FileEditor's githubDarkHighlight colors.
@@ -52,6 +53,7 @@ const _sql = sql().language;
 const _html = html().language;
 const _css = css().language;
 const _yaml = yaml().language;
+const _svelte = svelte().language;
 
 /**
  * Map file extensions to CodeMirror Language objects.
@@ -82,6 +84,7 @@ function getLanguage(path: string): Language | null {
         sql: _sql,
         html: _html, htm: _html,
         css: _css, scss: _css, sass: _css, less: _css,
+        svelte: _svelte,
         yaml: _yaml, yml: _yaml,
     };
 
@@ -499,13 +502,13 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
         }
     }
 
-    // Sort: templates (class) first, then variables, then properties, each group by line number
+    // Sort: by kind group, then alphabetically
     unique.sort((a, b) => {
         const kindOrder = { class: 0, variable: 1, property: 2 };
         const aOrder = kindOrder[a.kind] ?? 9;
         const bOrder = kindOrder[b.kind] ?? 9;
         if (aOrder !== bOrder) return aOrder - bOrder;
-        return a.line - b.line;
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     });
 
     return unique;
@@ -557,10 +560,109 @@ function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: numbe
 }
 
 /**
+ * Extract symbols from a Svelte file.
+ * Finds: component props ($props()), exported functions, $state declarations, and classes.
+ * Skips template-level noise (block directives, component references, internal variables).
+ */
+function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+
+    // Extract script-level symbols from <script>
+    try {
+        const scriptMatch = /<script[^>]*>([\s\S]*?)<\/script>/.exec(source);
+        if (scriptMatch) {
+            const scriptContent = scriptMatch[1];
+            const scriptStartLine = source.substring(0, scriptMatch.index).split('\n').length;
+            const scriptLines = scriptContent.split('\n');
+
+            for (let i = 0; i < scriptLines.length; i++) {
+                const sLine = scriptLines[i].trim();
+                const absLine = scriptStartLine + i;
+
+                // Props: let { name, name2 } = $props() or let { name = default } = $props()
+                const propsMatch = /let\s*\{([^}]+)\}\s*=\s*\$props\s*\(/.exec(sLine);
+                if (propsMatch) {
+                    for (const prop of propsMatch[1].split(',')) {
+                        const name = prop.trim().split(/[=:]/)[0].trim();
+                        if (name && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+                            symbols.push({ name, kind: 'property', line: absLine, indent: 0 });
+                        }
+                    }
+                    continue;
+                }
+
+                // Function declarations: function name(, export function name(, async function name(
+                const funcMatch = /(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/.exec(sLine);
+                if (funcMatch) {
+                    symbols.push({ name: funcMatch[1], kind: 'function', line: absLine, indent: 0 });
+                    continue;
+                }
+
+                // Arrow/function assignments: const name = (...) => / const name = function(
+                const arrowMatch = /(?:const|let)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>|(?:const|let)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?function\b/.exec(sLine);
+                if (arrowMatch) {
+                    const arrowName = arrowMatch[1] || arrowMatch[2];
+                    if (arrowName) {
+                        symbols.push({ name: arrowName, kind: 'function', line: absLine, indent: 0 });
+                        continue;
+                    }
+                }
+
+                // Class declarations: class name extends/implements/{
+                const classMatch = /(?:export\s+)?class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:extends|implements|\{|$)/.exec(sLine);
+                if (classMatch) {
+                    symbols.push({ name: classMatch[1], kind: 'class', line: absLine, indent: 0 });
+                    continue;
+                }
+
+                // $state declarations: const name = $state(...) or let name = $state(...)
+                const stateMatch = /(?:const|let)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*\$state/.exec(sLine);
+                if (stateMatch) {
+                    symbols.push({ name: stateMatch[1], kind: 'variable', line: absLine, indent: 0 });
+                    continue;
+                }
+
+                // $derived declarations: const name = $derived(...)
+                const derivedMatch = /const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*\$derived/.exec(sLine);
+                if (derivedMatch) {
+                    symbols.push({ name: derivedMatch[1], kind: 'variable', line: absLine, indent: 0 });
+                    continue;
+                }
+            }
+        }
+    } catch {
+        // Ignore parsing errors in script section
+    }
+
+    // Sort: by kind group, then alphabetically
+    symbols.sort((a, b) => {
+        const kindOrder = { property: 0, function: 1, class: 2, variable: 3, constant: 4 };
+        const aOrder = kindOrder[a.kind] ?? 9;
+        const bOrder = kindOrder[b.kind] ?? 9;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+
+    // Deduplicate by name + line
+    const seen = new Set<string>();
+    const unique: typeof symbols = [];
+    for (const s of symbols) {
+        const key = `${s.name}:${s.line}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(s);
+        }
+    }
+
+    return unique.slice(0, 200);
+}
+
+/**
  * Extract global symbols (functions, classes, variables) from a CodeMirror EditorView.
  * Walks the language syntax tree and collects top-level definitions.
  * For Go templates, uses regex-based extraction (StreamLanguage has no Lezer tree).
  * For markdown, extracts ATX headings as a document outline.
+ * For Svelte, extracts components, blocks, and script-level declarations.
  * Returns an array of { name, kind, line, indent } sorted by line number.
  */
 export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; indent: number }> {
@@ -577,6 +679,10 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             // Markdown — extract headings as outline
             if (ext === 'md' || ext === 'mdx') {
                 return extractMarkdownHeadings(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
+            }
+            // Svelte — extract components, blocks, and script declarations
+            if (ext === 'svelte') {
+                return extractSvelteSymbols(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
             }
         }
 

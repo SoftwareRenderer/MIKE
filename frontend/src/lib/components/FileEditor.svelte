@@ -28,6 +28,7 @@
     import { sql } from '@codemirror/lang-sql';
     import { html } from '@codemirror/lang-html';
     import { css } from '@codemirror/lang-css';
+    import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
 
     let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
@@ -76,6 +77,7 @@
             sql: sql,
             html: html, htm: html,
             css: css, scss: css, sass: css, less: css,
+            svelte: svelte,
             tmpl: goTemplate, gohtml: goTemplate,
         };
 

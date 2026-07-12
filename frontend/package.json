@@ -43,6 +43,7 @@
     "@codemirror/lint": "^6.9.7",
     "@codemirror/search": "^6.7.1",
     "@lezer/highlight": "^1.2.3",
+    "@replit/codemirror-lang-svelte": "^6.0.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^5.5.0",

@@ -26,6 +26,7 @@
     import { sql } from '@codemirror/lang-sql';
     import { html } from '@codemirror/lang-html';
     import { css } from '@codemirror/lang-css';
+    import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
@@ -127,6 +128,7 @@
             sql: sql,
             html: html, htm: html,
             css: css, scss: css, sass: css, less: css,
+            svelte: svelte,
             tmpl: goTemplate, gohtml: goTemplate,
         };
         if (base === 'dockerfile' || base === 'makefile' || base === 'cmakeLists.txt') return null;

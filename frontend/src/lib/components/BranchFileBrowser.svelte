@@ -153,9 +153,7 @@
             const data = await res.json();
             entries = (data.entries || [])
                 .filter((e: any) => {
-                    // Keep ".." only when not at project root
-                    const rootPath = sandboxEnabled ? mountPath : projectPath;
-                    if (e.name === '..') return currentPath !== rootPath;
+                    if (e.name === '..') return false; // handled separately
                     if (e.name.startsWith('.')) return false;
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
@@ -165,6 +163,11 @@
                     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
                     return a.name.localeCompare(b.name);
                 });
+            // Prepend ".." when not at project root
+            if (currentPath !== rootPath) {
+                const parentPath = currentPath.split('/').slice(0, -1).join('/');
+                entries = [{ name: '..', isDir: true, path: parentPath }, ...entries];
+            }
                 firstLoadComplete = true;
         } catch (e) {
             error = String(e);
