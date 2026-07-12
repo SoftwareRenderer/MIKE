@@ -203,6 +203,7 @@ type loopContext struct {
 	reasoningContent strings.Builder
 	pendingToolCalls []types.ChatToolCall
 	prevArgLens      map[string]int // tool_id -> arg length, for detecting streaming updates
+	finishReason     string         // LLM finish_reason from last stream ("stop", "tool_calls", etc.)
 	detector         *loopDetector
 	tracker          failureTracker
 	mc               *modelConfig
@@ -615,6 +616,10 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 		// Shared callbacks for ChatStream — used by both the initial call and retries.
 		tokenCb := func(choice types.ChatChoice) {
+			// Capture finish_reason for loop detection (last non-empty value wins).
+			if choice.FinishReason != "" {
+				lc.finishReason = choice.FinishReason
+			}
 			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 				lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
 				flusher.appendReasoning(*choice.Delta.ReasoningContent)
@@ -716,6 +721,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					lc.assistantContent.Reset()
 					lc.reasoningContent.Reset()
 					lc.pendingToolCalls = nil
+					lc.finishReason = ""
 					flusher.reset()
 					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 					if streamErr == nil {
@@ -753,6 +759,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				lc.assistantContent.Reset()
 				lc.reasoningContent.Reset()
 				lc.pendingToolCalls = nil
+				lc.finishReason = ""
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 				continue
 			}
@@ -785,6 +792,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
 			lc.pendingToolCalls = nil
+			lc.finishReason = ""
 
 			// If any queued message is a regenerate, truncate stale assistant messages.
 			// Otherwise, re-sync with DB to pick up any deleted messages.
@@ -952,6 +960,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 								lc.pendingToolCalls = nil
 								lc.assistantContent.Reset()
 								lc.reasoningContent.Reset()
+								lc.finishReason = ""
 								continue
 							}
 							task.ExecutionState = "completed"
@@ -1003,6 +1012,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 							lc.pendingToolCalls = nil
 							lc.assistantContent.Reset()
 							lc.reasoningContent.Reset()
+							lc.finishReason = ""
 							continue
 						}
 						task.ExecutionState = "completed"
@@ -1122,7 +1132,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			}
 
 			// Loop detection: record this turn and check for repetition
-			loopType, _, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText)
+			loopType, _, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText, lc.finishReason)
 			if loopType != LoopNone {
 				target := ""
 				if loopType == LoopTool {
@@ -1136,6 +1146,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.pendingToolCalls = nil
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
+			lc.finishReason = ""
 
 			// Auto-commit file changes as a checkpoint.
 			newMessages := lc.messages[lc.checkpointIdx:]
@@ -1169,7 +1180,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.reasoningContent.Reset()
 
 			// Loop detection for text-only responses
-			loopType, _, _ := lc.detector.recordTurn(nil, assistantText)
+			loopType, _, _ := lc.detector.recordTurn(nil, assistantText, lc.finishReason)
+			lc.finishReason = ""
 			// Also check for phrase repetition detected during streaming.
 			// Skip if the response contains a question (natural question, not a loop).
 			if loopType == LoopNone && lc.detector.phraseDetected() && !strings.Contains(assistantText, "?") {
@@ -1251,13 +1263,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: "", ReasoningContent: reasoningText})
 
 			// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
-			lc.detector.recordTurn(nil, "")
+			lc.detector.recordTurn(nil, "", lc.finishReason)
 			if handleLoopDetected(te, task, projectID, task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages, task.IsIdeationMode()) {
 				return
 			}
 
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
+			lc.finishReason = ""
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
 			continue
 		}

@@ -118,8 +118,9 @@ func (d *loopDetector) resetText() {
 // recordTurn records an LLM turn and returns the loop type if detected.
 // toolCalls: the tool calls made this turn (nil or empty for text-only).
 // assistantText: the text content of the response.
+// finishReason: the LLM's finish_reason ("stop", "tool_calls", etc.).
 // Returns (loopType, toolName, rawArgs) where toolName/rawArgs identify the repeated call.
-func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText string) (LoopType, string, string) {
+func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText, finishReason string) (LoopType, string, string) {
 	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
 
 	if hasToolCalls {
@@ -148,8 +149,13 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText 
 			}
 		}
 	} else if strings.TrimSpace(assistantText) != "" {
-		// Text-only response: if it contains a question, let it through naturally.
-		// Only trigger LoopStatement when the LLM makes a statement without action.
+		// Text-only response: only trigger LoopStatement when the LLM is
+		// explicitly done (finish_reason="stop"). If the stream ended for
+		// another reason (e.g., tool_calls with no valid calls), don't penalize.
+		if finishReason != "stop" {
+			d.loopStreak = 0
+			return LoopNone, "", ""
+		}
 		if strings.Contains(assistantText, "?") {
 			d.loopStreak = 0
 			return LoopNone, "", ""
