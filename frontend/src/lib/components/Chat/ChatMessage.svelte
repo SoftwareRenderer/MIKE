@@ -206,6 +206,29 @@
             mobileEditAttachments = attachments ? [...attachments] : [];
         }
     });
+
+    let mobileFileInput: HTMLInputElement | null = $state(null);
+
+    function handleMobileFileSelect(e: Event) {
+        const files = (e.target as HTMLInputElement).files;
+        if (!files || files.length === 0) return;
+        const remaining = 4 - mobileEditAttachments.length;
+        for (let i = 0; i < Math.min(remaining, files.length); i++) {
+            const file = files[i];
+            if (!file.type.startsWith('image/')) continue;
+            if (file.size > 4 * 1024 * 1024) continue;
+            const reader = new FileReader();
+            reader.onload = () => {
+                mobileEditAttachments = [...mobileEditAttachments, { mimeType: file.type, data: reader.result as string }];
+            };
+            reader.readAsDataURL(file);
+        }
+        if (mobileFileInput) mobileFileInput.value = '';
+    }
+
+    function removeMobileAttachment(index: number) {
+        mobileEditAttachments = mobileEditAttachments.filter((_, i) => i !== index);
+    }
 </script>
 
 <div
@@ -233,7 +256,23 @@
                 rows="8"
                 aria-label="Edit message content"
             ></textarea>
+            {#if mobileEditAttachments.length > 0}
+                <div class="edit-attachments-preview">
+                    {#each mobileEditAttachments as att, i}
+                        <div class="edit-attachment-chip">
+                            <img src={att.data} alt="Attachment" />
+                            <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title="Remove">&times;</button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
             <div class="edit-modal-footer">
+                <input type="file" accept="image/*" multiple bind:this={mobileFileInput} onchange={handleMobileFileSelect} style="display:none" />
+                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title="Attach image" aria-label="Attach image">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                </button>
                 <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>Cancel</button>
                 <button type="button" class="edit-save-btn" onclick={() => submitEdit(mobileEditContent, mobileEditAttachments.length > 0 ? mobileEditAttachments : undefined)} disabled={isSubmitting}>
                     {#if isSubmitting}
@@ -748,6 +787,58 @@
     .edit-save-btn:disabled {
         opacity: 0.6;
         cursor: not-allowed;
+    }
+    .edit-attach-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: var(--color-text-secondary);
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .edit-attach-btn:hover {
+        opacity: 1;
+        color: var(--color-text-primary);
+    }
+    .edit-attachments-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 16px;
+    }
+    .edit-attachment-chip {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        border: 1px solid var(--color-border);
+    }
+    .edit-attachment-chip img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .edit-attachment-chip .remove-attachment {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.7);
+        color: white;
+        border: none;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
     }
     .spinner-inline {
         display: inline-block;

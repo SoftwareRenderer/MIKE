@@ -251,6 +251,7 @@
         diffCommitIndex = index;
         diffLoading = true;
         diffUnified = '';
+        if (isMobileCtx.isMobile) activeTab = 'editor';
         try {
             // Base: previous commit in log, or the commit's first parent, or empty tree
             let baseHash: string;

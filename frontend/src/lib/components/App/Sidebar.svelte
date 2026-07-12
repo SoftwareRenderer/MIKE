@@ -16,6 +16,7 @@
         onToggleSidebar,
         onShowStats,
         onShowConfig,
+        onToggleFullScreen,
         onAddProject,
     }: {
         projects: Project[];
@@ -30,6 +31,7 @@
         onToggleSidebar: () => void;
         onShowStats: () => void;
         onShowConfig: () => void;
+        onToggleFullScreen: () => void;
         onAddProject: () => void;
     } = $props();
 </script>
@@ -107,6 +109,12 @@
     </nav>
     <!-- Mobile sidebar menu (hidden on desktop via CSS) -->
     <div class="sidebar-menu">
+        <button class="sidebar-menu-item" onclick={onToggleFullScreen} aria-label="Toggle full screen" title="Toggle full screen">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+            </svg>
+            Full Screen
+        </button>
         <button class="sidebar-menu-item" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>

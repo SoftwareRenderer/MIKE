@@ -905,6 +905,14 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         onToggleSidebar={toggleSidebar}
         onShowStats={() => { showStats.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onShowConfig={() => { showConfig.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onToggleFullScreen={() => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            } else {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+            if (isMobileCtx.isMobile) mobileMenuOpen = false;
+        }}
         onAddProject={() => { openAddProject(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
     />
 
@@ -1286,6 +1294,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         display: flex;
         height: 100dvh;
         overflow: hidden;
+    }
+    /* Fullscreen: add top margin for camera cutout on phones */
+    :global(html:fullscreen) .app {
+        padding-top: env(safe-area-inset-top, 0px);
     }
     .app.task-detail :global(aside#sidebar) {
         display: none;
