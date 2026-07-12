@@ -486,6 +486,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 						content = "file changes"
 					}
 				}
+				content = fmt.Sprintf("%s\n\nCo-authored-by: %s", content, task.ModelName)
 				writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
 			}
 		},
@@ -507,6 +508,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 				content = "file changes"
 			}
 		}
+		content = fmt.Sprintf("%s\n\nCo-authored-by: %s", content, task.ModelName)
 		writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
 	}
 }
