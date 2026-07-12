@@ -108,7 +108,7 @@
 <style>
     .column {
         flex: 1;
-        min-width: 260px;
+        min-width: 200px;
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
         display: flex;
