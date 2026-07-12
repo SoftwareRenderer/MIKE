@@ -2,6 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
+import { sortByActivity } from '$lib/utils/sort-tasks';
     import { board as boardStore, selectedTask, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
 import { showCardDetail } from '$lib/stores/ui';
 import { showConfirm, showToast } from '$lib/stores/dialogs';
@@ -22,9 +23,13 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                 map.get(t.parent_task_id)!.push(t);
             }
         }
-        // Sort children by column_order
+        // Sort children chronologically by last activity
         for (const [, children] of map) {
-            children.sort((a, b) => a.column_order - b.column_order);
+            children.sort((a, b) => {
+                if (a.updated_at < b.updated_at) return -1;
+                if (a.updated_at > b.updated_at) return 1;
+                return a.column_order - b.column_order;
+            });
         }
         return map;
     });
@@ -142,9 +147,9 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             if (!cols[t.status]) cols[t.status] = [];
             cols[t.status].push(t);
         }
-        // Sort each column by column_order
+        // Sort each column chronologically by last activity (oldest first)
         for (const status of Object.keys(cols)) {
-            cols[status].sort((a, b) => a.column_order - b.column_order);
+            cols[status] = sortByActivity(cols[status]);
         }
         return cols;
     });

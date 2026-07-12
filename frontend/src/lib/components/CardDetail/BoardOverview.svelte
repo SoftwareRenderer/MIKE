@@ -2,6 +2,7 @@
     import { fade, slide } from 'svelte/transition';
     import type { Task } from '$lib/types';
     import Card from '../Card.svelte';
+    import { sortByActivity } from '$lib/utils/sort-tasks';
 
     let {
         sections,
@@ -51,7 +52,7 @@
 
 <div class="task-list">
     {#each sections as section (section.id)}
-        {@const sectionTasks = allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }).sort((a, b) => a.column_order - b.column_order)}
+        {@const sectionTasks = sortByActivity(allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }))}
         {@const sectionState = sectionDragState.get(section.id) || { isOver: false, isRejected: false }}
         <div
             class="section-group"

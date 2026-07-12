@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/git"
 	"kanban/backend/types"
@@ -1915,4 +1916,78 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	if !foundSystemMsg {
 		t.Fatal("expected system message about merge conflict resolution")
 	}
+}
+
+// TestTaskMoveUpdatesUpdatedAt verifies that moving a task between columns
+// updates the updated_at timestamp, enabling chronological sorting by activity.
+func TestTaskMoveUpdatesUpdatedAt(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Create 3 tasks (taskB and taskC stay in backlog for ordering verification)
+	taskA := createTestTask(t, s, projID, "task-a")
+	_ = createTestTask(t, s, projID, "task-b")
+	_ = createTestTask(t, s, projID, "task-c")
+
+	// Get initial updated_at for taskA
+	taskAMap := getTask(t, s, projID, taskA)
+	initialUpdatedAt := taskAMap["updated_at"].(string)
+
+	// Small delay to ensure distinct timestamps (updated_at uses second precision)
+	time.Sleep(1 * time.Second)
+
+	// Move taskA to review — updated_at should change
+	moveTask(t, s, projID, taskA, "review")
+	taskAMap = getTask(t, s, projID, taskA)
+	reviewUpdatedAt := taskAMap["updated_at"].(string)
+	if reviewUpdatedAt == initialUpdatedAt {
+		t.Fatal("updated_at should change after move")
+	}
+
+	// Small delay to ensure distinct timestamps (updated_at uses second precision)
+	time.Sleep(1 * time.Second)
+
+	// Move taskA to done — updated_at should change again
+	moveTask(t, s, projID, taskA, "done")
+	taskAMap = getTask(t, s, projID, taskA)
+	doneUpdatedAt := taskAMap["updated_at"].(string)
+	if doneUpdatedAt == reviewUpdatedAt {
+		t.Fatal("updated_at should change after second move")
+	}
+
+	// Verify chronological order: initial < review < done
+	if initialUpdatedAt >= reviewUpdatedAt {
+		t.Fatalf("expected initial < review, got %s >= %s", initialUpdatedAt, reviewUpdatedAt)
+	}
+	if reviewUpdatedAt >= doneUpdatedAt {
+		t.Fatalf("expected review < done, got %s >= %s", reviewUpdatedAt, doneUpdatedAt)
+	}
+
+	// Verify all three tasks in backlog are sortable by updated_at
+	// taskA was created first, taskB second, taskC third
+	tasks := getAllTasks(t, s, projID)
+	backlogTasks := []map[string]any{}
+	for _, task := range tasks {
+		if task["status"] == "backlog" {
+			backlogTasks = append(backlogTasks, task)
+		}
+	}
+	if len(backlogTasks) != 2 {
+		t.Fatalf("expected 2 backlog tasks, got %d", len(backlogTasks))
+	}
+	// taskB created before taskC, so taskB.updated_at <= taskC.updated_at
+	if backlogTasks[0]["updated_at"].(string) > backlogTasks[1]["updated_at"].(string) {
+		t.Fatal("backlog tasks should be in chronological order by updated_at")
+	}
+}
+
+// Helper: get all tasks for a project as a slice of maps
+func getAllTasks(t *testing.T, s *Server, projectID string) []map[string]any {
+	t.Helper()
+	req := testRequest("GET", "/api/projects/"+projectID+"/tasks", nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get tasks: %d %s", rr.Code, rr.Body.String())
+	}
+	return mustJSON[[]map[string]any](t, rr.Body)
 }

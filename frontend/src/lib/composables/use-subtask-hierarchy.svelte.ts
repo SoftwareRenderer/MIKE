@@ -1,5 +1,6 @@
 import type { Task } from '$lib/types';
 import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
+import { sortByActivity } from '$lib/utils/sort-tasks';
 
 /** Composable for subtask hierarchy management.
  * Tracks expanded/collapsed state, consolidation of subtasks under same-column ancestors,
@@ -22,7 +23,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
             }
         }
         for (const [, children] of map) {
-            children.sort((a, b) => a.column_order - b.column_order);
+            sortByActivity(children);
         }
         return map;
     });
