@@ -458,6 +458,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 						lc.contextWindow = switched.contextWindow
 					}
 					lc.detector.reset() // model changed, clear stale text window
+					lc.detector.clearHints()
 					log.Printf("[model-switch] task=%s url=%s model=%s context_window=%v", task.ID, newURL, newModel, lc.contextWindow)
 				}
 			}
@@ -530,10 +531,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if um.ContextChanged {
 				log.Printf("[context-changed] task=%s conversation context changed, resetting loop detector", task.ID)
 				lc.detector.reset()
+				lc.detector.clearHints()
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			} else {
 				log.Printf("[user-msg] task=%s received message before LLM call (regenerate=%v)", task.ID, um.Regenerate)
 				lc.detector.reset() // user input breaks any loop pattern
+				lc.detector.clearHints()
 				if um.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
 				} else {
@@ -749,6 +752,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if um.ContextChanged {
 				log.Printf("[context-changed] task=%s conversation context changed during streaming, cancelling", task.ID)
 				lc.detector.reset()
+				lc.detector.clearHints()
 				callCancel()
 				select {
 				case <-streamDone:
@@ -766,6 +770,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			// New user message — cancel current LLM call.
 			log.Printf("[cancel] task=%s user message received during streaming, cancelling (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset() // user input breaks any loop pattern
+			lc.detector.clearHints()
 			callCancel()
 			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
 			select {
@@ -950,6 +955,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 									log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
 								}
 								lc.detector.reset()
+								lc.detector.clearHints()
 								lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
 								te.store.CreateTaskMessage(&types.TaskMessage{
 									ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID,
@@ -1002,6 +1008,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 								log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
 							}
 							lc.detector.reset()
+							lc.detector.clearHints()
 							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
 							te.store.CreateTaskMessage(&types.TaskMessage{
 								ID: uuid.New().String(), TaskID: task.ID, ThreadID: task.CurrentThreadID,
@@ -1141,6 +1148,9 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, target, &lc.messages, task.IsIdeationMode()) {
 					return
 				}
+			} else {
+				// Valid turn: remove previously injected hints from context
+				lc.messages = lc.detector.removeHints(lc.messages)
 			}
 
 			lc.pendingToolCalls = nil
@@ -1195,6 +1205,8 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				te.store.UpdateTask(task)
 				continue
 			}
+			// Valid text-only response: remove previously injected hints from context
+			lc.messages = lc.detector.removeHints(lc.messages)
 
 			// Check for queued user messages before sending complete.
 			select {
@@ -1202,11 +1214,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if um.ContextChanged {
 					log.Printf("[context-changed] task=%s conversation context changed after response, re-syncing", task.ID)
 					lc.detector.reset()
+					lc.detector.clearHints()
 					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 					continue
 				}
 				log.Printf("[user-msg] task=%s received message after response, continuing (regenerate=%v)", task.ID, um.Regenerate)
 				lc.detector.reset() // user input breaks any loop pattern
+				lc.detector.clearHints()
 				if um.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
 				} else {
@@ -1280,6 +1294,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			if shouldSummarize(lc.messages, *lc.contextWindow) {
 				lc.messages = te.applySummarization(ctx, task, projectID, task.ID, lc.messages, serverURL, activeModel, nil)
 				lc.detector.reset() // context changed, clear stale text window
+				lc.detector.clearHints()
 			}
 		}
 
@@ -1293,16 +1308,19 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			log.Printf("[summarize] task=%s manual summarization requested", task.ID)
 			lc.messages = te.applySummarization(ctx, task, projectID, task.ID, lc.messages, serverURL, activeModel, resultCh)
 			lc.detector.reset() // context changed, clear stale text window
+			lc.detector.clearHints()
 			continue
 		case um := <-userMsgChan:
 			if um.ContextChanged {
 				log.Printf("[context-changed] task=%s conversation context changed while idle, re-syncing", task.ID)
 				lc.detector.reset()
+				lc.detector.clearHints()
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 				continue
 			}
 			log.Printf("[user-msg] task=%s received message while idle, continuing (regenerate=%v)", task.ID, um.Regenerate)
 			lc.detector.reset()
+			lc.detector.clearHints()
 			if um.Regenerate {
 				lc.messages = truncateForRegenerate(lc.messages)
 			} else {

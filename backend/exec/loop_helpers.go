@@ -241,7 +241,9 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 
 	hint := buildHint(loopType, target)
 	log.Printf("[loop] task=%s detected loop type=%d (streak %d/%d), target=%s", taskID, loopType, detector.loopStreak, maxLoopHints, target)
+	hintIdx := len(*messages)
 	*messages = append(*messages, types.ChatMessage{Role: "user", Content: hint})
+	detector.recordHintIndex(hintIdx)
 	// Persist the hint as a visible user message so it appears in the chat UI
 	te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user",

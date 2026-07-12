@@ -89,6 +89,7 @@ type loopDetector struct {
 	loopStreak       int             // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
 	phraseFired      bool            // phrase loop detected during current streaming response
+	hintIndices      []int           // indices in messages slice of injected loop hints
 }
 
 // newLoopDetector creates a new loopDetector.
@@ -100,6 +101,7 @@ func newLoopDetector() *loopDetector {
 }
 
 // reset clears all tracked state (called on user message or after hint injection).
+// Does NOT clear hintIndices — those are preserved until hints are removed from context.
 func (d *loopDetector) reset() {
 	d.lastReadToolName = ""
 	d.lastReadArgs = ""
@@ -108,6 +110,38 @@ func (d *loopDetector) reset() {
 	d.loopStreak = 0
 	d.phraseDet.reset()
 	d.phraseFired = false
+}
+
+// clearHints removes tracked hint indices (called on user message / context change).
+func (d *loopDetector) clearHints() {
+	d.hintIndices = d.hintIndices[:0]
+}
+
+// recordHintIndex tracks the position of an injected loop hint in the messages slice.
+func (d *loopDetector) recordHintIndex(idx int) {
+	d.hintIndices = append(d.hintIndices, idx)
+}
+
+// removeHints removes tracked hint messages from the conversation and clears the tracker.
+// Returns the cleaned messages slice.
+func (d *loopDetector) removeHints(messages []types.ChatMessage) []types.ChatMessage {
+	if len(d.hintIndices) == 0 {
+		return messages
+	}
+	// Build a set of indices to remove for O(1) lookup
+	remove := make(map[int]bool, len(d.hintIndices))
+	for _, i := range d.hintIndices {
+		remove[i] = true
+	}
+	// Filter out hint messages, preserving order
+	cleaned := make([]types.ChatMessage, 0, len(messages)-len(remove))
+	for i, m := range messages {
+		if !remove[i] {
+			cleaned = append(cleaned, m)
+		}
+	}
+	d.hintIndices = d.hintIndices[:0]
+	return cleaned
 }
 
 // resetText clears only the text window (called after a tool call breaks text-only streak).

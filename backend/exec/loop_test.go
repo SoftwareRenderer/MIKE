@@ -640,6 +640,61 @@ func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
 	}
 }
 
+func TestLoopDetector_RemoveHints(t *testing.T) {
+	d := newLoopDetector()
+
+	// Build a conversation with hints injected at indices 2 and 4
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there"},
+		{Role: "user", Content: "LOOP HINT 1"}, // index 2
+		{Role: "assistant", Content: "Ok, calling tool"},
+		{Role: "user", Content: "LOOP HINT 2"}, // index 4
+		{Role: "assistant", Content: "Done"},
+	}
+	d.recordHintIndex(2)
+	d.recordHintIndex(4)
+
+	// Remove hints
+	cleaned := d.removeHints(messages)
+
+	// Should have 4 messages (hints at indices 2 and 4 removed)
+	if len(cleaned) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(cleaned))
+	}
+	expected := []struct {
+		role, content string
+	}{
+		{"user", "Hello"},
+		{"assistant", "Hi there"},
+		{"assistant", "Ok, calling tool"},
+		{"assistant", "Done"},
+	}
+	for i, e := range expected {
+		if cleaned[i].Role != e.role || cleaned[i].Content != e.content {
+			t.Errorf("message[%d] = {Role: %q, Content: %q}, want {Role: %q, Content: %q}",
+				i, cleaned[i].Role, cleaned[i].Content, e.role, e.content)
+		}
+	}
+	// hintIndices should be cleared
+	if len(d.hintIndices) != 0 {
+		t.Errorf("expected hintIndices to be cleared, got %v", d.hintIndices)
+	}
+}
+
+func TestLoopDetector_RemoveHints_Noop(t *testing.T) {
+	d := newLoopDetector()
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi"},
+	}
+	// No hints recorded — should return unchanged
+	cleaned := d.removeHints(messages)
+	if len(cleaned) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(cleaned))
+	}
+}
+
 func TestBuildHint_Phrase(t *testing.T) {
 	hint := buildHint(LoopPhrase, "")
 	if hint == "" {
