@@ -1326,6 +1326,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         font-weight: 600;
         color: var(--color-accent-light);
     }
+    .port-container {
+        color: white;
+    }
 
     /* Remove buttons (ports + mounts) */
     .btn-remove-port,
@@ -1481,7 +1484,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .mount-path {
         font-weight: 600;
-        color: var(--color-text-primary);
+        color: var(--color-accent-light);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1490,7 +1493,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .mount-container {
         font-weight: 600;
-        color: var(--color-accent-light);
+        color: var(--color-text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1632,7 +1635,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .env-key {
         font-weight: 600;
-        color: var(--color-text-primary);
+        color: var(--color-accent-light);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1644,7 +1647,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .env-value {
-        color: var(--color-accent-light);
+        color: var(--color-text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;

@@ -249,7 +249,7 @@ Sandbox Isolation is enabled for this project
     }
 
     .assigned-container {
-        color: var(--color-text-secondary);
+        color: var(--color-text-primary);
     }
 
     .assigned-empty {
@@ -291,7 +291,7 @@ Sandbox Isolation is enabled for this project
     }
 
     .mount-container {
-        color: var(--color-text-secondary);
+        color: var(--color-text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -343,7 +343,7 @@ Sandbox Isolation is enabled for this project
 
     .env-key {
         font-weight: 600;
-        color: var(--color-text-primary);
+        color: var(--color-accent-light);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -355,7 +355,7 @@ Sandbox Isolation is enabled for this project
     }
 
     .env-value {
-        color: var(--color-accent-light);
+        color: var(--color-text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
