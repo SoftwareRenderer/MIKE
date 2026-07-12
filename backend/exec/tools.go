@@ -410,7 +410,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		return question, true
 	case "request_review":
 		// In plan mode, require at least one task created during planning before allowing completion
-		if task.PlanMode {
+		if task.IsPlanMode() {
 			if state == nil {
 				return "Error: Cannot complete planning without creating tasks. Use create_task() to add at least one task first.", false
 			}
@@ -556,7 +556,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ReasoningEffort:           parent.ReasoningEffort,
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
 		AutoCommit:                parent.AutoCommit,
-		PlanMode:                  false,
+		OperatingMode:             "act",
 		ParentTaskID:              actualParentID,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,

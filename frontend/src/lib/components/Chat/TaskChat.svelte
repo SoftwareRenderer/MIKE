@@ -88,7 +88,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let selectedModel = $state('');
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
-    let planMode = $state(false);
+    let operatingMode = $state('act');
     // Tracks when handleModelSelect's updateTask is in-flight, so the board store
     // $effect doesn't overwrite the user's selection with stale DB values.
     let modelUpdatePending = $state(false);
@@ -230,7 +230,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             if (!modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
             if (!modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
             if (!modelUpdatePending && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
-            planMode = boardTask.plan_mode ?? false;
+            operatingMode = boardTask.operating_mode ?? 'act';
         }
     });
 
@@ -649,14 +649,16 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     }
 
-    async function handlePlanModeToggle(newPlanMode: boolean) {
-        planMode = newPlanMode;
-        try {
-            await updateTask(projectId, taskId, { plan_mode: newPlanMode });
-        } catch (e) {
-            console.error('Failed to update plan mode:', e);
-            planMode = !newPlanMode; // revert on error
-        }
+    function handleOperatingModeToggle() {
+        const modes = ['act', 'plan', 'ideate'];
+        const prevMode = operatingMode;
+        const nextIdx = (modes.indexOf(operatingMode) + 1) % modes.length;
+        const newMode = modes[nextIdx];
+        operatingMode = newMode;
+        updateTask(projectId, taskId, { operating_mode: newMode }).catch((e) => {
+            console.error('Failed to update operating mode:', e);
+            operatingMode = prevMode;
+        });
     }
 
     let isSummarizing = $state(false);
@@ -1234,12 +1236,12 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {selectedModel}
             {selectedUrl}
             {selectedReasoningEffort}
-            {planMode}
+            {operatingMode}
             {isStarting}
             {disabled}
             {isAgentSelected}
             onModelSelect={handleModelSelect}
-            onPlanModeToggle={handlePlanModeToggle}
+            onOperatingModeToggle={handleOperatingModeToggle}
             onStartTask={handleStartTask}
         />
     {:else}
@@ -1277,7 +1279,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             selectedReasoningEffort={selectedReasoningEffort}
             contextUsed={stream.state.contextState.used}
             contextLimit={stream.state.contextState.limit}
-            planMode={planMode}
+            operatingMode={operatingMode}
             projectId={projectId}
             taskId={taskId}
             onInput={handleInputSave}
@@ -1285,7 +1287,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             onSubmit={handleSend}
             onStop={handleStop}
             onModelSelect={handleModelSelect}
-            onPlanModeToggle={handlePlanModeToggle}
+            onOperatingModeToggle={handleOperatingModeToggle}
             onSummarize={handleSummarize}
             onSummarizeCancel={handleSummarizeCancel}
             isSummarizing={isSummarizing}

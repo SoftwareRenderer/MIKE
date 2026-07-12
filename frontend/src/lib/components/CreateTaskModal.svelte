@@ -8,6 +8,7 @@ import { showCreateTask } from '$lib/stores/ui';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
+    import ModeSelect from './ModeSelect.svelte';
     import { createFocusTrap } from '$lib/a11y';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
@@ -16,7 +17,7 @@ import { showCreateTask } from '$lib/stores/ui';
     let prompt = $state('');
     let autoCommit = $state(false);
 
-    let planMode = $state(false);
+    let operatingMode = $state('act'); // "act", "plan", or "ideate"
     let autoMerge = $state(true);
     let subtasksAutoMerge = $state(true);
     let loading = $state(false);
@@ -185,7 +186,7 @@ import { showCreateTask } from '$lib/stores/ui';
             configLoaded = true;
             autoCommit = cfg.default_auto_commit ?? false;
             autoMerge = cfg.default_auto_merge ?? true;
-            planMode = cfg.default_plan_mode ?? false;
+            operatingMode = cfg.default_operating_mode ?? 'act';
         }
     });
 
@@ -231,7 +232,7 @@ import { showCreateTask } from '$lib/stores/ui';
         const taskData: Record<string, unknown> = {
             prompt: prompt.trim(),
             auto_commit: autoMerge, // auto-commit is prerequisite for auto-merge
-            plan_mode: planMode,
+            operating_mode: operatingMode,
             auto_merge: autoMerge,
             subtasks_auto_merge: subtasksAutoMerge,
         };
@@ -351,11 +352,19 @@ import { showCreateTask } from '$lib/stores/ui';
                 <div class="config-row">
                     <div class="config-info">
                         <div class="config-text">
-                            <span class="config-label">Plan mode</span>
-                            <span class="config-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
+                            <span class="config-label">Operating mode</span>
+                            <span class="config-desc">
+                                {#if operatingMode === 'act'}
+                                AI is required to take formal actions
+                                {:else if operatingMode === 'plan'}
+                                AI decomposes work into subtasks on the board, then executes after approval
+                                {:else}
+                                Free-form brainstorming. AI is not required to take formal actions
+                                {/if}
+                            </span>
                         </div>
                     </div>
-                    <ToggleSwitch bind:checked={planMode} ariaLabel="Plan mode" />
+                    <ModeSelect value={operatingMode} onChange={(m: string) => operatingMode = m} />
                 </div>
                 {/if}
             </div>

@@ -24,7 +24,7 @@ type Task struct {
 	AutoCommit                bool      `json:"auto_commit"`
 	AutoMerge                 bool      `json:"auto_merge"`
 	SubtasksAutoMerge         bool      `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
-	PlanMode                  bool      `json:"plan_mode"`
+	OperatingMode             string    `json:"operating_mode"`      // "act" (default), "plan", or "ideate"
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`
 	CurrentThreadID           string    `json:"current_thread_id,omitempty"`
@@ -32,6 +32,16 @@ type Task struct {
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
 	AssignedPorts             []AssignedPort `json:"assigned_ports,omitempty"`
+}
+
+// IsPlanMode returns true if the task is in plan mode.
+func (t *Task) IsPlanMode() bool {
+	return t.OperatingMode == "plan"
+}
+
+// IsIdeationMode returns true if the task is in ideation mode.
+func (t *Task) IsIdeationMode() bool {
+	return t.OperatingMode == "ideate"
 }
 
 // Board represents the collection of tasks for a project.
@@ -63,7 +73,7 @@ type Config struct {
 	DefaultAutoCommit     *bool      `json:"default_auto_commit"`
 	DefaultAutoMerge      *bool      `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge *bool   `json:"default_subtasks_auto_merge"`
-	DefaultPlanMode       *bool      `json:"default_plan_mode"`
+	DefaultOperatingMode  *string    `json:"default_operating_mode"`
 	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
 }
 

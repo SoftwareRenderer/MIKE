@@ -263,7 +263,7 @@ func TestTaskBoolFields(t *testing.T) {
 	task := newTask("task-1", "proj-1")
 	task.AutoCommit = true
 
-	task.PlanMode = true
+	task.OperatingMode = "plan"
 	task.TitleGenerating = true
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -273,7 +273,7 @@ func TestTaskBoolFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if !got.AutoCommit || !got.PlanMode || !got.TitleGenerating {
+	if !got.AutoCommit || !got.IsPlanMode() || !got.TitleGenerating {
 		t.Fatalf("bool fields not preserved: %+v", got)
 	}
 }

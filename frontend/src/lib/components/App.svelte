@@ -1017,7 +1017,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             taskHasParent={editTaskDataVal.taskHasParent}
             targetBranch={editTaskDataVal.targetBranch}
             isAgentSelected={editTaskDataVal.isAgentSelected}
-            onSave={(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) => {
+            onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => {
                 const taskId = editTaskDataVal!.taskId;
                 const projectId = editTaskDataVal!.projectId;
                 // Find the task in the board and update it
@@ -1025,7 +1025,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 if (task) {
                     const trimmed = title.trim();
                     const updates: Record<string, unknown> = { title: trimmed };
-                    updates.plan_mode = planMode;
+                    updates.operating_mode = operatingMode;
                     updates.auto_commit = autoMerge;
                     updates.auto_merge = autoMerge;
                     updates.subtasks_auto_merge = subtasksAutoMerge;
@@ -1033,7 +1033,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     if (url) updates.llama_server_url = url;
                     if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
                     task.title = trimmed;
-                    task.plan_mode = planMode;
+                    task.operating_mode = operatingMode;
                     task.auto_commit = autoMerge;
                     task.auto_merge = autoMerge;
                     task.subtasks_auto_merge = subtasksAutoMerge;

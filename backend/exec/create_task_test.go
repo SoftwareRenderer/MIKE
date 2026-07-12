@@ -73,7 +73,7 @@ func createParentTask(t *testing.T, s *store.Store, id, projectID string, status
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		AutoCommit:     true,
-		PlanMode:       true,
+		OperatingMode:  "plan",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -155,8 +155,8 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	if child.AutoCommit != parent.AutoCommit {
 		t.Errorf("expected inherited auto_commit %v, got %v", parent.AutoCommit, child.AutoCommit)
 	}
-	if child.PlanMode {
-		t.Errorf("expected plan_mode false for subtask, got %v", child.PlanMode)
+	if child.IsPlanMode() {
+		t.Errorf("expected operating_mode 'act' for subtask, got %q", child.OperatingMode)
 	}
 }
 
@@ -453,7 +453,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 		ExecutionState: "running",
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
-		PlanMode:       false,
+		OperatingMode:  "act",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

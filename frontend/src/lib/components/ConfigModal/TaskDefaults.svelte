@@ -1,19 +1,26 @@
 <script lang="ts">
     import ToggleSwitch from '../ToggleSwitch.svelte';
+    import ModeSelect from '../ModeSelect.svelte';
 
     let {
-        defaultPlanMode = $bindable(false),
+        defaultOperatingMode = $bindable('act'),
         defaultAutoMerge = $bindable(true),
         defaultSubtasksAutoMerge = $bindable(true),
         defaultMaxFailedTurns = $bindable(3),
         originBranch,
     }: {
-        defaultPlanMode?: boolean;
+        defaultOperatingMode?: string;
         defaultAutoMerge?: boolean;
         defaultSubtasksAutoMerge?: boolean;
         defaultMaxFailedTurns?: number;
         originBranch: string;
     } = $props();
+
+    const modeDescription = $derived({
+        act: 'AI is required to take formal actions',
+        plan: 'AI decomposes work into subtasks on the board, then executes after approval',
+        ideate: 'Free-form brainstorming. AI is not required to take formal actions',
+    }[defaultOperatingMode] || '');
 </script>
 
 <fieldset class="section">
@@ -22,10 +29,10 @@
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-planmode-label" class="toggle-label">Plan mode</span>
-            <span id="toggle-planmode-desc" class="toggle-desc">AI decomposes work into subtasks on the board before executing</span>
+            <span id="toggle-mode-label" class="toggle-label">Operating mode</span>
+            <span id="toggle-mode-desc" class="toggle-desc">{modeDescription}</span>
         </div>
-        <ToggleSwitch bind:checked={defaultPlanMode} ariaLabel="Plan mode" ariaDescribedby="toggle-planmode-desc" />
+        <ModeSelect value={defaultOperatingMode} onChange={(m: string) => defaultOperatingMode = m} />
     </div>
 
     <div class="toggle-field">

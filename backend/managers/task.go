@@ -140,8 +140,20 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				if cfg.DefaultSubtasksAutoMerge != nil && !hasField(rawBody, "subtasks_auto_merge") {
 					task.SubtasksAutoMerge = *cfg.DefaultSubtasksAutoMerge
 				}
-				if cfg.DefaultPlanMode != nil && !hasField(rawBody, "plan_mode") {
-					task.PlanMode = *cfg.DefaultPlanMode
+				if !hasField(rawBody, "operating_mode") && !hasField(rawBody, "plan_mode") {
+					if cfg.DefaultOperatingMode != nil {
+						task.OperatingMode = *cfg.DefaultOperatingMode
+					}
+				}
+				// Backward compat: if client sends plan_mode (bool), convert to operating_mode
+				if pm, ok := rawBody["plan_mode"]; ok {
+					if v, ok := pm.(bool); ok && v {
+						task.OperatingMode = "plan"
+					}
+				}
+				// Default to "act" if not set
+				if task.OperatingMode == "" {
+					task.OperatingMode = "act"
 				}
 				if cfg.DefaultMaxFailedTurns != nil && !hasField(rawBody, "max_consecutive_failed_turns") {
 					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns

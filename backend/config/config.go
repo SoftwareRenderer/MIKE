@@ -67,7 +67,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
 	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
-	defaultPlanModeRaw, _ := cs.store.GetConfigValue("default_plan_mode")
+	defaultOperatingModeRaw, _ := cs.store.GetConfigValue("default_operating_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 
 	cfg := &types.Config{
@@ -85,8 +85,12 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if v, err := parseBoolPtr(defaultSubtasksAutoMergeRaw); err == nil && v != nil {
 		cfg.DefaultSubtasksAutoMerge = v
 	}
-	if v, err := parseBoolPtr(defaultPlanModeRaw); err == nil && v != nil {
-		cfg.DefaultPlanMode = v
+	if defaultOperatingModeRaw != "" {
+		mode := defaultOperatingModeRaw
+		if mode != "act" && mode != "plan" && mode != "ideate" {
+			mode = "act"
+		}
+		cfg.DefaultOperatingMode = &mode
 	}
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
@@ -136,8 +140,8 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	if c.DefaultPlanMode != nil {
-		if err := cs.store.SetConfigValue("default_plan_mode", fmt.Sprintf("%t", *c.DefaultPlanMode)); err != nil {
+	if c.DefaultOperatingMode != nil {
+		if err := cs.store.SetConfigValue("default_operating_mode", *c.DefaultOperatingMode); err != nil {
 			return err
 		}
 	}
@@ -158,7 +162,7 @@ type configResponse struct {
 	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
 	DefaultAutoMerge      *bool            `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge *bool         `json:"default_subtasks_auto_merge"`
-	DefaultPlanMode       *bool            `json:"default_plan_mode"`
+	DefaultOperatingMode   *string         `json:"default_operating_mode"`
 	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
 	EncryptionEnabled     bool             `json:"encryption_enabled"`
 }
@@ -194,7 +198,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
 			DefaultAutoMerge:      cfg.DefaultAutoMerge,
 			DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
-			DefaultPlanMode:       cfg.DefaultPlanMode,
+			DefaultOperatingMode:   cfg.DefaultOperatingMode,
 			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),
 		}
@@ -253,9 +257,9 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultSubtasksAutoMerge = &v
 			}
 		}
-		if dpm, ok := updates["default_plan_mode"]; ok {
-			if v, ok := dpm.(bool); ok {
-				current.DefaultPlanMode = &v
+		if dom, ok := updates["default_operating_mode"]; ok {
+			if v, ok := dom.(string); ok && (v == "act" || v == "plan" || v == "ideate") {
+				current.DefaultOperatingMode = &v
 			}
 		}
 		if dmft, ok := updates["default_max_failed_turns"]; ok {
@@ -278,7 +282,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			DefaultAutoCommit:     current.DefaultAutoCommit,
 			DefaultAutoMerge:      current.DefaultAutoMerge,
 			DefaultSubtasksAutoMerge: current.DefaultSubtasksAutoMerge,
-			DefaultPlanMode:       current.DefaultPlanMode,
+			DefaultOperatingMode:   current.DefaultOperatingMode,
 			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
 			EncryptionEnabled:     crypto.IsEnabled(),
 		}

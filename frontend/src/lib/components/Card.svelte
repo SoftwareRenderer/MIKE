@@ -347,7 +347,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             editModel: task.model_name || '',
             editUrl: task.llama_server_url || '',
             editReasoningEffort: task.reasoning_effort || '',
-            editPlanMode: task.plan_mode ?? false,
+            editOperatingMode: task.operating_mode ?? 'act',
             editAutoMerge: task.auto_merge ?? true,
             editSubtasksAutoMerge: task.subtasks_auto_merge ?? true,
             taskHasParent: !!task.parent_task_id,
@@ -363,7 +363,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         showEditTask.set(true);
     }
 
-    function handleEditSaved(title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) {
+    function handleEditSaved(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) {
         const trimmed = title.trim();
         if (!trimmed || !projectId) {
             showEditTask.set(false);
@@ -371,7 +371,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             return;
         }
         const updates: Record<string, unknown> = { title: trimmed };
-        updates.plan_mode = planMode;
+        updates.operating_mode = operatingMode;
         updates.auto_commit = autoMerge;
         updates.auto_merge = autoMerge;
         updates.subtasks_auto_merge = subtasksAutoMerge;
@@ -379,7 +379,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         if (url) updates.llama_server_url = url;
         if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
         task.title = trimmed;
-        task.plan_mode = planMode;
+        task.operating_mode = operatingMode;
         task.auto_commit = autoMerge;
         task.auto_merge = autoMerge;
         task.subtasks_auto_merge = subtasksAutoMerge;

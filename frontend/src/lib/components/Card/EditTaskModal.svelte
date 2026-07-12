@@ -3,6 +3,7 @@
     import type { Provider } from '$lib/types';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
+    import ModeSelect from '../ModeSelect.svelte';
     import BaseModal from '../BaseModal.svelte';
 
     let {
@@ -12,7 +13,7 @@
         editModel,
         editUrl,
         editReasoningEffort,
-        editPlanMode,
+        editOperatingMode,
         editAutoMerge,
         editSubtasksAutoMerge,
         taskHasParent,
@@ -27,13 +28,13 @@
         editModel: string;
         editUrl: string;
         editReasoningEffort: string;
-        editPlanMode: boolean;
+        editOperatingMode: string;
         editAutoMerge: boolean;
         editSubtasksAutoMerge: boolean;
         taskHasParent: boolean;
         targetBranch: string;
         isAgentSelected: () => boolean;
-        onSave: (title: string, model: string, url: string, reasoningEffort: string, planMode: boolean, autoMerge: boolean, subtasksAutoMerge: boolean) => void;
+        onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => void;
         onCancel: () => void;
     } = $props();
 
@@ -41,7 +42,7 @@
     let modelDraft = $state('');
     let urlDraft = $state('');
     let effortDraft = $state('');
-    let planModeDraft = $state(false);
+    let operatingModeDraft = $state('act');
     let autoMergeDraft = $state(true);
     let subtasksAutoMergeDraft = $state(true);
 
@@ -49,7 +50,7 @@
     $effect(() => { modelDraft = editModel; });
     $effect(() => { urlDraft = editUrl; });
     $effect(() => { effortDraft = editReasoningEffort; });
-    $effect(() => { planModeDraft = editPlanMode; });
+    $effect(() => { operatingModeDraft = editOperatingMode; });
     $effect(() => { autoMergeDraft = editAutoMerge; });
     $effect(() => { subtasksAutoMergeDraft = editSubtasksAutoMerge; });
 
@@ -71,12 +72,18 @@
     function handleSave() {
         const trimmed = titleDraft.trim();
         if (!trimmed) return;
-        onSave(trimmed, modelDraft, urlDraft, effortDraft, planModeDraft, autoMergeDraft, subtasksAutoMergeDraft);
+        onSave(trimmed, modelDraft, urlDraft, effortDraft, operatingModeDraft, autoMergeDraft, subtasksAutoMergeDraft);
     }
 
     function handleClose() {
         onCancel();
     }
+
+    const modeDescription = $derived({
+        act: 'AI is required to take formal actions',
+        plan: 'AI decomposes work into subtasks on the board, then executes after approval',
+        ideate: 'Free-form brainstorming. AI is not required to take formal actions',
+    }[operatingModeDraft] || '');
 </script>
 
 <BaseModal title="Edit Task" width="440px" onClose={handleClose}>
@@ -107,10 +114,10 @@
             <div class="options">
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">Plan mode</span>
-                        <span class="config-desc">AI decomposes work into subtasks on the board, then executes after approval</span>
+                        <span class="config-label">Operating mode</span>
+                        <span class="config-desc">{modeDescription}</span>
                     </div>
-                    <ToggleSwitch bind:checked={planModeDraft} ariaLabel="Plan mode" />
+                    <ModeSelect value={operatingModeDraft} onChange={(m: string) => operatingModeDraft = m} />
                 </div>
             </div>
             {/if}

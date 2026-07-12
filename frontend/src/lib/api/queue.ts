@@ -306,7 +306,7 @@ export function applyQueuedActionsToBoard(
                     auto_commit: taskData.auto_commit ?? false,
                     auto_merge: taskData.auto_merge ?? false,
                     subtasks_auto_merge: taskData.subtasks_auto_merge ?? false,
-                    plan_mode: taskData.plan_mode ?? false,
+                    operating_mode: taskData.operating_mode ?? 'act',
                     parent_task_id: taskData.parent_task_id || undefined,
                     title_generating: taskData.title_generating ?? false,
                     current_thread_id: taskData.current_thread_id || undefined,

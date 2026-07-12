@@ -24,7 +24,7 @@
         selectedReasoningEffort?: string;
         contextUsed?: number;
         contextLimit?: number;
-        planMode?: boolean;
+        operatingMode?: string;
         attachments?: ImageAttachment[];
         projectId?: string;
         taskId?: string;
@@ -32,7 +32,7 @@
         onClearDraft?: () => void;
         onStop?: () => void;
         onModelSelect?: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
-        onPlanModeToggle?: (planMode: boolean) => void;
+        onOperatingModeToggle?: () => void;
         onSummarize?: () => Promise<void>;
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
@@ -50,14 +50,14 @@
         selectedReasoningEffort = '',
         contextUsed = 0,
         contextLimit = 0,
-        planMode = false,
+        operatingMode = 'act',
         attachments = $bindable<ImageAttachment[]>([]),
         projectId = '',
         taskId = '',
         onSubmit,
         onStop,
         onModelSelect,
-        onPlanModeToggle,
+        onOperatingModeToggle,
         onSummarize,
         onSummarizeCancel,
         isSummarizing = false,
@@ -303,24 +303,27 @@
             {#if !isAgent}
                 <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} onSummarize={onSummarize} onSummarizeCancel={onSummarizeCancel} {isSummarizing} />
             {/if}
-            {#if onPlanModeToggle && !isAgent}
+            {#if onOperatingModeToggle && !isAgent}
                 <button
                     type="button"
                     class="btn-plan-toggle"
-                    class:active={planMode}
-                    onclick={() => onPlanModeToggle(!planMode)}
-                    title={planMode ? 'Plan mode: AI proposes subtasks. Click to switch to act mode.' : 'Act mode: AI makes changes directly. Click to switch to plan mode.'}
-                    aria-label="Toggle plan mode"
+                    class:active={operatingMode === 'plan'}
+                    onclick={onOperatingModeToggle}
+                    title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. AI is not required to take formal actions. Click to switch.'}
+                    aria-label="Toggle operating mode"
                     style="margin-left: auto"
                 >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        {#if planMode}
+                        {#if operatingMode === 'plan'}
                             <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        {:else if operatingMode === 'ideate'}
+                            <circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/>
+                            <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
                         {:else}
                             <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         {/if}
                     </svg>
-                    <span>{planMode ? 'Plan' : 'Act'}</span>
+                    <span>{operatingMode === 'plan' ? 'Plan' : operatingMode === 'ideate' ? 'Ideate' : 'Act'}</span>
                 </button>
             {/if}
         </div>

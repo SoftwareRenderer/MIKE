@@ -379,7 +379,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	// In plan mode, restrict tools to read-only + create_task + request_review
 	var tools []types.ChatTool
-	if task.PlanMode {
+	if task.IsPlanMode() {
 		tools = llama.GetPlanModeToolDefinitions()
 	} else {
 		tools = llama.GetToolDefinitions()
@@ -1066,7 +1066,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if loopType == LoopTool {
 					target = extractPathFromArgs(toolArgs)
 				}
-				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, target, &lc.messages) {
+				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, target, &lc.messages, task.IsIdeationMode()) {
 					return
 				}
 			}
@@ -1114,7 +1114,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				loopType = LoopPhrase
 			}
 			if loopType != LoopNone {
-				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, "", &lc.messages) {
+				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, "", &lc.messages, task.IsIdeationMode()) {
 					return
 				}
 				task.ExecutionState = "running"
@@ -1190,7 +1190,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 
 			// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
 			lc.detector.recordTurn(nil, "")
-			if handleLoopDetected(te, task, projectID, task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages) {
+			if handleLoopDetected(te, task, projectID, task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages, task.IsIdeationMode()) {
 				return
 			}
 

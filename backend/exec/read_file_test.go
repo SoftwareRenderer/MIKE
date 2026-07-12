@@ -40,7 +40,7 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 		ExecutionState:    "running",
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
-		PlanMode:       false,
+		OperatingMode:  "act",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

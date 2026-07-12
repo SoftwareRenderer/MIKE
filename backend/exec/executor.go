@@ -1246,7 +1246,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	if sandboxEnabled {
 		skillsMount = sandboxmgr.SkillsMount
 	}
-	if task.PlanMode {
+	if task.IsPlanMode() {
 		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, true)
 	} else {
 		systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, false)

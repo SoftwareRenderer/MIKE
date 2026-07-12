@@ -385,7 +385,7 @@ func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
 	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
 
 	// First call — increments streak to 1, does NOT terminate, preserves streak
-	terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages, false)
 	if terminated {
 		t.Fatal("first loop should not terminate")
 	}
@@ -394,7 +394,7 @@ func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
 	}
 
 	// Second call — increments streak to 2, does NOT terminate, preserves streak
-	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages, false)
 	if terminated {
 		t.Fatal("second loop should not terminate")
 	}
@@ -403,9 +403,54 @@ func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
 	}
 
 	// Third call — increments streak to 3, terminates (>= maxLoopHints)
-	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages)
+	terminated = handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages, false)
 	if !terminated {
 		t.Fatal("third loop should terminate (>= maxLoopHints)")
+	}
+}
+
+func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
+	e := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	proj := &types.Project{ID: "proj-ideation", Name: "ideation", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	_ = e.store.CreateProject(proj)
+	task := &types.Task{
+		ID:            "task-ideation",
+		ProjectID:     proj.ID,
+		Title:         "Ideation task",
+		Prompt:        "Brainstorm",
+		Status:        "in_progress",
+		OperatingMode: "ideate",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := e.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	detector := newLoopDetector()
+	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
+
+	// With ideation mode, handleLoopDetected should NOT inject hints or terminate
+	for i := 0; i < 5; i++ {
+		terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages, true)
+		if terminated {
+			t.Fatalf("ideation mode should never terminate (iteration %d)", i+1)
+		}
+	}
+	// No hint messages should have been injected
+	if len(messages) != 1 {
+		t.Errorf("expected 1 message (system only), got %d", len(messages))
+	}
+	// Loop streak should be 0 (reset on each call in ideation mode)
+	if detector.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 in ideation mode, got %d", detector.loopStreak)
+	}
+	// Task should still be running
+	taskAfter, _ := e.store.GetTaskByTaskID(task.ID)
+	if taskAfter.ExecutionState == "failed" {
+		t.Error("task should not be in failed state in ideation mode")
 	}
 }
 
@@ -1910,7 +1955,7 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
 
 	// First call — should NOT terminate (streak 1/3)
-	terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
 	if terminated {
 		t.Fatal("first hint should not terminate")
 	}
@@ -1919,7 +1964,7 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	}
 
 	// Second call — should NOT terminate (streak 2/3)
-	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
 	if terminated {
 		t.Fatal("second hint should not terminate")
 	}
@@ -1928,7 +1973,7 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	}
 
 	// Third call — SHOULD terminate (streak 3 >= maxLoopHints)
-	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
 	if !terminated {
 		t.Fatal("third hint should terminate (>= maxLoopHints)")
 	}
@@ -1964,8 +2009,8 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
 
 	// Build up a streak of 2
-	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
-	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
+	handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
 	if detector.loopStreak != 2 {
 		t.Fatalf("expected loopStreak=2, got %d", detector.loopStreak)
 	}
@@ -1978,7 +2023,7 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 
 	// After reset, first 2 of 3 should NOT terminate (fresh streak)
 	for i := 0; i < 2; i++ {
-		terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages)
+		terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
 		if terminated {
 			t.Fatalf("hint %d should not terminate (fresh streak, %d/3)", i+1, i+2)
 		}
@@ -2366,7 +2411,7 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 		{Role: "assistant", Content: "", ReasoningContent: "I need to reason before acting"},
 	}
 
-	task := &types.Task{PlanMode: false}
+	task := &types.Task{OperatingMode: "act"}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
 	// Skip system prompt (index 0)
@@ -2411,7 +2456,7 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","args":{"path":"foo.txt"}}`, ToolResult: `{"output":"file contents","success":true,"duration":10}`},
 	}
 
-	task := &types.Task{PlanMode: false}
+	task := &types.Task{OperatingMode: "act"}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
 	// system + user + assistant + tool = 4
@@ -2451,7 +2496,7 @@ func TestBuildMessagesFromDB_FiltersTaskComplete(t *testing.T) {
 		{Role: "user", Content: "Now do something else"},
 	}
 
-	task := &types.Task{PlanMode: false}
+	task := &types.Task{OperatingMode: "act"}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
 	// system + user + assistant + tool(edit_file) + user — request_review turn filtered
@@ -2482,7 +2527,7 @@ func TestBuildMessagesFromDB_FiltersTaskCompleteWithSiblings(t *testing.T) {
 		{Role: "user", Content: "Next task"},
 	}
 
-	task := &types.Task{PlanMode: false}
+	task := &types.Task{OperatingMode: "act"}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
 	// system + 2 users — assistant + all tool results filtered

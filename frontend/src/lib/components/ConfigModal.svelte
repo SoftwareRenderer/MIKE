@@ -31,7 +31,7 @@
     let defaultAutoCommit = $state(false);
     let defaultAutoMerge = $state(true);
     let defaultSubtasksAutoMerge = $state(true);
-    let defaultPlanMode = $state(false);
+    let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
     let loading = $state(false);
     let error = $state('');
@@ -158,7 +158,7 @@
         defaultAutoCommit = config?.default_auto_commit ?? false;
         defaultAutoMerge = config?.default_auto_merge ?? true;
         defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
-        defaultPlanMode = config?.default_plan_mode ?? false;
+        defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
@@ -477,7 +477,7 @@
                 default_auto_commit: defaultAutoCommit,
                 default_auto_merge: defaultAutoMerge,
                 default_subtasks_auto_merge: defaultSubtasksAutoMerge,
-                default_plan_mode: defaultPlanMode,
+                default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
             } as Config);
             configStore.set(cfg);
@@ -620,7 +620,7 @@
 
             <!-- Task Defaults Section -->
             <TaskDefaults
-                bind:defaultPlanMode
+                bind:defaultOperatingMode
                 bind:defaultAutoMerge
                 bind:defaultSubtasksAutoMerge
                 bind:defaultMaxFailedTurns
