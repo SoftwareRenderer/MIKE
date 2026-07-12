@@ -336,7 +336,7 @@
                 timestampDisplay={timestampInfo.display}
                 timestampTooltip={timestampInfo.tooltip}
                 onCopy={handleCopy}
-                onDelete={onDelete}
+                onDelete={!isFirstUserMessage ? onDelete : undefined}
                 onFork={startEdit}
                 {copied}
             />
