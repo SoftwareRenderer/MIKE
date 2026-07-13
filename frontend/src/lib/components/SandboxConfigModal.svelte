@@ -726,7 +726,20 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="config-label">Dockerfile</span>
                         <span class="config-desc">Select a Dockerfile on the server</span>
                     </div>
-                    {#if sandboxDockerfilePath && !dockerfileChanged}
+                    {#if sandboxDockerfilePath && dockerfileChanged}
+                    <button type="button" class="btn-build" onclick={handleRebuild} disabled={isLocked || building} title="Build image">
+                        {#if building}
+                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
+                            </svg>
+                        {:else}
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+                            </svg>
+                        {/if}
+                        {building ? 'Building...' : 'Build'}
+                    </button>
+                    {:else if sandboxDockerfilePath && !dockerfileChanged}
                     <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title="Rebuild image">
                         {#if building}
                             <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -1126,6 +1139,30 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .btn-rebuild:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-build {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-accent);
+        background: var(--color-accent-dark);
+        color: white;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-build:hover:not(:disabled) {
+        background: var(--color-accent);
+    }
+
+    .btn-build:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
