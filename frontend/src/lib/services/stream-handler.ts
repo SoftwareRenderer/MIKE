@@ -282,10 +282,18 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'stats': {
-                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number };
+                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number; context_used?: number; context_limit?: number; context_percent?: number };
                 if (data.prompt_tokens !== undefined && data.prompt_tokens > 0) s.lastPromptTokens = data.prompt_tokens;
                 if (data.predicted_tokens !== s.streamTokenCount) {
                     s.streamTokenCount = data.predicted_tokens;
+                }
+                // Pi mode: use direct context usage from get_session_stats
+                if (data.context_used !== undefined) {
+                    s.contextState.used = data.context_used;
+                    if (data.context_limit !== undefined) {
+                        s.contextState.limit = data.context_limit;
+                    }
+                } else {
                     s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
                 }
                 if (s.currentAssistantId) {

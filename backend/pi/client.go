@@ -30,6 +30,8 @@ type Client struct {
 	mu          sync.Mutex
 	closed      bool
 	eventChan   chan PiEvent
+	statsChan   chan SessionStats // dedicated channel for get_session_stats responses
+	compactChan chan error        // dedicated channel for compact response (nil=ok, non-nil=error)
 	done        chan struct{}
 	cwd         string
 	env         []string
@@ -46,6 +48,74 @@ func (c *Client) ModelName() string {
 		return "Pi"
 	}
 	return c.modelName
+}
+
+// SessionStats holds context usage data from get_session_stats.
+type SessionStats struct {
+	ContextTokens   int     // current context token count
+	ContextWindow   int     // model's max context window
+	ContextPercent  float64 // percentage of context used (0-100)
+	TotalInput      int     // cumulative input tokens
+	TotalOutput     int     // cumulative output tokens
+	TotalCacheRead  int     // cumulative cache read tokens
+	TotalCacheWrite int     // cumulative cache write tokens
+}
+
+// QuerySessionStats sends get_session_stats and waits for the response.
+// Returns SessionStats with context usage data, or zero values on error/timeout.
+// Uses a dedicated statsChan to avoid racing with the main event loop.
+func (c *Client) QuerySessionStats(ctx context.Context) SessionStats {
+	cmd := map[string]any{
+		"type": "get_session_stats",
+		"id":   fmt.Sprintf("session_stats-%d", time.Now().UnixNano()),
+	}
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		return SessionStats{}
+	}
+
+	c.mu.Lock()
+	if !c.closed {
+		c.stdin.Write(append(data, '\n'))
+	}
+	c.mu.Unlock()
+
+	select {
+	case stats := <-c.statsChan:
+		return stats
+	case <-ctx.Done():
+		return SessionStats{}
+	case <-time.After(3 * time.Second):
+		return SessionStats{}
+	}
+}
+
+// Compact sends a compact command to Pi and waits for it to complete.
+// Returns nil on success, or an error if compaction failed or timed out.
+func (c *Client) Compact(ctx context.Context) error {
+	cmd := map[string]any{
+		"type": "compact",
+		"id":   fmt.Sprintf("compact-%d", time.Now().UnixNano()),
+	}
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("marshal compact: %w", err)
+	}
+
+	c.mu.Lock()
+	if !c.closed {
+		c.stdin.Write(append(data, '\n'))
+	}
+	c.mu.Unlock()
+
+	select {
+	case err := <-c.compactChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(120 * time.Second):
+		return fmt.Errorf("compaction timed out")
+	}
 }
 
 // PiEvent represents an event from the Pi RPC protocol.
@@ -65,6 +135,7 @@ type PiEvent struct {
 	Success            bool             `json:"success"`               // from response
 	Command            string           `json:"command"`               // from response
 	ResponseID         string           `json:"id"`                    // from response (correlation id)
+	SessionStats       SessionStats     `json:"-"`                     // from get_session_stats response
 	// Extension UI
 	ExtMethod string `json:"method"` // from extension_ui_request
 	ExtID     string `json:"-"`      // from extension_ui_request (id field)
@@ -79,6 +150,8 @@ func NewClientInContainer(sandboxMgr *sandbox.SandboxManager, taskID, sessionNam
 	c := &Client{
 		sessionName: sessionName,
 		eventChan:   make(chan PiEvent, 64),
+		statsChan:   make(chan SessionStats, 16),
+		compactChan: make(chan error, 1),
 		done:        make(chan struct{}),
 	}
 
@@ -118,6 +191,8 @@ func NewClient(cwd string, sessionName string, env []string) (*Client, error) {
 		env:         env,
 		sessionName: sessionName,
 		eventChan:   make(chan PiEvent, 64),
+		statsChan:   make(chan SessionStats, 16),
+		compactChan: make(chan error, 1),
 		done:        make(chan struct{}),
 	}
 
@@ -412,6 +487,40 @@ func (c *Client) readEvents() {
 					}
 				}
 			}
+			// Extract session stats from get_session_stats response
+			if command, ok := raw["command"].(string); ok && command == "get_session_stats" {
+				if data, ok := raw["data"].(map[string]any); ok {
+					stats := SessionStats{}
+					// Extract token totals
+					if tokens, ok := data["tokens"].(map[string]any); ok {
+						if v, ok := tokens["input"].(float64); ok {
+							stats.TotalInput = int(v)
+						}
+						if v, ok := tokens["output"].(float64); ok {
+							stats.TotalOutput = int(v)
+						}
+						if v, ok := tokens["cacheRead"].(float64); ok {
+							stats.TotalCacheRead = int(v)
+						}
+						if v, ok := tokens["cacheWrite"].(float64); ok {
+							stats.TotalCacheWrite = int(v)
+						}
+					}
+					// Extract context usage
+					if cu, ok := data["contextUsage"].(map[string]any); ok {
+						if v, ok := cu["tokens"].(float64); ok {
+							stats.ContextTokens = int(v)
+						}
+						if v, ok := cu["contextWindow"].(float64); ok {
+							stats.ContextWindow = int(v)
+						}
+						if v, ok := cu["percent"].(float64); ok {
+							stats.ContextPercent = v
+						}
+					}
+					event.SessionStats = stats
+				}
+			}
 
 		case "message_update":
 			// Extract assistantMessageEvent
@@ -506,6 +615,30 @@ func (c *Client) readEvents() {
 		if eventType == "extension_ui_request" && event.ExtID != "" {
 			log.Printf("[pi] extension_ui_request method=%s, auto-cancelling", event.ExtMethod)
 			c.sendExtensionUIResponse(event.ExtID, true)
+		}
+
+		// Route get_session_stats responses to dedicated statsChan
+		// to avoid racing with the main event loop on eventChan.
+		if eventType == "response" && event.Command == "get_session_stats" {
+			select {
+			case c.statsChan <- event.SessionStats:
+			default:
+				log.Printf("[pi] stats channel full, dropping get_session_stats response")
+			}
+			continue
+		}
+		// Route compact responses to dedicated compactChan.
+		if eventType == "response" && event.Command == "compact" {
+			var compactErr error
+			if !event.Success {
+				compactErr = fmt.Errorf("compaction failed: %s", event.Error)
+			}
+			select {
+			case c.compactChan <- compactErr:
+			default:
+				log.Printf("[pi] compact channel full, dropping response")
+			}
+			continue
 		}
 
 		// Send to event channel (non-blocking to avoid blocking the reader)

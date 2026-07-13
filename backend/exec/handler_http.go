@@ -287,3 +287,56 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		"new_count":   sumResult.oldLen + 1, // summary appended, all messages preserved
 	})
 }
+
+// HandleCompact triggers Pi context compaction via RPC.
+// Only works for tasks actively running with Pi executor.
+func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if !te.configStore.IsAgentProvider(task.LlamaServerURL) {
+		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for Pi tasks")
+		return
+	}
+
+	// If task is actively running with Pi, send compact request to the execution loop
+	te.taskMu.Lock()
+	state := te.tasks[taskID]
+	te.taskMu.Unlock()
+
+	if state == nil {
+		httputil.JSONError(w, http.StatusBadGateway, "task is not running (Pi must be actively processing to compact)")
+		return
+	}
+	if state.executorType != "pi" {
+		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for Pi tasks")
+		return
+	}
+
+	resultCh := make(chan error, 1)
+	select {
+	case state.compactCh <- resultCh:
+		select {
+		case err := <-resultCh:
+			if err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		case <-time.After(120 * time.Second):
+			httputil.JSONError(w, http.StatusInternalServerError, "compaction timed out")
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted"})
+	default:
+		httputil.JSONError(w, http.StatusConflict, "compaction already in progress")
+	}
+}

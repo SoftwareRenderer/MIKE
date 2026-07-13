@@ -5,9 +5,10 @@
         onSummarize?: () => void;
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
+        disabled?: boolean;
     }
 
-    let { used = 0, limit = 0, onSummarize, onSummarizeCancel, isSummarizing = false }: Props = $props();
+    let { used = 0, limit = 0, onSummarize, onSummarizeCancel, isSummarizing = false, disabled = false }: Props = $props();
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
     let isWarning = $derived(percentage > 70 && percentage <= 80);
@@ -42,9 +43,10 @@
     <button
         type="button"
         class="context-usage"
-        class:clickable={!!onSummarize}
+        class:clickable={!!onSummarize && !disabled}
         class:summarizing={isSummarizing}
-        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
+        disabled={disabled || isSummarizing}
+        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize && !disabled ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
         onclick={handleClick}
     >
         {#if isSummarizing}

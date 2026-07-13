@@ -58,6 +58,7 @@ export {
     stopTask,
     resumeTask,
     summarizeTask,
+    compactTask,
 } from './tasks';
 
 // -- Messages --

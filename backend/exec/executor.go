@@ -45,6 +45,7 @@ type executionState struct {
 	cancel       context.CancelFunc
 	userMsgChan  chan stream.UserMessage
 	summarizeCh  chan chan error // send a channel, receives result (ok/err) from the loop
+	compactCh    chan chan error // send a channel, receives result (ok/err) from the Pi compaction
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
@@ -662,7 +663,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "pi"
 	}
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, executorType: execType, taskStatus: task.Status}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan error, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1354,6 +1355,16 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 
 func estimateTotalTokens(content, reasoning string) int {
 	return estimateTokensFromText(content) + estimateTokensFromText(reasoning)
+}
+
+// getCompactCh returns the compact channel for a running task, or nil if not found.
+func (te *TaskExecutor) getCompactCh(taskID string) chan chan error {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	if state, ok := te.tasks[taskID]; ok {
+		return state.compactCh
+	}
+	return nil
 }
 
 // branchExists checks if a git branch exists in the project.

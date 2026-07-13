@@ -65,7 +65,7 @@
         onClearDraft,
     }: Props = $props();
     let canSend = $derived((value.trim().length > 0 || attachments.length > 0) && !disabled && !(providers.length > 0 && !selectedModel));
-    let showModelSelector = $derived(providers.length > 0);
+    let showModelSelector = $derived(providers.length > 0 || isAgent);
     let isAgent = $derived(selectedUrl === PI_SENTINEL_URL);
     let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
     const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
@@ -300,9 +300,7 @@
                 {disabled}
                 onSelect={onModelSelect!}
             />
-            {#if !isAgent}
-                <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} onSummarize={onSummarize} onSummarizeCancel={onSummarizeCancel} {isSummarizing} />
-            {/if}
+            <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} {onSummarize} onSummarizeCancel={isAgent ? undefined : onSummarizeCancel} {isSummarizing} disabled={disabled} />
             {#if onOperatingModeToggle && !isAgent}
                 <button
                     type="button"

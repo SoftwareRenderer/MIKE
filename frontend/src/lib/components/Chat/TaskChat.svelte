@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged } from '$lib/api';
 import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
 import { showToast, showConfirm } from '$lib/stores/dialogs';
 import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
@@ -367,7 +367,11 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
     /** Look up the context window for the currently selected model. */
     function updateContextLimit() {
-        const provider = providers.find(p => p.url === selectedUrl);
+        let provider = providers.find(p => p.url === selectedUrl);
+        // Pi agent: selectedUrl is PI_SENTINEL_URL, look up the Pi agent provider
+        if (!provider && selectedUrl === PI_SENTINEL_URL) {
+            provider = providers.find(p => isAgentProvider(p));
+        }
         if (!provider) {
             stream.state.contextState.limit = 0;
             return;
@@ -673,18 +677,21 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             variant: 'default',
         });
         if (!confirmed) return;
-        summarizeController = new AbortController();
         isSummarizing = true;
         try {
-            const result = await summarizeTask(projectId, taskId, summarizeController.signal);
-            // Update context usage after summarization
-            // The WebSocket 'summarization' event will add the checkpoint entry
-            // and the next token event will refresh the usage count
-            console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
+            if (isAgentSelected()) {
+                // Pi mode: trigger compaction via RPC (only works while task is running)
+                await compactTask(projectId, taskId);
+            } else {
+                // LLM mode: summarize via backend
+                summarizeController = new AbortController();
+                const result = await summarizeTask(projectId, taskId, summarizeController.signal);
+                console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
+            }
         } catch (e: any) {
-            if (e?.name === 'AbortError') return; // cancelled by user, no error
-            console.error('Failed to summarize:', e);
-            showToast(e?.message || 'Failed to summarize context', 'error');
+            if (e?.name === 'AbortError') return;
+            console.error('Failed to compress context:', e);
+            showToast(e?.message || 'Failed to compress context', 'error');
         } finally {
             isSummarizing = false;
             summarizeController = null;

@@ -172,6 +172,52 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	agentEnded := false
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int // accumulated across all assistant messages
+	compactCh := te.getCompactCh(task.ID) // for HTTP-triggered compaction
+
+	// Query Pi session stats immediately so the frontend gets context limit right away.
+	// The 5-second ticker below will keep context_used updated during execution.
+	statsCtx, statsCancel := context.WithCancel(ctx)
+	defer statsCancel()
+	statsCtxInner, cancel := context.WithTimeout(statsCtx, 3*time.Second)
+	initialStats := client.QuerySessionStats(statsCtxInner)
+	cancel()
+	if initialStats.ContextWindow > 0 {
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+			"model_name":       client.ModelName(),
+			"prompt_tokens":    initialStats.TotalInput,
+			"predicted_tokens": initialStats.TotalOutput,
+			"context_used":     initialStats.ContextTokens,
+			"context_limit":    initialStats.ContextWindow,
+			"context_percent":  initialStats.ContextPercent,
+		}})
+	}
+
+	// Periodically query Pi session stats for context usage display.
+	// Broadcast stats via WebSocket so the frontend can show the context usage bar.
+	statsTicker := time.NewTicker(5 * time.Second)
+	defer statsTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-statsCtx.Done():
+				return
+			case <-statsTicker.C:
+				statsCtxInner, cancel := context.WithTimeout(statsCtx, 3*time.Second)
+				stats := client.QuerySessionStats(statsCtxInner)
+				cancel()
+				if stats.ContextWindow > 0 {
+					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+						"model_name":       client.ModelName(),
+						"prompt_tokens":    stats.TotalInput,
+						"predicted_tokens": stats.TotalOutput,
+						"context_used":     stats.ContextTokens,
+						"context_limit":    stats.ContextWindow,
+						"context_percent":  stats.ContextPercent,
+					}})
+				}
+			}
+		}
+	}()
 
 	for !agentEnded {
 		select {
@@ -357,6 +403,20 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			err := client.Prompt(ctx, um.Content, "steer")
 			if err != nil {
 				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
+			}
+
+		case resultCh := <-compactCh:
+			// Handle compact request from HTTP handler.
+			log.Printf("[pi] task=%s compact requested", task.ID)
+			compactCtx, compactCancel := context.WithTimeout(ctx, 120*time.Second)
+			err := client.Compact(compactCtx)
+			compactCancel()
+			if err != nil {
+				log.Printf("[pi] task=%s compact failed: %v", task.ID, err)
+				resultCh <- err
+			} else {
+				log.Printf("[pi] task=%s compact succeeded", task.ID)
+				resultCh <- nil
 			}
 		}
 	}
