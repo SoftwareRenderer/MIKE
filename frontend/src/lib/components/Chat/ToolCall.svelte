@@ -542,7 +542,7 @@
         font-size: 0.8125rem;
     }
     .tool-result-summary :global(:not(pre) > code) {
-        background-color: #4B4B4B;
+        background-color: #151515;
         padding: 1px 4px;
         border-radius: 3px;
     }
