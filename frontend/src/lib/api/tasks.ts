@@ -209,7 +209,7 @@ export async function summarizeTask(projectId: string, taskId: string, signal?: 
 }
 
 /** Trigger Pi agent context compaction via RPC. Only works for Pi tasks. */
-export async function compactTask(projectId: string, taskId: string): Promise<{ status: string }> {
+export async function compactTask(projectId: string, taskId: string): Promise<{ status: string; summary: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/compact`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to compact task');
     return res.json();

@@ -16,6 +16,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
+	"kanban/backend/pi"
 	"kanban/backend/prompts"
 	sandboxmgr "kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -45,7 +46,9 @@ type executionState struct {
 	cancel       context.CancelFunc
 	userMsgChan  chan stream.UserMessage
 	summarizeCh  chan chan error // send a channel, receives result (ok/err) from the loop
-	compactCh    chan chan error // send a channel, receives result (ok/err) from the Pi compaction
+	compactCh    chan chan *pi.CompactResult // send a channel, receives result from the Pi compaction
+	piClient     *pi.Client                  // Pi RPC client — kept alive after completion for on-demand compaction
+	clientClosed bool                        // true when piClient has been closed (prevents double-close)
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "pi" — tracks which executor type is active
@@ -659,11 +662,16 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	te.taskMu.Lock()
+	// Close old Pi client if this task is being restarted (client was kept alive after completion).
+	if oldState, exists := te.tasks[taskID]; exists && oldState.piClient != nil && !oldState.clientClosed {
+		oldState.piClient.Close()
+		oldState.clientClosed = true
+	}
 	execType := "llm"
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "pi"
 	}
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan error, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *pi.CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -728,6 +736,11 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	state, ok := te.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("task not running")
+	}
+	// Close Pi client if it's still alive (kept after completion for compaction).
+	if state.piClient != nil && !state.clientClosed {
+		state.piClient.Close()
+		state.clientClosed = true
 	}
 	state.taskStatus = ""
 	state.cancel()
@@ -1358,7 +1371,7 @@ func estimateTotalTokens(content, reasoning string) int {
 }
 
 // getCompactCh returns the compact channel for a running task, or nil if not found.
-func (te *TaskExecutor) getCompactCh(taskID string) chan chan error {
+func (te *TaskExecutor) getCompactCh(taskID string) chan chan *pi.CompactResult {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
 	if state, ok := te.tasks[taskID]; ok {

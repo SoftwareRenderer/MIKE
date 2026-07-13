@@ -31,7 +31,7 @@ type Client struct {
 	closed      bool
 	eventChan   chan PiEvent
 	statsChan   chan SessionStats // dedicated channel for get_session_stats responses
-	compactChan chan error        // dedicated channel for compact response (nil=ok, non-nil=error)
+	compactChan chan *CompactResult // dedicated channel for compact response (nil=ok, non-nil=error)
 	done        chan struct{}
 	cwd         string
 	env         []string
@@ -90,16 +90,22 @@ func (c *Client) QuerySessionStats(ctx context.Context) SessionStats {
 	}
 }
 
+// CompactResult holds the result of a Pi compact command.
+type CompactResult struct {
+	Summary string
+	Error   error
+}
+
 // Compact sends a compact command to Pi and waits for it to complete.
-// Returns nil on success, or an error if compaction failed or timed out.
-func (c *Client) Compact(ctx context.Context) error {
+// Returns the summary text on success, or an error if compaction failed or timed out.
+func (c *Client) Compact(ctx context.Context) (*CompactResult, error) {
 	cmd := map[string]any{
 		"type": "compact",
 		"id":   fmt.Sprintf("compact-%d", time.Now().UnixNano()),
 	}
 	data, err := json.Marshal(cmd)
 	if err != nil {
-		return fmt.Errorf("marshal compact: %w", err)
+		return nil, fmt.Errorf("marshal compact: %w", err)
 	}
 
 	c.mu.Lock()
@@ -109,12 +115,12 @@ func (c *Client) Compact(ctx context.Context) error {
 	c.mu.Unlock()
 
 	select {
-	case err := <-c.compactChan:
-		return err
+	case result := <-c.compactChan:
+		return result, result.Error
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-time.After(120 * time.Second):
-		return fmt.Errorf("compaction timed out")
+		return nil, fmt.Errorf("compaction timed out")
 	}
 }
 
@@ -135,6 +141,7 @@ type PiEvent struct {
 	Success            bool             `json:"success"`               // from response
 	Command            string           `json:"command"`               // from response
 	ResponseID         string           `json:"id"`                    // from response (correlation id)
+	Summary            string           `json:"-"`                     // from compact response data.summary
 	SessionStats       SessionStats     `json:"-"`                     // from get_session_stats response
 	// Extension UI
 	ExtMethod string `json:"method"` // from extension_ui_request
@@ -151,7 +158,7 @@ func NewClientInContainer(sandboxMgr *sandbox.SandboxManager, taskID, sessionNam
 		sessionName: sessionName,
 		eventChan:   make(chan PiEvent, 64),
 		statsChan:   make(chan SessionStats, 16),
-		compactChan: make(chan error, 1),
+		compactChan: make(chan *CompactResult, 1),
 		done:        make(chan struct{}),
 	}
 
@@ -192,7 +199,7 @@ func NewClient(cwd string, sessionName string, env []string) (*Client, error) {
 		sessionName: sessionName,
 		eventChan:   make(chan PiEvent, 64),
 		statsChan:   make(chan SessionStats, 16),
-		compactChan: make(chan error, 1),
+		compactChan: make(chan *CompactResult, 1),
 		done:        make(chan struct{}),
 	}
 
@@ -633,8 +640,18 @@ func (c *Client) readEvents() {
 			if !event.Success {
 				compactErr = fmt.Errorf("compaction failed: %s", event.Error)
 			}
+			// Extract summary from compact response data
+			var summary string
+			if event.Success {
+				if data, ok := raw["data"].(map[string]any); ok {
+					if s, ok := data["summary"].(string); ok {
+						summary = s
+					}
+					event.Summary = summary
+				}
+			}
 			select {
-			case c.compactChan <- compactErr:
+			case c.compactChan <- &CompactResult{Summary: summary, Error: compactErr}:
 			default:
 				log.Printf("[pi] compact channel full, dropping response")
 			}

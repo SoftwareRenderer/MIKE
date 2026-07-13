@@ -230,10 +230,13 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		}
 		te.taskMu.Unlock()
 		// Only remove from tasks map if we're still the active executor
-		// (prevents old executor from deleting a replacement during type switch)
+		// (prevents old executor from deleting a replacement during type switch).
+		// For Pi executors, keep the task alive for on-demand compaction.
 		te.taskMu.Lock()
 		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
-			delete(te.tasks, task.ID)
+			if state.executorType != "pi" {
+				delete(te.tasks, task.ID)
+			}
 		}
 		te.taskMu.Unlock()
 		// Clear assigned ports when task execution ends

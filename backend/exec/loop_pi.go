@@ -29,11 +29,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
-		// Only remove from tasks map if we're still the active executor
-		// (prevents old executor from deleting a replacement during type switch)
+		// Keep the task in te.tasks for on-demand compaction (Pi client stays alive).
+		// Only delete if we're a replacement executor (prevents old executor from
+		// deleting a replacement during type switch).
 		te.taskMu.Lock()
 		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
-			delete(te.tasks, task.ID)
+			// Don't delete — keep alive for compaction. The client is closed
+			// when the task is restarted or fully stopped.
 		}
 		te.taskMu.Unlock()
 	}()
@@ -68,12 +70,18 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		log.Printf("[pi] task=%s creating client (cwd=%s, session=%s)", task.ID, cwd, sessionName)
 		client, err = pi.NewClient(cwd, sessionName, env)
 	}
-
 	if err != nil {
 		te.failTask(task, projectID, fmt.Sprintf("Failed to start Pi Coding Agent: %v", err), "pi_start_failed")
 		return
 	}
-	defer client.Close()
+
+	// Store client on execution state so it survives after the event loop exits.
+	// This enables on-demand compaction while the task is idle (not actively processing).
+	te.taskMu.Lock()
+	if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
+		state.piClient = client
+	}
+	te.taskMu.Unlock()
 
 	log.Printf("[pi] task=%s client started (pid=%d)", task.ID, client.PID())
 
@@ -409,14 +417,14 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			// Handle compact request from HTTP handler.
 			log.Printf("[pi] task=%s compact requested", task.ID)
 			compactCtx, compactCancel := context.WithTimeout(ctx, 120*time.Second)
-			err := client.Compact(compactCtx)
+			compactResult, err := client.Compact(compactCtx)
 			compactCancel()
 			if err != nil {
 				log.Printf("[pi] task=%s compact failed: %v", task.ID, err)
-				resultCh <- err
+				resultCh <- &pi.CompactResult{Error: err}
 			} else {
-				log.Printf("[pi] task=%s compact succeeded", task.ID)
-				resultCh <- nil
+				log.Printf("[pi] task=%s compact succeeded (summary len=%d)", task.ID, len(compactResult.Summary))
+				resultCh <- compactResult
 			}
 		}
 	}

@@ -681,7 +681,16 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         try {
             if (isAgentSelected()) {
                 // Pi mode: trigger compaction via RPC (only works while task is running)
-                await compactTask(projectId, taskId);
+                const result = await compactTask(projectId, taskId);
+                // Add the compaction summary as a chat entry
+                stream.state.entries = [...stream.state.entries, {
+                    id: genId(),
+                    role: 'summarization',
+                    content: result.summary || 'Context was summarized to free space',
+                    isStreaming: false,
+                    createdAt: new Date().toISOString(),
+                    stats: { model_name: selectedModel || 'Pi', prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
+                }];
             } else {
                 // LLM mode: summarize via backend
                 summarizeController = new AbortController();

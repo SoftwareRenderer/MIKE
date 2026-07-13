@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"kanban/backend/httputil"
+	"kanban/backend/pi"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
@@ -308,13 +310,18 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If task is actively running with Pi, send compact request to the execution loop
+	// Check if task has a Pi client (running or idle).
+	// Pi client stays alive after completion for on-demand compaction.
 	te.taskMu.Lock()
 	state := te.tasks[taskID]
 	te.taskMu.Unlock()
 
+	log.Printf("[compact] task=%s state=%v executorType=%s piClient=%v", taskID, state != nil, func() string { if state != nil { return state.executorType }; return "" }(), state != nil && state.piClient != nil)
+
 	if state == nil {
-		httputil.JSONError(w, http.StatusBadGateway, "task is not running (Pi must be actively processing to compact)")
+		// Task not in active executors — it may have been stopped, restarted, or
+		// the server may have restarted. The task still exists in the store.
+		httputil.JSONError(w, http.StatusNotFound, "task not found in active executors")
 		return
 	}
 	if state.executorType != "pi" {
@@ -322,20 +329,36 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resultCh := make(chan error, 1)
+	// If task is not actively running, we need to send the compact command
+	// directly to the Pi client (not through the event loop's compactCh).
+	if state.piClient != nil {
+		compactCtx, compactCancel := context.WithTimeout(r.Context(), 120*time.Second)
+		compactResult, err := state.piClient.Compact(compactCtx)
+		compactCancel()
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})
+		return
+	}
+
+	// Task is actively running — use the event loop's compact channel.
+	resultCh := make(chan *pi.CompactResult, 1)
+	var compactResult *pi.CompactResult
 	select {
 	case state.compactCh <- resultCh:
 		select {
-		case err := <-resultCh:
-			if err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		case compactResult = <-resultCh:
+			if compactResult.Error != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, compactResult.Error.Error())
 				return
 			}
 		case <-time.After(120 * time.Second):
 			httputil.JSONError(w, http.StatusInternalServerError, "compaction timed out")
 			return
 		}
-		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted"})
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})
 	default:
 		httputil.JSONError(w, http.StatusConflict, "compaction already in progress")
 	}
