@@ -1704,9 +1704,6 @@ func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string)
 	if len(out) > 0 && out[len(out)-1] == '\n' {
 		out = out[:len(out)-1]
 	}
-	if len(annotations) == 0 {
-		out = out
-	}
 	return out, annotations
 }
 

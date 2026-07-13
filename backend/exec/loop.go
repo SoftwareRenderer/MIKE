@@ -539,11 +539,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				lc.detector.clearHints()
 				if um.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
+					lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				} else {
-					// Re-sync with DB to pick up any deleted messages.
+					// Re-sync with DB to pick up the user message (already created by HandleSend)
+					// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
 					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 				}
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 					switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
@@ -810,12 +811,16 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				}
 			}
 			if !hadRegenerate {
+				// Re-sync with DB to pick up user messages (already created by HandleSend)
+				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes them.
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			}
 
-			// Add queued messages to conversation history.
+			// Apply model overrides from queued messages.
 			for _, qm := range queuedMsgs {
-				lc.messages = append(lc.messages, userMessageToChatMessage(qm))
+				if qm.Regenerate {
+					lc.messages = append(lc.messages, userMessageToChatMessage(qm))
+				}
 				if qm.ModelName != "" {
 					switched := te.applyModelSwitch(lc.mc, task, qm.ServerURL, qm.ModelName, true, false)
 					lc.client = switched.client
@@ -1228,11 +1233,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				lc.detector.clearHints()
 				if um.Regenerate {
 					lc.messages = truncateForRegenerate(lc.messages)
+					lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				} else {
-					// Re-sync with DB to pick up any deleted messages.
+					// Re-sync with DB to pick up the user message (already created by HandleSend)
+					// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
 					lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 				}
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 				if um.ModelName != "" {
 					switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
@@ -1328,11 +1334,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 			lc.detector.clearHints()
 			if um.Regenerate {
 				lc.messages = truncateForRegenerate(lc.messages)
+				lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			} else {
-				// Re-sync with DB to pick up any deleted messages.
+				// Re-sync with DB to pick up the user message (already created by HandleSend)
+				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
 				lc.messages, task = te.syncMessagesFromDB(task, worktreePath, projectName, sandboxEnabled)
 			}
-			lc.messages = append(lc.messages, userMessageToChatMessage(um))
 			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
 				switched := te.applyModelSwitch(lc.mc, task, um.ServerURL, um.ModelName, true, false)
 				lc.client = switched.client
