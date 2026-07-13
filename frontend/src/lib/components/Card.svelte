@@ -971,6 +971,9 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         background: var(--color-accent-dark);
         color: white !important;
     }
+    :global(.action-icon.action-move:hover .icon svg) {
+        color: white !important;
+    }
     .action-icon.action-delete:hover {
         background: var(--color-status-red-dark);
         color: white;
