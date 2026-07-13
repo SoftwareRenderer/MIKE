@@ -55,7 +55,7 @@
                     <button
                         class="project-item"
                         onclick={() => onSelectProject(p)}
-                        title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}${projectCounts[p.id]?.review > 0 ? ` (${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} for review)` : ''}`}
+                        title={projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
@@ -69,11 +69,8 @@
                             {/if}
                         {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled}>
                             {getProjectAbbr(p.name)}
-                            {#if projectCounts[p.id]?.review > 0}
-                                <span class="review-dot" aria-label="{projectCounts[p.id].review} task{projectCounts[p.id].review === 1 ? '' : 's'} for review" title="{projectCounts[p.id].review} task{projectCounts[p.id].review === 1 ? '' : 's'} for review"></span>
-                            {/if}
                         </span>
                         {#if (isMobile || !collapsed) && projectCounts[p.id]}
                             <span class="project-stats">
@@ -298,16 +295,6 @@
     }
     .project-abbr-no-sandbox {
         color: var(--color-text-tertiary);
-    }
-    .review-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--color-column-review);
-        margin-left: 4px;
-        vertical-align: middle;
-        flex-shrink: 0;
     }
     .project-stats {
         display: flex;
