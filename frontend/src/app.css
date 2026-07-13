@@ -133,3 +133,13 @@ a:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--color-surface-4);
 }
+
+/* CodeMirror selection — override browser default bright highlight */
+.cm-editor ::selection,
+.cm-editor ::-moz-selection {
+    background-color: #2a4060 !important;
+}
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+    background-color: #2a4060 !important;
+}
