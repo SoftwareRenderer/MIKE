@@ -740,7 +740,8 @@ import { showTerminal } from '$lib/stores/ui';
             const text = e.clipboardData?.getData('text');
             if (text && term) {
                 e.preventDefault();
-                term.write(text);
+                e.stopImmediatePropagation();
+                term.paste(text);
             }
         };
         term.element.addEventListener('paste', handlePaste, { capture: true });
