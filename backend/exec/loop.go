@@ -1201,14 +1201,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 				if handleLoopDetected(te, task, projectID, task.ID, lc.detector, loopType, "", &lc.messages, task.IsIdeationMode()) {
 					return
 				}
-				if !task.IsIdeationMode() {
-					// In normal mode: loop detected, inject hint, continue
+				if !task.IsIdeationMode() && !task.IsPlanMode() {
+					// In act mode: loop detected, inject hint, continue
 					task.ExecutionState = "running"
 					te.store.UpdateTask(task)
 					continue
 				}
-				// In ideation mode: loop detection is suppressed (no hint injected).
-				// Fall through to treat the text-only response as valid and end the turn.
+				// In ideation/plan mode: text-only responses are valid (brainstorming / planning).
+				// Fall through to end the turn.
 			}
 			// Valid text-only response: remove previously injected hints from context
 			lc.messages = lc.detector.removeHints(lc.messages)

@@ -220,10 +220,11 @@ func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 // injects a hint message, and notifies the frontend.
 // If target is non-empty, it is included in the hint (used for tool loops).
 // If ideationMode is true, loop hints are suppressed (no hint injection, no streak tracking).
+// Plan mode also suppresses hints — reading files and making statements is normal planning behavior.
 // On valid turn (via recordTurn), loopStreak is reset to 0.
 func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID string, detector *loopDetector, loopType LoopType, target string, messages *[]types.ChatMessage, ideationMode bool) bool {
-	// In ideation mode, suppress all loop hints — let the LLM freely explore
-	if ideationMode {
+	// In ideation/plan mode, suppress all loop hints — let the LLM freely explore / plan
+	if ideationMode || task.IsPlanMode() {
 		detector.reset()
 		return false // continue without intervention
 	}

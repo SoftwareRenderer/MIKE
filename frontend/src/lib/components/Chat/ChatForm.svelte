@@ -422,9 +422,9 @@
         color: var(--color-text-primary);
     }
     .btn-plan-toggle.active {
-        background: var(--color-accent)22;
+        background: color-mix(in srgb, var(--color-accent) 22%, transparent);
         border-color: var(--color-accent);
-        color: var(--color-accent);
+        color: #fff;
     }
     .btn-plan-toggle.ideate {
         background: color-mix(in srgb, var(--color-status-yellow) 15%, transparent);

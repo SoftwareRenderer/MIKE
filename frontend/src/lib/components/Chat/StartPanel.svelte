@@ -111,12 +111,13 @@
     }
     .btn-plan-toggle.active {
         padding: 4px 10px;
-        border: 2px dotted var(--color-accent);
-        color: var(--color-accent);
+        background: var(--color-surface-3);
+        border: 1px solid var(--color-accent-light);
+        color: var(--color-accent-light);
     }
     .btn-plan-toggle.ideate {
         padding: 4px 10px;
-        border: 2px dotted var(--color-status-yellow);
+        border: 1px solid var(--color-status-yellow);
         color: var(--color-status-yellow);
     }
     .btn-start-task {
