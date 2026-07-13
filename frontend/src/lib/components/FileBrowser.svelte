@@ -2,9 +2,10 @@
     import { onMount } from 'svelte';
     import BaseModal from './BaseModal.svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import homeIcon from '$lib/assets/icons/home.svg';
-    import folderIcon from '$lib/assets/icons/folder.svg';
-    import fileIcon from '$lib/assets/icons/file.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import homeIcon from '$lib/assets/icons/home.svg?raw';
+    import folderIcon from '$lib/assets/icons/folder.svg?raw';
+    import fileIcon from '$lib/assets/icons/file.svg?raw';
 
     let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string, sandboxEnabled: boolean) => void } = $props();
 
@@ -145,7 +146,7 @@
             <div class="path-bar">
             <div class="path-bar-row">
                 <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
-                    <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
+                    <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
                 </button>
                 <input
                     type="text"
@@ -207,9 +208,9 @@
                         >
                             <span class="icon" aria-hidden="true">
                                 {#if entry.isDir}
-                                    <img src={folderIcon} width="16" height="16" alt="" />
+                                    <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
                                 {:else}
-                                    <img src={fileIcon} width="16" height="16" alt="" />
+                                    <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
                                 {/if}
                             </span>
                             <span class="name">{entry.name}</span>

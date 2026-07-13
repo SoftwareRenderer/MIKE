@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { ensureCsrfToken, getGitStatus } from '$lib/api';
-    import folderIcon from '$lib/assets/icons/folder.svg';
-    import fileIcon from '$lib/assets/icons/file.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import folderIcon from '$lib/assets/icons/folder.svg?raw';
+    import fileIcon from '$lib/assets/icons/file.svg?raw';
 
     let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
         projectId: string;
@@ -438,9 +439,9 @@
                         title={entry.path}
                     >
                         {#if entry.isDir}
-                            <img src={folderIcon} width="14" height="14" alt="" class="file-icon" />
+                            <Icon src={folderIcon} color="#6E7681" width={14} height={14} class="file-icon" />
                         {:else}
-                            <img src={fileIcon} width="14" height="14" alt="" class="file-icon" />
+                            <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
                         {/if}
                         <span class="file-name">{entry.name}</span>
                         {#if getGitStatusChar(entry.path)}

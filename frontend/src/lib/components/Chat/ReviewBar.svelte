@@ -1,5 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
+    import Icon from '$lib/components/Icon.svelte';
+    import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import ModelSelector from './ModelSelector.svelte';
 
     let {
@@ -79,7 +81,7 @@
                 {:else if queueStatus === 'processing' || isCommitting}
                     <span class="spinner-inline"></span> Committing...
                 {:else}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
                     Commit and move to Done
                 {/if}
             </button>

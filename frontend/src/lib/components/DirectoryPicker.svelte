@@ -1,7 +1,8 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
-    import homeIcon from '$lib/assets/icons/home.svg';
-    import folderIcon from '$lib/assets/icons/folder.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import homeIcon from '$lib/assets/icons/home.svg?raw';
+    import folderIcon from '$lib/assets/icons/folder.svg?raw';
 
     let { initialPath, onClose, onSelect }: {
         initialPath: string;
@@ -90,7 +91,7 @@
     <div class="path-bar">
         <div class="path-bar-row">
             <button type="button" class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">
-                <img src={homeIcon} width="18" height="18" alt="" aria-hidden="true" />
+                <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
             </button>
             <input
                 type="text"
@@ -118,7 +119,7 @@
                     title="Go to parent directory"
                 >
                     <span class="icon" aria-hidden="true">
-                        <img src={folderIcon} width="16" height="16" alt="" />
+                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
                     </span>
                     <span class="name">..</span>
                 </button>
@@ -136,7 +137,7 @@
                         title={`Open folder: ${entry.name}`}
                     >
                         <span class="icon" aria-hidden="true">
-                            <img src={folderIcon} width="16" height="16" alt="" />
+                            <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
                         </span>
                         <span class="name">{entry.name}</span>
                     </button>

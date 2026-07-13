@@ -5,8 +5,9 @@
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { showConfirm } from '$lib/stores/dialogs';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
-    import shieldIcon from '$lib/assets/icons/shield.svg';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldIcon from '$lib/assets/icons/shield.svg?raw';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import BaseModal from './BaseModal.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
     import DockerfilePicker from './DockerfilePicker.svelte';
@@ -398,9 +399,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="config-info">
                     <div class="config-icon">
                         {#if sandboxEnabled}
-                            <img src={shieldIcon} width="20" height="20" alt="" />
+                            <Icon src={shieldIcon} color="#E6EDF3" width={20} height={20} />
                         {:else}
-                            <img src={shieldOffIcon} width="20" height="20" alt="" />
+                            <Icon src={shieldOffIcon} color="#F85149" width={20} height={20} />
                         {/if}
                     </div>
                     <div class="config-text">

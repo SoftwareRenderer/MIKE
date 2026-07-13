@@ -14,6 +14,8 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { showEditTask, editTaskData } from '$lib/stores/app';
+    import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
+    import Icon from './Icon.svelte';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
@@ -716,7 +718,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                         {:else if nextStatus === 'review'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                         {:else if nextStatus === 'done' && hasChanges}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v12"/><circle cx="4" cy="2" r="2" fill="currentColor" stroke="none"/><circle cx="4" cy="13.5" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="13.5" r="2" fill="currentColor" stroke="none"/><path d="M12.038 13.487l-.05-5.519c.015-4.475-.074-5.754-2.897-5.794l-1.449.05"/><path d="M9.164 4.323l-2.5-2.156 2.5-2.156" fill="currentColor" stroke="none"/></svg>
+                            <Icon src={commitPushIcon} color="#eab308" width={14} height={14} />
                         {:else if nextStatus === 'done'}
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                         {/if}

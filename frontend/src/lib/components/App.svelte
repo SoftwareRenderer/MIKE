@@ -9,8 +9,6 @@ import { createStreamingContext, createTaskDiffContext, createCommitQueueContext
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import { getBoardCache, boardCacheKey } from '$lib/storage';
 import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-import shieldIcon from '$lib/assets/icons/shield.svg';
-import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
 import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';

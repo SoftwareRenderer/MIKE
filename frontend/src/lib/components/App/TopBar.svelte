@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { Project } from '$lib/types';
-    import shieldIcon from '$lib/assets/icons/shield.svg';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldIcon from '$lib/assets/icons/shield.svg?raw';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { toHomeRelative } from '$lib/utils/path';
 
     let {
@@ -42,9 +43,9 @@
     </button>
     <button class="icon-btn sandbox-config-btn" class:port-conflict={hasPortConflict} onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
-            <img src={shieldIcon} width="14" height="14" alt="" />
+            <Icon src={shieldIcon} color="#E6EDF3" width={14} height={14} />
         {:else}
-            <img src={shieldOffIcon} width="14" height="14" alt="" />
+            <Icon src={shieldOffIcon} color="#F85149" width={14} height={14} />
         {/if}
     </button>
     <span class="project-title">

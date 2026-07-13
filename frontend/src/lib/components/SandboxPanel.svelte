@@ -1,8 +1,9 @@
 <script lang="ts">
-    
+
     import type { Task, Project } from '$lib/types';
     import { getProject } from '$lib/api';
-    import shieldIcon from '$lib/assets/icons/shield.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldIcon from '$lib/assets/icons/shield.svg?raw';
 import BaseModal from './BaseModal.svelte';
 
     let { task, onClose }: {
@@ -31,7 +32,7 @@ import BaseModal from './BaseModal.svelte';
 <BaseModal width="480px" onClose={onClose}>
         {#snippet header({ title })}
             <div class="panel-title">
-                <img src={shieldIcon} width="16" height="16" alt="" />
+                <Icon src={shieldIcon} color="#E6EDF3" width={16} height={16} />
                 <span>Sandboxed Task</span>
             </div>
         {/snippet}

@@ -1,6 +1,7 @@
 <script lang="ts">
-    import shieldIcon from '$lib/assets/icons/shield.svg';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldIcon from '$lib/assets/icons/shield.svg?raw';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { getWorktreeDisplayPath } from '$lib/utils/path';
     import SandboxPanel from '../SandboxPanel.svelte';
     import type { Task } from '$lib/types';
@@ -41,11 +42,11 @@
             {#if sandboxEnabled !== undefined}
                 {#if sandboxEnabled}
                     <button class="icon-btn" onclick={() => { showSandboxPanel = true; }} title="Sandbox enabled (click for details)">
-                        <img src={shieldIcon} width="14" height="14" alt="" />
+                        <Icon src={shieldIcon} color="#E6EDF3" width={14} height={14} />
                     </button>
                 {:else}
                     <span class="sandbox-badge" title="Sandbox disabled">
-                        <img src={shieldOffIcon} width="14" height="14" alt="" />
+                        <Icon src={shieldOffIcon} color="#F85149" width={14} height={14} />
                     </span>
                 {/if}
             {/if}

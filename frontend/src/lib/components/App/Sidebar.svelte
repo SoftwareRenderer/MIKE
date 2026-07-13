@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { Project } from '$lib/types';
-    import shieldIcon from '$lib/assets/icons/shield.svg';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldIcon from '$lib/assets/icons/shield.svg?raw';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
 
     let {
         projects,
@@ -60,11 +61,11 @@
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
                                 <span class="sandbox-badge" aria-label="Sandbox enabled (gVisor)" title="Sandbox enabled (gVisor)">
-                                    <img src={shieldIcon} width="14" height="14" alt="" />
+                                    <Icon src={shieldIcon} color="#E6EDF3" width={14} height={14} />
                                 </span>
                             {:else}
                                 <span class="sandbox-badge sandbox-badge-off" aria-label="Sandbox disabled" title="Sandbox disabled">
-                                    <img src={shieldOffIcon} width="14" height="14" alt="" />
+                                    <Icon src={shieldOffIcon} color="#F85149" width={14} height={14} />
                                 </span>
                             {/if}
                         {/if}

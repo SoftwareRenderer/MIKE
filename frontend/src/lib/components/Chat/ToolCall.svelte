@@ -2,13 +2,14 @@
     import { marked } from 'marked';
     import { getToolDisplayName } from '$lib/types';
     import { slide } from 'svelte/transition';
-    import shieldGreenIcon from '$lib/assets/icons/shield-green.svg';
-    import shieldOffIcon from '$lib/assets/icons/shield-off.svg';
-    import zapIcon from '$lib/assets/icons/zap.svg';
-    import fileTextIcon from '$lib/assets/icons/file-text.svg';
-    import editIcon from '$lib/assets/icons/edit.svg';
-    import checkCircleIcon from '$lib/assets/icons/check-circle.svg';
-    import questionIcon from '$lib/assets/icons/question.svg';
+    import Icon from '$lib/components/Icon.svelte';
+    import shieldGreenIcon from '$lib/assets/icons/shield-green.svg?raw';
+    import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
+    import zapIcon from '$lib/assets/icons/zap.svg?raw';
+    import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
+    import editIcon from '$lib/assets/icons/edit.svg?raw';
+    import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
+    import questionIcon from '$lib/assets/icons/question.svg?raw';
     import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
     import { getTaskMessageFull } from '$lib/api';
 
@@ -189,12 +190,12 @@
     }
 
     // Icon selection
-    let iconSrc = $derived(
-        tc.toolName === 'read_file' ? fileTextIcon :
-        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? editIcon :
-        tc.toolName === 'request_review' ? checkCircleIcon :
-        tc.toolName === 'ask_question' ? questionIcon :
-        zapIcon
+    let iconInfo = $derived(
+        tc.toolName === 'read_file' ? { src: fileTextIcon, color: '#E6EDF3' } :
+        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? { src: editIcon, color: '#E6EDF3' } :
+        tc.toolName === 'request_review' ? { src: checkCircleIcon, color: '#E6EDF3' } :
+        tc.toolName === 'ask_question' ? { src: questionIcon, color: '#fff' } :
+        { src: zapIcon, color: '#E6EDF3' }
     );
 
     // Parse create_task result
@@ -274,9 +275,9 @@
     <div class="tool-call-card" class:tool-call-question={tc.toolName === 'ask_question'} style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
-                <img class="tool-sandbox-icon" src={shieldGreenIcon} width="14" height="14" alt="" title="Sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="#3FB950" width={14} height={14} title="Sandboxed" />
             {:else if SANDBOXABLE_TOOLS.has(tc.toolName)}
-                <img class="tool-sandbox-icon" src={shieldOffIcon} width="14" height="14" alt="" title="Not sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldOffIcon} color="#F85149" width={14} height={14} title="Not sandboxed" />
             {/if}
             {#if tc.toolName === 'create_task' || tc.toolName === 'edit_task'}
                 <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -291,7 +292,7 @@
                     <rect x="2" y="8" width="12" height="4" rx="1"/>
                 </svg>
             {:else}
-                <img class="tool-icon" width="14" height="14" alt="" src={iconSrc} />
+                <Icon class="tool-icon" src={iconInfo.src} color={iconInfo.color} width={14} height={14} />
             {/if}
             <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
             {#if showArgs}
