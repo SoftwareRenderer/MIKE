@@ -968,7 +968,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 {#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting to stream...
+        Reconnecting...
         <span class="reconnecting-stale">Data from {lastSyncedAgo()}</span>
         {#if countdownSeconds > 0}
             <span class="reconnecting-countdown">({countdownSeconds}s)</span>

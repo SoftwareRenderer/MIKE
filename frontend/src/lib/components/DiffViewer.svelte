@@ -3,7 +3,7 @@
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
     import { highlightLines } from '$lib/highlighter';
-    import { loadCollapsedDiffFiles, saveCollapsedDiffFiles, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
 
@@ -38,12 +38,12 @@ import { slide } from 'svelte/transition';
         if (collapsedFiles.has(path)) {
             toggleFile(path);
         }
-        // Expand parent section if collapsed
+        // Expand parent section files if collapsed
         const file = [...sortedStagedFiles, ...sortedUnstagedFiles, ...sortedStagedUntracked, ...sortedUnstagedUntracked].find(f => (f as any).path === path);
         if (file) {
             const isStaged = sortedStagedFiles.includes(file as any) || sortedStagedUntracked.includes(file as any);
             const sectionId = isStaged ? 'staged' : 'unstaged';
-            if (collapsedSections.has(sectionId)) {
+            if (isSectionCollapsed(sectionId)) {
                 toggleSection(sectionId);
             }
         }
@@ -73,27 +73,48 @@ import { slide } from 'svelte/transition';
     // Single global key — stale paths are cleaned up by the $effect below.
     let collapsedFiles = $state(new Set<string>());
 
-    // Section-level collapse (Staged / Unstaged)
-    // Persisted via app-settings so state survives page refreshes.
-    let collapsedSections = $state<Set<string>>(new Set());
-
-    loadAppSetting('kanban:diff:collapsedSections', [] as string[]).then(ids => {
-        collapsedSections = new Set(ids);
-    }).catch(() => {});
-
-    async function saveCollapsedSections(ids: Set<string>): Promise<void> {
-        await saveAppSetting('kanban:diff:collapsedSections', [...ids]);
+    /** Get all file paths belonging to a section. */
+    function getSectionPaths(id: string): string[] {
+        if (id === 'staged') {
+            const paths: string[] = [];
+            for (const f of sortedStagedFiles) paths.push(f.path);
+            for (const u of sortedStagedUntracked) paths.push(u.path);
+            return paths;
+        }
+        if (id === 'unstaged') {
+            const paths: string[] = [];
+            for (const f of sortedUnstagedFiles) paths.push(f.path);
+            for (const u of sortedUnstagedUntracked) paths.push(u.path);
+            return paths;
+        }
+        return [];
     }
 
-    function toggleSection(id: string) {
-        const next = new Set(collapsedSections);
-        if (next.has(id)) {
-            next.delete(id);
-        } else {
-            next.add(id);
+    /** Check if all files in a section are collapsed. */
+    function isSectionCollapsed(id: string): boolean {
+        const paths = getSectionPaths(id);
+        if (paths.length === 0) return false;
+        for (const path of paths) {
+            if (!collapsedFiles.has(path)) return false;
         }
-        collapsedSections = next;
-        saveCollapsedSections(next).catch(() => {});
+        return true;
+    }
+
+    /** Collapse or expand all files in a section. */
+    function toggleSection(id: string) {
+        const sectionPaths = getSectionPaths(id);
+        if (sectionPaths.length === 0) return;
+        const allCollapsed = isSectionCollapsed(id);
+        const nextFiles = new Set(collapsedFiles);
+        for (const path of sectionPaths) {
+            if (allCollapsed) {
+                nextFiles.delete(path);
+            } else {
+                nextFiles.add(path);
+            }
+        }
+        collapsedFiles = nextFiles;
+        saveCollapsedFiles(nextFiles).catch(() => {});
     }
 
     // Derived counts for section headers
@@ -284,8 +305,8 @@ import { slide } from 'svelte/transition';
         <!-- Staged section -->
         {#if stagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!collapsedSections.has('staged')} onclick={() => toggleSection('staged')} title={collapsedSections.has('staged') ? 'Show staged changes' : 'Hide staged changes'}>
-                <svg class="diff-section-chevron" class:expanded={!collapsedSections.has('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!isSectionCollapsed('staged')} onclick={() => toggleSection('staged')} title={isSectionCollapsed('staged') ? 'Expand all staged files' : 'Collapse all staged files'}>
+                <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span class="diff-section-title">Staged</span>
@@ -300,8 +321,7 @@ import { slide } from 'svelte/transition';
                 </span>
                 {/if}
             </button>
-            {#if !collapsedSections.has('staged')}
-            <div class="diff-section-body" transition:slide={{ duration: 200 }}>
+            <div class="diff-section-body">
                 <!-- Staged tracked files -->
                 {#each sortedStagedFiles as file (file.path)}
             {@const isFileExpanded = isFileOpen(file.path)}
@@ -517,15 +537,14 @@ import { slide } from 'svelte/transition';
             </section>
                 {/each}
             </div>
-            {/if}
         </div>
         {/if}
 
         <!-- Unstaged section -->
         {#if unstagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!collapsedSections.has('unstaged')} onclick={() => toggleSection('unstaged')} title={collapsedSections.has('unstaged') ? 'Expand unstaged changes' : 'Collapse unstaged changes'}>
-                <svg class="diff-section-chevron" class:expanded={!collapsedSections.has('unstaged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!isSectionCollapsed('unstaged')} onclick={() => toggleSection('unstaged')} title={isSectionCollapsed('unstaged') ? 'Expand all unstaged files' : 'Collapse all unstaged files'}>
+                <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('unstaged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span class="diff-section-title">Unstaged</span>
@@ -540,8 +559,7 @@ import { slide } from 'svelte/transition';
                 </span>
                 {/if}
             </button>
-            {#if !collapsedSections.has('unstaged')}
-            <div class="diff-section-body" transition:slide={{ duration: 200 }}>
+            <div class="diff-section-body">
                 <!-- Unstaged tracked files -->
                 {#each sortedUnstagedFiles as file (file.path)}
             {@const isFileExpanded = isFileOpen(file.path)}
@@ -993,7 +1011,6 @@ import { slide } from 'svelte/transition';
             </section>
                 {/each}
             </div>
-            {/if}
         </div>
         {/if}
 
