@@ -739,7 +739,7 @@ func TestBuildHint_ReasoningOnly(t *testing.T) {
 		t.Error("hint should mention reasoning")
 	}
 	// Verify it lists available tools
-	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review", "create_task"} {
+	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review"} {
 		if !strings.Contains(hint, tool) {
 			t.Errorf("hint should mention tool %q, got: %s", tool, hint)
 		}

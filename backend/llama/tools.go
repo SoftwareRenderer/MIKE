@@ -153,8 +153,10 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 	}
 }
 
-// GetToolDefinitions returns the standard tool definitions.
-func GetToolDefinitions() []types.ChatTool {
+// GetIdeationModeToolDefinitions returns the tool set for ideation mode.
+// Same as standard (act) mode plus task management tools (create_task, view_tasks, edit_task).
+// This allows the LLM to brainstorm, prototype code, and organize work into tasks.
+func GetIdeationModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		{
 			Type: "function",
@@ -251,15 +253,142 @@ func GetToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "create_task",
 				DisplayName: "Create Task",
-				Description: "This creates a new task on the Kanban board. You MUST ask the user for explicit approval before using this tool.",
+				Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Do not create duplicate tasks.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
 						"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
-						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a parent task. Use a previously created task_id to create nested subtasks."},
+						"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a primary task. Use a previously created task_id to create nested subtasks."},
 					},
 					"required": []string{"title", "prompt"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "view_tasks",
+				DisplayName: "View Tasks",
+				Description: "List all tasks with status 'backlog' in the current project. Returns an array of tasks with id, title, prompt, and parent_task_id fields.",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+					"required":   []string{},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "edit_task",
+				DisplayName: "Edit Task",
+				Description: "Edit a task's title, prompt, or parent_task_id. Only tasks with status 'backlog' in the current project can be edited. At least one field (title, prompt, parent_task_id) must be provided. If parent_task_id is set, the parent task must also have status 'backlog'.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"task_id":        map[string]any{"type": "string", "description": "ID of the task to edit"},
+						"title":          map[string]any{"type": "string", "description": "New title for the task"},
+						"prompt":         map[string]any{"type": "string", "description": "New prompt/description for the task"},
+						"parent_task_id": map[string]any{"type": "string", "description": "New parent task ID to nest this task under. Must also be a backlog task. Omit to keep existing parent."},
+					},
+					"required": []string{"task_id"},
+				},
+			},
+		},
+	}
+}
+
+// GetToolDefinitions returns the standard tool definitions.
+func GetToolDefinitions() []types.ChatTool {
+	return []types.ChatTool{
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "read_file",
+				DisplayName: "Read",
+				Description: "Read the contents of a file. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":   map[string]any{"type": "string", "description": "Path to the file"},
+						"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
+						"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "write_file",
+				DisplayName: "Write",
+				Description: "Write content to a file (creates directories as needed)",
+				Parameters: map[string]any{
+					"type": "object",
+					// ensure that the LLM sees path before content
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"content":{"type":"string","description":"Content to write"}}`),
+					"required":   []string{"path", "content"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "edit_file",
+				DisplayName: "Edit",
+				Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Each oldText must match exactly (whitespace, indentation)",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
+					"required":   []string{"path", "edits"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "bash",
+				DisplayName: "Execute",
+				Description: "Execute a shell command. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+						"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
+					},
+					"required": []string{"command"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "ask_question",
+				DisplayName: "Question",
+				Description: "Ask the user a clarifying question when you need more information to proceed. Use this instead of making assumptions when requirements are unclear.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"question": map[string]any{"type": "string", "description": "The question to ask the user"},
+					},
+					"required": []string{"question"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "request_review",
+				DisplayName: "Done",
+				Description: "Request the user to review completed changes",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"summary": map[string]any{"type": "string", "description": "Brief summary of the changes made or issues encountered. Explain key decisions ONLY IF changes include complex logic."},
+					},
+					"required": []string{"summary"},
 				},
 			},
 		},

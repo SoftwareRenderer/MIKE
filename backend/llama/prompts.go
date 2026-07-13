@@ -15,11 +15,15 @@ import (
 // summary is injected into the system prompt.
 // skillsMount is the container mount path for skills (e.g. "/mnt/skills")
 // when running in a sandbox; empty string for non-sandbox mode.
-func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, planMode bool) string {
+// operatingMode is "act" (default), "plan", or "ideate".
+func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode string) string {
 	var tools []types.ChatTool
-	if planMode {
+	switch operatingMode {
+	case "plan":
 		tools = GetPlanModeToolDefinitions()
-	} else {
+	case "ideate":
+		tools = GetIdeationModeToolDefinitions()
+	default:
 		tools = GetToolDefinitions()
 	}
 	toolInfos := make([]prompts.ToolInfo, len(tools))
@@ -37,13 +41,13 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, planMode 
 	}
 
 	data := prompts.PromptData{
-		WorktreePath: cwd,
-		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
-		PlanMode:     planMode,
-		Tools:        toolInfos,
-		Skills:       prompts.DiscoverSkills(skillsMount),
-		AgentsMd:     agentsMd,
-		Summary:      summary,
+		WorktreePath:  cwd,
+		CurrentDate:   time.Now().UTC().Format("2006-01-02"),
+		PlanMode:      operatingMode == "plan",
+		Tools:         toolInfos,
+		Skills:        prompts.DiscoverSkills(skillsMount),
+		AgentsMd:      agentsMd,
+		Summary:       summary,
 	}
 
 	result, err := prompts.RenderSystemPrompt(data)

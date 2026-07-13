@@ -379,10 +379,12 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
-	// In plan mode, restrict tools to read-only + create_task + request_review
+	// Select tools based on operating mode
 	var tools []types.ChatTool
 	if task.IsPlanMode() {
 		tools = llama.GetPlanModeToolDefinitions()
+	} else if task.IsIdeationMode() {
+		tools = llama.GetIdeationModeToolDefinitions()
 	} else {
 		tools = llama.GetToolDefinitions()
 	}
@@ -507,12 +509,14 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					te.taskMu.Unlock()
 					// Update task reference with latest mode
 					task.OperatingMode = updatedTask.OperatingMode
-					// Update tools if mode affects them (plan mode restricts tools)
-					if updatedTask.IsPlanMode() {
-						tools = llama.GetPlanModeToolDefinitions()
-					} else {
-						tools = llama.GetToolDefinitions()
-					}
+									// Update tools if mode affects them
+				if updatedTask.IsPlanMode() {
+					tools = llama.GetPlanModeToolDefinitions()
+				} else if updatedTask.IsIdeationMode() {
+					tools = llama.GetIdeationModeToolDefinitions()
+				} else {
+					tools = llama.GetToolDefinitions()
+				}
 					// Broadcast assigned ports if any changed
 					if len(assignedPorts) > 0 {
 						task.AssignedPorts = assignedPorts

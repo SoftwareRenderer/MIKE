@@ -491,7 +491,7 @@ func buildHint(loopType LoopType, target string) string {
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	case LoopReasoningOnly:
-		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, ask_question, request_review, create_task. Use the function calling format to invoke tools — do not describe tool calls as plain text."
+		return "Your last response contained only internal reasoning with no visible text or tool calls. You must respond with actual content (a text message) or call a tool to take action. Available tools: read_file, write_file, edit_file, bash, ask_question, request_review. Use the function calling format to invoke tools — do not describe tool calls as plain text."
 	default:
 		return ""
 	}
