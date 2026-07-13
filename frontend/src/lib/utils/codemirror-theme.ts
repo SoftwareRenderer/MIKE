@@ -48,6 +48,8 @@ export const darkTheme = EditorView.theme({
     '.cm-matchingBracket': { backgroundColor: 'rgba(88,166,255,0.3)' },
     '.cm-selectionBackground': { backgroundColor: 'rgba(88,166,255,0.3)' },
     '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(88,166,255,0.3)' },
+    '& ::selection': { color: 'initial' },
+    '& ::-moz-selection': { color: 'initial' },
     '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     '.cm-dropCursor': { borderLeftColor: '#C9D1D9' },
     '.cm-searchMatch': { backgroundColor: 'rgba(232,164,20,0.25)', outline: '1px solid rgba(232,164,20,0.5)' },
