@@ -98,6 +98,18 @@ import { slide } from 'svelte/transition';
         return rows.filter(r => r.variant === 'added' || r.variant === 'removed').length - TRUNCATE_AFTER;
     }
 
+    /** Get the index to slice rows at for unified view truncation. */
+    function getUnifiedTruncateIndex(rows: DiffRow[]): number {
+        let changeCount = 0;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i]!.variant === 'added' || rows[i]!.variant === 'removed') {
+                changeCount++;
+                if (changeCount > TRUNCATE_AFTER) return i;
+            }
+        }
+        return rows.length;
+    }
+
     // Expanded file state — track which truncated files are fully expanded
     let expandedFiles = $state<Set<string>>(new Set());
 
@@ -185,6 +197,15 @@ import { slide } from 'svelte/transition';
         return parts.join('\n');
     });
 
+    // Diff view mode: 'split' (side-by-side) or 'unified' (single column)
+    // Mobile always uses unified; desktop defaults to split with a toggle
+    let diffMode = $state<'split' | 'unified'>('split');
+    let useUnifiedView = $derived(!!isMobile || diffMode === 'unified');
+
+    function toggleDiffMode() {
+        diffMode = diffMode === 'split' ? 'unified' : 'split';
+    }
+
     // Close tooltip on outside click
     $effect(() => {
         function handleClick(e: MouseEvent) {
@@ -248,6 +269,22 @@ import { slide } from 'svelte/transition';
                 </div>
             {/if}
         </div>
+        {#if !isMobile}
+            <button class="diff-mode-toggle" onclick={toggleDiffMode} title={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'} aria-label={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'}>
+                {#if diffMode === 'split'}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        <line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
+                        <rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
+                    </svg>
+                {/if}
+            </button>
+        {/if}
     </div>
 
     <!-- Content area -->
@@ -296,7 +333,39 @@ import { slide } from 'svelte/transition';
                                 {:else}
                                     <div class="diff-binary-notice">Binary file</div>
                                 {/if}
+                            {:else if useUnifiedView}
+                                <!-- Unified diff view (mobile) -->
+                                {@const unifiedRows = isExpanded(file.path) ? file.rows : file.rows.slice(0, getUnifiedTruncateIndex(file.rows))}
+                                <div class="diff-unified-body">
+                                    <div class="diff-unified-scroll" role="button" tabindex="0" onclick={() => handleFileClick(file.path)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(file.path); } }}>
+                                        {#each unifiedRows as row}
+                                            <div class={`diff-row diff-row-${row.variant}`}>
+                                                <span class="diff-line-num">{row.lineNumber ?? ''}</span>
+                                                <span class="diff-line-content">
+                                                    {#if row.variant === 'added'}<span class="diff-prefix">+</span>{/if}
+                                                    {#if row.variant === 'removed'}<span class="diff-prefix">-</span>{/if}
+                                                    {#if row.variant === 'context'}<span class="diff-prefix"> </span>{/if}
+                                                    {#if row.segments}
+                                                        <span class="diff-text">
+                                                            {#each row.segments as seg}
+                                                                <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
+                                                            {/each}
+                                                        </span>
+                                                    {:else}
+                                                        <span class="diff-text">{@html getHighlighted(file.path, row.text) || row.text}</span>
+                                                    {/if}
+                                                </span>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                </div>
+                                {#if isTruncated(file.rows) && !isExpanded(file.path)}
+                                    <button type="button" class="diff-expand-btn" onclick={(e) => { e.stopPropagation(); toggleExpand(file.path); }}>
+                                        Show all changes
+                                    </button>
+                                {/if}
                             {:else}
+                                <!-- Side-by-side view (desktop) -->
                                 {@const rows = fileRows[file.path]}
                                 <div class="diff-sbs-body">
                                     <!-- Column headers -->
@@ -749,6 +818,113 @@ import { slide } from 'svelte/transition';
         .diff-commit-date {
             display: none;
         }
+    }
+
+    /* Diff mode toggle button */
+    .diff-mode-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+        transition: background 0.1s ease, color 0.1s ease;
+    }
+    .diff-mode-toggle:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .diff-mode-toggle:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+    }
+
+    /* Unified diff view (mobile) */
+    .diff-unified-body {
+        border: 1px solid var(--color-border);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        overflow: hidden;
+    }
+    .diff-unified-scroll {
+        overflow-x: auto;
+        cursor: pointer;
+    }
+    .diff-row {
+        display: flex;
+        font-size: 0.8125rem;
+        font-family: var(--font-mono, monospace);
+        line-height: 1.75rem;
+        min-width: max-content;
+    }
+    .diff-row .diff-line-num {
+        width: 3.5rem;
+        flex-shrink: 0;
+        text-align: right;
+        padding: 0 10px;
+        color: var(--color-text-tertiary);
+        opacity: 0.5;
+        user-select: none;
+        border-right: 1px solid var(--color-border);
+        border-left: 1px solid var(--color-border);
+    }
+    .diff-row .diff-line-content {
+        flex: 1;
+        min-width: 0;
+        padding: 0 8px;
+        white-space: pre;
+        color: var(--color-text-secondary);
+        display: flex;
+        align-items: center;
+    }
+    .diff-row .diff-prefix {
+        flex-shrink: 0;
+        width: 1rem;
+        text-align: center;
+        user-select: none;
+    }
+    .diff-row .diff-text {
+        white-space: pre;
+        flex: 1;
+    }
+    .diff-row-added {
+        background: rgba(63, 185, 80, 0.15);
+    }
+    .diff-row-added .diff-line-num {
+        background: rgba(63, 185, 80, 0.08);
+    }
+    .diff-row-added .diff-prefix {
+        color: var(--color-status-green);
+    }
+    .diff-row-removed {
+        background: rgba(248, 81, 73, 0.15);
+    }
+    .diff-row-removed .diff-line-num {
+        background: rgba(248, 81, 73, 0.08);
+    }
+    .diff-row-removed .diff-prefix {
+        color: var(--color-status-red);
+    }
+    .diff-row-context .diff-prefix {
+        color: var(--color-text-tertiary);
+    }
+    /* Inline diff segments in unified view */
+    .diff-segment {
+        font-family: inherit;
+        font-size: inherit;
+        white-space: inherit;
+    }
+    .diff-segment-added {
+        background: rgba(63, 185, 80, 0.4);
+    }
+    .diff-segment-removed {
+        background: rgba(248, 81, 73, 0.4);
     }
 
     /* Syntax highlighting — GitHub Dark palette (matches DiffViewer) */
