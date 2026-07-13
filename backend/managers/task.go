@@ -238,7 +238,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		if task.TitleGenerating {
 			h.startTitleGeneration(projectID, task.ID, task.Prompt)
 		}
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		h.boardStreamMgr.Broadcast(projectID)
 		httputil.JSONResponse(w, http.StatusCreated, task)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -297,6 +297,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		}
 		h.broadcastTaskDeleted(projectID, taskID)
 		h.cleanupTask(taskID)
+		h.boardStreamMgr.Broadcast(projectID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -328,6 +329,7 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 		deleted++
 	}
 
+	h.boardStreamMgr.Broadcast(projectID)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
 

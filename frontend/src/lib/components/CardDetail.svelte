@@ -36,7 +36,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
     let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
-    let allTasks: Task[] = $state([]);
+    let allTasks = $derived($boardStore?.tasks || []);
 
     const overviewSections = [
         { id: 'backlog', title: 'Backlog' },
@@ -400,13 +400,6 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         previousFocus = document.activeElement as HTMLElement;
         // Focus the detail panel for keyboard/screen reader users
         queueMicrotask(() => detailEl?.focus());
-        const unsubBoard = boardStore.subscribe(b => {
-            if (b) {
-                allTasks = b.tasks;
-            } else {
-                allTasks = [];
-            }
-        });
         const unsubDiff = taskDiffStats.subscribe(v => { diffStatsMap = v; });
 
         loadDiff();
@@ -424,7 +417,6 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         }
         window.addEventListener('keydown', handleKey);
         return () => {
-            unsubBoard();
             unsubDiff();
             window.removeEventListener('keydown', handleKey);
         };

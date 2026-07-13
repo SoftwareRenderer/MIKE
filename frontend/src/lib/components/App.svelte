@@ -452,32 +452,26 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         }
                     },
                     onTaskUpdated: (updatedTask: Task) => {
-                        const idx = tasks.findIndex(t => t.id === updatedTask.id);
-                        if (idx !== -1) {
-                            tasks[idx] = updatedTask;
-                        } else {
-                            // Replace optimistic (queued) task in-place to avoid flicker.
-                            // Do NOT push unknown tasks — they could be stale events for deleted tasks.
-                            // Genuinely new tasks are picked up by refreshBoard() / board_refresh.
-                            const optIdx = tasks.findIndex(t => (t as any).queued);
-                            if (optIdx !== -1) {
-                                tasks[optIdx] = updatedTask;
+                        // Replace existing task or optimistic (queued) placeholder.
+                        // Genuinely new tasks are picked up by board_refresh (Broadcast).
+                        let changed = false;
+                        tasks = tasks.map(t => {
+                            if (t.id === updatedTask.id || (t as any).queued) {
+                                changed = true;
+                                return updatedTask;
                             }
+                            return t;
+                        });
+                        if (changed) {
+                            boardStore.update(b => b ? { ...b, tasks } : b);
                         }
-                        // Spread into a new array so boardStore subscribers (e.g., CardDetail allTasks)
-                        // detect the change — Svelte 5 $derived is reference-based.
-                        boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
                             selectedTask.set(updatedTask);
                         }
                     },
                     onTaskDeleted: (task_id: string) => {
-                        const idx = tasks.findIndex(t => t.id === task_id);
-                        if (idx !== -1) {
-                            tasks.splice(idx, 1);
-                            // Spread into a new array so boardStore subscribers detect the deletion.
-                            boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
-                        }
+                        tasks = tasks.filter(t => t.id !== task_id);
+                        boardStore.update(b => b ? { ...b, tasks } : b);
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             clearTaskDetail();
                         }
@@ -1114,7 +1108,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
             onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
-            onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { const idx = tasks.findIndex(t => t.id === optimisticId); if (idx !== -1) { tasks[idx] = realTask; } }}
+            onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
         />
     {/if}
     {#if showEditTaskVal && editTaskDataVal}
