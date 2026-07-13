@@ -910,6 +910,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     /* Expandable rows (subsection + non-subsection like Custom Mounts) */
     .config-row-subsection,
     .config-row-expandable {
+        width: 100%;
+        text-align: left;
         cursor: pointer;
         user-select: none;
     }
@@ -945,6 +947,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .chevron {
+        margin-left: auto;
         flex-shrink: 0;
         color: var(--color-text-secondary);
         transition: transform 0.15s ease;
