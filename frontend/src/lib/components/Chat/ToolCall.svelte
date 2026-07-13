@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { marked } from 'marked';
     import { getToolDisplayName } from '$lib/types';
     import { slide } from 'svelte/transition';
     import shieldGreenIcon from '$lib/assets/icons/shield-green.svg';
@@ -260,6 +261,13 @@
         return count;
     });
     let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
+
+    // Rendered markdown for request_review summary
+    let renderedSummaryHtml = $derived(
+        tc.toolName === 'request_review' && tc.args && tc.args.summary
+            ? (marked.parse(tc.args.summary as string, { async: false }) as string)
+            : ''
+    );
 </script>
 
 <div class="tool-call-entry">
@@ -378,7 +386,7 @@
         {:else if tc.toolName === 'ask_question' && tc.args && tc.args.question}
             <div class="tool-result tool-result-question">{tc.args.question as string}</div>
         {:else if tc.toolName === 'request_review' && tc.args && tc.args.summary}
-            <div class="tool-result tool-result-summary">{tc.args.summary as string}</div>
+            <div class="tool-result tool-result-summary">{@html renderedSummaryHtml}</div>
         {:else if tc.result && tc.result.trim()}
             {#if resultNeedsTruncation}
                 <div class="tool-result-wrapper">
@@ -508,12 +516,35 @@
     .tool-result-summary {
         font-family: inherit;
         font-size: 0.875rem;
-        line-height: 1.875rem;
+        line-height: 1.5;
         color: var(--color-text-primary);
-        white-space: pre-wrap;
         word-break: break-word;
         max-height: none;
         overflow-y: visible;
+        background: var(--color-surface-3);
+        border-radius: 1.125rem;
+        padding: 8px 14px;
+    }
+    .tool-result-summary :global(p) {
+        margin: 0 0 0.5em;
+    }
+    .tool-result-summary :global(p:last-child) {
+        margin-bottom: 0;
+    }
+    .tool-result-summary :global(pre) {
+        background: var(--color-surface-0);
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        overflow-x: auto;
+    }
+    .tool-result-summary :global(code) {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+    }
+    .tool-result-summary :global(:not(pre) > code) {
+        background-color: #4B4B4B;
+        padding: 1px 4px;
+        border-radius: 3px;
     }
     .tool-result-question {
         font-family: inherit;
