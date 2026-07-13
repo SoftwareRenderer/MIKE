@@ -316,8 +316,6 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	state := te.tasks[taskID]
 	te.taskMu.Unlock()
 
-	log.Printf("[compact] task=%s state=%v executorType=%s piClient=%v", taskID, state != nil, func() string { if state != nil { return state.executorType }; return "" }(), state != nil && state.piClient != nil)
-
 	if state == nil {
 		// Task not in active executors — it may have been stopped, restarted, or
 		// the server may have restarted. The task still exists in the store.

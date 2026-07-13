@@ -141,7 +141,6 @@ type PiEvent struct {
 	Success            bool             `json:"success"`               // from response
 	Command            string           `json:"command"`               // from response
 	ResponseID         string           `json:"id"`                    // from response (correlation id)
-	Summary            string           `json:"-"`                     // from compact response data.summary
 	SessionStats       SessionStats     `json:"-"`                     // from get_session_stats response
 	// Extension UI
 	ExtMethod string `json:"method"` // from extension_ui_request
@@ -647,7 +646,6 @@ func (c *Client) readEvents() {
 					if s, ok := data["summary"].(string); ok {
 						summary = s
 					}
-					event.Summary = summary
 				}
 			}
 			select {
