@@ -968,12 +968,9 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 {#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting...
+        Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s{/if}...
         <span class="reconnecting-stale">Data from {lastSyncedAgo()}</span>
-        {#if countdownSeconds > 0}
-            <span class="reconnecting-countdown">({countdownSeconds}s)</span>
-        {/if}
-        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Try now</button>
+        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
     </div>
 {/if}
 <!-- Offline cache banner -->
@@ -1284,11 +1281,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         gap: 8px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         animation: slide-down 0.2s ease-out;
-    }
-    .reconnecting-countdown {
-        font-weight: 400;
-        opacity: 0.7;
-        font-variant-numeric: tabular-nums;
     }
     .reconnecting-stale {
         font-weight: 400;
