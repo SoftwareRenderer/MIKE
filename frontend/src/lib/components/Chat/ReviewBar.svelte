@@ -75,7 +75,7 @@
                 {/if}
             </button>
         {:else if hasStagedChanges}
-            <button class="btn-commit-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
+            <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
                 {#if queueStatus === 'queued'}
                     <span class="spinner-inline"></span> In queue...
                 {:else if queueStatus === 'processing' || isCommitting}
@@ -171,6 +171,9 @@
         border: 1.5px solid var(--color-status-green);
         cursor: pointer;
         transition: all 0.15s ease;
+    }
+    .btn-commit-and-done {
+        border-color: #EAB308;
     }
     .btn-commit-done:hover:not(:disabled) {
         background: var(--color-surface-3);
