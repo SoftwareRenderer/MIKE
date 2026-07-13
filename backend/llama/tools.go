@@ -22,6 +22,8 @@ var toolDisplayNames = map[string]string{
 	"ask_question":   "Question",
 	"request_review": "Done",
 	"create_task":    "Create Task",
+	"view_tasks":     "View Tasks",
+	"edit_task":      "Edit Task",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -75,7 +77,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 			Function: &types.ToolDef{
 				Name:        "create_task",
 				DisplayName: "Create Task",
-				Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. The new task inherits the parent's settings (model, provider, auto_commit). Returns the created task_id, which can be used as parent_task_id for nested subtasks.",
+				Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Do not create duplicate tasks.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -99,6 +101,37 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 						"question": map[string]any{"type": "string", "description": "The question to ask the user"},
 					},
 					"required": []string{"question"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "view_tasks",
+				DisplayName: "View Tasks",
+				Description: "List all tasks with status 'backlog' in the current project. Returns an array of tasks with id, title, prompt, and parent_task_id fields.",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+					"required":   []string{},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        "edit_task",
+				DisplayName: "Edit Task",
+				Description: "Edit a task's title, prompt, or parent_task_id. Only tasks with status 'backlog' in the current project can be edited. At least one field (title, prompt, parent_task_id) must be provided. If parent_task_id is set, the parent task must also have status 'backlog'.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"task_id":        map[string]any{"type": "string", "description": "ID of the task to edit"},
+						"title":          map[string]any{"type": "string", "description": "New title for the task"},
+						"prompt":         map[string]any{"type": "string", "description": "New prompt/description for the task"},
+						"parent_task_id": map[string]any{"type": "string", "description": "New parent task ID to nest this task under. Must also be a backlog task. Omit to keep existing parent."},
+					},
+					"required": []string{"task_id"},
 				},
 			},
 		},

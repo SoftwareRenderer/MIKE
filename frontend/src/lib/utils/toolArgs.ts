@@ -45,15 +45,23 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             const title = args.title as string;
             return title || '(create task)';
         }
+        case 'edit_task': {
+            const title = args.title as string;
+            const task_id = args.task_id as string;
+            if (title) return title;
+            return task_id || '(edit task)';
+        }
         case 'ask_question':
             return args.question as string || '(question)';
+        case 'view_tasks':
+            return '(list backlog tasks)';
         default:
             return JSON.stringify(args, null, 2);
     }
 }
 
 /** Tools that should not show their args inline (shown in result instead) */
-export const HIDE_ARGS_FOR_TOOLS = new Set(['create_task', 'request_review', 'ask_question']);
+export const HIDE_ARGS_FOR_TOOLS = new Set(['create_task', 'edit_task', 'view_tasks', 'request_review', 'ask_question']);
 
 /** Tools that can run in a sandbox */
 export const SANDBOXABLE_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'bash']);

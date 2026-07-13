@@ -451,6 +451,12 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	case "create_task":
 		result, err := te.handleCreateTask(args, task, state)
 		return result, err == nil
+	case "view_tasks":
+		result, err := te.handleViewTasks(task)
+		return result, err == nil
+	case "edit_task":
+		result, err := te.handleEditTask(args, task)
+		return result, err == nil
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), false
 	}
@@ -610,6 +616,114 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
 	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})
+	return string(result), nil
+}
+
+// handleViewTasks returns all backlog tasks for the current project.
+// Returns a JSON array with id, title, prompt, and parent_task_id for each task.
+func (te *TaskExecutor) handleViewTasks(currentTask *types.Task) (string, error) {
+	tasks, err := te.store.GetTasksByProject(currentTask.ProjectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	type taskSummary struct {
+		ID           string `json:"id"`
+		Title        string `json:"title"`
+		Prompt       string `json:"prompt"`
+		ParentTaskID string `json:"parent_task_id"`
+	}
+
+	var summaries []taskSummary
+	for _, t := range tasks {
+		if t.Status == "backlog" {
+			summaries = append(summaries, taskSummary{
+				ID:           t.ID,
+				Title:        t.Title,
+				Prompt:       t.Prompt,
+				ParentTaskID: t.ParentTaskID,
+			})
+		}
+	}
+
+	if summaries == nil {
+		summaries = []taskSummary{}
+	}
+
+	data, err := json.Marshal(summaries)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal tasks: %w", err)
+	}
+
+	log.Printf("[view_tasks] task=%s listed %d backlog task(s) in project %s", currentTask.ID, len(summaries), currentTask.ProjectID)
+	return string(data), nil
+}
+
+// handleEditTask edits title, prompt, or parent_task_id of a backlog task.
+// Only tasks with status 'backlog' in the current project can be edited.
+func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.Task) (string, error) {
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return "", errors.New("task_id is required")
+	}
+
+	title, hasTitle := args["title"].(string)
+	prompt, hasPrompt := args["prompt"].(string)
+	parentTaskID, hasParent := args["parent_task_id"].(string)
+
+	if !hasTitle && !hasPrompt && !hasParent {
+		return "", errors.New("at least one of title, prompt, or parent_task_id must be provided")
+	}
+
+	target, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return "", fmt.Errorf("task %s not found", taskID)
+	}
+
+	// Must belong to the same project
+	if target.ProjectID != currentTask.ProjectID {
+		return "", fmt.Errorf("task %s does not belong to the current project", taskID)
+	}
+
+	// Must be in backlog status
+	if target.Status != "backlog" {
+		return "", fmt.Errorf("task %s is not in backlog (status: %s). Only backlog tasks can be edited", taskID, target.Status)
+	}
+
+	// If changing parent, validate the parent exists and is also backlog
+	if hasParent {
+		if parentTaskID != "" {
+			parent, err := te.store.GetTaskByTaskID(parentTaskID)
+			if err != nil {
+				return "", fmt.Errorf("parent task %s not found", parentTaskID)
+			}
+			if parent.Status != "backlog" {
+				return "", fmt.Errorf("parent task %s is not in backlog (status: %s). Parent must be a backlog task", parentTaskID, parent.Status)
+			}
+			target.ParentTaskID = parentTaskID
+		} else {
+			// Empty string means remove parent
+			target.ParentTaskID = ""
+		}
+	}
+
+	if hasTitle {
+		target.Title = title
+	}
+	if hasPrompt {
+		target.Prompt = prompt
+	}
+
+	if err := te.store.UpdateTask(target); err != nil {
+		return "", fmt.Errorf("failed to update task: %w", err)
+	}
+
+	// Broadcast the updated task to the frontend
+	te.appStreamMgr.BroadcastTaskUpdated(currentTask.ProjectID, *target)
+
+	log.Printf("[edit_task] task=%s edited task %s: %q", currentTask.ID, taskID, target.Title)
+
+	result, _ := json.Marshal(map[string]string{"task_id": taskID, "title": target.Title, "status": "updated"})
 	return string(result), nil
 }
 

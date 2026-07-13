@@ -203,6 +203,20 @@
         null
     );
 
+    // Parse edit_task result
+    let editResult = $derived(
+        tc.toolName === 'edit_task' && tc.result ?
+        (() => { try { return JSON.parse(tc.result); } catch { return null; } })() :
+        null
+    );
+
+    // Parse view_tasks result
+    let viewTasksResult = $derived(
+        tc.toolName === 'view_tasks' && tc.result ?
+        (() => { try { const arr = JSON.parse(tc.result); return Array.isArray(arr) ? arr : null; } catch { return null; } })() :
+        null
+    );
+
     interface EditDiffLine { type: 'removed' | 'added'; text: string; }
     interface EditDiffBlock { edits: EditDiffLine[]; separator?: boolean; }
 
@@ -256,12 +270,17 @@
             {:else if SANDBOXABLE_TOOLS.has(tc.toolName)}
                 <img class="tool-sandbox-icon" src={shieldOffIcon} width="14" height="14" alt="" title="Not sandboxed" />
             {/if}
-            {#if tc.toolName === 'create_task'}
+            {#if tc.toolName === 'create_task' || tc.toolName === 'edit_task'}
                 <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <rect x="2" y="2" width="12" height="12" rx="2"/>
                     <path d="M5 5h1M5 7.5h1M5 10h1"/>
                     <path d="M8 7.5l1 1 2-2"/>
                     <path d="M8 11l1 1 2-2"/>
+                </svg>
+            {:else if tc.toolName === 'view_tasks'}
+                <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="4" rx="1"/>
+                    <rect x="2" y="8" width="12" height="4" rx="1"/>
                 </svg>
             {:else}
                 <img class="tool-icon" width="14" height="14" alt="" src={iconSrc} />
@@ -326,6 +345,32 @@
                     <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title="Open task">
                         <span class="btn-open-task-text">{createResult.title as string}</span>
                     </button>
+                </div>
+            {:else}
+                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+            {/if}
+        {:else if tc.toolName === 'edit_task' && tc.result}
+            {#if editResult && editResult.task_id && editResult.title}
+                <div class="tool-result tool-edit-task">
+                    <span class="edit-task-text">Edited task</span>
+                    <span class="edit-task-title">{editResult.title as string}</span>
+                </div>
+            {:else}
+                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+            {/if}
+        {:else if tc.toolName === 'view_tasks' && tc.result}
+            {#if viewTasksResult !== null}
+                <div class="tool-result tool-view-tasks">
+                    <div class="view-tasks-header">{viewTasksResult.length} backlog task{viewTasksResult.length === 1 ? '' : 's'}</div>
+                    {#each viewTasksResult as task}
+                        <div class="view-task-item">
+                            <span class="view-task-id">{task.id}</span>
+                            <span class="view-task-title">{task.title}</span>
+                            {#if task.parent_task_id}
+                                <span class="view-task-parent">↳ {task.parent_task_id}</span>
+                            {/if}
+                        </div>
+                    {/each}
                 </div>
             {:else}
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
@@ -515,6 +560,63 @@
     .create-task-text {
         color: var(--color-text-secondary);
         font-size: 0.75rem;
+    }
+    .tool-edit-task {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--color-surface-0);
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        margin: 4px 0 0;
+        font-size: 0.75rem;
+    }
+    .edit-task-text {
+        color: var(--color-text-secondary);
+    }
+    .edit-task-title {
+        color: var(--color-text-primary);
+        font-weight: 500;
+        font-family: var(--font-mono);
+    }
+    .tool-view-tasks {
+        background: var(--color-surface-0);
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        margin: 4px 0 0;
+        font-size: 0.75rem;
+    }
+    .view-tasks-header {
+        color: var(--color-text-secondary);
+        margin-bottom: 4px;
+        font-weight: 500;
+    }
+    .view-task-item {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 2px 0;
+    }
+    .view-task-id {
+        color: var(--color-text-tertiary);
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        flex-shrink: 0;
+    }
+    .view-task-title {
+        color: var(--color-text-primary);
+        font-weight: 500;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .view-task-parent {
+        color: var(--color-text-tertiary);
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        flex-shrink: 0;
     }
     .btn-open-task {
         display: flex;
