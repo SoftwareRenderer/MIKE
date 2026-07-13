@@ -344,7 +344,9 @@
         </div>
     {/if}
     <div class="chat-form-inner">
+        <label for="chat-message-input" class="sr-only">Message input</label>
         <textarea
+            id="chat-message-input"
             bind:this={textareaEl}
             bind:value
             {disabled}
@@ -472,7 +474,7 @@
         width: 16px;
         height: 16px;
         border-radius: 50%;
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         border: none;
         cursor: pointer;
@@ -542,11 +544,11 @@
         transition: all 0.15s ease;
         padding: 0;
     }
-    .btn-send { background: var(--color-accent); color: white; }
+    .btn-send { background: var(--color-accent-dark); color: white; }
     .btn-send:hover:not(:disabled) { opacity: 0.85; transform: scale(1.05); }
     .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); cursor: not-allowed; }
     .btn-stop {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         animation: pulse-stop 1.5s ease-in-out infinite;
     }

@@ -441,7 +441,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
             <div class="config-row-group" class:expanded={portsExpanded}>
-            <div class="config-row config-row-subsection" role="button" tabindex="0" onclick={() => { portsExpanded = !portsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); portsExpanded = !portsExpanded; } }}>
+            <button type="button" class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }} aria-expanded={portsExpanded} aria-label="Toggle port forwarding settings">
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -460,7 +460,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <svg class="chevron" class:chevron-open={portsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            </div>
+            </button>
 
             {#if portsExpanded}
             <div class="ports-content" transition:slide={{ duration: 200 }}>
@@ -513,7 +513,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Custom mounts (collapsible) -->
             <div class="config-row-group" class:expanded={mountsExpanded}>
-            <div class="config-row config-row-expandable" role="button" tabindex="0" onclick={() => { mountsExpanded = !mountsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); mountsExpanded = !mountsExpanded; } }}>
+            <button type="button" class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }} aria-expanded={mountsExpanded} aria-label="Toggle mount settings">
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -531,7 +531,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <svg class="chevron" class:chevron-open={mountsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            </div>
+            </button>
 
             {#if mountsExpanded}
             <div class="mounts-content" transition:slide={{ duration: 200 }}>
@@ -598,7 +598,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Environment variables (collapsible) -->
             <div class="config-row-group" class:expanded={envsExpanded}>
-            <div class="config-row config-row-expandable" role="button" tabindex="0" onclick={() => { envsExpanded = !envsExpanded; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); envsExpanded = !envsExpanded; } }}>
+            <button type="button" class="config-row config-row-expandable" onclick={() => { envsExpanded = !envsExpanded; }} aria-expanded={envsExpanded} aria-label="Toggle environment variables settings">
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -615,7 +615,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <svg class="chevron" class:chevron-open={envsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            </div>
+            </button>
 
             {#if envsExpanded}
             <div class="envs-content" transition:slide={{ duration: 200 }}>
@@ -1068,7 +1068,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .radio-label.active {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
 
@@ -1351,7 +1351,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .btn-remove-port:hover:not(:disabled),
     .btn-remove-mount:hover:not(:disabled) {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
 
@@ -1671,7 +1671,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .btn-remove-env:hover:not(:disabled) {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
 

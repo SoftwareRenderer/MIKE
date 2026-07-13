@@ -719,7 +719,7 @@
         cursor: pointer;
     }
     .terminal-btn:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
 
@@ -736,7 +736,7 @@
     }
     .git-status-btn:hover,
     .git-status-btn.active {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
 

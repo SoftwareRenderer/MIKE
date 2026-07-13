@@ -345,7 +345,7 @@
         border-radius: var(--radius-sm);
         font-size: 0.75rem;
         font-weight: 500;
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         border: none;
         cursor: pointer;

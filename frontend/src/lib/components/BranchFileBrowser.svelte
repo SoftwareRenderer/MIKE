@@ -257,6 +257,20 @@
         }
     }
 
+    /** Get human-readable name for git status. */
+    function getGitStatusName(char: string): string {
+        switch (char) {
+            case 'M': return 'Modified';
+            case 'A': return 'Added';
+            case 'D': return 'Deleted';
+            case '?': return 'Untracked';
+            case 'R': return 'Renamed';
+            case 'U': return 'Unmerged';
+            case 'C': return 'Copied';
+            default: return char;
+        }
+    }
+
     function handleClick(entry: { isDir: boolean; path: string }) {
         if (entry.isDir) {
             loadDir(entry.path);
@@ -429,7 +443,7 @@
                         {/if}
                         <span class="file-name">{entry.name}</span>
                         {#if getGitStatusChar(entry.path)}
-                            <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}">
+                            <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}" aria-label={`Git status: ${getGitStatusName(getGitStatusChar(entry.path))}`}>
                                 {getGitStatusChar(entry.path)}
                             </span>
                         {/if}

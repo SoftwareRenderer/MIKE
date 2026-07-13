@@ -34,7 +34,7 @@
                 {#if model.name}
                     {@const modelEffort = model.reasoning_effort || 'medium'}
                     {@const modelCompositeKey = modelEffort !== 'medium' ? `${model.name}|${modelEffort}` : model.name}
-                    <button type="button" class="btn-default" class:active={defaultModel === modelCompositeKey} onclick={() => onSetDefault(model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{defaultModel === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}22` : ''}">
+                    <button type="button" class="btn-default" class:active={defaultModel === modelCompositeKey} onclick={() => onSetDefault(model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{defaultModel === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}11` : ''}">
                         {defaultModel === modelCompositeKey ? 'Default' : 'Set default'}
                     </button>
                 {:else}
@@ -221,7 +221,7 @@
         flex-shrink: 0;
     }
     .btn-remove-model:hover {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
     .models-empty {

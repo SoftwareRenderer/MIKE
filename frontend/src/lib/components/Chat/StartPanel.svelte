@@ -127,7 +127,7 @@
         gap: 8px;
         padding: 10px 20px;
         border-radius: var(--radius-md);
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: #fff;
         font-size: 0.875rem;
         font-weight: 600;

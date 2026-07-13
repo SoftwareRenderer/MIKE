@@ -184,7 +184,7 @@
         opacity: 1;
     }
     .add-btn:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
     @media (max-width: 768px) {
@@ -209,7 +209,7 @@
         flex-shrink: 0;
     }
     .clear-btn:hover {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
     @media (max-width: 768px) {
@@ -237,7 +237,7 @@
         transition: background 0.15s ease;
     }
     .add-task-btn:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
 </style>

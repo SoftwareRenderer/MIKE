@@ -187,6 +187,8 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         }
         try {
             const updated = await moveTask(projectId, taskId, targetStatus);
+            const statusLabel = targetStatus === 'backlog' ? 'Backlog' : targetStatus === 'in_progress' ? 'In Progress' : targetStatus === 'review' ? 'Review' : 'Done';
+            announce(`Task moved to ${statusLabel}`);
             // Skip optimistic update if this subtask will be consolidated into its parent.
             // The immediate status change triggers consolidatedSubtaskIds to recalculate,
             // which hides the card mid-drop and makes the drag appear to fail.
@@ -226,13 +228,23 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         try {
             await clearDoneTasks(projectId);
             // Board stream WebSocket will push the update
+            liveAnnouncement = `${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''} deleted`;
         } catch (e) {
             showToast('Failed to clear done tasks: ' + String(e), 'error');
         }
     }
+
+    // Live region for screen reader announcements
+    let liveAnnouncement = $state('');
+    function announce(message: string) {
+        // Reset then set to ensure announcement is re-triggered
+        liveAnnouncement = '';
+        queueMicrotask(() => { liveAnnouncement = message; });
+    }
 </script>
 
 <div class="board" role="region" aria-label="Task board">
+    <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     {#each columns as col}
         <Column
             columnId={col.id}

@@ -241,7 +241,7 @@
         font-weight: 500;
     }
     .file-entry.selected {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
     .icon {

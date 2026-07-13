@@ -342,7 +342,7 @@
     }
     .btn-mini {
         padding: 8px 12px;
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         border-radius: var(--radius-md);
         font-size: 0.875rem;
@@ -408,7 +408,7 @@
         font-weight: 500;
     }
     .file-entry.git-repo:hover {
-        background: var(--color-status-green)22;
+        background: var(--color-status-green)11;
     }
     .icon {
         display: flex;

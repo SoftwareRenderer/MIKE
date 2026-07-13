@@ -113,7 +113,7 @@
         opacity: 0.85;
     }
     .btn-confirm.destructive {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
     }
 
     @keyframes fade-in {

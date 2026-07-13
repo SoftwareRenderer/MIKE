@@ -738,7 +738,7 @@
         border: none;
     }
     .editor-save-btn:not(:disabled) {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
     .editor-save-btn:hover:not(:disabled) {
@@ -840,7 +840,7 @@
     .btn-discard {
         padding: 4px 12px;
         border-radius: var(--radius-sm);
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         border: none;
         cursor: pointer;

@@ -54,7 +54,7 @@
         text-align: center;
     }
     .toast.error {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
     }
     .toast.success {
         background: var(--color-status-green);

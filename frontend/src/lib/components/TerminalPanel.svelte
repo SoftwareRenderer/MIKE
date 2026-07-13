@@ -1026,7 +1026,7 @@ import { showTerminal } from '$lib/stores/ui';
             background: var(--color-surface-4);
         }
         .kb-mod-active {
-            background: var(--color-accent) !important;
+            background: var(--color-accent-dark) !important;
             border-color: var(--color-accent) !important;
             color: #fff !important;
         }

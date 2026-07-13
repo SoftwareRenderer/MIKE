@@ -286,6 +286,8 @@
                 <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Awaiting answer{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
+            {:else}
+                <span class="tool-status success">Completed</span>
             {/if}
         </div>
         {#if hasEditDiff}
@@ -408,6 +410,7 @@
     .lines-added { color: var(--color-status-green); }
     .lines-removed { color: var(--color-status-red); }
     .tool-status.error { color: var(--color-status-red); }
+    .tool-status.success { color: var(--color-status-green); }
     .spinner {
         display: inline-block;
         width: 10px;

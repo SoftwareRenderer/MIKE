@@ -159,7 +159,7 @@
         color: inherit;
     }
     .icon-btn:hover:not(:disabled) {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
     }
     .icon-btn:disabled {
         opacity: 0.35;

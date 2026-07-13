@@ -36,7 +36,7 @@
     } = $props();
 </script>
 
-<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
+<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} role="complementary" aria-label="Sidebar">
     <div class="sidebar-header">
         <h2 class:collapsed={!isMobile && collapsed}>Projects</h2>
         <!-- Mobile close button (hidden on desktop via CSS) -->
@@ -55,7 +55,7 @@
                     <button
                         class="project-item"
                         onclick={() => onSelectProject(p)}
-                        title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
+                        title={`Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}${projectCounts[p.id]?.review > 0 ? ` (${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} for review)` : ''}`}
                     >
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
@@ -69,7 +69,12 @@
                             {/if}
                         {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>{getProjectAbbr(p.name)}</span>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} title={p.name}>
+                            {getProjectAbbr(p.name)}
+                            {#if projectCounts[p.id]?.review > 0}
+                                <span class="review-dot" aria-label="{projectCounts[p.id].review} task{projectCounts[p.id].review === 1 ? '' : 's'} for review" title="{projectCounts[p.id].review} task{projectCounts[p.id].review === 1 ? '' : 's'} for review"></span>
+                            {/if}
+                        </span>
                         {#if (isMobile || !collapsed) && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
@@ -294,6 +299,16 @@
     .project-abbr-no-sandbox {
         color: var(--color-text-tertiary);
     }
+    .review-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-column-review);
+        margin-left: 4px;
+        vertical-align: middle;
+        flex-shrink: 0;
+    }
     .project-stats {
         display: flex;
         gap: 4px;
@@ -324,7 +339,7 @@
         transition: all 0.15s ease;
     }
     .project-remove-btn:hover {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
     .sidebar-menu {

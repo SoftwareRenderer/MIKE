@@ -95,7 +95,7 @@
         background: var(--color-surface-3);
     }
     .picker-model-option.active {
-        background: var(--color-accent)22;
+        background: var(--color-accent)11;
         color: var(--color-accent);
     }
     .option-name {

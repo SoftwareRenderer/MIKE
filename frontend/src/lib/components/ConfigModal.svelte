@@ -15,7 +15,7 @@
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
     const MODEL_COLORS = [
-        '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
+        '#888888', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
         '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
         '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
     ];
@@ -855,7 +855,7 @@
         transition: background 0.15s, color 0.15s;
     }
     .btn-pwa-install:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
 

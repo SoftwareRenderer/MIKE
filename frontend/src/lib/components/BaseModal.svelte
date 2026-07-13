@@ -34,7 +34,7 @@
         triggerEl = document.activeElement as HTMLElement;
         if (modalEl && trapFocus) {
             focusTrap = createFocusTrap(modalEl, handleClose);
-            setTimeout(() => focusTrap?.focusFirst(), 50);
+            queueMicrotask(() => focusTrap?.focusFirst());
         }
     });
 
@@ -48,7 +48,7 @@
         focusTrap?.destroy();
         focusTrap = null;
         onClose();
-        setTimeout(() => triggerEl?.focus(), 50);
+        queueMicrotask(() => triggerEl?.focus());
     }
 
     function handleOverlayClick(e: MouseEvent) {
@@ -170,7 +170,7 @@
         background: var(--color-surface-4);
     }
     .modal-footer :global(.btn-primary) {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
     .modal-footer :global(.btn-primary):hover:not(:disabled) {

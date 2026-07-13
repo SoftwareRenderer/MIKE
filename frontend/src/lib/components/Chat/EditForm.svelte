@@ -349,7 +349,7 @@
         padding: 4px 12px;
         border-radius: var(--radius-sm);
         font-size: 0.8125rem;
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         cursor: pointer;
     }

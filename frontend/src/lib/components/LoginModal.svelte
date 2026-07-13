@@ -54,8 +54,10 @@
         <div class="login-error" role="alert">{error}</div>
     {/if}
 
+    <label for="login-password" class="login-label">Password</label>
     <!-- svelte-ignore a11y_autofocus — intentional focus on login form -->
     <input
+        id="login-password"
         bind:this={passwordInput}
         type="password"
         bind:value={password}
@@ -98,6 +100,14 @@
         justify-content: stretch;
     }
 
+    .login-label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        text-align: center;
+        margin-bottom: 8px;
+    }
     .login-header {
         text-align: center;
     }
@@ -114,7 +124,7 @@
 
     .login-error {
         background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
+        color: var(--color-text-primary);
         padding: 8px 12px;
         border-radius: var(--radius-sm);
         font-size: 0.875rem;
@@ -140,8 +150,7 @@
     }
 
     input::placeholder {
-        color: var(--color-text-secondary);
-        opacity: 0.6;
+        color: var(--color-text-tertiary);
     }
 
     .login-btn {
@@ -149,7 +158,7 @@
         padding: 10px;
         border: none;
         border-radius: var(--radius-md);
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         font-size: 0.875rem;
         font-weight: 500;

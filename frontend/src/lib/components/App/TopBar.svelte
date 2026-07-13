@@ -31,7 +31,7 @@
     let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
 </script>
 
-<header class="top-bar">
+<header class="top-bar" role="banner">
     <!-- Hamburger menu button (hidden on desktop via CSS) -->
     <button class="icon-btn hamburger" onclick={onOpenMenu} aria-label="Open menu" title="Open menu">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -166,7 +166,7 @@
         transition: all 0.15s ease;
     }
     .icon-btn:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
     }
     .icon-btn.sandbox-config-btn {
         color: var(--color-primary);

@@ -829,6 +829,16 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     function toggleSidebar() {
         collapsed = !collapsed;
         sidebarCollapsed.set(collapsed);
+        // Manage focus: when collapsing, focus the toggle button; when expanding, focus the first project
+        queueMicrotask(() => {
+            if (collapsed) {
+                // Focus the collapse toggle button
+                document.querySelector('.desktop-collapse-btn')?.focus();
+            } else {
+                // Focus the first project item
+                document.querySelector('.project-item')?.focus();
+            }
+        });
     }
 
     // Track whether sidebar was auto-collapsed for tablet Explorer (so we can restore it)
@@ -1282,7 +1292,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     }
     .reconnecting-stale {
         font-weight: 400;
-        opacity: 0.6;
+        opacity: 0.75;
         font-size: 0.75rem;
     }
     .reconnecting-btn {
@@ -1394,7 +1404,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         left: 16px;
         z-index: 10000;
         padding: 8px 16px;
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         font-weight: 600;
         border-radius: var(--radius-md);
@@ -1451,7 +1461,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     .btn-primary {
         padding: 8px 20px;
         border-radius: var(--radius-md);
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         font-weight: 500;
     }
@@ -1463,7 +1473,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         bottom: 24px;
         left: 50%;
         transform: translateX(-50%);
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         padding: 10px 20px;
         border-radius: var(--radius-md);

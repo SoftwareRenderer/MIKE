@@ -607,7 +607,7 @@
         text-underline-offset: 2px;
     }
     .assistant .message-text :global(a:hover) {
-        color: var(--color-accent-hover);
+        color: var(--color-accent-light);
     }
     .assistant .message-text :global(ul),
     .assistant .message-text :global(ol) {
@@ -772,7 +772,7 @@
     .edit-save-btn {
         padding: 7px 18px;
         border-radius: var(--radius-md);
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: #fff;
         font-size: 0.8125rem;
         font-weight: 500;

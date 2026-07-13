@@ -307,7 +307,7 @@
         display: inline-block;
         width: 2px;
         height: 1em;
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         vertical-align: text-bottom;
         animation: blink 0.8s step-end infinite;
     }

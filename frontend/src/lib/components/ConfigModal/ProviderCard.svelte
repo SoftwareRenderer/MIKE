@@ -56,7 +56,7 @@
 
 <div class="provider-card" data-index={index} class:dragging={isDragging}>
     <!-- Card header: always visible -->
-    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} tabindex="0">
+    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} aria-label={`Toggle ${provider.display_name || provider.name} settings`} tabindex="0">
         <div class="reorder-buttons">
             <button type="button" class="btn-drag-handle" onpointerdown={onDragStart} title="Drag to reorder" aria-label="Drag to reorder provider">
                 <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
@@ -90,7 +90,7 @@
         <div class="provider-actions">
             {#if provider.default_model}
                 {@const defaultModelInfo = parseDefaultModel(provider.default_model)}
-                <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}22">{defaultModelInfo.name}</span>
+                <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}11">{defaultModelInfo.name}</span>
             {/if}
             <button type="button" class="btn-remove-provider" onclick={handleRemove} title="Remove provider" aria-label="Remove provider">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -199,7 +199,7 @@
                     <div class="option-row">
                         <div class="option-label-group">
                             <label class="option-label" for={`concurrency-{index}`}>Concurrency</label>
-                            <span class="help-icon" title="Maximum simultaneous requests to this provider. Higher values allow parallel task execution but may overload the server.">
+                            <span class="help-icon" title="Maximum simultaneous requests to this provider.">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                     <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
@@ -295,7 +295,7 @@
         font-size: 0.6875rem;
         font-weight: 600;
         color: var(--color-accent);
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         background-color: rgba(76, 154, 255, 0.15);
         padding: 1px 6px;
         border-radius: var(--radius-sm);
@@ -331,7 +331,7 @@
         cursor: pointer;
     }
     .btn-remove-provider:hover {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
     .btn-expand {

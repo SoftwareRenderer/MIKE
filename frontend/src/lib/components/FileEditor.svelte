@@ -633,7 +633,7 @@
 
     .btn-save {
         padding: 4px 12px;
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
         border: none;
         border-radius: var(--radius-sm);
@@ -780,7 +780,7 @@
     }
     .btn-confirm-discard {
         padding: 5px 14px;
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
         border: none;
         border-radius: var(--radius-sm);

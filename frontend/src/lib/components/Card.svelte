@@ -155,7 +155,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     // Model badge: always "auto" behavior
     // Model only (1 provider) or provider+model (2+)
     const MODEL_COLORS = [
-        '#6E7681', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
+        '#888888', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
         '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
         '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
     ];
@@ -428,6 +428,27 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             selectedTask.set(task);
             showCardDetail.set(true);
         }
+        // Alt+ArrowLeft/ArrowRight: move task to previous/next column
+        if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!projectId) return;
+            const currentIdx = statuses.indexOf(task.status as typeof statuses[number]);
+            const targetIdx = e.key === 'ArrowLeft'
+                ? (currentIdx - 1 + statuses.length) % statuses.length
+                : (currentIdx + 1) % statuses.length;
+            const targetStatus = statuses[targetIdx];
+            (async () => {
+                try {
+                    const { moveTask: apiMoveTask } = await import('$lib/api');
+                    const updated = await apiMoveTask(projectId, task.id, targetStatus);
+                    Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
+                    boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
+                } catch (err) {
+                    console.error('Failed to move task:', err);
+                }
+            })();
+        }
     }
 
     // Pause/Resume for In Progress column
@@ -592,7 +613,8 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     onkeydown={handleCardKeydown}
     role="button"
     tabindex="0"
-    aria-label={`Open task: ${task.title || '(untitled)'}`}
+    aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${task.status === 'backlog' ? 'Backlog' : task.status === 'in_progress' ? 'In Progress' : task.status === 'review' ? 'Review' : 'Done'}`}
+    aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
@@ -705,13 +727,13 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     {#if statusBadge || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
-                <div class="badge" style="background: {statusBadge.color}22; color: {statusBadge.color}">
+                <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
                     {statusBadge.text}
                 </div>
             {/if}
             {#if modelBadge.text}
                 {#if modelBadge.isAgent}
-                    <div class="badge model-badge pi-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
+                    <div class="badge model-badge pi-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
@@ -720,7 +742,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                         Pi Coding Agent
                     </div>
                 {:else}
-                    <div class="badge model-badge" style="background: {modelBadge.color}22; color: {modelBadge.color}">
+                    <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
                         {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
                     </div>
                 {/if}
@@ -940,15 +962,15 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         transition: background 0.1s ease, color 0.1s ease;
     }
     .action-icon:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white;
     }
     .action-icon.action-move:hover {
-        background: var(--color-accent);
+        background: var(--color-accent-dark);
         color: white !important;
     }
     .action-icon.action-delete:hover {
-        background: var(--color-status-red);
+        background: var(--color-status-red-dark);
         color: white;
     }
     .action-idle {

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
@@ -393,7 +393,14 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
 
 
+    let detailEl: HTMLDivElement | null = null;
+    let previousFocus: HTMLElement | null = null;
+
     onMount(() => {
+        // Save current focus so we can restore on close
+        previousFocus = document.activeElement as HTMLElement;
+        // Focus the detail panel for keyboard/screen reader users
+        queueMicrotask(() => detailEl?.focus());
         const unsubBoard = boardStore.subscribe(b => {
             if (b) {
                 allTasks = b.tasks;
@@ -422,6 +429,11 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             unsubDiff();
             window.removeEventListener('keydown', handleKey);
         };
+    });
+
+    onDestroy(() => {
+        // Restore focus to the element that was focused before CardDetail opened
+        queueMicrotask(() => previousFocus?.focus());
     });
 
     // Real-time diff update: delegate to DiffCache service.
@@ -581,7 +593,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
 </script>
 
-    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen}>
+    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
