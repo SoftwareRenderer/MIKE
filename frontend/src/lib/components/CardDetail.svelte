@@ -272,8 +272,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     $effect(() => {
         const taskId = task.id;
         if (previousTaskId && taskId !== previousTaskId) {
-            // Task changed — update cache task ID, reload diff and reset state
-            diffCache.setTask(task.project_id, taskId);
+            // Task changed — reload diff and reset state
             diffCache.reset();
             commits = [];
             baseCommit = null;
