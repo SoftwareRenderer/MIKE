@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -137,7 +138,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	// Read uses plain os.ReadFile (no isolation) when sandbox is disabled.
 	makeRead := func() readFunc {
 		return func(_ context.Context, p string) ([]byte, error) {
-			norm := normalizePath(worktreePath, state.projectName, p)
+			norm := normalizePath(state.projectName, p)
 			if !filepath.IsAbs(norm) {
 				norm = filepath.Join(worktreePath, norm)
 			}
@@ -161,7 +162,7 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 		te.taskMu.Unlock()
 		return func(_ context.Context, p, c string) error {
-			norm := normalizePath(worktreePath, state.projectName, p)
+			norm := normalizePath(state.projectName, p)
 			dir := filepath.Dir(filepath.Join(worktreePath, norm))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
@@ -448,7 +449,8 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 		return "Task complete", true
 	case "create_task":
-		return te.handleCreateTask(args, task, state), true
+		result, err := te.handleCreateTask(args, task, state)
+		return result, err == nil
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), false
 	}
@@ -485,7 +487,7 @@ func parseToolArgs(s string) map[string]any {
 
 // normalizePath strips the sandbox mount prefix from absolute paths.
 // Relative paths are returned as-is (os.Root handles traversal prevention).
-func normalizePath(worktreePath, projectName, path string) string {
+func normalizePath(projectName, path string) string {
 	cleaned := filepath.Clean(path)
 	if !filepath.IsAbs(cleaned) {
 		return cleaned
@@ -509,13 +511,13 @@ func normalizePath(worktreePath, projectName, path string) string {
 
 // handleCreateTask creates a new task on the board, used by the LLM in plan mode
 // to decompose work into subtasks. The new task inherits settings from the parent.
-func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task, state *executionState) string {
+func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task, state *executionState) (string, error) {
 	title, _ := args["title"].(string)
 	prompt, _ := args["prompt"].(string)
 	parentTaskID, _ := args["parent_task_id"].(string)
 
 	if title == "" || prompt == "" {
-		return "Error: title and prompt are required"
+		return "", errors.New("title and prompt are required")
 	}
 
 	// Determine the actual parent: if parent_task_id is provided, use it (nested subtask).
@@ -526,10 +528,10 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		var err error
 		parentTask, err = te.store.GetTaskByTaskID(actualParentID)
 		if err != nil {
-			return fmt.Sprintf("Error: parent task %s not found", actualParentID)
+			return "", fmt.Errorf("parent task %s not found", actualParentID)
 		}
 		if parentTask.Status != "backlog" && parentTask.Status != "in_progress" {
-			return fmt.Sprintf("Error: parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
+			return "", fmt.Errorf("parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
 		}
 	}
 
@@ -563,7 +565,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 	}
 
 	if err := te.store.CreateTask(newTask); err != nil {
-		return fmt.Sprintf("Error: failed to create task: %v", err)
+		return "", fmt.Errorf("failed to create task: %w", err)
 	}
 
 	// Track the created task ID for plan mode validation
@@ -580,7 +582,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		IsActive:  true,
 		CreatedAt: now,
 	}); err != nil {
-		return fmt.Sprintf("Error: failed to create thread: %v", err)
+		return "", fmt.Errorf("failed to create thread: %w", err)
 	}
 	newTask.CurrentThreadID = defaultThreadID
 	_ = te.store.UpdateTask(newTask)
@@ -608,7 +610,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
 	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})
-	return string(result)
+	return string(result), nil
 }
 
 // pluralS returns "s" if count > 1, empty string otherwise.

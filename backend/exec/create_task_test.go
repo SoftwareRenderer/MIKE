@@ -87,11 +87,14 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-1", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "parent-task-1",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Should return JSON with task_id
 	var resp map[string]string
@@ -132,11 +135,14 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-2", "proj-1", "backlog")
 
-	te.handleCreateTask(map[string]any{
+	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-2",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Get the child task
 	children, _ := te.store.GetChildren("parent-task-2")
@@ -165,11 +171,14 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
 
 	// Create first child under parent
-	result1 := te.handleCreateTask(map[string]any{
+	result1, err := te.handleCreateTask(map[string]any{
 		"title":          "Level 1 Task",
 		"prompt":         "Level 1 prompt",
 		"parent_task_id": "parent-task-3",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	var resp1 map[string]string
 	json.Unmarshal([]byte(result1), &resp1)
@@ -177,11 +186,14 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 
 	// Ensure parent can accept nested subtasks (parent must still be in backlog)
 	// Create a second child under the first child
-	result2 := te.handleCreateTask(map[string]any{
+	result2, err := te.handleCreateTask(map[string]any{
 		"title":          "Level 2 Task",
 		"prompt":         "Level 2 prompt",
 		"parent_task_id": level1ID,
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	var resp2 map[string]string
 	json.Unmarshal([]byte(result2), &resp2)
@@ -204,11 +216,14 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-4",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
@@ -234,11 +249,14 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement feature X",
 		"parent_task_id": "parent-task-5",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
@@ -265,12 +283,15 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-6", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	_, err := te.handleCreateTask(map[string]any{
 		"prompt": "Test prompt",
 	}, parent, nil)
 
-	if result != "Error: title and prompt are required" {
-		t.Errorf("expected error for missing title, got: %s", result)
+	if err == nil {
+		t.Error("expected error for missing title, got nil")
+	}
+	if !strings.Contains(err.Error(), "title and prompt are required") {
+		t.Errorf("unexpected error message: %s", err)
 	}
 }
 
@@ -278,12 +299,15 @@ func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-7", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	_, err := te.handleCreateTask(map[string]any{
 		"title": "Task without prompt",
 	}, parent, nil)
 
-	if result != "Error: title and prompt are required" {
-		t.Errorf("expected error for missing prompt, got: %s", result)
+	if err == nil {
+		t.Error("expected error for missing prompt, got nil")
+	}
+	if !strings.Contains(err.Error(), "title and prompt are required") {
+		t.Errorf("unexpected error message: %s", err)
 	}
 }
 
@@ -291,14 +315,17 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-8", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "nonexistent-task",
 	}, parent, nil)
 
-	if !strings.Contains(result, "not found") {
-		t.Errorf("expected 'not found' error, got: %s", result)
+	if err == nil {
+		t.Error("expected error for parent not found, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unexpected error message: %s", err)
 	}
 }
 
@@ -306,14 +333,17 @@ func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-9", "proj-1", "done")
 
-	result := te.handleCreateTask(map[string]any{
+	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-9",
 	}, parent, nil)
 
-	if !strings.Contains(result, "not in backlog") {
-		t.Errorf("expected 'not in backlog' error, got: %s", result)
+	if err == nil {
+		t.Error("expected error for parent not in backlog, got nil")
+	}
+	if !strings.Contains(err.Error(), "not in backlog") {
+		t.Errorf("unexpected error message: %s", err)
 	}
 }
 
@@ -321,11 +351,14 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
 
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-10",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Should succeed (in_progress parents can accept subtasks during planning)
 	var resp map[string]string
@@ -343,11 +376,14 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 
 	// Create multiple subtasks under parent
 	for i := 1; i <= 3; i++ {
-		result := te.handleCreateTask(map[string]any{
+		result, err := te.handleCreateTask(map[string]any{
 			"title":          "Task " + string(rune('A'+i-1)),
 			"prompt":         "Prompt for task " + string(rune('A'+i-1)),
 			"parent_task_id": "parent-task-11",
 		}, parent, nil)
+		if err != nil {
+			t.Fatalf("iteration %d: unexpected error: %v", i, err)
+		}
 
 		var resp map[string]string
 		if err := json.Unmarshal([]byte(result), &resp); err != nil {
@@ -372,11 +408,14 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-12", "proj-1", "backlog")
 
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          `Task with "quotes" and \backslash`,
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-12",
 	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Should return valid JSON even with special characters
 	var resp map[string]string
@@ -412,11 +451,14 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 
 	// Create a subtask via handleCreateTask
 	state := &executionState{}
-	result := te.handleCreateTask(map[string]any{
+	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "plan-parent-1",
 	}, parent, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Verify subtask was created
 	var resp map[string]string
