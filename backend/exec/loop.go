@@ -309,7 +309,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 			// Container doesn't exist or is not running — create (or recreate) it
 			var assignedPorts []types.AssignedPort
-			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, task.IsIdeationMode())
+			createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, task.IsPlanMode())
 			if createErr != nil {
 				task.ExecutionState = "failed"
 				task.Status = "review"
@@ -477,7 +477,7 @@ func (te *TaskExecutor) executeTask(ctx context.Context, task *types.Task, proje
 					}
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
-					createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, updatedTask.IsIdeationMode())
+					createErr, assignedPorts := te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, updatedTask.IsPlanMode())
 					if createErr != nil {
 						log.Printf("[mode-switch] task=%s failed to recreate sandbox: %v", task.ID, createErr)
 						task.ExecutionState = "failed"

@@ -984,7 +984,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 	}
 }
 
-func TestCreate_IdeationModeReadonlyMount(t *testing.T) {
+func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	agentPath := findAgentBinary(t)
 	os.Setenv("KANBAN_AGENT_PATH", agentPath)
 	defer os.Unsetenv("KANBAN_AGENT_PATH")
@@ -996,12 +996,12 @@ func TestCreate_IdeationModeReadonlyMount(t *testing.T) {
 
 	// Create a temp directory to use as worktree
 	dir := t.TempDir()
-	taskID := "test-ideation-task"
+	taskID := "test-plan-task"
 
-	// Create with ideation mode (read-only mount)
+	// Create with plan mode (read-only mount)
 	err, _ := sm.Create(taskID, dir, "", "test-proj", "", "", false, 0, nil, "", "", nil, nil, true)
 	if err != nil {
-		t.Fatalf("create sandbox with ideation mode: %v", err)
+		t.Fatalf("create sandbox with plan mode: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = sm.Stop(taskID)
@@ -1010,7 +1010,7 @@ func TestCreate_IdeationModeReadonlyMount(t *testing.T) {
 	// Verify the worktree is mounted read-only by trying to write a file
 	out, err := sm.Exec(taskID, "touch /home/sandbox/test-proj/test-file", nil)
 	if err == nil {
-		t.Fatal("expected write to fail in ideation mode (read-only mount)")
+		t.Fatal("expected write to fail in plan mode (read-only mount)")
 	}
 	if !strings.Contains(out, "Read-only file system") && !strings.Contains(out, "Read-only") {
 		t.Logf("output: %s", out)
@@ -1024,7 +1024,7 @@ func TestCreate_IdeationModeReadonlyMount(t *testing.T) {
 	}
 	out, err = sm.Exec(taskID, "cat /home/sandbox/test-proj/existing-file.txt", nil)
 	if err != nil {
-		t.Fatalf("read should work in ideation mode: %v", err)
+		t.Fatalf("read should work in plan mode: %v", err)
 	}
 	if out != "test content" {
 		t.Errorf("expected 'test content', got %q", out)

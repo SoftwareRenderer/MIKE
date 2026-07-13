@@ -198,7 +198,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 
 // Create creates a gVisor sandbox container for a task.
 // The worktree is bind-mounted at /home/sandbox/<projectName> inside the container.
-// When ideationMode is true, the worktree is mounted read-only (ro); otherwise read-write (rw).
+// When planMode is true, the worktree is mounted read-only (ro); otherwise read-write (rw).
 // If projectPath is non-empty, the .git/ directory is also mounted read-only
 // at the same absolute path (so git can resolve refs, objects, worktree metadata, etc.).
 // If baseImage is empty, the default BaseImage constant is used.
@@ -212,7 +212,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
 // If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
 // Returns (error, assignedPorts) where assignedPorts lists the host→container mappings.
-func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv, ideationMode bool) (error, []types.AssignedPort) {
+func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv, planMode bool) (error, []types.AssignedPort) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -284,7 +284,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, baseImage, projectName, p
 		"--workdir", mountPath,
 	}
 	worktreeMode := "rw"
-	if ideationMode {
+	if planMode {
 		worktreeMode = "ro"
 	}
 	createArgs = append(createArgs,
