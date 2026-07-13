@@ -38,7 +38,7 @@
             return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
         }
         if (icon === 'bulb') {
-            return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 6a3 3 0 1 1 6 0c0 2-1.5 3-1.5 3v1h-3v-1s-1.5-1-1.5-3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 10h3v1h-3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+            return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
         }
         return '';
     }
@@ -46,7 +46,7 @@
 
 <div class="mode-select" bind:this={dropdownRef}>
     <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label="Operating mode" aria-expanded={open}>
-        <span class="mode-icon active">{@html renderIcon(selected.icon)}</span>
+        <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:ideate={value === 'ideate'}>{@html renderIcon(selected.icon)}</span>
         <span class="mode-label">{selected.label}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -59,12 +59,15 @@
                     type="button"
                     class="mode-option"
                     class:selected={mode.value === value}
+                    class:act={mode.value === 'act'}
+                    class:plan={mode.value === 'plan'}
+                    class:ideate={mode.value === 'ideate'}
                     role="option"
                     aria-selected={mode.value === value}
                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(mode.value); } }}
                     onclick={() => select(mode.value)}
                 >
-                    <span class="mode-icon" class:active={mode.value === value}>{@html renderIcon(mode.icon)}</span>
+                    <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:ideate={mode.value === 'ideate'}>{@html renderIcon(mode.icon)}</span>
                     <span>{mode.label}</span>
                 </button>
             {/each}
@@ -115,8 +118,14 @@
         align-items: center;
         color: var(--color-text-secondary);
     }
-    .mode-icon.active {
+    .mode-icon.act.active {
+        color: var(--color-text-secondary);
+    }
+    .mode-icon.plan.active {
         color: var(--color-accent);
+    }
+    .mode-icon.ideate.active {
+        color: var(--color-status-yellow);
     }
     .mode-dropdown {
         position: absolute;
@@ -149,7 +158,13 @@
     .mode-option:hover {
         background: var(--color-surface-3);
     }
-    .mode-option.selected {
+    .mode-option.act.selected {
+        color: var(--color-text-secondary);
+    }
+    .mode-option.plan.selected {
         color: var(--color-accent);
+    }
+    .mode-option.ideate.selected {
+        color: var(--color-status-yellow);
     }
 </style>

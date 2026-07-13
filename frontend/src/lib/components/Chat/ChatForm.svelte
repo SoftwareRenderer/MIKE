@@ -318,9 +318,9 @@
                         {#if operatingMode === 'plan'}
                             <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                         {:else if operatingMode === 'ideate'}
-                            <path d="M5 6a3 3 0 1 1 6 0c0 2-1.5 3-1.5 3v1h-3v-1s-1.5-1-1.5-3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                            <path d="M6.5 10h3v1h-3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                            <path d="M6.5 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                            <path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                            <path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                         {:else}
                             <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         {/if}
