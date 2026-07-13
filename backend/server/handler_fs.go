@@ -705,8 +705,16 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		}
 		// Create directory inside the sandbox
 		mountPath := "/home/sandbox/" + project.Name
-		relPath, _ := filepath.Rel(project.Path, req.Path)
-		sandboxPath := filepath.Join(mountPath, relPath)
+		cleanPath := filepath.Clean(req.Path)
+		var sandboxPath string
+		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
+			// req.Path is already a sandbox path — use it directly
+			sandboxPath = cleanPath
+		} else {
+			// req.Path is a host path — convert to sandbox path
+			relPath, _ := filepath.Rel(project.Path, cleanPath)
+			sandboxPath = filepath.Join(mountPath, relPath)
+		}
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command

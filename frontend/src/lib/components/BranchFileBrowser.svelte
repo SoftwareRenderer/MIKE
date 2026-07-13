@@ -80,7 +80,8 @@
             }
             showNewFolder = false;
             newFolderName = '';
-            loadDir(currentPath);
+            const newFolderPath = currentPath + '/' + name;
+            await loadDir(newFolderPath);
             loadGitStatus();
         } catch (e) {
             createFolderError = String(e);
