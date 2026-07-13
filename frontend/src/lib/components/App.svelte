@@ -113,10 +113,12 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let wsConnected = $state(false);
-    let lastSyncedAt = $state(Date.now()); // epoch ms of last successful data sync
+    let lastSyncedAt = $state(Infinity); // epoch ms of last successful data sync
     let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
     let countdownSeconds = $state(0);
     let countdownTimer: ReturnType<typeof setInterval> | null = null;
+    let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
+    let staleTimer: ReturnType<typeof setInterval> | null = null;
 
     function startCountdown() {
         stopCountdown();
@@ -134,11 +136,24 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         countdownSeconds = remaining;
         if (remaining <= 0) stopCountdown();
     }
+    function startStaleTick() {
+        stopStaleTick();
+        updateStaleTime();
+        staleTimer = setInterval(updateStaleTime, 1000);
+    }
+    function updateStaleTime() {
+        staleTimeText = lastSyncedAgo();
+    }
+    function stopStaleTick() {
+        if (staleTimer) {
+            clearInterval(staleTimer);
+            staleTimer = null;
+        }
+    }
 
     /** Format seconds as a human-readable relative time string. */
     function timeAgo(seconds: number): string {
-        if (seconds < 5) return 'just now';
-        if (seconds < 60) return `${seconds}s ago`;
+        if (seconds < 60) return `just now`;
         const mins = Math.floor(seconds / 60);
         if (mins < 60) return `${mins}m ago`;
         const hrs = Math.floor(mins / 60);
@@ -147,6 +162,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 
     /** Get relative time since last data sync. */
     function lastSyncedAgo(): string {
+        if (lastSyncedAt === Infinity) return 'just now';
         return timeAgo(Math.floor((Date.now() - lastSyncedAt) / 1000));
     }
 
@@ -483,11 +499,12 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         setOfflineStatus(!connected);
                         if (!connected) {
                             startCountdown();
+                            startStaleTick();
                         } else {
                             stopCountdown();
+                            stopStaleTick();
                             nextReconnectAt = 0;
                             countdownSeconds = 0;
-                            lastSyncedAt = Date.now();
                             // Auto-refresh cached data on reconnect
                             if (servingFromCache) {
                                 silentRefresh().catch(() => {});
@@ -587,11 +604,12 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 setOfflineStatus(!connected);
                 if (!connected) {
                     startCountdown();
+                    startStaleTick();
                 } else {
                     stopCountdown();
+                    stopStaleTick();
                     nextReconnectAt = 0;
                     countdownSeconds = 0;
-                    lastSyncedAt = Date.now();
                     if (servingFromCache) {
                         silentRefresh().catch(() => {});
                     }
@@ -968,8 +986,8 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
 {#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s{/if}...
-        <span class="reconnecting-stale">Data from {lastSyncedAgo()}</span>
+        Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s {/if}...
+        <span class="reconnecting-stale">Data from {staleTimeText}</span>
         <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
     </div>
 {/if}
