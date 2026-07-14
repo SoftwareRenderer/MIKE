@@ -210,6 +210,91 @@ describe('createStreamHandler', () => {
         // Entry with only pending tool calls should be removed
         expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
     });
+
+    it('tool_result uses O(1) direct reference from activeToolCalls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        // Verify the toolCall reference is stored in activeToolCalls
+        const ref = stream.state.activeToolCalls.get('tc1');
+        expect(ref).toBeDefined();
+        expect(ref!.toolCall.toolId).toBe('tc1');
+        expect(ref!.toolCall.isPending).toBe(true);
+        // tool_result resolves via direct reference
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'content', duration: 50 } }, false, 'p1', 't1');
+        // The stored reference and the entry's toolCall are the same object
+        expect(ref!.toolCall.result).toBe('content');
+        expect(ref!.toolCall.isPending).toBe(false);
+        expect(stream.state.activeToolCalls.has('tc1')).toBe(false);
+    });
+
+    it('tool_output uses O(1) direct reference from activeToolCalls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc2', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
+        // Streaming output via direct reference
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line1' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line2' } }, false, 'p1', 't1');
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('line1line2');
+        expect(tc.isPending).toBe(true); // still pending until tool_result
+    });
+
+    it('tool_progress with tool_id uses O(1) direct reference', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc3', tool_name: 'write_file', args: {} } }, false, 'p1', 't1');
+        // Progress via direct reference
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'tc3', bytes_written: 42, lines_added: 5 } }, false, 'p1', 't1');
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.bytesWritten).toBe(42);
+        expect(tc.linesAdded).toBe(5);
+    });
+
+    it('tool_progress without tool_id broadcasts to all active tool calls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tcA', tool_name: 'write_file', args: {} } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tcB', tool_name: 'edit_file', args: {} } }, false, 'p1', 't1');
+        // Broadcast progress (no tool_id) — both active tool calls get updated
+        handleEvent({ type: 'tool_progress', data: { bytes_written: 100 } }, false, 'p1', 't1');
+        const entry = stream.state.entries[0];
+        expect(entry.toolCalls![0].bytesWritten).toBe(100);
+        expect(entry.toolCalls![1].bytesWritten).toBe(100);
+    });
+
+    it('tool_result ignores stale tool_id not in activeToolCalls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        // Send result for a tool call that was never registered
+        handleEvent({ type: 'tool_result', data: { tool_id: 'ghost', success: true, output: 'nope', duration: 0 } }, false, 'p1', 't1');
+        // No entries should have been modified
+        expect(stream.state.entries[0].toolCalls).toBeUndefined();
+    });
+
+    it('tool_output ignores unknown tool_id not in activeToolCalls', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        // Output for unknown tool_id is silently ignored
+        handleEvent({ type: 'tool_output', data: { tool_id: 'unknown', text: 'leak' } }, false, 'p1', 't1');
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBeUndefined();
+    });
+
+    it('activeToolCalls stores reference that stays in sync with entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+        const ref = stream.state.activeToolCalls.get('tc1');
+        const entryTc = stream.state.entries[0].toolCalls![0];
+        // Mutating via the map reference updates the entry (same underlying object behind $state proxy)
+        ref!.toolCall.displayName = 'Overridden';
+        expect(entryTc.displayName).toBe('Overridden');
+        // The map reference has the same initial data as the entry
+        expect(ref!.toolCall.toolId).toBe(entryTc.toolId);
+        expect(ref!.toolCall.toolName).toBe(entryTc.toolName);
+    });
 });
 
 describe('estimateTokens', () => {
