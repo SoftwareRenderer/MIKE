@@ -57,6 +57,25 @@
         return { text: display.slice(0, ARGS_MAX_LEN) + '…', truncated: true };
     }
 
+    // Track text selection so clicking to select doesn't toggle expanded args
+    let selectionStart = $state(0);
+    let wasSelecting = $state(false);
+
+    function handleArgsMouseDown() {
+        selectionStart = window.getSelection()?.toString().length ?? 0;
+        wasSelecting = false;
+    }
+
+    function handleArgsMouseUp() {
+        const selLen = window.getSelection()?.toString().length ?? 0;
+        if (selLen !== selectionStart) wasSelecting = true;
+    }
+
+    function handleArgsClick() {
+        if (!wasSelecting) onToggleArgs(tc.toolId);
+        wasSelecting = false;
+    }
+
     function formatBytes(bytes: number): string {
         if (bytes < 1024) return bytes + 'B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
@@ -297,7 +316,7 @@
             <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
             {#if showArgs}
                 {#if expandedArgs.has(tc.toolId)}
-                    <button class="tool-args-link" onclick={() => onToggleArgs(tc.toolId)} aria-label="Collapse arguments">
+                    <button class="tool-args-link" onclick={handleArgsClick} onmousedown={handleArgsMouseDown} onmouseup={handleArgsMouseUp} aria-label="Collapse arguments">
                         <pre class="tool-args tool-args-expanded">{argsDisplay}</pre>
                     </button>
                 {:else}
@@ -445,6 +464,7 @@
         overflow-wrap: break-word;
         overflow-x: visible;
         min-width: 0;
+        user-select: text;
     }
     .tool-args-link {
         display: flex;
