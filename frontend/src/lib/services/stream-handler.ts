@@ -1,4 +1,4 @@
-import type { StreamEvent } from '$lib/types';
+import type { StreamEvent, DiffData } from '$lib/types';
 import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
 import type { StreamState } from './stream-state.svelte';
 
@@ -7,7 +7,10 @@ export function estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
 }
 
-type DiffData = { files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>; short_stat?: string };
+/** Update context usage from accumulated token counts. */
+function updateContextUsed(s: typeof import('./stream-state.svelte').StreamState['state']) {
+    s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+}
 
 /** External callbacks the component must provide. */
 export interface StreamHandlerCallbacks {
@@ -49,7 +52,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
                 s.streamTokenCount += estimateTokens(data.text);
-                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 if (!s.currentAssistantId) s.currentAssistantId = entry.id;
                 entry.content += data.text;
@@ -59,12 +62,14 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'reasoning': {
                 if (suppressEvents) break;
                 stream.clearAwaiting();
+                markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
                 s.streamTokenCount += estimateTokens(data.text);
-                s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
+                entry.hasReasoning = true;
                 scroll();
                 break;
             }
@@ -75,11 +80,6 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (!data.tool_id || data.tool_id === '') break;
 
                 let entry = s.currentAssistantId ? s.entries.find(e => e.id === s.currentAssistantId) || null : null;
-                if (!entry) {
-                    for (let i = s.entries.length - 1; i >= 0; i--) {
-                        if (s.entries[i].role === 'assistant') { entry = s.entries[i]; break; }
-                    }
-                }
                 if (!entry) entry = ensureAssistantEntry();
 
                 if (entry.content.trim() === data.tool_name && !entry.reasoningContent) entry.content = '';
@@ -288,7 +288,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         s.contextState.limit = data.context_limit;
                     }
                 } else {
-                    s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+                    updateContextUsed(s);
                 }
                 if (s.currentAssistantId) {
                     const entry = s.entries.find(e => e.id === s.currentAssistantId);
@@ -376,6 +376,5 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
         }
-        scroll();
     };
 }
