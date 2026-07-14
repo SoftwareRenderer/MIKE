@@ -18,13 +18,11 @@ import { slide } from 'svelte/transition';
     let sortedUnstagedUntracked = $derived(sortUntrackedByPath(unstagedUntracked));
 
     // Map of file path -> DOM element for scroll-to-file from sidebar
-    let fileSections = $state(new Map<string, HTMLElement>());
+    let fileSections = new Map<string, HTMLElement>();
     function registerFileSection(el: HTMLElement, path: string) {
-        fileSections = new Map([...fileSections, [path, el]]);
+        fileSections.set(path, el);
         return () => {
-            const next = new Map(fileSections);
-            next.delete(path);
-            fileSections = next;
+            fileSections.delete(path);
         };
     }
 
