@@ -37,7 +37,7 @@
     } = $props();
 </script>
 
-<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} role="complementary" aria-label="Sidebar">
+<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
     <div class="sidebar-header">
         <h2 class:collapsed={!isMobile && collapsed}>Projects</h2>
         <!-- Mobile close button (hidden on desktop via CSS) -->

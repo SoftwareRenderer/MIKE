@@ -80,17 +80,17 @@
                 <div class="header-right">
                     <span class="section-count">{sectionTasks.length}</span>
                     {#if section.id === 'backlog'}
-                        <button type="button" class="add-btn" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} aria-label="Create a new task" title="Create a new task">
+                        <span class="add-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onShowCreateTask(); } }} aria-label="Create a new task" title="Create a new task">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                        </button>
+                        </span>
                     {/if}
                     {#if section.id === 'done' && sectionTasks.length > 0}
-                        <button type="button" class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
+                        <span class="clear-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                        </button>
+                        </span>
                     {/if}
                 </div>
                 <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -203,9 +203,7 @@
         width: 22px;
         height: 22px;
         padding: 0;
-        border: none;
         border-radius: var(--radius-sm);
-        background: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
         transition: color 0.15s ease, background 0.15s ease;
@@ -214,6 +212,10 @@
     .add-btn:hover {
         background: var(--color-accent-dark);
         color: white;
+    }
+    .add-btn:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 1px;
     }
     .clear-btn {
         display: inline-flex;
@@ -230,6 +232,10 @@
     .clear-btn:hover {
         background: var(--color-status-red-dark);
         color: white;
+    }
+    .clear-btn:focus-visible {
+        outline: 2px solid var(--color-status-red, #f85149);
+        outline-offset: 1px;
     }
     @media (max-width: 768px) {
         .add-btn,
