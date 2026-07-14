@@ -295,7 +295,7 @@
         display: none;
     }
     .project-abbr-no-sandbox {
-        color: var(--color-text-tertiary);
+        color: var(--color-status-red, #f85149);
     }
     .project-stats {
         display: flex;
