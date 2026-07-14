@@ -1,18 +1,5 @@
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { syntaxTree, Language } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { go } from '@codemirror/lang-go';
-import { json } from '@codemirror/lang-json';
-import { markdown } from '@codemirror/lang-markdown';
-import { rust } from '@codemirror/lang-rust';
-import { cpp } from '@codemirror/lang-cpp';
-import { php } from '@codemirror/lang-php';
-import { sql } from '@codemirror/lang-sql';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { yaml } from '@codemirror/lang-yaml';
-import { svelte } from '@replit/codemirror-lang-svelte';
 
 /**
  * GitHub Dark highlighter — matches the FileEditor's githubDarkHighlight colors.
@@ -40,55 +27,112 @@ const githubDarkHighlighter = tagHighlighter([
     { tag: tags.invalid, class: 'hl-invalid' },
 ]);
 
-// Cached Language objects — CodeMirror lang packages export functions
-const _js = javascript().language;
-const _py = python().language;
-const _go = go().language;
-const _cpp = cpp().language;
-const _rust = rust().language;
-const _json = json().language;
-const _md = markdown().language;
-const _php = php().language;
-const _sql = sql().language;
-const _html = html().language;
-const _css = css().language;
-const _yaml = yaml().language;
-const _svelte = svelte().language;
+/**
+ * Lazily-loaded language cache. Keys are file extensions.
+ * Values are Language objects (or null for unsupported extensions).
+ * Uses dynamic import() to avoid bundling all 14 grammar parsers upfront.
+ */
+const languageCache = new Map<string, Language | null>();
 
 /**
- * Map file extensions to CodeMirror Language objects.
- * Returns null for unsupported languages (plain text fallback).
+ * Load a CodeMirror language for the given file path via dynamic import.
+ * Caches the result so subsequent calls for the same extension are instant.
+ * Returns null for unsupported file types (plain text fallback).
+ */
+export async function loadLanguage(path: string): Promise<Language | null> {
+    const ext = path.split('.').pop()?.toLowerCase() || '';
+    const base = path.split('/').pop()?.toLowerCase() || '';
+
+    // Check cache first
+    const cached = languageCache.get(ext);
+    if (cached !== undefined) return cached;
+
+    // Special basenames — no CodeMirror support
+    if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') {
+        languageCache.set(ext, null);
+        return null;
+    }
+
+    // Go templates — handled by custom regex-based highlighter (no Lezer grammar)
+    if (ext === 'tmpl' || ext === 'gohtml') {
+        languageCache.set(ext, null);
+        return null;
+    }
+
+    let lang: Language | null = null;
+    try {
+        switch (ext) {
+            case 'js': case 'mjs': case 'cjs': case 'jsx': case 'mx':
+            case 'ts': case 'tsx':
+                lang = (await import('@codemirror/lang-javascript')).javascript().language;
+                break;
+            case 'py': case 'pyw':
+                lang = (await import('@codemirror/lang-python')).python().language;
+                break;
+            case 'go':
+                lang = (await import('@codemirror/lang-go')).go().language;
+                break;
+            case 'c': case 'h':
+            case 'cpp': case 'cc': case 'cxx': case 'hxx': case 'hpp':
+            case 'cppm': case 'hppm': case 'cx': case 'cxxm':
+                lang = (await import('@codemirror/lang-cpp')).cpp().language;
+                break;
+            case 'rs':
+                lang = (await import('@codemirror/lang-rust')).rust().language;
+                break;
+            case 'json':
+                lang = (await import('@codemirror/lang-json')).json().language;
+                break;
+            case 'md': case 'mdx':
+                lang = (await import('@codemirror/lang-markdown')).markdown().language;
+                break;
+            case 'php': case 'php3': case 'php4': case 'php5': case 'php7': case 'phps': case 'phpws':
+                lang = (await import('@codemirror/lang-php')).php().language;
+                break;
+            case 'sql':
+                lang = (await import('@codemirror/lang-sql')).sql().language;
+                break;
+            case 'html': case 'htm':
+                lang = (await import('@codemirror/lang-html')).html().language;
+                break;
+            case 'css': case 'scss': case 'sass': case 'less':
+                lang = (await import('@codemirror/lang-css')).css().language;
+                break;
+            case 'yaml': case 'yml':
+                lang = (await import('@codemirror/lang-yaml')).yaml().language;
+                break;
+            case 'svelte':
+                lang = (await import('@replit/codemirror-lang-svelte')).svelte().language;
+                break;
+            default:
+                lang = null;
+        }
+    } catch {
+        lang = null;
+    }
+
+    languageCache.set(ext, lang);
+    return lang;
+}
+
+/**
+ * Synchronously get a cached CodeMirror Language for the given file path.
+ * Returns null if the language hasn't been loaded yet (use loadLanguage() to preload).
+ * Also returns null for unsupported file types (plain text fallback).
  */
 function getLanguage(path: string): Language | null {
     const ext = path.split('.').pop()?.toLowerCase() || '';
     const base = path.split('/').pop()?.toLowerCase() || '';
 
-    // Special basenames — no CodeMirror support, return null
+    // Special basenames — no CodeMirror support
     if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') return null;
 
     // Go templates — handled by custom regex-based highlighter (no Lezer grammar)
     if (ext === 'tmpl' || ext === 'gohtml') return null;
 
-    const extMap: Record<string, Language> = {
-        js: _js, mjs: _js, cjs: _js, jsx: _js, mx: _js,
-        ts: _js, tsx: _js,
-        py: _py, pyw: _py,
-        go: _go,
-        c: _cpp, h: _cpp,
-        cpp: _cpp, cc: _cpp, cxx: _cpp, hxx: _cpp, hpp: _cpp,
-        cppm: _cpp, hppm: _cpp, cx: _cpp, cxxm: _cpp,
-        rs: _rust,
-        json: _json,
-        md: _md, mdx: _md,
-        php: _php, php3: _php, php4: _php, php5: _php, php7: _php, phps: _php, phpws: _php,
-        sql: _sql,
-        html: _html, htm: _html,
-        css: _css, scss: _css, sass: _css, less: _css,
-        svelte: _svelte,
-        yaml: _yaml, yml: _yaml,
-    };
-
-    return extMap[ext] ?? null;
+    const cached = languageCache.get(ext);
+    if (cached === undefined) return null; // not loaded yet
+    return cached;
 }
 
 /**
@@ -317,23 +361,10 @@ function tokenizeGoAction(content: string, baseOffset: number): { from: number; 
 }
 
 /**
- * Highlight multiple lines of code and return an array of HTML fragments (one per line).
- * Uses Lezer parsers from CodeMirror language packages for token-level highlighting.
- * Returns empty string for lines that should fall back to plain text rendering.
+ * Core highlighting logic — given a loaded Language object, parse and highlight.
  * Results are cached per file path + content hash to avoid redundant parsing.
  */
-export function highlightLines(lines: string[], path: string): string[] {
-    if (lines.length === 0) return [];
-
-    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'tmpl' || ext === 'gohtml') {
-        return highlightGoTemplateLines(lines);
-    }
-
-    const lang = getLanguage(path);
-    if (!lang) return lines.map(() => '');
-
+function _highlightWithLang(lines: string[], path: string, lang: Language): string[] {
     // Check cache
     const cacheKey = `${path}\x00${contentHash(lines)}`;
     const cached = highlightCache.get(cacheKey);
@@ -443,11 +474,54 @@ export function highlightLines(lines: string[], path: string): string[] {
 }
 
 /**
+ * Highlight multiple lines of code and return an array of HTML fragments (one per line).
+ * Uses Lezer parsers from CodeMirror language packages for token-level highlighting.
+ * Returns empty string for lines that should fall back to plain text rendering
+ * (when the language hasn't been loaded yet — use highlightLinesAsync to preload).
+ * Results are cached per file path + content hash to avoid redundant parsing.
+ */
+export function highlightLines(lines: string[], path: string): string[] {
+    if (lines.length === 0) return [];
+
+    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
+    const ext = path.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'tmpl' || ext === 'gohtml') {
+        return highlightGoTemplateLines(lines);
+    }
+
+    const lang = getLanguage(path);
+    if (!lang) return lines.map(() => '');
+
+    return _highlightWithLang(lines, path, lang);
+}
+
+/**
+ * Async version of highlightLines — loads the language package on first use
+ * (via dynamic import), caches it, then highlights synchronously.
+ * Subsequent calls for the same extension are instant (language already cached).
+ */
+export async function highlightLinesAsync(lines: string[], path: string): Promise<string[]> {
+    if (lines.length === 0) return [];
+
+    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
+    const ext = path.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'tmpl' || ext === 'gohtml') {
+        return highlightGoTemplateLines(lines);
+    }
+
+    const lang = await loadLanguage(path);
+    if (!lang) return lines.map(() => '');
+
+    return _highlightWithLang(lines, path, lang);
+}
+
+/**
  * Clear the module-level LRU highlight cache.
  * Call when switching tasks to avoid stale highlights.
  */
 export function clearHighlightCache(): void {
     highlightCache.clear();
+    languageCache.clear();
 }
 
 /**

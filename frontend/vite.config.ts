@@ -70,6 +70,19 @@ export default defineConfig({
             $lib: path.resolve('./src/lib'),
         },
     },
+    build: {
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    // Split CodeMirror language packages into separate chunks
+                    // so they're only loaded when a diff of that language is viewed.
+                    if (id.includes('/@codemirror/lang-') || id.includes('/@replit/codemirror-lang-svelte')) {
+                        return 'codemirror-langs';
+                    }
+                },
+            },
+        },
+    },
     server: {
         port: 5173,
         proxy: {

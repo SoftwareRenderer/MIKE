@@ -3,7 +3,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { parseUnifiedDiff, buildSideBySideRows } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
-    import { highlightLines } from '$lib/highlighter';
+    import { highlightLinesAsync } from '$lib/highlighter';
 import { slide } from 'svelte/transition';
 
     interface Props {
@@ -26,10 +26,16 @@ import { slide } from 'svelte/transition';
     let hasContent = $derived(diffFiles.length > 0);
 
     // Syntax highlight cache: path -> Map<lineText, highlightedHtml>
-    let highlightMap = $derived<Record<string, Map<string, string>>>(
-        (() => {
+    // Populated asynchronously via $effect (language packages loaded lazily).
+    let highlightMap: Record<string, Map<string, string>> = {};
+
+    $effect(() => {
+        const _files = diffFiles;
+        const _commitHash = commit.hash;
+        // Async highlight computation — runs when diff files change
+        (async () => {
             const result: Record<string, Map<string, string>> = {};
-            for (const file of diffFiles) {
+            for (const file of _files) {
                 const cleanPath = formatPath(file.path);
                 // Collect old lines (removed + context in order)
                 const oldLines: string[] = [];
@@ -39,8 +45,8 @@ import { slide } from 'svelte/transition';
                     else if (row.variant === 'context') { oldLines.push(row.text); newLines.push(row.text); }
                     else if (row.variant === 'added') newLines.push(row.text);
                 }
-                const oldHtmls = oldLines.length ? highlightLines(oldLines, cleanPath) : [];
-                const newHtmls = newLines.length ? highlightLines(newLines, cleanPath) : [];
+                const oldHtmls = oldLines.length ? await highlightLinesAsync(oldLines, cleanPath) : [];
+                const newHtmls = newLines.length ? await highlightLinesAsync(newLines, cleanPath) : [];
                 const map = new Map<string, string>();
                 for (let i = 0; i < oldLines.length; i++) {
                     if (oldHtmls[i]) map.set(oldLines[i], oldHtmls[i]);
@@ -50,9 +56,9 @@ import { slide } from 'svelte/transition';
                 }
                 result[cleanPath] = map;
             }
-            return result;
-        })()
-    );
+            highlightMap = result;
+        })();
+    });
 
     function getHighlighted(path: string, text: string): string {
         if (!text) return '';

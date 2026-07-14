@@ -2,7 +2,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
-    import { highlightLines } from '$lib/highlighter';
+    import { highlightLinesAsync } from '$lib/highlighter';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
@@ -181,42 +181,38 @@ import { slide } from 'svelte/transition';
         return highlightCache.get(filePath)?.[String(lineNumber)];
     }
 
-    /** Pre-populate highlight cache for a file (runs asynchronously via microtask). */
-    function preloadHighlights(path: string, rows: Array<{ text?: string; lineNumber: number | null }>) {
+    /** Pre-populate highlight cache for a file (loads language lazily via dynamic import). */
+    async function preloadHighlights(path: string, rows: Array<{ text?: string; lineNumber: number | null }>) {
         if (highlightCache.has(path)) return;
         if (rows.length === 0) return;
-        queueMicrotask(() => {
-            const texts = rows.map(r => r.text ?? '');
-            const htmls = highlightLines(texts, path);
-            const cache: Record<string, string> = {};
-            let hasAny = false;
-            rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    cache[String(row.lineNumber)] = htmls[i];
-                    hasAny = true;
-                }
-            });
-            if (hasAny) highlightCache.set(path, cache);
+        const texts = rows.map(r => r.text ?? '');
+        const htmls = await highlightLinesAsync(texts, path);
+        const cache: Record<string, string> = {};
+        let hasAny = false;
+        rows.forEach((row, i) => {
+            if (htmls[i]) {
+                cache[String(row.lineNumber)] = htmls[i];
+                hasAny = true;
+            }
         });
+        if (hasAny) highlightCache.set(path, cache);
     }
 
     /** Pre-populate highlight cache for an untracked file entry. */
-    function preloadUntrackedHighlights(entry: { path: string; fileSize?: number; file: DiffFile }) {
+    async function preloadUntrackedHighlights(entry: { path: string; fileSize?: number; file: DiffFile }) {
         if (highlightCache.has(entry.path)) return;
         if (entry.file.rows.length === 0 || entry.fileSize !== undefined) return;
-        queueMicrotask(() => {
-            const texts = entry.file.rows.map(r => r.text ?? '');
-            const htmls = highlightLines(texts, entry.path);
-            const cache: Record<string, string> = {};
-            let hasAny = false;
-            entry.file.rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    cache[String(row.lineNumber)] = htmls[i];
-                    hasAny = true;
-                }
-            });
-            if (hasAny) highlightCache.set(entry.path, cache);
+        const texts = entry.file.rows.map(r => r.text ?? '');
+        const htmls = await highlightLinesAsync(texts, entry.path);
+        const cache: Record<string, string> = {};
+        let hasAny = false;
+        entry.file.rows.forEach((row, i) => {
+            if (htmls[i]) {
+                cache[String(row.lineNumber)] = htmls[i];
+                hasAny = true;
+            }
         });
+        if (hasAny) highlightCache.set(entry.path, cache);
     }
 
     function toggleBlock(id: string) {
