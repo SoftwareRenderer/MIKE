@@ -14,10 +14,10 @@ test.describe('Mobile delete task scroll to column', () => {
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `mobile-scroll-${Date.now()}`);
 
-    // Move task to in_progress via API
+    // Move task to review via API
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
       method: 'POST',
-      body: { status: 'in_progress' },
+      body: { status: 'review' },
     });
 
     // Scroll board to Backlog (first column) so in_progress is NOT centered
@@ -45,7 +45,7 @@ test.describe('Mobile delete task scroll to column', () => {
     // Get scroll state
     const { scrollLeft, boardWidth, colOffset, colWidth } = await page.evaluate(() => {
       const board = document.querySelector('.board');
-      const col = document.querySelector('.column[aria-label="In Progress column"]');
+      const col = document.querySelector('.column[aria-label="Review column"]');
       if (!board || !col) return null;
       return {
         scrollLeft: board.scrollLeft,
