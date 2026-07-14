@@ -547,20 +547,49 @@
     .tool-result-summary {
         font-family: inherit;
         font-size: 0.875rem;
-        line-height: 1.7;
+        line-height: 1.875rem;
         color: var(--color-text-primary);
         word-break: break-word;
+        white-space: normal;
+        min-width: 0;
+        overflow: hidden;
         max-height: none;
         overflow-y: visible;
         background: var(--color-surface-3);
-        border-radius: 1.125rem;
-        padding: 8px 14px;
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
     }
     .tool-result-summary :global(p) {
-        margin: 0 0 0.5em;
+        margin: 0.75rem 0;
+        line-height: 1.7;
+    }
+    .tool-result-summary :global(p:first-child) {
+        margin-top: 0;
     }
     .tool-result-summary :global(p:last-child) {
         margin-bottom: 0;
+    }
+    .tool-result-summary :global(ul),
+    .tool-result-summary :global(ol) {
+        margin: 0.75rem 0;
+        padding-left: 1.5rem;
+        line-height: 1.7;
+    }
+    .tool-result-summary :global(ul:first-child),
+    .tool-result-summary :global(ol:first-child) {
+        margin-top: 0;
+    }
+    .tool-result-summary :global(ul:last-child),
+    .tool-result-summary :global(ol:last-child) {
+        margin-bottom: 0;
+    }
+    .tool-result-summary :global(li) {
+        margin: 0.125rem 0;
+        line-height: 1.7;
+    }
+    .tool-result-summary :global(li > p) {
+        margin: 0.25rem 0;
+        line-height: 1.7;
     }
     .tool-result-summary :global(pre) {
         background: var(--color-surface-0);
@@ -580,21 +609,50 @@
     .tool-result-question {
         font-family: inherit;
         font-size: 0.875rem;
-        line-height: 1.7;
+        line-height: 1.875rem;
         color: var(--color-text-primary);
         word-break: break-word;
+        white-space: normal;
+        min-width: 0;
+        overflow: hidden;
         max-height: none;
         overflow-y: visible;
         background: var(--color-surface-3);
-        border-radius: 1.125rem;
-        padding: 8px 14px;
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
         margin: 4px 0 0;
     }
     .tool-result-question :global(p) {
-        margin: 0 0 0.5em;
+        margin: 0.75rem 0;
+        line-height: 1.7;
+    }
+    .tool-result-question :global(p:first-child) {
+        margin-top: 0;
     }
     .tool-result-question :global(p:last-child) {
         margin-bottom: 0;
+    }
+    .tool-result-question :global(ul),
+    .tool-result-question :global(ol) {
+        margin: 0.75rem 0;
+        padding-left: 1.5rem;
+        line-height: 1.7;
+    }
+    .tool-result-question :global(ul:first-child),
+    .tool-result-question :global(ol:first-child) {
+        margin-top: 0;
+    }
+    .tool-result-question :global(ul:last-child),
+    .tool-result-question :global(ol:last-child) {
+        margin-bottom: 0;
+    }
+    .tool-result-question :global(li) {
+        margin: 0.125rem 0;
+        line-height: 1.7;
+    }
+    .tool-result-question :global(li > p) {
+        margin: 0.25rem 0;
+        line-height: 1.7;
     }
     .tool-result-question :global(pre) {
         background: var(--color-surface-0);
