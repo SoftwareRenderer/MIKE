@@ -211,7 +211,7 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
     });
 
-    it('tool_result uses O(1) direct reference from activeToolCalls', () => {
+    it('tool_result resolves pending tool call via activeToolCalls lookup', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
         handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
@@ -220,19 +220,22 @@ describe('createStreamHandler', () => {
         expect(ref).toBeDefined();
         expect(ref!.toolCall.toolId).toBe('tc1');
         expect(ref!.toolCall.isPending).toBe(true);
-        // tool_result resolves via direct reference
+        // tool_result resolves via activeToolCalls lookup, replaces object in entry for reactivity
         handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'content', duration: 50 } }, false, 'p1', 't1');
-        // The stored reference and the entry's toolCall are the same object
-        expect(ref!.toolCall.result).toBe('content');
-        expect(ref!.toolCall.isPending).toBe(false);
+        // Entry's toolCall is a new object (replaced for Svelte 5 reactivity)
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('content');
+        expect(tc.isPending).toBe(false);
+        expect(tc.success).toBe(true);
+        expect(tc.duration).toBe(50);
         expect(stream.state.activeToolCalls.has('tc1')).toBe(false);
     });
 
-    it('tool_output uses O(1) direct reference from activeToolCalls', () => {
+    it('tool_output accumulates via activeToolCalls lookup', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
         handleEvent({ type: 'tool_call', data: { tool_id: 'tc2', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
-        // Streaming output via direct reference
+        // Streaming output via activeToolCalls lookup, replaces object in entry for reactivity
         handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line1' } }, false, 'p1', 't1');
         handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line2' } }, false, 'p1', 't1');
         const tc = stream.state.entries[0].toolCalls![0];

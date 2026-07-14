@@ -88,11 +88,16 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
                 if (existing) {
                     if (!existing.isPending && existing.result !== undefined) break;
+                    // Mutate in-place so activeToolCalls map reference stays valid
+                    existing.toolName = data.tool_name;
+                    existing.displayName = data.tool_display_name;
+                    existing.args = data.args || {};
                     const newRawArgs = data.raw_args_delta ? (existing.raw_args || '') + data.raw_args_delta : data.raw_args;
-                    const updated = { ...existing, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args || {}, raw_args: newRawArgs, sandbox: data.sandbox, path: data.path };
-                    if (data.lines_added !== undefined) updated.linesAdded = data.lines_added;
-                    if (data.lines_removed !== undefined) updated.linesRemoved = data.lines_removed;
-                    entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id ? updated : tc);
+                    existing.raw_args = newRawArgs;
+                    existing.sandbox = data.sandbox;
+                    existing.path = data.path;
+                    if (data.lines_added !== undefined) existing.linesAdded = data.lines_added;
+                    if (data.lines_removed !== undefined) existing.linesRemoved = data.lines_removed;
                 } else if (s.processedToolIds.has(data.tool_id)) {
                     break;
                 } else {
@@ -117,12 +122,13 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const ref = s.activeToolCalls.get(data.tool_id);
                 s.activeToolCalls.delete(data.tool_id);
                 if (ref) {
-                    const tc = ref.toolCall;
-                    tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
-                    if (data.args) tc.args = data.args;
-                    if (data.raw_args) tc.raw_args = data.raw_args;
-                    if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                    if (data.path) tc.path = data.path;
+                    // Replace object in array for Svelte 5 reactivity
+                    const entry = s.entries.find(e => e.id === ref.entryId);
+                    if (entry && entry.toolCalls) {
+                        entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
+                            ? { ...tc, result: data.output, success: data.success, duration: data.duration, isPending: false, args: data.args ?? tc.args, raw_args: data.raw_args ?? tc.raw_args, sandbox: data.sandbox ?? tc.sandbox, path: data.path ?? tc.path }
+                            : tc);
+                    }
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();
@@ -136,20 +142,22 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (data.tool_id) {
                     const ref = s.activeToolCalls.get(data.tool_id);
                     if (ref) {
-                        const tc = ref.toolCall;
-                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
-                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
-                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                        if (data.path) tc.path = data.path;
+                        const entry = s.entries.find(e => e.id === ref.entryId);
+                        if (entry && entry.toolCalls) {
+                            entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
+                                ? { ...tc, bytesWritten: data.bytes_written ?? tc.bytesWritten, linesAdded: data.lines_added ?? tc.linesAdded, linesRemoved: data.lines_removed ?? tc.linesRemoved, path: data.path ?? tc.path }
+                                : tc);
+                        }
                     }
                 } else {
                     // Broadcast: update all active tool calls
                     for (const ref of s.activeToolCalls.values()) {
-                        const tc = ref.toolCall;
-                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
-                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
-                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                        if (data.path) tc.path = data.path;
+                        const entry = s.entries.find(e => e.id === ref.entryId);
+                        if (entry && entry.toolCalls) {
+                            entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === ref.toolCall.toolId
+                                ? { ...tc, bytesWritten: data.bytes_written ?? tc.bytesWritten, linesAdded: data.lines_added ?? tc.linesAdded, linesRemoved: data.lines_removed ?? tc.linesRemoved, path: data.path ?? tc.path }
+                                : tc);
+                        }
                     }
                 }
                 break;
@@ -158,8 +166,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { tool_id: string; text: string };
                 const ref = s.activeToolCalls.get(data.tool_id);
                 if (ref) {
-                    const tc = ref.toolCall;
-                    tc.result = (tc.result || '') + data.text;
+                    const entry = s.entries.find(e => e.id === ref.entryId);
+                    if (entry && entry.toolCalls) {
+                        entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
+                            ? { ...tc, result: (tc.result || '') + data.text }
+                            : tc);
+                    }
                 }
                 scroll();
                 break;
