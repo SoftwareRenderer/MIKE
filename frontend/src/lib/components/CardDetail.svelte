@@ -9,6 +9,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
+    import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
@@ -278,6 +279,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             baseCommit = null;
             diffFrom = '';
             diffTo = 'working';
+            clearHighlightCache();
             loadDiff();
         }
         previousTaskId = taskId;

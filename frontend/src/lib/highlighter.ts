@@ -443,6 +443,14 @@ export function highlightLines(lines: string[], path: string): string[] {
 }
 
 /**
+ * Clear the module-level LRU highlight cache.
+ * Call when switching tasks to avoid stale highlights.
+ */
+export function clearHighlightCache(): void {
+    highlightCache.clear();
+}
+
+/**
  * Extract symbols from Go template source using regex.
  * Finds: {{define "name"}}, {{block "name" .}}, $var := assignments.
  */

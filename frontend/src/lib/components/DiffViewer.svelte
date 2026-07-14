@@ -18,13 +18,11 @@ import { slide } from 'svelte/transition';
     let sortedUnstagedUntracked = $derived(sortUntrackedByPath(unstagedUntracked));
 
     // Map of file path -> DOM element for scroll-to-file from sidebar
-    let fileSections = $state(new Map<string, HTMLElement>());
+    let fileSections = new Map<string, HTMLElement>();
     function registerFileSection(el: HTMLElement, path: string) {
-        fileSections = new Map([...fileSections, [path, el]]);
+        fileSections.set(path, el);
         return () => {
-            const next = new Map(fileSections);
-            next.delete(path);
-            fileSections = next;
+            fileSections.delete(path);
         };
     }
 
@@ -163,7 +161,7 @@ import { slide } from 'svelte/transition';
     }
 
     // Track hovered row index per file for gutter highlight sync
-    let hoveredRow = $state<Record<string, number>>({});
+    let hoveredRowKey = $state('');
 
     // Reset hover state when diff data changes (e.g. expand, reload)
     $effect(() => {
@@ -171,57 +169,54 @@ import { slide } from 'svelte/transition';
         const _unstagedFiles = unstagedFiles;
         const _stagedUntracked = stagedUntracked;
         const _unstagedUntracked = unstagedUntracked;
-        hoveredRow = {};
+        hoveredRowKey = '';
     });
 
-    // Syntax highlight cache: filePath -> { lineNumKey: highlightedHtml }
-    let highlightCache = $state<Record<string, Record<string, string>>>({});
-
-    $effect(() => {
-        // Read props to establish reactive dependencies
-        const _stagedFiles = stagedFiles;
-        const _unstagedFiles = unstagedFiles;
-        const _stagedUntracked = stagedUntracked;
-        const _unstagedUntracked = unstagedUntracked;
-
-        const result: typeof highlightCache = {};
-
-        for (const file of [..._stagedFiles, ..._unstagedFiles]) {
-            if (file.rows.length === 0 || file.fileSize) continue;
-            const texts = file.rows.map(r => r.text ?? '');
-            const fileResult: Record<string, string> = {};
-            const htmls = highlightLines(texts, file.path);
-            let hasAnyHighlight = false;
-            file.rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    fileResult[String(row.lineNumber)] = htmls[i];
-                    hasAnyHighlight = true;
-                }
-            });
-            if (hasAnyHighlight) result[file.path] = fileResult;
-        }
-
-        for (const entry of [..._stagedUntracked, ..._unstagedUntracked]) {
-            const ufile = entry.file;
-            if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
-            const texts = ufile.rows.map(r => r.text ?? '');
-            const fileResult: Record<string, string> = {};
-            const htmls = highlightLines(texts, entry.path);
-            let hasAnyHighlight = false;
-            ufile.rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    fileResult[String(row.lineNumber)] = htmls[i];
-                    hasAnyHighlight = true;
-                }
-            });
-            if (hasAnyHighlight) result[entry.path] = fileResult;
-        }
-
-        highlightCache = result;
-    });
+    // Syntax highlight cache: plain Map, populated lazily on file expand.
+    // Not wrapped in $state — highlighting runs off-main-thread via queueMicrotask.
+    let highlightCache: Map<string, Record<string, string>> = new Map();
 
     function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
-        return highlightCache[filePath]?.[String(lineNumber)];
+        if (!lineNumber) return undefined;
+        return highlightCache.get(filePath)?.[String(lineNumber)];
+    }
+
+    /** Pre-populate highlight cache for a file (runs asynchronously via microtask). */
+    function preloadHighlights(path: string, rows: Array<{ text?: string; lineNumber: number | null }>) {
+        if (highlightCache.has(path)) return;
+        if (rows.length === 0) return;
+        queueMicrotask(() => {
+            const texts = rows.map(r => r.text ?? '');
+            const htmls = highlightLines(texts, path);
+            const cache: Record<string, string> = {};
+            let hasAny = false;
+            rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    cache[String(row.lineNumber)] = htmls[i];
+                    hasAny = true;
+                }
+            });
+            if (hasAny) highlightCache.set(path, cache);
+        });
+    }
+
+    /** Pre-populate highlight cache for an untracked file entry. */
+    function preloadUntrackedHighlights(entry: { path: string; fileSize?: number; file: DiffFile }) {
+        if (highlightCache.has(entry.path)) return;
+        if (entry.file.rows.length === 0 || entry.fileSize !== undefined) return;
+        queueMicrotask(() => {
+            const texts = entry.file.rows.map(r => r.text ?? '');
+            const htmls = highlightLines(texts, entry.path);
+            const cache: Record<string, string> = {};
+            let hasAny = false;
+            entry.file.rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    cache[String(row.lineNumber)] = htmls[i];
+                    hasAny = true;
+                }
+            });
+            if (hasAny) highlightCache.set(entry.path, cache);
+        });
     }
 
     function toggleBlock(id: string) {
@@ -230,13 +225,26 @@ import { slide } from 'svelte/transition';
 
     function toggleFile(path: string) {
         const next = new Set(collapsedFiles);
-        if (next.has(path)) {
+        const wasCollapsed = next.has(path);
+        if (wasCollapsed) {
             next.delete(path);
         } else {
             next.add(path);
         }
         collapsedFiles = next;
         saveCollapsedFiles(next);
+        // Preload highlights when expanding a file (not when collapsing)
+        if (wasCollapsed) {
+            const file = [...sortedStagedFiles, ...sortedUnstagedFiles].find(f => f.path === path);
+            if (file) {
+                preloadHighlights(file.path, file.rows);
+                return;
+            }
+            const entry = untrackedMap.get(path);
+            if (entry) {
+                preloadUntrackedHighlights(entry);
+            }
+        }
     }
 
     /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
@@ -374,16 +382,16 @@ import { slide } from 'svelte/transition';
                         <div class="diff-gutter">
                             {#each items as item, i}
                                 {#if item.type === 'row'}
-                                    <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[file.path] === i}>
+                                    <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRowKey === `${file.path}:${i}`}>
                                         <span class="diff-line-num">
                                             <span class="diff-line-num-text">{item.row.lineNumber || ''}</span>
                                         </span>
                                     </div>
                                 {:else if item.type === 'collapsed'}
-                                    <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[file.path] === i}></div>
+                                    <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRowKey === `${file.path}:${i}`}></div>
                                     {#if expandedBlocks[item.block.id]}
                                         {#each item.block.rows as row, ji}
-                                            <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[file.path] === i + 1 + ji}>
+                                            <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRowKey === `${file.path}:${i + 1 + ji}`}>
                                                 <span class="diff-line-num">
                                                     <span class="diff-line-num-text">{row.lineNumber || ''}</span>
                                                 </span>
@@ -403,8 +411,8 @@ import { slide } from 'svelte/transition';
                                             role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
                                             tabindex={onLineClick && item.row.lineNumber != null ? 0 : undefined}
                                             onclick={() => handleRowClick(file.path, item.row.lineNumber)}
-                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
-                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                            onmouseenter={() => { hoveredRowKey = `${file.path}:${i}` }}
+                                            onmouseleave={() => { hoveredRowKey = '' }}
                                         >
                                             <span class="diff-line-content">
                                                 {#if item.row.variant === 'added'}
@@ -433,8 +441,8 @@ import { slide } from 'svelte/transition';
                                             class="diff-collapse-btn"
                                             aria-expanded={expandedBlocks[item.block.id]}
                                             onclick={() => toggleBlock(item.block.id)}
-                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i } }}
-                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                            onmouseenter={() => { hoveredRowKey = `${file.path}:${i}` }}
+                                            onmouseleave={() => { hoveredRowKey = '' }}
                                             title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
                                         >
                                             {#if expandedBlocks[item.block.id]}
@@ -458,8 +466,8 @@ import { slide } from 'svelte/transition';
                                                     tabindex={onLineClick && row.lineNumber != null ? 0 : undefined}
                                                     onclick={() => handleRowClick(file.path, row.lineNumber)}
                                                     onkeydown={(e) => { if (onLineClick && row.lineNumber != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(file.path, row.lineNumber); } }}
-                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [file.path]: i + 1 + ji } }}
-                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[file.path]; hoveredRow = n; }}
+                                                    onmouseenter={() => { hoveredRowKey = `${file.path}:${i + 1 + ji}` }}
+                                                    onmouseleave={() => { hoveredRowKey = '' }}
                                                 >
                                                     <span class="diff-line-content">
                                                         <span class="diff-prefix"> </span>
@@ -574,16 +582,16 @@ import { slide } from 'svelte/transition';
                         <div class="diff-gutter">
                             {#each uitems as item, i}
                                 {#if item.type === 'row'}
-                                    <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRow[entry.path] === i}>
+                                    <div class={`diff-gutter-row diff-row-${item.row.variant}`} class:diff-gutter-hover={hoveredRowKey === `${entry.path}:${i}`}>
                                         <span class="diff-line-num">
                                             <span class="diff-line-num-text">{item.row.lineNumber || ''}</span>
                                         </span>
                                     </div>
                                 {:else if item.type === 'collapsed'}
-                                    <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRow[entry.path] === i}></div>
+                                    <div class="diff-gutter-row diff-gutter-collapse" class:diff-gutter-hover={hoveredRowKey === `${entry.path}:${i}`}></div>
                                     {#if expandedBlocks[item.block.id]}
                                         {#each item.block.rows as row, ji}
-                                            <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRow[entry.path] === i + 1 + ji}>
+                                            <div class="diff-gutter-row diff-row-context" class:diff-gutter-hover={hoveredRowKey === `${entry.path}:${i + 1 + ji}`}>
                                                 <span class="diff-line-num">
                                                     <span class="diff-line-num-text">{row.lineNumber || ''}</span>
                                                 </span>
@@ -603,8 +611,8 @@ import { slide } from 'svelte/transition';
                                             role={onLineClick && item.row.lineNumber != null ? 'button' : undefined}
                                             tabindex={onLineClick && item.row.lineNumber != null ? 0 : -1}
                                             onclick={() => handleRowClick(entry.path, item.row.lineNumber)}
-                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
-                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                            onmouseenter={() => { hoveredRowKey = `${entry.path}:${i}` }}
+                                            onmouseleave={() => { hoveredRowKey = '' }}
                                         >
                                             <span class="diff-line-content">
                                                 {#if item.row.variant === 'added'}
@@ -633,8 +641,8 @@ import { slide } from 'svelte/transition';
                                             class="diff-collapse-btn"
                                             aria-expanded={expandedBlocks[item.block.id]}
                                             onclick={() => toggleBlock(item.block.id)}
-                                            onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i } }}
-                                            onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                            onmouseenter={() => { hoveredRowKey = `${entry.path}:${i}` }}
+                                            onmouseleave={() => { hoveredRowKey = '' }}
                                             title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
                                         >
                                             {#if expandedBlocks[item.block.id]}
@@ -658,8 +666,8 @@ import { slide } from 'svelte/transition';
                                                     tabindex={onLineClick && row.lineNumber != null ? 0 : undefined}
                                                     onclick={() => handleRowClick(entry.path, row.lineNumber)}
                                                     onkeydown={(e) => { if (onLineClick && row.lineNumber != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(entry.path, row.lineNumber); } }}
-                                                    onmouseenter={() => { hoveredRow = { ...hoveredRow, [entry.path]: i + 1 + ji } }}
-                                                    onmouseleave={() => { const n = { ...hoveredRow }; delete n[entry.path]; hoveredRow = n; }}
+                                                    onmouseenter={() => { hoveredRowKey = `${entry.path}:${i + 1 + ji}` }}
+                                                    onmouseleave={() => { hoveredRowKey = '' }}
                                                 >
                                                     <span class="diff-line-content">
                                                         <span class="diff-prefix"> </span>
