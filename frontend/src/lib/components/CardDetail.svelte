@@ -488,6 +488,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         editingFile = null;
         diffFrom = '';
         diffTo = 'working';
+        clearHighlightCache();
         diffLoading = true;
         try {
             await Promise.all([loadCommits(), diffCache.loadDiff(() => {})]);
