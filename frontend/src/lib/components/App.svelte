@@ -171,14 +171,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
-    let showCreateTaskVal = $state(false);
-    let showConfigVal = $state(false);
-    let showTerminalVal = $state(false);
-    let showStatsVal = $state(false);
-    let showCardDetailVal = $state(false);
-    let showSandboxConfigVal = $state(false);
-    let showEditTaskVal = $state(false);
-    let editTaskDataVal: import('$lib/stores/app').EditTaskData | null = $state(null);
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
@@ -189,7 +181,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let currentBranch = $state('');
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let selectedTaskVal: Task | null = $state(null);
-    let creatingChildOfVal: string | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
@@ -204,14 +195,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     $effect(() => {
         const unsub = [
             sidebarCollapsed.subscribe(v => collapsed = v),
-            showCreateTask.subscribe(v => showCreateTaskVal = v),
-            creatingChildOfStore.subscribe(v => creatingChildOfVal = v),
-            showConfig.subscribe(v => showConfigVal = v),
-            showTerminal.subscribe(v => { showTerminalVal = v; if (v) loadTerminalPanel(); }),
-            showStats.subscribe(v => showStatsVal = v),
-            showCardDetail.subscribe(v => showCardDetailVal = v),
-            showEditTask.subscribe(v => showEditTaskVal = v),
-            editTaskDataStore.subscribe(v => editTaskDataVal = v),
             configStore.subscribe(v => { if (v) cfg = v; }),
             selectedTask.subscribe(t => {
                 selectedTaskVal = t;
@@ -683,7 +666,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
         selectedTaskVal = task;
-        showCardDetailVal = true;
+        showCardDetail.set(true);
         selectedTask.set(task);
     }
 
@@ -761,7 +744,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Push URL first so the subscription sees updated URL
         updateUrl({ project: currentProject?.id }, true, true);
         selectedTaskVal = null;
-        showCardDetailVal = false;
         selectedTask.set(null);
         showCardDetail.set(false);
     }
@@ -933,11 +915,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         // Clear port conflict when opening modal (user will see/fix it in modal)
         portConflict = null;
-        showSandboxConfigVal = true;
+        showSandboxConfig.set(true);
     }
 
     async function handleSandboxSaved() {
-        showSandboxConfigVal = false;
+        showSandboxConfig.set(false);
         portConflict = null; // Clear port conflict on successful save
         // Refresh projects list to pick up changes
         try {
@@ -996,7 +978,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         Viewing cached data
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={showCardDetailVal && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={$showCardDetail && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -1033,7 +1015,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !(showCardDetailVal && selectedTaskVal) && !showExplorerViewVal}
+            {#if !($showCardDetail && selectedTaskVal) && !showExplorerViewVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -1060,7 +1042,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onUpdateFile={handleExplorerFileChange}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
-                {:else if showCardDetailVal && selectedTaskVal}
+                {:else if $showCardDetail && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
                         showCardDetail.set(false);
@@ -1107,33 +1089,33 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     </main>
 
     <!-- Modals -->
-    {#if showCreateTaskVal}
+    {#if $showCreateTask}
         <CreateTaskModal
             projectId={currentProject?.id}
-            parentId={creatingChildOfVal ?? undefined}
+            parentId={$creatingChildOfStore ?? undefined}
             onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
             onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
         />
     {/if}
-    {#if showEditTaskVal && editTaskDataVal}
+    {#if $showEditTask && $editTaskDataStore}
         <EditTaskModal
-            taskTitle={editTaskDataVal.taskTitle}
-            taskPrompt={editTaskDataVal.taskPrompt}
-            editProviders={editTaskDataVal.editProviders}
-            editModel={editTaskDataVal.editModel}
-            editUrl={editTaskDataVal.editUrl}
-            editReasoningEffort={editTaskDataVal.editReasoningEffort}
-            editPlanMode={editTaskDataVal.editPlanMode}
-            editAutoMerge={editTaskDataVal.editAutoMerge}
-            editSubtasksAutoMerge={editTaskDataVal.editSubtasksAutoMerge}
-            taskHasParent={editTaskDataVal.taskHasParent}
-            targetBranch={editTaskDataVal.targetBranch}
-            isAgentSelected={editTaskDataVal.isAgentSelected}
+            taskTitle={$editTaskDataStore.taskTitle}
+            taskPrompt={$editTaskDataStore.taskPrompt}
+            editProviders={$editTaskDataStore.editProviders}
+            editModel={$editTaskDataStore.editModel}
+            editUrl={$editTaskDataStore.editUrl}
+            editReasoningEffort={$editTaskDataStore.editReasoningEffort}
+            editPlanMode={$editTaskDataStore.editPlanMode}
+            editAutoMerge={$editTaskDataStore.editAutoMerge}
+            editSubtasksAutoMerge={$editTaskDataStore.editSubtasksAutoMerge}
+            taskHasParent={$editTaskDataStore.taskHasParent}
+            targetBranch={$editTaskDataStore.targetBranch}
+            isAgentSelected={$editTaskDataStore.isAgentSelected}
             onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => {
-                const taskId = editTaskDataVal!.taskId;
-                const projectId = editTaskDataVal!.projectId;
+                const taskId = $editTaskDataStore!.taskId;
+                const projectId = $editTaskDataStore!.projectId;
                 // Find the task in the board and update it
                 const task = tasks.find(t => t.id === taskId);
                 if (task) {
@@ -1171,7 +1153,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }}
         />
     {/if}
-    {#if showConfigVal}
+    {#if $showConfig}
         <ConfigModal
             config={cfg}
             onClose={() => showConfig.set(false)}
@@ -1179,7 +1161,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onSignOut={handleLogout}
         />
     {/if}
-    {#if showTerminalVal && TerminalPanelComponent}
+    {#if $showTerminal && TerminalPanelComponent}
         {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
             {@const Terminal = TerminalPanelComponent}
             {#if Terminal}
@@ -1187,7 +1169,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             {/if}
         {/key}
     {/if}
-    {#if showStatsVal && currentProject}
+    {#if $showStats && currentProject}
         <StatsModal
             projectId={currentProject.id}
             onClose={() => showStats.set(false)}
@@ -1199,11 +1181,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onSelect={handleSelectProjectPath}
         />
     {/if}
-    {#if showSandboxConfigVal && currentProject}
+    {#if $showSandboxConfig && currentProject}
         <SandboxConfigModal
             project={currentProject}
             inProgressCount={projectCounts[currentProject.id]?.in_progress ?? 0}
-            onClose={() => showSandboxConfigVal = false}
+            onClose={() => showSandboxConfig.set(false)}
             onSaved={handleSandboxSaved}
         />
     {/if}
