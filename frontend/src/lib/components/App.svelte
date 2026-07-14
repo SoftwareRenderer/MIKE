@@ -130,9 +130,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         }
     }
     function updateCountdown() {
-        const remaining = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
-        countdownSeconds = remaining;
-        if (remaining <= 0) stopCountdown();
+        countdownSeconds = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
     }
     function startStaleTick() {
         stopStaleTick();
@@ -167,9 +165,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     function tryReconnectNow() {
         if (appStream) {
             appStream.reconnectNow();
-            stopCountdown();
             nextReconnectAt = 0;
-            countdownSeconds = 0;
         }
     }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
@@ -490,7 +486,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         wsConnected = connected;
                         setOfflineStatus(!connected);
                         if (!connected) {
-                            startCountdown();
                             startStaleTick();
                         } else {
                             stopCountdown();
@@ -506,6 +501,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                     onReconnectScheduled: (nextAttemptAt) => {
                         nextReconnectAt = nextAttemptAt;
                         startCountdown();
+                    },
+                    onConnectAttempt: () => {
+                        stopCountdown();
+                        countdownSeconds = 0;
                     },
                     onPortConflict: (project_id, conflicted_ports) => {
                         portConflict = { project_id, ports: conflicted_ports };
@@ -595,7 +594,6 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                 wsConnected = connected;
                 setOfflineStatus(!connected);
                 if (!connected) {
-                    startCountdown();
                     startStaleTick();
                 } else {
                     stopCountdown();
@@ -610,6 +608,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             onReconnectScheduled: (nextAttemptAt) => {
                 nextReconnectAt = nextAttemptAt;
                 startCountdown();
+            },
+            onConnectAttempt: () => {
+                stopCountdown();
+                countdownSeconds = 0;
             },
             onPortConflict: () => {},
         });
@@ -708,7 +710,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             }
             // Live data received — clear cache indicator
             servingFromCache = false;
-            lastSyncedAt = Date.now();
+            if (wsConnected) lastSyncedAt = Date.now();
         } catch (e) {
             // When offline, sync tasks from boardStore (has optimistic updates)
             const b = (boardStore as any).get();
@@ -745,7 +747,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             cfg = c;
             configStore.set(c);
             servingFromCache = false;
-            lastSyncedAt = Date.now();
+            if (wsConnected) lastSyncedAt = Date.now();
         } catch {
             // Still offline — keep cached data
         }

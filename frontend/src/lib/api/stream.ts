@@ -21,6 +21,7 @@ export interface AppStreamCallbacks {
     onProjectPorts?: (ports: Array<{ host_port: number; container_port: number }>) => void; // project-level terminal port mappings
     onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
     onReconnectScheduled?: (nextAttemptAt: number) => void; // epoch ms of next reconnect attempt
+    onConnectAttempt?: () => void; // fired when a connection attempt begins
 }
 
 export interface AppStream {
@@ -98,15 +99,25 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
     }
 
     let hasConnectedOnce = false;
+    let connectGen = 0; // incremented each connect() to stale out old onclose handlers
 
     function connect() {
         if (isClosed) return;
+        // Close any in-flight WebSocket to prevent overlapping connections
+        // (e.g. reconnect timer + user clicking "Connect" at the same time)
+        if (currentWs) {
+            currentWs.close();
+        }
+        stopHeartbeat(); // prevent leak when stale onclose is skipped
+        const gen = ++connectGen;
+        callbacks.onConnectAttempt?.();
         // Use ?sync=1 on reconnect so the server sends the global event buffer
         const syncParam = hasConnectedOnce ? '?sync=1' : '';
         const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream${syncParam}`);
         currentWs = ws;
 
         ws.onopen = () => {
+            if (gen !== connectGen) return; // stale
             reconnectAttempts = 0;
             hasConnectedOnce = true;
             lastActivityAt = Date.now();
@@ -172,6 +183,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         };
 
         ws.onclose = () => {
+            if (gen !== connectGen) return; // stale connection, skip
             stopHeartbeat();
             currentWs = null;
             if (isClosed) return;
