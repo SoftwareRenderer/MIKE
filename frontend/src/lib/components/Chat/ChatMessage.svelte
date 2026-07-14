@@ -533,7 +533,7 @@
     .assistant .message-bubble {
         max-width: 100%;
         background: var(--color-surface-3);
-        border-radius: var(--radius-md);
+        border-radius: 1.125rem;
         padding: 10px 14px;
         border: 1px solid var(--color-border);
     }
