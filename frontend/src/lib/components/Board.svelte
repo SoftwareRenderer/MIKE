@@ -243,12 +243,20 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         queueMicrotask(() => { liveAnnouncement = message; });
     }
 
-    // Scroll to a specific column on mobile (e.g. after task delete)
+    // Scroll to a specific column on mobile (e.g. after task delete or close)
     let boardEl: HTMLDivElement | null = null;
     let hasScrolled = $state(false);
+    let lastScrolledTarget = $state<string | null>(null);
     $effect(() => {
         const target = scrollToColumn;
+        // Reset hasScrolled when target changes (new close event)
+        if (target !== lastScrolledTarget) {
+            hasScrolled = false;
+            lastScrolledTarget = target;
+        }
         if (!target || !boardEl || hasScrolled) return;
+        // Skip scroll if target column is empty (e.g. last task in column was deleted)
+        if (getTasksForColumn(target).length === 0) return;
         hasScrolled = true;
         (async () => {
             await tick();

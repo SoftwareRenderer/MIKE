@@ -22,7 +22,7 @@
         sandboxEnabled: boolean | undefined;
         badge: { text: string; color: string };
         worktreeExists: boolean;
-        onClose: () => void;
+        onClose: (status?: string) => void;
         onOpenTerminal: () => void;
         onDelete: () => Promise<void>;
         task: Task;
@@ -33,7 +33,7 @@
 
 <div class="header">
     <div class="header-left">
-        <button class="btn-back" onclick={onClose} aria-label="Back to board (Esc)" title="Back to board (Esc)">
+        <button class="btn-back" onclick={() => onClose(task.status)} aria-label="Back to board (Esc)" title="Back to board (Esc)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>

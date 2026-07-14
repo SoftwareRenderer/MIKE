@@ -291,6 +291,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 showCardDetail.set(true);
             }
         } else {
+            // Scroll to the task's column when going back via browser back button
+            const prevTask = selectedTaskVal;
+            if (prevTask) scrollToColumn = prevTask.status;
             selectedTask.set(null);
             showCardDetail.set(false);
         }
