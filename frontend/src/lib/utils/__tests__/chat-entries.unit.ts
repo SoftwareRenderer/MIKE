@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, getCheckpointEntryCheckpointState, buildCheckpointStateMap } from '$lib/utils/chat-entries';
 import type { ChatEntry } from '$lib/types';
 
 function entry(role: string, content: string): ChatEntry {
@@ -96,5 +96,194 @@ describe('trimEntriesForRegenerate', () => {
         const trimmed = trimEntriesForRegenerate(entries, 1);
         expect(entries).toHaveLength(2);
         expect(trimmed).not.toBe(entries);
+    });
+});
+
+describe('buildCheckpointStateMap', () => {
+    function assistant(id: string, toolCalls?: any[], hash?: string): ChatEntry {
+        const base: ChatEntry = { id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString() };
+        if (toolCalls) base.toolCalls = toolCalls;
+        return base;
+    }
+
+    function user(id: string): ChatEntry {
+        return { id, role: 'user', content: 'hello', isStreaming: false, createdAt: new Date().toISOString() };
+    }
+
+    /** Helper to verify buildCheckpointStateMap matches per-entry getCheckpointEntryCheckpointState. */
+    function assertMatches(entries: ChatEntry[], pending: Set<string>, labels: Map<string, string>, hashes: Map<string, string>) {
+        const map = buildCheckpointStateMap(entries, pending, labels, hashes);
+        for (let i = 0; i < entries.length; i++) {
+            if (entries[i].role === 'user') {
+                const expected = getCheckpointEntryCheckpointState(i, entries, pending, labels, hashes);
+                expect(map.get(i)).toEqual(expected);
+            }
+        }
+    }
+
+    it('returns empty map for entries with no user messages', () => {
+        const entries = [assistant('a1')];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        expect(map.size).toBe(0);
+    });
+
+    it('returns null when no assistant with tool calls exists', () => {
+        const entries = [user('u1'), assistant('a1')];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        expect(map.get(0)).toBeNull();
+    });
+
+    it('finds forward assistant with tool calls', () => {
+        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
+        const pending = new Set<string>();
+        const labels = new Map<string, string>();
+        const hashes = new Map<string, string>();
+        const map = buildCheckpointStateMap(entries, pending, labels, hashes);
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
+    });
+
+    it('finds forward assistant with checkpoint hash', () => {
+        const entries = [user('u1'), assistant('a1')];
+        const hashes = new Map<string, string>();
+        hashes.set('a1', 'abc123');
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'abc123' });
+    });
+
+    it('forward scan stops at first assistant even without tool calls', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1'),          // no tool calls — forward scan stops here
+            assistant('a2', [{ toolId: 't1' }]), // has tool calls but forward already stopped
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        expect(map.get(0)).toBeNull();
+    });
+
+    it('backward scan finds previous assistant with tool calls', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1', [{ toolId: 't1' }]),
+            user('u2'),
+            assistant('a2'),          // no tool calls — forward stops here for u2
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u2: forward stops at a2 (no tool calls), backward finds a1
+        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
+    });
+
+    it('backward scan finds assistant before the user when forward scan fails', () => {
+        const entries = [
+            assistant('a0', [{ toolId: 't0' }]),
+            user('u1'),
+            assistant('a1'),          // no tool calls — forward stops here for u1
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u1: forward stops at a1 (no tool calls), backward scan finds a0 (has tool calls)
+        // No previous user entry to bound backward scan, so a0 is visible.
+        expect(map.get(1)).toEqual({ isPending: false, commitHash: undefined });
+    });
+
+    it('backward scan is bounded by previous user entry', () => {
+        const entries = [
+            assistant('a0', [{ toolId: 't0' }]),
+            user('u1'),
+            assistant('a1'),          // no tool calls — forward stops here for u1
+            user('u2'),
+            assistant('a2'),          // no tool calls — forward stops here for u2
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u1: forward stops at a1, backward finds a0
+        expect(map.get(1)).toEqual({ isPending: false, commitHash: undefined });
+        // u2: forward stops at a2, backward bounded by u1 — a1 has no tool calls, a0 is before u1
+        // so backward scan finds nothing
+        expect(map.get(3)).toBeNull();
+    });
+
+    it('handles pending checkpoints correctly', () => {
+        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
+        const pending = new Set<string>();
+        pending.add('a1');
+        const map = buildCheckpointStateMap(entries, pending, new Map(), new Map());
+        expect(map.get(0)).toEqual({ isPending: true, commitHash: undefined });
+    });
+
+    it('handles commit labels', () => {
+        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
+        const labels = new Map<string, string>();
+        labels.set('a1', 'fix: bug');
+        const map = buildCheckpointStateMap(entries, new Set(), labels, new Map());
+        expect(map.get(0)).toEqual({ isPending: false, commitLabel: 'fix: bug', commitHash: undefined });
+    });
+
+    it('matches per-entry function across multiple users with mixed assistants', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1', [{ toolId: 't1' }]),
+            user('u2'),
+            assistant('a2'),
+            user('u3'),
+            assistant('a3', [{ toolId: 't3' }]),
+            assistant('a4'),
+        ];
+        const hashes = new Map<string, string>();
+        hashes.set('a1', 'hash1');
+        hashes.set('a3', 'hash3');
+        assertMatches(entries, new Set(), new Map(), hashes);
+    });
+
+    it('handles empty entries array', () => {
+        const map = buildCheckpointStateMap([], new Set(), new Map(), new Map());
+        expect(map.size).toBe(0);
+    });
+
+    it('handles single user entry with no assistants', () => {
+        const entries = [user('u1')];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        expect(map.get(0)).toBeNull();
+    });
+
+    it('forward scan for second user does not use assistant consumed by first user', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1', [{ toolId: 't1' }]),
+            user('u2'),
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u1: forward finds a1 (has tool calls) → uses it
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
+        // u2: no forward assistant, backward bounded by u1 finds a1 (has tool calls, between u1 and u2)
+        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
+    });
+
+    it('backward scan returns null when no qualifying assistant between users', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1'),          // no tool calls
+            user('u2'),
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u1: no forward qualifying assistant, no backward qualifying assistant
+        expect(map.get(0)).toBeNull();
+        // u2: no forward assistant, backward bounded by u1 — a1 has no tool calls
+        expect(map.get(2)).toBeNull();
+    });
+
+    it('non-qualifying forward assistant does not block next user from backward scanning', () => {
+        const entries = [
+            user('u1'),
+            assistant('a1', [{ toolId: 't1' }]),
+            user('u2'),
+            assistant('a2'),          // no tool calls — forward stops for u2
+            user('u3'),
+            assistant('a3', [{ toolId: 't3' }]),
+        ];
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
+        // u1: forward finds a1 → uses it
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
+        // u2: forward stops at a2 (no tool calls), backward bounded by u1 finds a1
+        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
+        // u3: forward finds a3 → uses it
+        expect(map.get(4)).toEqual({ isPending: false, commitHash: undefined });
     });
 });

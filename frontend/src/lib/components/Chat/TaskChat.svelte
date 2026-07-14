@@ -11,7 +11,7 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
     import { useCheckpointTracker } from '$lib/composables/use-checkpoint-tracker.svelte';
-    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, getCheckpointEntryCheckpointState as getCheckpointEntryCheckpointStateUtil, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
+    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
@@ -170,16 +170,18 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     // Set of user message IDs with no assistant response after them.
     let lastUserMessageIds = $derived(computeLastUserMessageIds(entries));
 
-    // Precomputed per-entry metadata — avoids O(n²) lookups inside {#each}.
+    // Precomputed per-entry metadata — O(n) single-pass via buildCheckpointStateMap.
     let entryMetas = $derived(((() => {
         const metas: EntryMeta[] = new Array(entries.length);
         const streaming = isLoading;
+        const cpStateMap = buildCheckpointStateMap(entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes);
+        const activeThread = threads.find(t => t.is_active);
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
             metas[i] = entry.role === 'user'
                 ? {
-                    cpState: getCheckpointEntryCheckpointStateUtil(i, entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes),
-                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, threads.find(t => t.is_active), i === 0) : null,
+                    cpState: cpStateMap.get(i) ?? null,
+                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0) : null,
                     isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
                 }
                 : { cpState: null, cpThread: null, isLastUserMessage: false };
