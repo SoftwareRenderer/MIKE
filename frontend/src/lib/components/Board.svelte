@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
+    import { tick } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
     import { board as boardStore, selectedTask, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
@@ -9,7 +10,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
 
-    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void } = $props();
+    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
 
     // Build a lookup map for children of each task
@@ -241,9 +242,25 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         liveAnnouncement = '';
         queueMicrotask(() => { liveAnnouncement = message; });
     }
+
+    // Scroll to a specific column on mobile (e.g. after task delete)
+    let boardEl: HTMLDivElement | null = null;
+    let hasScrolled = $state(false);
+    $effect(() => {
+        const target = scrollToColumn;
+        if (!target || !boardEl || hasScrolled) return;
+        hasScrolled = true;
+        (async () => {
+            await tick();
+            const col = boardEl.querySelector(`.column[aria-label="${target === 'in_progress' ? 'In Progress' : target === 'backlog' ? 'Backlog' : target === 'review' ? 'Review' : 'Done'} column"]`);
+            if (col instanceof HTMLElement) {
+                col.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }
+        })();
+    });
 </script>
 
-<div class="board" role="region" aria-label="Task board">
+<div class="board" bind:this={boardEl} role="region" aria-label="Task board">
     <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     {#each columns as col}
         <Column

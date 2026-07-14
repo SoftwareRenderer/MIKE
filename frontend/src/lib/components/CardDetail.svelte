@@ -34,7 +34,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
 
-    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: () => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
+    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
     let allTasks = $derived($boardStore?.tasks || []);
 
@@ -464,7 +464,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             await deleteTask(projectId, taskId);
             // Fallback refresh in case WebSocket is disconnected
             onRefreshBoard?.();
-            onClose();
+            onClose(task.status);
         } catch (e) {
             showToast('Failed to delete task: ' + String(e), 'error');
         }

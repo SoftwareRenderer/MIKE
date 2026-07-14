@@ -182,6 +182,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
+let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
@@ -1057,7 +1058,8 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showCardDetailVal && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={() => {
+                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
+                        if (status) scrollToColumn = status;
                         showCardDetail.set(false);
                         selectedTask.set(null);
                         updateUrl({ project: currentProject?.id }, true, true);
@@ -1073,6 +1075,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
                         {tasks}
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
+                        scrollToColumn={scrollToColumn}
                         onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
                         onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
                         onRefreshBoard={() => refreshBoard()}
