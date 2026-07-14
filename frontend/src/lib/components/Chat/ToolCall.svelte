@@ -667,12 +667,11 @@
         max-width: 100%;
         overflow: hidden;
         font-family: inherit;
-        flex-shrink: 0;
     }
     .btn-open-task-text {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        text-align: left;
+        overflow-wrap: break-word;
+        word-break: break-word;
     }
     .btn-open-task:hover {
         border-color: var(--color-border-bright);
