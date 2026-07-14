@@ -189,7 +189,7 @@
         <div class="edit-attachments">
             {#each editAttachments as att, i}
                 <div class="edit-attachment-chip">
-                    <img src={att.data} alt="Attachment" />
+                    <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="Attachment" />
                     <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title="Remove">&times;</button>
                 </div>
             {/each}

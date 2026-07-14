@@ -71,16 +71,19 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     }
 
-    // Clear draft text and attachments on send (called synchronously from ChatForm)
+    // Clear draft on send (called synchronously from ChatForm)
     function handleClearDraft() {
         clearDraftText(taskId).catch(() => {});
+        clearDraftAttachments(taskId).catch(() => {});
         draftAttachments = [];
     }
 
-    // Save draft attachments to IndexedDB on every change
+    // Save draft attachments; skip empty to avoid racing with load effect on mount
     $effect(() => {
         const atts = draftAttachments;
-        saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+        if (atts.length > 0) {
+            saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+        }
     });
 
     // Model selection state
@@ -119,6 +122,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let lastPromptTokens = $derived(stream.state.lastPromptTokens);
 
     let lastSentMessage: string | null = $state(null);
+    let lastSentEntryId: string | null = $state(null); // temp ID of last optimistic entry
     let isStarting = $state(false);
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let firstConnectDone = $state(false); // track if initial onopen has fired
@@ -277,8 +281,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     }
 
     /** Send a message via the API with tracking state. Returns false on failure. */
-    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false): Promise<boolean> {
+    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false, entryId?: string): Promise<boolean> {
         lastSentMessage = msg;
+        lastSentEntryId = entryId ?? null;
         stream.state.awaitingResponse = true;
         try {
             await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
@@ -324,14 +329,26 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
             if (lastSentMessage === data.content) {
                 lastSentMessage = null;
+                lastSentEntryId = null;
                 isRegenerating = false;
                 if (data.id) {
-                    for (let i = stream.state.entries.length - 1; i >= 0; i--) {
-                        if (stream.state.entries[i].role === 'user' && stream.state.entries[i].content === data.content) {
-                            stream.state.entries[i].id = data.id;
-                            if (data.thread_id) stream.state.entries[i].threadId = data.thread_id;
-                            if (data.attachments) stream.state.entries[i].attachments = data.attachments;
-                            break;
+                    // Match by optimistic entry ID when available (reliable),
+                    // fall back to content match for backward compat (e.g. regenerate).
+                    if (lastSentEntryId) {
+                        const entry = stream.state.entries.find(e => e.id === lastSentEntryId);
+                        if (entry) {
+                            entry.id = data.id;
+                            if (data.thread_id) entry.threadId = data.thread_id;
+                            if (data.attachments) entry.attachments = data.attachments;
+                        }
+                    } else {
+                        for (let i = stream.state.entries.length - 1; i >= 0; i--) {
+                            if (stream.state.entries[i].role === 'user' && stream.state.entries[i].content === data.content) {
+                                stream.state.entries[i].id = data.id;
+                                if (data.thread_id) stream.state.entries[i].threadId = data.thread_id;
+                                if (data.attachments) stream.state.entries[i].attachments = data.attachments;
+                                break;
+                            }
                         }
                     }
                 }
@@ -618,7 +635,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         const isOfflineNow = getOfflineStatus();
         stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
         // Send with model info for lazy-start
-        if (!await sendWithTracking(msg, attachments)) {
+        if (!await sendWithTracking(msg, attachments, false, entryId)) {
             const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
             stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
             stream.state.entries = [...stream.state.entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];

@@ -96,8 +96,12 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		Attachments     string `json:"attachments"`
 		Regenerate      bool   `json:"regenerate"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "content is required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Content == "" && req.Attachments == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "content or attachments required")
 		return
 	}
 
@@ -117,7 +121,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 	}
 
-	// Check for duplicate (same content as last user message in thread)
+	// Check for duplicate — compare both content and attachments
 	msgID := uuid.New().String()
 	existingID, lookupErr := te.store.GetLastUserMessageInThread(threadID)
 	isDuplicate := false
@@ -125,7 +129,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		existingMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 		for i := len(existingMsgs) - 1; i >= 0; i-- {
 			if existingMsgs[i].ID == existingID {
-				if existingMsgs[i].Content == req.Content {
+				if existingMsgs[i].Content == req.Content && existingMsgs[i].Attachments == req.Attachments {
 					isDuplicate = true
 					msgID = existingID
 				}

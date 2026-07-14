@@ -282,7 +282,7 @@
                 <div class="edit-attachments-preview">
                     {#each mobileEditAttachments as att, i}
                         <div class="edit-attachment-chip">
-                            <img src={att.data} alt="Attachment" />
+                            <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="Attachment" />
                             <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title="Remove">&times;</button>
                         </div>
                     {/each}
@@ -338,7 +338,7 @@
             {#if attachments && attachments.length > 0}
                 <div class="message-images">
                     {#each attachments as att}
-                        <img src={att.data} alt="" class="message-image" />
+                        <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="" class="message-image" />
                     {/each}
                 </div>
             {/if}
