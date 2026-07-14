@@ -706,6 +706,22 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Ensure parent branch exists for child tasks (safety net for manual commit-and-done).
+	// Normally this is done during task start (ensureParentBranch), but if the user
+	// commits a subtask without starting it, the parent branch may not exist yet.
+	if task.ParentTaskID != "" {
+		parent, pErr := h.store.GetTaskByTaskID(task.ParentTaskID)
+		if pErr == nil && parent.Branch == "" {
+			log.Printf("[commit-and-done] task=%s parent %s has no branch, creating it", taskID, task.ParentTaskID)
+			if err := h.executor.EnsureParentBranch(projectID, parent); err != nil {
+				log.Printf("[commit-and-done] task=%s failed to ensure parent branch: %v", taskID, err)
+			} else {
+				// Reload task with updated parent info
+				task, _ = h.store.GetTask(projectID, taskID)
+			}
+		}
+	}
+
 	// Merge task branch
 	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)

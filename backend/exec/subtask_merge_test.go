@@ -41,7 +41,7 @@ func TestEnsureParentBranch_CreatesBranchWhenParentNotStarted(t *testing.T) {
 	}
 
 	// Ensure parent branch is created
-	err := te.ensureParentBranch(projectID, parent)
+	err := te.EnsureParentBranch(projectID, parent)
 	if err != nil {
 		t.Fatalf("ensureParentBranch failed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestEnsureParentBranch_Idempotent(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// First call — creates branch
-	err := te.ensureParentBranch(projectID, parent)
+	err := te.EnsureParentBranch(projectID, parent)
 	if err != nil {
 		t.Fatalf("first ensureParentBranch failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestEnsureParentBranch_Idempotent(t *testing.T) {
 	parent, _ = te.store.GetTaskByTaskID(parentID)
 
 	// Second call — should be no-op
-	err = te.ensureParentBranch(projectID, parent)
+	err = te.EnsureParentBranch(projectID, parent)
 	if err != nil {
 		t.Fatalf("second ensureParentBranch failed: %v", err)
 	}
@@ -261,15 +261,13 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	}
 }
 
-// TestMergeBranch_SubtaskFallsBackToOriginWhenParentHasNoBranch verifies the
-// current (buggy) behavior: when parent has no branch, merge falls through to origin.
-// After the fix (ensureParentBranch called before subtask starts), this path
-// should not be reachable in normal operation, but the fallback is still correct
-// as a safety net.
-func TestMergeBranch_SubtaskFallsBackToOriginWhenParentHasNoBranch(t *testing.T) {
-	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+// TestMergeBranch_SubtaskNeverMergesIntoOrigin verifies that a subtask
+// NEVER merges into origin. If the parent has no branch, MergeBranch creates
+// it on demand and merges into the parent's branch.
+func TestMergeBranch_SubtaskNeverMergesIntoOrigin(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
-	// Create parent task WITHOUT a branch (simulating the bug scenario)
+	// Create parent task WITHOUT a branch
 	parentID := "parent-no-branch"
 	parent := &types.Task{
 		ID:             parentID,
@@ -284,7 +282,7 @@ func TestMergeBranch_SubtaskFallsBackToOriginWhenParentHasNoBranch(t *testing.T)
 	te.store.CreateTask(parent)
 
 	// Create subtask with its own branch
-	subtaskID := "subtask-fallback"
+	subtaskID := "subtask-no-fallback"
 	subtask := &types.Task{
 		ID:             subtaskID,
 		ProjectID:      projectID,
@@ -303,24 +301,44 @@ func TestMergeBranch_SubtaskFallsBackToOriginWhenParentHasNoBranch(t *testing.T)
 
 	// Make a commit on the subtask branch
 	runGit(t, repoDir, "checkout", subtask.Branch)
-	subtaskFile := filepath.Join(repoDir, "fallback_file.txt")
-	os.WriteFile(subtaskFile, []byte("fallback changes\n"), 0o644)
-	runGit(t, repoDir, "add", "fallback_file.txt")
-	runGit(t, repoDir, "commit", "-m", "fallback work")
+	subtaskFile := filepath.Join(repoDir, "no_fallback_file.txt")
+	os.WriteFile(subtaskFile, []byte("no fallback changes\n"), 0o644)
+	runGit(t, repoDir, "add", "no_fallback_file.txt")
+	runGit(t, repoDir, "commit", "-m", "no fallback work")
 
-	// Checkout master so that rev-parse HEAD returns master (the fallback target)
-	runGit(t, repoDir, "checkout", "master")
+	// Verify parent has no branch before merge
+	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Branch != "" {
+		t.Fatalf("parent should have no branch initially, got %q", parentFromDB.Branch)
+	}
 
-	// Merge — should fall back to origin (master) since parent has no branch
-	err := te.MergeBranch(projectID, subtaskID, subtask)
+	// Merge — should create parent branch on demand, NOT fall back to origin
+	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
-	// Verify the commit ended up on master (the fallback target)
-	runGit(t, repoDir, "checkout", "master")
-	if _, err := os.Stat(subtaskFile); err != nil {
-		t.Fatalf("fallback file should exist on master after fallback merge: %v", err)
+	// Verify parent now has a branch (created on demand)
+	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Branch == "" {
+		t.Fatal("parent should have a branch after merge (created on demand)")
+	}
+
+	// Verify the commit is on the parent branch
+	cmd := exec.Command("git", "-C", repoDir, "show", parentFromDB.Branch+":no_fallback_file.txt")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("subtask file should be on parent branch: %v %s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != "no fallback changes" {
+		t.Errorf("unexpected content on parent branch: %q", string(out))
+	}
+
+	// Verify the commit is NOT on master (origin)
+	cmd = exec.Command("git", "-C", repoDir, "show", "master:no_fallback_file.txt")
+	if _, err := cmd.CombinedOutput(); err == nil {
+		t.Error("subtask file should NOT exist on master — subtask must NEVER merge into origin")
 	}
 }
 
@@ -889,5 +907,94 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 	if _, err := os.Stat(subtaskFile); err == nil {
 		t.Error("subtask file should NOT exist on master — MergeBranch must target parent branch, not origin")
+	}
+}
+
+// TestMergeBranch_ParentBranchCreatedOnDemand verifies that when MergeBranch
+// is called for a subtask whose parent has no branch, the parent branch is
+// created on demand (safety net for HandleCommitAndDone path).
+func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent in backlog (no branch)
+	parentID := "parent-on-demand"
+	parent := &types.Task{
+		ID:             parentID,
+		ProjectID:      projectID,
+		Title:          "Parent Task",
+		Prompt:         "Parent prompt",
+		Status:         "backlog",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(parent)
+
+	// Create subtask with its own branch (simulating a subtask that was
+	// started manually or via HandleCommitAndDone without going through
+	// the normal start flow)
+	subtaskID := "subtask-on-demand"
+	subtask := &types.Task{
+		ID:             subtaskID,
+		ProjectID:      projectID,
+		Title:          "Subtask",
+		Prompt:         "Subtask prompt",
+		Status:         "review",
+		Branch:         "task/" + subtaskID,
+		ParentTaskID:   parentID,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(subtask)
+
+	// Create subtask branch from master
+	runGit(t, repoDir, "branch", subtask.Branch, "master")
+
+	// Make a commit on the subtask branch
+	runGit(t, repoDir, "checkout", subtask.Branch)
+	subtaskFile := filepath.Join(repoDir, "on_demand_file.txt")
+	os.WriteFile(subtaskFile, []byte("on demand changes\n"), 0o644)
+	runGit(t, repoDir, "add", "on_demand_file.txt")
+	runGit(t, repoDir, "commit", "-m", "on demand work")
+
+	// Verify parent has no branch
+	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Branch != "" {
+		t.Fatalf("parent should have no branch initially, got %q", parentFromDB.Branch)
+	}
+
+	// Ensure parent branch is created (safety net from HandleCommitAndDone)
+	err := te.EnsureParentBranch(projectID, parentFromDB)
+	if err != nil {
+		t.Fatalf("EnsureParentBranch failed: %v", err)
+	}
+
+	// Verify parent now has a branch
+	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Branch == "" {
+		t.Fatal("parent should have a branch after EnsureParentBranch")
+	}
+
+	// Merge subtask — should go to parent's branch, not master
+	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
+	if err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// Verify the subtask's commit is on the parent branch
+	// (can't checkout — branch is in a worktree, use git show instead)
+	cmd := exec.Command("git", "-C", repoDir, "show", parentFromDB.Branch+":on_demand_file.txt")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("subtask file should be on parent branch: %v %s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != "on demand changes" {
+		t.Errorf("unexpected content on parent branch: %q", string(out))
+	}
+
+	// Verify the commit is NOT on master
+	cmd = exec.Command("git", "-C", repoDir, "show", "master:on_demand_file.txt")
+	if _, err := cmd.CombinedOutput(); err == nil {
+		t.Error("subtask file should NOT exist on master — merge must target parent branch, not origin")
 	}
 }
