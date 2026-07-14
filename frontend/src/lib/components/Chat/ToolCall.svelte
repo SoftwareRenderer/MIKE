@@ -440,6 +440,12 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    .tool-args-expanded {
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+        overflow-x: visible;
+        min-width: 0;
+    }
     .tool-args-link {
         display: flex;
         align-items: center;
