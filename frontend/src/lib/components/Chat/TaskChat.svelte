@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
 import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
 import { showToast, showConfirm } from '$lib/stores/dialogs';
 import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
@@ -1153,12 +1153,36 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             }
         })();
 
+        // Reconcile stale streaming state on tab return.
+        // Mobile browsers suspend JS while hidden; the 'complete' event may be missed
+        // (per-task buffer is cleared on the server when the turn ends).
+        const handleTabVisibility = async () => {
+            if (!document.hidden && isLoading) {
+                try {
+                    const task = await getTask(projectId, taskId);
+                    if (task.status !== 'in_progress') {
+                        // Drop stale streaming entries (temp IDs would duplicate DB entries)
+                        stream.state.entries = stream.state.entries.filter(
+                            e => !e.isStreaming && !(e.toolCalls?.some(tc => tc.isPending))
+                        );
+                        stream.resetStreaming();
+                        markNotStreaming();
+                        await loadHistory();
+                    }
+                } catch {
+                    // task deleted — ignore
+                }
+            }
+        };
+        window.addEventListener('visibilitychange', handleTabVisibility);
+
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubConfig?.();
             unsubViewport?.();
             window.removeEventListener('keydown', handleKeydown);
             unsubTaskEvent?.();
+            window.removeEventListener('visibilitychange', handleTabVisibility);
         };
     });
 
