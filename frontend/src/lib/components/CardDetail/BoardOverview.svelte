@@ -48,6 +48,22 @@
 
         getColumnColor: (sectionId: string) => string;
     } = $props();
+
+    // Scroll to current task when task detail opens or task changes.
+    // The current task's section is always expanded (handled in template).
+    $effect(() => {
+        const taskId = currentTask.id;
+        if (!taskId) return;
+        // Scroll into view after DOM is painted
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const card = document.querySelector(`.card[data-task-id="${taskId}"]`);
+                if (card) {
+                    card.scrollIntoView({ behavior: 'auto', block: 'center' });
+                }
+            });
+        });
+    });
 </script>
 
 <div class="task-list">
@@ -64,7 +80,7 @@
             ondragleave={() => onSectionDragLeave(section.id)}
             ondrop={(e) => onSectionDrop(e, section.id)}
         >
-            <button class="section-header" onclick={() => onToggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
+            <button class="section-header" onclick={() => section.id !== currentTask.status && onToggleSection(section.id)} type="button" aria-expanded={section.id === currentTask.status || !collapsedSections.has(section.id)} title={section.id === currentTask.status ? `${section.title} (current task)` : (collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`)}>
                 <span class="section-title">
                     {#if section.id === 'backlog'}
                         <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -95,7 +111,7 @@
                 </div>
                 <svg class="section-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            {#if !collapsedSections.has(section.id)}
+            {#if section.id === currentTask.status || !collapsedSections.has(section.id)}
             <div class="section-body" transition:slide={{ duration: 200 }}>
                 {#each sectionTasks as t (t.id)}
                     {@const selectHandler = (selected: Task) => { if (onSelectTask) onSelectTask(selected); }}

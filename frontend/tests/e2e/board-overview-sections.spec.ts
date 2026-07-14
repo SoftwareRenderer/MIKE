@@ -54,14 +54,16 @@ test.describe('Board overview sections in task detail', () => {
 
     // Section headers should be buttons with aria-expanded
     const sectionHeaders = page.locator('.section-header');
-    await expect(sectionHeaders.nth(0)).toHaveAttribute('aria-expanded', 'true');
+    // Use the In Progress section (index 1) for collapse test
+    // because the current task's section (Backlog) cannot be collapsed
+    await expect(sectionHeaders.nth(1)).toHaveAttribute('aria-expanded', 'true');
 
-    // Click to collapse the first section
-    await sectionHeaders.nth(0).click();
-    await expect(sectionHeaders.nth(0)).toHaveAttribute('aria-expanded', 'false');
+    // Click to collapse the In Progress section
+    await sectionHeaders.nth(1).click();
+    await expect(sectionHeaders.nth(1)).toHaveAttribute('aria-expanded', 'false');
 
     // Click again to expand
-    await sectionHeaders.nth(0).click();
-    await expect(sectionHeaders.nth(0)).toHaveAttribute('aria-expanded', 'true');
+    await sectionHeaders.nth(1).click();
+    await expect(sectionHeaders.nth(1)).toHaveAttribute('aria-expanded', 'true');
   });
 });
