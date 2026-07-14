@@ -288,10 +288,17 @@
             ? (marked.parse(tc.args.summary as string, { async: false }) as string)
             : ''
     );
+
+    // Rendered markdown for ask_question
+    let renderedQuestionHtml = $derived(
+        tc.toolName === 'ask_question' && tc.args && tc.args.question
+            ? (marked.parse(tc.args.question as string, { async: false }) as string)
+            : ''
+    );
 </script>
 
 <div class="tool-call-entry">
-    <div class="tool-call-card" class:tool-call-question={tc.toolName === 'ask_question'} style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
+    <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
                 <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="#3FB950" width={14} height={14} title="Sandboxed" />
@@ -330,7 +337,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Pending{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Writing Question{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {:else}
@@ -404,7 +411,7 @@
                 <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
             {/if}
         {:else if tc.toolName === 'ask_question' && tc.args && tc.args.question}
-            <div class="tool-result tool-result-question">{tc.args.question as string}</div>
+            <div class="tool-result tool-result-question">{@html renderedQuestionHtml}</div>
         {:else if tc.toolName === 'request_review' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{@html renderedSummaryHtml}</div>
         {:else if tc.result && tc.result.trim()}
@@ -433,9 +440,6 @@
         border-left: 3px solid var(--color-accent);
         border-radius: var(--radius-md);
         padding: 8px;
-    }
-    .tool-call-question {
-        background: var(--color-surface-3);
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     .tool-name {
@@ -543,7 +547,7 @@
     .tool-result-summary {
         font-family: inherit;
         font-size: 0.875rem;
-        line-height: 1.5;
+        line-height: 1.7;
         color: var(--color-text-primary);
         word-break: break-word;
         max-height: none;
@@ -576,17 +580,36 @@
     .tool-result-question {
         font-family: inherit;
         font-size: 0.875rem;
-        line-height: 1.875rem;
+        line-height: 1.7;
         color: var(--color-text-primary);
-        white-space: pre-wrap;
         word-break: break-word;
         max-height: none;
         overflow-y: visible;
-        background: var(--color-surface-0);
-        padding: 8px 10px;
-        border-radius: var(--radius-sm);
-        border-left: 3px solid var(--color-accent);
+        background: var(--color-surface-3);
+        border-radius: 1.125rem;
+        padding: 8px 14px;
         margin: 4px 0 0;
+    }
+    .tool-result-question :global(p) {
+        margin: 0 0 0.5em;
+    }
+    .tool-result-question :global(p:last-child) {
+        margin-bottom: 0;
+    }
+    .tool-result-question :global(pre) {
+        background: var(--color-surface-0);
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        overflow-x: auto;
+    }
+    .tool-result-question :global(code) {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+    }
+    .tool-result-question :global(:not(pre) > code) {
+        background-color: #151515;
+        padding: 1px 4px;
+        border-radius: 3px;
     }
     .tool-create-task {
         display: flex;
