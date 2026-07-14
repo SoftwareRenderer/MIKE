@@ -44,6 +44,7 @@ export interface DiffApiResponse {
         staged?: boolean;
     }>;
     short_stat?: string;
+    base_ref?: string;
 }
 
 /** Response from getDiffFile API. */
@@ -72,6 +73,7 @@ export class DiffCache {
         files: {} as Record<string, DiffFile>,
         untracked: {} as Record<string, UntrackedMeta>,
         loading: false,
+        baseRef: '' as string,
     });
 
     /** Per-file hash tracker for incremental updates. */
@@ -196,6 +198,9 @@ export class DiffCache {
 
     /** Update cache from a full diff manifest response. */
     updateDiff(data: DiffApiResponse) {
+        if (data.base_ref !== undefined) {
+            this.state.baseRef = data.base_ref;
+        }
         if (!data.files || Object.keys(data.files).length === 0) {
             this.state.files = {};
             this.state.untracked = {};
@@ -460,6 +465,7 @@ export class DiffCache {
         this.tracker.stagedPathsKey = '';
         this.state.files = {};
         this.state.untracked = {};
+        this.state.baseRef = '';
         this.fileHashes = {};
         this.initialLoaded = false;
     }

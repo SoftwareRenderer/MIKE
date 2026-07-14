@@ -719,6 +719,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                                 displayPath={editingFile.displayPath}
                                 projectId={task.project_id}
                                 taskId={task.id}
+                                baseRef={diffCache.state.baseRef}
                                 onClose={closeFileEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}

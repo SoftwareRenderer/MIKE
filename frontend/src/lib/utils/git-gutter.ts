@@ -135,7 +135,7 @@ export function gitGutter() {
             if (current !== state.current) {
                 state.current = current;
                 const map = new Map<number, ('added' | 'modified' | 'removed')[]>();
-                if (state.original && state.original !== current) {
+                if (state.original !== current) {
                     const markers = computeDiffMarkers(state.original, current);
                     for (let i = 1; i < markers.length; i++) {
                         const markerList = markers[i];

@@ -71,7 +71,7 @@ func (h *GitHandler) GetDiffManifest(taskID, baseRef string) (any, error) {
 	// Cache the full result for on-demand file fetches
 	h.diffCache.Store(taskID, taskDiff)
 	stagedPaths := getStagedPaths(h.worktreeMgr, taskID, baseRef)
-	return buildDiffManifest(taskDiff, stagedPaths), nil
+	return buildDiffManifest(taskDiff, stagedPaths, baseRef), nil
 }
 
 // HandleLog returns commit log for a project.
@@ -729,7 +729,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	if headRef == "" && customBase == "" && !fullDiff {
 		// Discover which files are staged (in the index but differ from target).
 		stagedPaths := getStagedPaths(h.worktreeMgr, taskID, baseRef)
-		manifest := buildDiffManifest(taskDiff, stagedPaths)
+		manifest := buildDiffManifest(taskDiff, stagedPaths, baseRef)
 		httputil.JSONResponse(w, http.StatusOK, manifest)
 		return
 	}
@@ -775,6 +775,7 @@ type diffManifestFile struct {
 type diffManifest struct {
 	Files     map[string]diffManifestFile `json:"files"`
 	ShortStat string                      `json:"short_stat"`
+	BaseRef   string                      `json:"base_ref,omitempty"`
 }
 
 // getStagedPaths returns a set of file paths that are staged in the index.
@@ -813,11 +814,11 @@ func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]
 }
 
 // buildDiffManifest creates a manifest from a TaskDiff with per-file hashes.
-// stagedPaths is a set of file paths that are currently staged in the index.
-func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}) diffManifest {
+func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef string) diffManifest {
 	manifest := diffManifest{
 		Files:     make(map[string]diffManifestFile),
 		ShortStat: d.ShortStat,
+		BaseRef:   baseRef,
 	}
 	for path, f := range d.Tracked {
 		_, ok := stagedPaths[path]

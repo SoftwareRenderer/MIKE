@@ -31,11 +31,12 @@
     import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
-    let originalContent = $state(''); // HEAD content for git gutter
-    let savedContent = $state('');    // disk content for unsaved-changes tracking
+    let originalContent = $state('');
+    let originalContentLoaded = $state(false);
+    let savedContent = $state('');
     let loading = $state(true);
     let saving = $state(false);
     let error = $state('');
@@ -292,12 +293,16 @@
         };
     });
 
-    // Re-create editor when content changes externally (e.g. after load)
+    // Re-create editor after baseline fetch completes so gitGutter has a comparison target.
     $effect(() => {
-        if (!loading && !fileTooLarge && !view && editorEl) {
-            createEditor();
-        } else if (!loading && !fileTooLarge && view && content !== originalContent && content === view.state.doc.toString()) {
-            // Content synced, no action needed
+        const _loaded = originalContentLoaded;
+        const _original = originalContent;
+        if (!loading && !fileTooLarge && !view && editorEl && _loaded !== undefined) {
+            requestAnimationFrame(() => {
+                if (editorEl && !view) {
+                    createEditor();
+                }
+            });
         }
     });
 
@@ -323,8 +328,10 @@
             const data = await res.json();
             content = data.content || '';
 
-            // Fetch HEAD version for git gutter comparison
-            const headParams = new URLSearchParams({ path: filePath, ref: 'HEAD' });
+            // Fetch baseline for git gutter. Uses DiffViewer's baseRef so markers match the diff.
+            // On failure (new file), originalContent stays empty — all lines shown as added.
+            const refToUse = baseRef || 'HEAD';
+            const headParams = new URLSearchParams({ path: filePath, ref: refToUse });
             if (projectId) headParams.set('project', projectId);
             if (taskId) headParams.set('task', taskId);
             try {
@@ -332,11 +339,14 @@
                 if (headRes.ok) {
                     const headData = await headRes.json();
                     originalContent = headData.content || '';
+                    originalContentLoaded = true;
                 } else {
-                    originalContent = content; // fallback: no HEAD (new file)
+                    originalContent = '';
+                    originalContentLoaded = false;
                 }
             } catch {
-                originalContent = content;
+                originalContent = '';
+                originalContentLoaded = false;
             }
             savedContent = content; // disk matches current
         } catch (e) {
