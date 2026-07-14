@@ -3,13 +3,18 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"kanban/backend/llama"
+	"kanban/backend/prompts"
+	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+
+	sandbox "kanban/pkg/bridge"
 
 	"github.com/google/uuid"
 )
@@ -276,4 +281,83 @@ func persistAssistantMessage(te *TaskExecutor, task *types.Task, assistantMsgID 
 		Duration: time.Since(startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 	})
 	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
+}
+
+// setupSandbox creates or reuses a sandbox container and connects to the agent.
+// Returns the image used, the agent client, and any assigned ports.
+// The caller is responsible for creating callbacks from the agent client.
+func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Client, []types.AssignedPort, error) {
+	task := setup.task
+	projectID := setup.projectID
+	projectName := setup.project.Name
+	worktreePath := setup.worktreePath
+	projectPath := setup.projectPath
+	networkIsolation := setup.networkIsolation
+	memoryLimit := setup.memoryLimit
+	baseImage := setup.baseImage
+	sandboxDockerfilePath := setup.sandboxDockerfilePath
+	forwardPorts := setup.forwardPorts
+	sandboxMounts := setup.sandboxMounts
+	sandboxEnvs := setup.sandboxEnvs
+
+	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
+		return "", nil, nil, fmt.Errorf("gVisor not available")
+	}
+
+	imageToUse := ""
+	// Determine image to use: Dockerfile build takes precedence over pre-built image
+	if sandboxDockerfilePath != "" {
+		imageToUse = kanban_sandbox.ProjectImageName(projectName)
+		if !te.sandboxMgr.ImageReadyForProject(projectName) {
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
+			if err := te.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+			}); err != nil {
+				return "", nil, nil, fmt.Errorf("failed to build sandbox image: %w", err)
+			}
+		}
+	} else {
+		imageToUse = baseImage
+		if imageToUse == "" {
+			imageToUse = kanban_sandbox.BaseImage
+		}
+		if !te.sandboxMgr.ImageReady(imageToUse) {
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
+			if err := te.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
+			}); err != nil {
+				return "", nil, nil, fmt.Errorf("failed to pull sandbox image: %w", err)
+			}
+		}
+	}
+
+	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
+	var assignedPorts []types.AssignedPort
+	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
+		piAgentDir := te.configStore.GetAgentConfigDir()
+		var createErr error
+		createErr, assignedPorts = te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, task.IsPlanMode())
+		if createErr != nil {
+			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
+		}
+		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+		// Store and broadcast assigned ports
+		if len(assignedPorts) > 0 {
+			task.AssignedPorts = assignedPorts
+			te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: task.ID, Ports: assignedPorts}})
+		}
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
+	} else {
+		log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
+	}
+
+	// Get agent client for tool calls (required — sandbox creation ensures agent is running)
+	agentClient, err := te.sandboxMgr.GetClient(task.ID)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to connect to sandbox bridge: %w", err)
+	}
+
+	return imageToUse, agentClient, assignedPorts, nil
 }

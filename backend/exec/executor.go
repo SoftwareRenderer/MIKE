@@ -374,20 +374,7 @@ func (te *TaskExecutor) ensureParentBranch(projectID string, parent *types.Task)
 		return nil // already has a branch
 	}
 
-	// Generate branch name for the parent (same logic as prepareTaskExecution)
-	branchName := fmt.Sprintf("task/%s", parent.ID)
-	if !parent.AutoMerge && parent.Title != "" {
-		slug := slugifyBranchName(parent.Title)
-		if len(slug) <= 50 {
-			branchName = "task/" + slug
-		}
-	}
-	parentWtPath, _ := te.worktreeMgr.WorktreePath(parent.ID)
-	_, parentWtErr := os.Stat(parentWtPath)
-	parentWtExists := parentWtErr == nil
-	if !parentWtExists && te.branchExists(projectID, branchName) {
-		branchName = branchName + "-" + parent.ID[:8]
-	}
+	branchName := te.generateBranchName(parent, parent.ID, projectID)
 
 	// Create a worktree for the parent from HEAD.
 	// This creates the branch AND the worktree directory in one step.
@@ -506,7 +493,9 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 type taskExecSetup struct {
 	task                  *types.Task
 	project               *types.Project
+	projectID             string
 	worktreePath          string
+	projectPath           string
 	serverURL             string
 	modelName             string
 	ctx                   context.Context
@@ -514,11 +503,15 @@ type taskExecSetup struct {
 	userMsgChan           chan stream.UserMessage
 	summarizeCh           chan chan error // channel for manual summarization requests
 	initialContent        string          // user message content for lazy-start (empty for normal start)
+	regenerate            bool
 	sandboxEnabled        bool
 	networkIsolation      bool
 	baseImage             string
 	sandboxDockerfilePath string
 	memoryLimit           int
+	forwardPorts          []types.PortForward
+	sandboxMounts         []types.SandboxMount
+	sandboxEnvs           []types.SandboxEnv
 }
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
@@ -556,24 +549,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		modelName = task.ModelName
 	}
 
-	// Generate branch name: use slugified title for separate branches, task ID for merge-to-main
-	branchName := fmt.Sprintf("task/%s", task.ID)
-	if !task.AutoMerge && task.Title != "" {
-		slug := slugifyBranchName(task.Title)
-		// If the slug is too long, fall back to the task ID (always short, ~22 chars)
-		if len(slug) <= 50 {
-			branchName = "task/" + slug
-		}
-	}
-	// Ensure uniqueness: if the branch already exists (e.g., from a deleted task)
-	// AND the worktree doesn't exist yet (first run), append a short suffix.
-	// If the worktree already exists, the branch was created with this name — keep it.
-	wtPath, wtErr := te.worktreeMgr.WorktreePath(taskID)
-	_, wtStatErr := os.Stat(wtPath)
-	wtExists := wtErr == nil && wtStatErr == nil
-	if !wtExists && te.branchExists(projectID, branchName) {
-		branchName = branchName + "-" + taskID[:8]
-	}
+	branchName := te.generateBranchName(task, taskID, projectID)
 	// If this is a child task, ensure the parent has a branch first.
 	// The parent's branch is the merge target for subtask auto-merge.
 	// If the parent hasn't started yet (no branch), create one now.
@@ -677,7 +653,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	return &taskExecSetup{
 		task:                  task,
 		project:               project,
+		projectID:             projectID,
 		worktreePath:          worktreePath,
+		projectPath:           project.Path,
 		serverURL:             serverURL,
 		modelName:             modelName,
 		ctx:                   ctx,
@@ -689,6 +667,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		baseImage:             project.SandboxImage,
 		sandboxDockerfilePath: project.SandboxDockerfilePath,
 		memoryLimit:           project.SandboxMemoryLimit,
+		forwardPorts:          project.ForwardPorts,
+		sandboxMounts:         project.SandboxMounts,
+		sandboxEnvs:           project.SandboxEnvs,
 	}, nil
 }
 
@@ -727,7 +708,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
 	}
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, "", false, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts, execSetup.project.SandboxEnvs)
+	go te.executeTask(execSetup)
 	return nil
 }
 func (te *TaskExecutor) StopTask(taskID string) error {
@@ -926,6 +907,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	}
 
 	execSetup.initialContent = content // pass user message to executor
+	execSetup.regenerate = regenerate
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
@@ -933,7 +915,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
-	go te.executeTask(execSetup.ctx, task, projectID, execSetup.project.Name, execSetup.worktreePath, execSetup.project.Path, execSetup.serverURL, execSetup.modelName, execSetup.userMsgChan, execSetup.summarizeCh, execSetup.sandboxEnabled, execSetup.networkIsolation, execSetup.baseImage, execSetup.sandboxDockerfilePath, execSetup.memoryLimit, content, regenerate, execSetup.project.ForwardPorts, execSetup.project.SandboxMounts, execSetup.project.SandboxEnvs)
+	go te.executeTask(execSetup)
 }
 
 // CommitAndMerge commits worktree changes and optionally merges the task branch.
@@ -1133,33 +1115,45 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 // mergeInProject performs a merge in the project's main directory.
 func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
 	project, _ := te.store.GetProject(projectID)
+	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID)
+}
 
+// mergeInWorktree performs a merge inside a specific worktree directory.
+// Used when the target branch is checked out in another worktree (e.g., parent's worktree).
+func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
+	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID)
+}
+
+// mergeInto performs a merge of taskBranch into targetBranch inside the given directory.
+// Both mergeInProject and mergeInWorktree delegate here — the only difference between them
+// is the directory in which git commands are run.
+func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID string) error {
 	// Stash any working tree changes (serialized with shared stash mutex).
 	hadStash := false
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInProject(projectID, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
+	if err := te.worktreeMgr.GitRunInDir(dir, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
 		hadStash = true
 	}
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 	defer func() {
 		if hadStash {
 			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			_ = te.worktreeMgr.GitRunInProject(projectID, "stash", "pop")
+			_ = te.worktreeMgr.GitRunInDir(dir, "stash", "pop")
 			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 		}
 	}()
 
 	// Checkout target branch
-	if err := te.worktreeMgr.GitRunInProject(projectID, "checkout", "-f", targetBranch); err != nil {
+	if err := te.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {
 		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
 	}
 
 	// Merge the task branch
-	mergeOut, mergeErr := te.worktreeMgr.GitRunInProjectOutput(projectID, "merge", taskBranch, "--no-edit")
+	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(dir, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
 		// Merge conflict — detect, set flag for LLM resolution, then abort
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(project.Path, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
 				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
 				// Include git output so the user sees the actual reason
@@ -1173,64 +1167,12 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 			}
 			// Real merge conflict — set flag so HandleCommitAndDone triggers LLM resolution
 			_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
-			_ = te.worktreeMgr.GitRunInProject(projectID, "merge", "--abort")
+			_ = te.worktreeMgr.GitRunInDir(dir, "merge", "--abort")
 			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
 			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
 		}
 	} else {
 		log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
-		task, _ := te.store.GetTaskByTaskID(taskID)
-		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
-	}
-	return nil
-}
-
-// mergeInWorktree performs a merge inside a specific worktree directory.
-// Used when the target branch is checked out in another worktree (e.g., parent's worktree).
-func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
-	// Stash any working tree changes in the worktree (serialized with shared stash mutex).
-	hadStash := false
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
-		hadStash = true
-	}
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-	defer func() {
-		if hadStash {
-			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
-			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-		}
-	}()
-
-	// Ensure we're on the target branch
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", targetBranch); err != nil {
-		return fmt.Errorf("checkout target branch %s in worktree: %w", targetBranch, err)
-	}
-
-	// Merge the task branch
-	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", taskBranch, "--no-edit")
-	if mergeErr != nil {
-		// Merge conflict — detect, set flag for LLM resolution, then abort
-		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(worktreePath, projectID, taskID, targetBranch, taskBranch, "task_to_target", task, false); resolveErr != nil {
-			if errors.Is(resolveErr, ErrNotAMergeConflict) {
-				mergeDetail := strings.TrimSpace(mergeOut)
-				if mergeDetail == "" {
-					mergeDetail = mergeErr.Error()
-				}
-				log.Printf("[merge] task=%s merge failed in worktree (not a conflict): %s", taskID, mergeDetail)
-				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
-				return fmt.Errorf("merge failed in worktree (not a conflict): %s", mergeDetail)
-			}
-			// Real merge conflict — set flag so HandleCommitAndDone triggers LLM resolution
-			_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
-			_ = te.worktreeMgr.GitRunInDir(worktreePath, "merge", "--abort")
-			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
-			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
-		}
-	} else {
-		log.Printf("[merge] task=%s merged %s into %s (in worktree) successfully", taskID, taskBranch, targetBranch)
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
 	}
@@ -1384,6 +1326,30 @@ func (te *TaskExecutor) getCompactCh(taskID string) chan chan *pi.CompactResult 
 func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
 	_, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--verify", branchName)
 	return err == nil
+}
+
+// generateBranchName creates a unique git branch name for a task.
+// Uses a slugified title when possible (e.g. "task/fix-login-bug"),
+// falls back to the task ID (e.g. "task/frost-amber-quartz"),
+// and appends a short suffix if the branch already exists from a deleted task.
+func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID string) string {
+	branchName := fmt.Sprintf("task/%s", task.ID)
+	if !task.AutoMerge && task.Title != "" {
+		slug := slugifyBranchName(task.Title)
+		if len(slug) <= 50 {
+			branchName = "task/" + slug
+		}
+	}
+	// Ensure uniqueness: if the branch already exists (e.g., from a deleted task)
+	// AND the worktree doesn't exist yet (first run), append a short suffix.
+	// If the worktree already exists, the branch was created with this name — keep it.
+	wtPath, wtErr := te.worktreeMgr.WorktreePath(taskID)
+	_, wtStatErr := os.Stat(wtPath)
+	wtExists := wtErr == nil && wtStatErr == nil
+	if !wtExists && te.branchExists(projectID, branchName) {
+		branchName = branchName + "-" + taskID[:8]
+	}
+	return branchName
 }
 
 // slugifyBranchName converts a task title into a git-friendly branch name.
