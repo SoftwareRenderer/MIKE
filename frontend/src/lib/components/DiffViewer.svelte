@@ -174,54 +174,51 @@ import { slide } from 'svelte/transition';
         hoveredRowKey = '';
     });
 
-    // Syntax highlight cache: filePath -> { lineNumKey: highlightedHtml }
-    let highlightCache = $state<Record<string, Record<string, string>>>({});
-
-    $effect(() => {
-        // Read props to establish reactive dependencies
-        const _stagedFiles = stagedFiles;
-        const _unstagedFiles = unstagedFiles;
-        const _stagedUntracked = stagedUntracked;
-        const _unstagedUntracked = unstagedUntracked;
-
-        const result: typeof highlightCache = {};
-
-        for (const file of [..._stagedFiles, ..._unstagedFiles]) {
-            if (file.rows.length === 0 || file.fileSize) continue;
-            const texts = file.rows.map(r => r.text ?? '');
-            const fileResult: Record<string, string> = {};
-            const htmls = highlightLines(texts, file.path);
-            let hasAnyHighlight = false;
-            file.rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    fileResult[String(row.lineNumber)] = htmls[i];
-                    hasAnyHighlight = true;
-                }
-            });
-            if (hasAnyHighlight) result[file.path] = fileResult;
-        }
-
-        for (const entry of [..._stagedUntracked, ..._unstagedUntracked]) {
-            const ufile = entry.file;
-            if (ufile.rows.length === 0 || entry.fileSize !== undefined) continue;
-            const texts = ufile.rows.map(r => r.text ?? '');
-            const fileResult: Record<string, string> = {};
-            const htmls = highlightLines(texts, entry.path);
-            let hasAnyHighlight = false;
-            ufile.rows.forEach((row, i) => {
-                if (htmls[i]) {
-                    fileResult[String(row.lineNumber)] = htmls[i];
-                    hasAnyHighlight = true;
-                }
-            });
-            if (hasAnyHighlight) result[entry.path] = fileResult;
-        }
-
-        highlightCache = result;
-    });
+    // Syntax highlight cache: plain Map, populated lazily on file expand.
+    // Not wrapped in $state — highlighting runs off-main-thread via queueMicrotask.
+    let highlightCache: Map<string, Record<string, string>> = new Map();
 
     function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
-        return highlightCache[filePath]?.[String(lineNumber)];
+        if (!lineNumber) return undefined;
+        return highlightCache.get(filePath)?.[String(lineNumber)];
+    }
+
+    /** Pre-populate highlight cache for a file (runs asynchronously via microtask). */
+    function preloadHighlights(path: string, rows: Array<{ text?: string; lineNumber: number | null }>) {
+        if (highlightCache.has(path)) return;
+        if (rows.length === 0) return;
+        queueMicrotask(() => {
+            const texts = rows.map(r => r.text ?? '');
+            const htmls = highlightLines(texts, path);
+            const cache: Record<string, string> = {};
+            let hasAny = false;
+            rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    cache[String(row.lineNumber)] = htmls[i];
+                    hasAny = true;
+                }
+            });
+            if (hasAny) highlightCache.set(path, cache);
+        });
+    }
+
+    /** Pre-populate highlight cache for an untracked file entry. */
+    function preloadUntrackedHighlights(entry: { path: string; fileSize?: number; file: DiffFile }) {
+        if (highlightCache.has(entry.path)) return;
+        if (entry.file.rows.length === 0 || entry.fileSize !== undefined) return;
+        queueMicrotask(() => {
+            const texts = entry.file.rows.map(r => r.text ?? '');
+            const htmls = highlightLines(texts, entry.path);
+            const cache: Record<string, string> = {};
+            let hasAny = false;
+            entry.file.rows.forEach((row, i) => {
+                if (htmls[i]) {
+                    cache[String(row.lineNumber)] = htmls[i];
+                    hasAny = true;
+                }
+            });
+            if (hasAny) highlightCache.set(entry.path, cache);
+        });
     }
 
     function toggleBlock(id: string) {
@@ -230,13 +227,26 @@ import { slide } from 'svelte/transition';
 
     function toggleFile(path: string) {
         const next = new Set(collapsedFiles);
-        if (next.has(path)) {
+        const wasCollapsed = next.has(path);
+        if (wasCollapsed) {
             next.delete(path);
         } else {
             next.add(path);
         }
         collapsedFiles = next;
         saveCollapsedFiles(next);
+        // Preload highlights when expanding a file (not when collapsing)
+        if (wasCollapsed) {
+            const file = [...sortedStagedFiles, ...sortedUnstagedFiles].find(f => f.path === path);
+            if (file) {
+                preloadHighlights(file.path, file.rows);
+                return;
+            }
+            const entry = untrackedMap.get(path);
+            if (entry) {
+                preloadUntrackedHighlights(entry);
+            }
+        }
     }
 
     /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
