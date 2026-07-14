@@ -74,16 +74,38 @@
     // Timestamp info
     let timestampInfo = $derived(timestamp ? formatTimestamp(timestamp) : { display: '', tooltip: '' });
 
+    // Memoized markdown / HTML rendering — avoids re-parsing on unrelated state changes
+    const renderCache = new Map<string, string>();
+    const CACHE_MAX = 100;
+
+    function memoizedRender(role: string, content: string): string {
+        const key = role + '\x00' + content;
+        const cached = renderCache.get(key);
+        if (cached !== undefined) return cached;
+        let result: string;
+        if (role === 'user') {
+            result = content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+        } else {
+            result = marked.parse(content, { async: false }) as string;
+        }
+        if (renderCache.size >= CACHE_MAX) {
+            const firstKey = renderCache.keys().next().value;
+            renderCache.delete(firstKey);
+        }
+        renderCache.set(key, result);
+        return result;
+    }
+
     // Markdown rendering
     let renderedHtml = $derived(
         (role === 'assistant' || role === 'system')
-            ? (marked.parse(content || '', { async: false }) as string)
+            ? memoizedRender(role, content || '')
             : ''
     );
 
     let userHtml = $derived(
         role === 'user'
-            ? content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+            ? memoizedRender('user', content)
             : ''
     );
 
@@ -411,7 +433,7 @@
     {#if interleavedLayout.trailingContent}
         <div class="message-bubble assistant-bubble">
             <div class="message-text" class:streaming={isStreaming}>
-                {@html marked.parse(interleavedLayout.trailingContent, { async: false }) as string}
+                {@html memoizedRender('assistant', interleavedLayout.trailingContent)}
                 {#if isStreaming}
                     <span class="cursor-blink"></span>
                 {/if}
