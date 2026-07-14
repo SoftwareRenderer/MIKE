@@ -244,6 +244,7 @@ export function buildEntriesFromMessages(
  * Looks at the next assistant entry (with tool calls or hash) after the given entry index,
  * since the checkpoint is created after tool calls in the same turn.
  * Falls back to walking backward if no forward entry has a checkpoint.
+ * @deprecated Use buildCheckpointStateMap for O(n) batch computation.
  */
 export function getCheckpointEntryCheckpointState(
     entryIdx: number,
@@ -285,4 +286,102 @@ export function getCheckpointEntryCheckpointState(
         if (prev.role === 'user') break;
     }
     return null;
+}
+
+/**
+ * Build a map from user-entry index to checkpoint state in O(n) time.
+ * Two-phase approach:
+ *  1. Precompute forward scan targets: for each user, find the next assistant
+ *     (any) in a single backward pass.
+ *  2. Single forward pass: resolve forward scan results and track backward scan
+ *     targets (the most recent qualifying assistant since the last user).
+ *
+ * For each user entry:
+ *  1. Forward scan: find the next assistant with tool calls or a checkpoint hash.
+ *     Stops at the first assistant (even without tool calls/hash).
+ *  2. Backward scan: find the most recent assistant with tool calls/hash,
+ *     bounded by the previous user entry.
+ *
+ * Produces identical output to calling getCheckpointEntryCheckpointState per entry.
+ */
+export function buildCheckpointStateMap(
+    entries: ChatEntry[],
+    pendingCheckpoints: Set<string>,
+    checkpointLabels: Map<string, string>,
+    checkpointCommitHashes: Map<string, string>,
+): Map<number, CheckpointState | null> {
+    const result = new Map<number, CheckpointState | null>();
+    const n = entries.length;
+
+    // Phase 1: Precompute forward scan targets.
+    // For each user, find the index of the next assistant (any) in forward direction.
+    // This is the entry the forward scan would stop at.
+    const nextAssistant = new Int32Array(n).fill(-1);
+    for (let i = n - 2; i >= 0; i--) {
+        if (entries[i + 1].role === 'assistant') {
+            nextAssistant[i] = i + 1;
+        } else {
+            nextAssistant[i] = nextAssistant[i + 1];
+        }
+    }
+
+    // Phase 2: Single forward pass — resolve forward scan and track backward targets.
+    let lastQualifyingAssistant: number | null = null;
+
+    for (let i = 0; i < n; i++) {
+        const entry = entries[i];
+
+        if (entry.role === 'assistant') {
+            const hasToolCalls = entry.toolCalls && entry.toolCalls.length > 0;
+            const hasHash = checkpointCommitHashes.has(entry.id);
+            if (hasToolCalls || hasHash) {
+                lastQualifyingAssistant = i;
+            }
+        }
+
+        if (entry.role === 'user') {
+            // Forward scan: check the precomputed next assistant.
+            const fwdIdx = nextAssistant[i];
+            if (fwdIdx >= 0) {
+                const fwd = entries[fwdIdx];
+                const fwdHasToolCalls = fwd.toolCalls && fwd.toolCalls.length > 0;
+                const fwdHasHash = checkpointCommitHashes.has(fwd.id);
+                if (fwdHasToolCalls || fwdHasHash) {
+                    result.set(i, {
+                        isPending: pendingCheckpoints.has(fwd.id),
+                        commitLabel: checkpointLabels.get(fwd.id),
+                        commitHash: checkpointCommitHashes.get(fwd.id) || undefined,
+                    });
+                } else if (lastQualifyingAssistant !== null) {
+                    // Forward scan stopped at non-qualifying assistant.
+                    // Fall back to backward scan.
+                    const bwd = entries[lastQualifyingAssistant];
+                    result.set(i, {
+                        isPending: pendingCheckpoints.has(bwd.id),
+                        commitLabel: checkpointLabels.get(bwd.id),
+                        commitHash: checkpointCommitHashes.get(bwd.id) || undefined,
+                    });
+                } else {
+                    result.set(i, null);
+                }
+            } else {
+                // No forward assistant at all — fall back to backward scan.
+                if (lastQualifyingAssistant !== null) {
+                    const bwd = entries[lastQualifyingAssistant];
+                    result.set(i, {
+                        isPending: pendingCheckpoints.has(bwd.id),
+                        commitLabel: checkpointLabels.get(bwd.id),
+                        commitHash: checkpointCommitHashes.get(bwd.id) || undefined,
+                    });
+                } else {
+                    result.set(i, null);
+                }
+            }
+
+            // Reset backward scan target — bounded by this user entry.
+            lastQualifyingAssistant = null;
+        }
+    }
+
+    return result;
 }

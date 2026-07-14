@@ -1,5 +1,8 @@
 import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
 
+/** Tool call info — matches ChatEntry['toolCalls'][number]. */
+type ToolCallInfo = NonNullable<ChatEntry['toolCalls']>[number];
+
 /**
  * Reactive class holding all stream-processing state.
  * Uses Svelte 5 $state() for deep reactivity — no version bumper needed.
@@ -14,7 +17,7 @@ export class StreamState {
     state = $state({
         entries: [] as ChatEntry[],
         currentAssistantId: null as string | null,
-        activeToolCalls: new Map<string, { entryId: string }>(),
+        activeToolCalls: new Map<string, { entryId: string; toolCall: ToolCallInfo }>(),
         processedToolIds: new Set<string>(),
         awaitingResponse: false,
         queuePosition: 0,

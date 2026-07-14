@@ -99,14 +99,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     s.processedToolIds.add(data.tool_id);
                     const ci = entry.content.length;
                     const ri = (entry.reasoningContent || '').length;
-                    entry.toolCalls = [...(entry.toolCalls || []), {
+                    const newTc = {
                         toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
                         args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
                         linesAdded: data.lines_added, linesRemoved: data.lines_removed,
                         isPending: true, contentIndex: ci, reasoningIndex: ri,
-                    }];
+                    };
+                    entry.toolCalls = [...(entry.toolCalls || []), newTc];
                     entry.isStreaming = true;
-                    s.activeToolCalls.set(data.tool_id, { entryId: entry.id });
+                    s.activeToolCalls.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
                 }
                 scroll();
                 break;
@@ -115,35 +116,13 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
                 const ref = s.activeToolCalls.get(data.tool_id);
                 s.activeToolCalls.delete(data.tool_id);
-                let updated = false;
                 if (ref) {
-                    const entry = s.entries.find(e => e.id === ref.entryId);
-                    if (entry?.toolCalls) {
-                        const tc = entry.toolCalls.find(t => t.toolId === data.tool_id);
-                        if (tc) {
-                            tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
-                            if (data.args) tc.args = data.args;
-                            if (data.raw_args) tc.raw_args = data.raw_args;
-                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                            if (data.path) tc.path = data.path;
-                            updated = true;
-                        }
-                    }
-                }
-                if (!updated) {
-                    for (const entry of s.entries) {
-                        if (entry.toolCalls) {
-                            const tc = entry.toolCalls.find(t => t.toolId === data.tool_id && t.isPending);
-                            if (tc) {
-                                tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
-                                if (data.args) tc.args = data.args;
-                                if (data.raw_args) tc.raw_args = data.raw_args;
-                                if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                                if (data.path) tc.path = data.path;
-                                updated = true; break;
-                            }
-                        }
-                    }
+                    const tc = ref.toolCall;
+                    tc.result = data.output; tc.success = data.success; tc.duration = data.duration; tc.isPending = false;
+                    if (data.args) tc.args = data.args;
+                    if (data.raw_args) tc.raw_args = data.raw_args;
+                    if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                    if (data.path) tc.path = data.path;
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();
@@ -154,30 +133,33 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'tool_progress': {
                 const data = event.data as { tool_id?: string; bytes_written?: number; lines_added?: number; lines_removed?: number; path?: string };
-                for (const entry of s.entries) {
-                    if (entry.toolCalls) {
-                        for (const tc of entry.toolCalls) {
-                            if (tc.isPending && (!data.tool_id || tc.toolId === data.tool_id)) {
-                                if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
-                                if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
-                                if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                                if (data.path) tc.path = data.path;
-                            }
-                        }
+                if (data.tool_id) {
+                    const ref = s.activeToolCalls.get(data.tool_id);
+                    if (ref) {
+                        const tc = ref.toolCall;
+                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
+                        if (data.path) tc.path = data.path;
+                    }
+                } else {
+                    // Broadcast: update all active tool calls
+                    for (const ref of s.activeToolCalls.values()) {
+                        const tc = ref.toolCall;
+                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
+                        if (data.path) tc.path = data.path;
                     }
                 }
                 break;
             }
             case 'tool_output': {
                 const data = event.data as { tool_id: string; text: string };
-                for (const entry of s.entries) {
-                    if (entry.toolCalls) {
-                        for (const tc of entry.toolCalls) {
-                            if (tc.isPending && tc.toolId === data.tool_id) {
-                                tc.result = (tc.result || '') + data.text;
-                            }
-                        }
-                    }
+                const ref = s.activeToolCalls.get(data.tool_id);
+                if (ref) {
+                    const tc = ref.toolCall;
+                    tc.result = (tc.result || '') + data.text;
                 }
                 scroll();
                 break;
