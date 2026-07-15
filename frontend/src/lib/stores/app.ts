@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { Project, Board, Config, Task, Provider } from '$lib/types';
+import type { Project, Board, Config, Task, Provider, EditTaskData } from '$lib/types';
 import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
 
 // ─── Domain State ───
@@ -29,22 +29,7 @@ sidebarCollapsed.subscribe(v => {
 
 // ─── Edit Task Modal ───
 
-export interface EditTaskData {
-    taskId: string;
-    projectId: string;
-    taskTitle: string;
-    taskPrompt: string;
-    editProviders: Provider[];
-    editModel: string;
-    editUrl: string;
-    editReasoningEffort: string;
-    editPlanMode: boolean;
-    editAutoMerge: boolean;
-    editSubtasksAutoMerge: boolean;
-    taskHasParent: boolean;
-    targetBranch: string;
-    isAgentSelected: () => boolean;
-}
+export type { EditTaskData };
 
 export const showEditTask = writable(false);
 export const editTaskData = writable<EditTaskData | null>(null);

@@ -364,3 +364,58 @@ export interface StreamSection {
     reasoningSummary?: string;
     tokenCount?: number;
 }
+
+// ─── Diff / Commit / Task Event types ───
+
+export type DiffStatsEntry = {
+    hash: string;
+    files: number;
+    additions: number;
+    deletions: number;
+    file_hashes?: Record<string, string>;
+    removed_files?: string[];
+    staged_paths?: string[];
+};
+
+export type DiffEntry = {
+    hash: string;
+    diff?: string;
+    untracked?: Array<{
+        path: string;
+        diff: string;
+        file_size?: number;
+        line_count?: number;
+    }>;
+    files?: Record<string, {
+        hash: string;
+        type: string;
+        added?: number;
+        removed?: number;
+        line_count?: number;
+        file_size?: number;
+    }>;
+    updated_at: number;
+};
+
+export type CommitQueueEntry = { taskID: string; status: 'queued' | 'processing' };
+
+export type TaskEventData = { task_id: string; type: string; data: any };
+
+// ─── Edit Task Modal ───
+
+export interface EditTaskData {
+    taskId: string;
+    projectId: string;
+    taskTitle: string;
+    taskPrompt: string;
+    editProviders: Provider[];
+    editModel: string;
+    editUrl: string;
+    editReasoningEffort: string;
+    editPlanMode: boolean;
+    editAutoMerge: boolean;
+    editSubtasksAutoMerge: boolean;
+    taskHasParent: boolean;
+    targetBranch: string;
+    isAgentSelected: () => boolean;
+}
