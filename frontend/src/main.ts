@@ -1,7 +1,7 @@
 import './app.css';
 import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
-import { pwaInstallPrompt, pwaInstalled } from './lib/stores/app';
+import { appStore } from './lib/stores';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
@@ -20,13 +20,13 @@ window.addEventListener('beforeinstallprompt', (e) => {
     // Prevent Chrome 67+ from showing the automatic install prompt
     e.preventDefault();
     // Store the event for later use
-    pwaInstallPrompt.set(e);
+    appStore.pwaInstallPrompt = e;
 });
 
 // Detect when the PWA is installed
 window.addEventListener('appinstalled', () => {
-    pwaInstalled.set(true);
-    pwaInstallPrompt.set(null);
+    appStore.pwaInstalled = true;
+    appStore.pwaInstallPrompt = null;
 });
 
 mount(App, {
