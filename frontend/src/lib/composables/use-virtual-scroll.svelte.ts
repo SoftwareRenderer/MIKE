@@ -203,6 +203,7 @@ export function useVirtualScroll(
 
         // Keep reference to old offsets for scroll compensation.
         const oldOffsets = offsets;
+        const wasDirty = dirty;
         recomputeOffsets();
 
         const scrollTop = el.scrollTop;
@@ -244,16 +245,18 @@ export function useVirtualScroll(
         // Padding: remaining height after the last rendered item
         paddingBottom = totalHeight - offsets[endIdx];
 
-        // Compensate scrollTop for offset shifts (estimated → measured heights).
-        // Compare old vs new offset of the first visible item.
-        const oldOffset = firstVisible < oldOffsets.length ? oldOffsets[firstVisible] : 0;
-        const shift = offsets[firstVisible] - oldOffset;
-        if (shift !== 0) {
-            const gap = totalHeight - el.scrollTop - clientHeight;
-            if (gap < 60) {
-                el.scrollTop = Math.max(0, totalHeight - clientHeight); // anchor bottom
-            } else {
-                el.scrollTop = Math.max(0, el.scrollTop - shift);
+        // Compensate scrollTop when heights change (skip during normal scroll
+        // to avoid fighting momentum scroll on touch devices).
+        if (wasDirty) {
+            const oldOffset = firstVisible < oldOffsets.length ? oldOffsets[firstVisible] : 0;
+            const shift = offsets[firstVisible] - oldOffset;
+            if (shift !== 0) {
+                const gap = totalHeight - el.scrollTop - clientHeight;
+                if (gap < 60) {
+                    el.scrollTop = Math.max(0, totalHeight - clientHeight); // anchor bottom
+                } else {
+                    el.scrollTop = Math.max(0, el.scrollTop - shift);
+                }
             }
         }
 
