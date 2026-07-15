@@ -35,14 +35,6 @@
     let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
     const MENTION_DEBOUNCE_MS = 150;
 
-    $effect(() => {
-        editContent = content;
-    });
-
-    $effect(() => {
-        editAttachments = attachments ? [...attachments] : [];
-    });
-
     function handleMentionInput() {
         if (!textareaEl) return;
         const cursorPos = textareaEl.selectionStart ?? 0;

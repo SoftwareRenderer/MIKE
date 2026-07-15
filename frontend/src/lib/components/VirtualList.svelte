@@ -159,6 +159,19 @@
 
         // Observe initially rendered items.
         const itemEls = scrollEl.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]');
+        // Prune stale indices — removed virtual items leave dead entries behind.
+        // This bounds observedIndices to only indices whose elements are still in the DOM.
+        const aliveIndices = new Set<number>();
+        for (const el of itemEls) {
+            const index = parseInt(el.getAttribute('data-virtual-index') ?? '', 10);
+            if (isNaN(index)) continue;
+            aliveIndices.add(index);
+        }
+        for (const index of observedIndices) {
+            if (!aliveIndices.has(index)) {
+                observedIndices.delete(index);
+            }
+        }
         for (const el of itemEls) {
             const index = parseInt(el.getAttribute('data-virtual-index') ?? '', 10);
             if (isNaN(index) || observedIndices.has(index)) continue;
@@ -172,8 +185,21 @@
         if (spacer) {
             mo = new MutationObserver((mutations) => {
                 for (const mutation of mutations) {
+                    // Handle removed nodes first — clean up observed indices
+                    for (const node of mutation.removedNodes) {
+                        if (node.nodeType !== 1) continue;
+                        const el = node as HTMLElement;
+                        const removedItems = el.classList?.contains('virtual-item')
+                            ? [el]
+                            : Array.from(el.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]'));
+                        for (const item of removedItems) {
+                            const index = parseInt(item.getAttribute('data-virtual-index') ?? '', 10);
+                            if (!isNaN(index)) observedIndices.delete(index);
+                        }
+                    }
+                    // Handle added nodes — observe new items
                     for (const node of mutation.addedNodes) {
-                        if (node.nodeType !== 1) continue; // Element
+                        if (node.nodeType !== 1) continue;
                         const el = node as HTMLElement;
                         // Direct virtual-item or parent of one
                         const items = el.classList?.contains('virtual-item')
