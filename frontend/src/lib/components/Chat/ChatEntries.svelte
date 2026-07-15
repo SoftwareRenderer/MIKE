@@ -70,21 +70,41 @@
         onScrollElChange?: (el: HTMLElement | null) => void;
     } = $props();
 
-    // Estimated heights — must be >= actual minimums to prevent overlap.
-    // Corrected by ResizeObserver on first paint.
+    // Estimate rendered height from message data.
+    // Text: ~20px per line (explicit \n or wrapped ~70 chars).
+    // Tool calls: header + args + result, estimated from data.
     function getEstimatedHeight(entry: ChatEntry, _index: number): number {
-        if (entry.role === 'user') return 80;
-        if (entry.role === 'error') return 100;
-        if (entry.role === 'summarization') return 150;
-        if (entry.role === 'merge_resolution') return 100;
-        // assistant entries: base height + extra for tool calls and reasoning
-        let h = 90;
-        if (entry.toolCalls && entry.toolCalls.length > 0) {
-            h += entry.toolCalls.length * 85;
+        if (entry.role === 'error') return estimateTextHeight(entry.content, 40);
+        if (entry.role === 'summarization') return estimateTextHeight(entry.content, 60);
+        if (entry.role === 'merge_resolution') return estimateTextHeight(entry.content, 50);
+        if (entry.role === 'user') {
+            let h = estimateTextHeight(entry.content, 35);
+            if (entry.attachments?.length) h += entry.attachments.length * 80;
+            return h;
         }
-        if (entry.hasReasoning) h += 60;
+        // assistant
+        let h = 30; // header/actions
+        h += estimateTextHeight(entry.content, 20);
+        if (entry.reasoningContent) h += estimateTextHeight(entry.reasoningContent, 40);
+        else if (entry.hasReasoning) h += 60;
+        for (const tc of entry.toolCalls || []) {
+            h += 30; // header
+            h += 30; // args (collapsed for many tools)
+            if (tc.result) h += estimateTextHeight(tc.result, 35);
+            else if (tc.isPending) h += 30;
+        }
         if (entry.isStreaming) h += 20;
+        if (entry.stats) h += 24;
         return h;
+    }
+
+    function estimateTextHeight(text: string, base: number): number {
+        if (!text) return base;
+        const lines = text.split('\n').length;
+        const chars = text.length;
+        const wrappedLines = Math.ceil(chars / 70);
+        const totalLines = Math.max(lines, wrappedLines);
+        return base + totalLines * 20;
     }
 
     // Virtual list scroll element — received from VirtualList via callback
