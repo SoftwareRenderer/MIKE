@@ -190,7 +190,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     const isMobileCtx = useIsMobile();
 
     // Sync reactive stores → local $state
-    $effect(() => { collapsed = appStore.sidebarCollapsed; });
+    $effect(() => {
+        collapsed = appStore.sidebarCollapsed;
+        appStore.persistSidebarCollapsed();
+    });
     $effect(() => { const v = appStore.config; if (v) cfg = v; });
     $effect(() => {
         const t = appStore.selectedTask;
@@ -203,7 +206,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
         }
     });
-    $effect(() => { taskDiffStats = taskDiffStatsContext.get(); });
+    $effect(() => { if (taskDiffStatsContext?.get) taskDiffStats = taskDiffStatsContext.get(); });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
     // Subscribes when a task is selected, unsubscribes only when switching to a

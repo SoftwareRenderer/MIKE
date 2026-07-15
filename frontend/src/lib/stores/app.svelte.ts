@@ -3,8 +3,7 @@ import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting 
 
 // ─── Board Helpers ───
 
-/** Replace a single task in the board's task list.
- * No-op if the board is null or the task is not found. */
+/** Replace a task in the board. No-op if board is null or task not found. */
 export function updateTaskInBoard(appStore: AppStore, taskId: string, updated: Task): void {
     const board = appStore.board;
     if (!board) return;
@@ -15,8 +14,7 @@ export function updateTaskInBoard(appStore: AppStore, taskId: string, updated: T
     appStore.board = { ...board, tasks: newTasks };
 }
 
-/** Remove a task from the board's task list.
- * No-op if the board is null or the task is not found. */
+/** Remove a task from the board. No-op if board is null or task not found. */
 export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
     const board = appStore.board;
     if (!board) return;
@@ -49,13 +47,13 @@ export class AppStore {
     public selectedTask = $state<Task | null>(null);
     public config = $state<Config | null>(null);
 
-    // Active port mappings for the project-level terminal (broadcast via WebSocket)
+    // Active port mappings for project-level terminal
     public projectTerminalPorts = $state<Array<{ host_port: number; container_port: number }>>([]);
 
     // Sidebar
     public sidebarCollapsed = $state(false);
 
-    // Edit Task Modal
+    // Edit task modal
     public showEditTask = $state(false);
     public editTaskData = $state<EditTaskData | null>(null);
 
@@ -64,25 +62,21 @@ export class AppStore {
     public pwaInstalled = $state(false);
 
     constructor() {
-        // Load sidebar collapsed state from IndexedDB on init
+        // Load sidebar state from IndexedDB
         loadAppSetting('kanban-sidebar-collapsed', false).then((v: unknown) => {
             this.sidebarCollapsed = v === true || v === 'true';
         }).catch(() => {});
+    }
 
-        // Persist sidebar collapsed state whenever it changes
-        $effect(() => {
-            const v = this.sidebarCollapsed;
-            saveAppSetting('kanban-sidebar-collapsed', v).catch(() => {});
-        });
+    /** Persist sidebar state to IndexedDB. Call from a component $effect. */
+    persistSidebarCollapsed(): void {
+        saveAppSetting('kanban-sidebar-collapsed', this.sidebarCollapsed).catch(() => {});
     }
 }
 
 // ─── Expanded Tasks Helpers ───
 
-/**
- * Save the current collapsed state to IndexedDB.
- * Collapsed = tasks with children that are NOT in the expanded set.
- */
+/** Save collapsed state to IndexedDB. */
 export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>): Promise<void> {
     const collapsed = new Set<string>();
     for (const id of parentTaskIds) {
@@ -93,9 +87,7 @@ export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds
     await saveCollapsedTasks(collapsed);
 }
 
-/**
- * Clean stale entries from IndexedDB (task IDs that no longer exist).
- */
+/** Clean stale entries from IndexedDB. */
 export async function cleanupCollapsedTasks(allTaskIds: Set<string>): Promise<Set<string>> {
     const collapsed = await loadCollapsedTasks();
     let changed = false;
@@ -111,10 +103,7 @@ export async function cleanupCollapsedTasks(allTaskIds: Set<string>): Promise<Se
     return collapsed;
 }
 
-/**
- * Initialize expandedTasks from IndexedDB.
- * Returns the set of expanded task IDs (all parent IDs minus collapsed).
- */
+/** Init expanded task IDs from IndexedDB. */
 export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
     const collapsed = await loadCollapsedTasks();
     // Clean stale entries

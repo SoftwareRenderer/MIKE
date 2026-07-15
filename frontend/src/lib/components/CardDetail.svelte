@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { get } from 'svelte/store';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';

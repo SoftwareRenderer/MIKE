@@ -3,6 +3,7 @@
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
+    import { get } from 'svelte/store';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';

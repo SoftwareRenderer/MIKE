@@ -1,4 +1,5 @@
 import type { Task } from '$lib/types';
+import { get } from 'svelte/store';
 import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds } from '$lib/api';
 import { selectedTask, board as boardStore, showEditTask, editTaskData as editTaskDataStore, selectedProject } from '$lib/stores/app';
 import { showCardDetail } from '$lib/stores/ui';
@@ -228,7 +229,6 @@ export function useCardActions(deps: CardActionsDeps) {
 
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
-        const { get } = require('svelte/store');
         const cfg = (boardStore as any).get?.() ?? null;
         const providers = cfg?.providers || [];
         const selProject = get(selectedProject);

@@ -1,22 +1,6 @@
 /**
  * Global setup/teardown for e2e tests.
- * 
- * Setup phase:
- *  1. Ensure test git repo exists
- *  2. Kill any existing kanban server on port 3000
- *  3. Start a fresh kanban server with a test-specific database
- *  4. Configure mock provider via API
- *  5. Create a test project pointing to the test repo
- *  6. Create test tasks with mock provider URL
- *  7. Start mock LLM server
- *
- * Teardown phase:
- *  1. Stop mock LLM server
- *  2. Stop test kanban server
- *  3. Delete test database and worktrees
- *  4. Remove lock file
- *
- * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock enabled).
+ * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock).
  */
 
 import { spawn } from 'node:child_process';
@@ -25,7 +9,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
-// Resolve project root relative to this file (frontend/tests/ -> ../..)
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const FRONTEND_DIR = path.resolve(__dirname, '..');
@@ -41,7 +24,9 @@ const MOCK_PORT = 9999;
 const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
 const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
-const AUTH_FILE = '/tmp/kanban-test-auth.json';
+// Playwright storage state files — read at context creation time
+const STORAGE_STATE_FILE = '/tmp/kanban-test-storage-state.json';
+const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 const KANBAN_BIN = 'go';
 const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
@@ -51,15 +36,10 @@ let kanbanServer: ReturnType<typeof spawn> | null = null;
 let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 
 async function setup(): Promise<void> {
-    // 1. Ensure test git repo exists
     ensureTestRepo();
-
-    // 2. Kill any existing kanban server on port 3000
     await killKanbanServer();
 
-    // 4. Start fresh kanban server with test database
     console.log('[global-setup] Starting test kanban server...');
-    // Use setsid to start server in a new session (truly independent of this process)
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
@@ -68,20 +48,30 @@ async function setup(): Promise<void> {
     });
     kanbanServer.unref();
 
-    // 5. Wait for server to be ready
     await waitForServer(KANBAN_PORT, 15000);
     console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
-    // 5b. Login to get session cookie and CSRF token
     const { cookie: sessionCookie, csrfToken } = await login(KANBAN_BASE);
-    // Write auth info for Playwright to pick up
-    fs.writeFileSync(AUTH_FILE, JSON.stringify({
+    fs.writeFileSync(STORAGE_STATE_FILE, JSON.stringify({
+        cookies: [{
+            name: 'PHPSESSID',
+            value: sessionCookie.split('=')[1],
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+            expires: Date.now() / 1000 + 86400 * 365,
+        }],
+        origins: [],
+    }));
+    // Legacy auth file for CSRF token
+    fs.writeFileSync('/tmp/kanban-test-auth.json', JSON.stringify({
         cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
         csrfToken,
     }));
     console.log(`[global-setup] Logged in to test server`);
 
-    // 6. Configure mock provider via API (if using mock LLM)
     const useMock = process.env.USE_MOCK_LLM !== '0';
     const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
     if (useMock) {
@@ -101,7 +91,7 @@ async function setup(): Promise<void> {
         console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
 
-    // 7. Start mock LLM server BEFORE creating tasks (title-gen goroutine calls LLM immediately)
+    // Start mock LLM before creating tasks (title-gen calls LLM immediately)
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
         mockServer = spawn('setsid', ['node', 'tests/mock-llm.js', MOCK_PORT.toString()], {
@@ -116,14 +106,14 @@ async function setup(): Promise<void> {
         console.log('[global-setup] Using real LLM endpoint (USE_MOCK_LLM=0)');
     }
 
-    // 8. Create test project (after mock LLM is ready, so title-gen works)
+    // Create test project
     const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
     }, sessionCookie, csrfToken);
     console.log(`[global-setup] Test project created: ${project.id}`);
 
-    // 9. Create test tasks with provider URL
+    // Create test tasks
     const taskPayload = useMock
         ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
         : { prompt: 'Test task for e2e tests' };
@@ -134,7 +124,7 @@ async function setup(): Promise<void> {
     const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie, csrfToken);
     console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
-    // 10. Start isolated kanban server (for config-modifying test suites)
+    // Start isolated server
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
@@ -146,16 +136,28 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT_ISOLATED, 15000);
     console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
 
-    // 10b. Login to isolated server
     const { cookie: sessionCookieIso, csrfToken: csrfTokenIso } = await login(KANBAN_BASE_ISOLATED);
-    // Write isolated auth info
-    fs.writeFileSync(AUTH_FILE + '.isolated', JSON.stringify({
+    fs.writeFileSync(STORAGE_STATE_FILE_ISOLATED, JSON.stringify({
+        cookies: [{
+            name: 'PHPSESSID',
+            value: sessionCookieIso.split('=')[1],
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+            expires: Date.now() / 1000 + 86400 * 365,
+        }],
+        origins: [],
+    }));
+    // Legacy auth file for CSRF token
+    fs.writeFileSync('/tmp/kanban-test-auth.json.isolated', JSON.stringify({
         cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
         csrfToken: csrfTokenIso,
     }));
     console.log(`[global-setup] Logged in to isolated server`);
 
-    // 11. Configure mock provider on isolated server
+    // Configure mock provider on isolated server
     if (useMock) {
         const configIso = await getJson(`${KANBAN_BASE_ISOLATED}/api/config`, sessionCookieIso);
         await putJson(`${KANBAN_BASE_ISOLATED}/api/config`, {
@@ -173,32 +175,32 @@ async function setup(): Promise<void> {
         console.log(`[global-setup] Mock provider configured on isolated server`);
     }
 
-    // 12. Create test project on isolated server
+    // Create test project on isolated server
     const projectIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
     }, sessionCookieIso, csrfTokenIso);
     console.log(`[global-setup] Test project created on isolated server: ${projectIso.id}`);
 
-    // 13. Create test tasks on isolated server
+    // Create test tasks on isolated server
     const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload, sessionCookieIso, csrfTokenIso);
     const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2, sessionCookieIso, csrfTokenIso);
     console.log(`[global-setup] Test tasks created on isolated server: ${taskIso.id}, ${taskIso2.id}`);
 
-    // 14. Create lock file to signal setup complete
+    // Create lock file
     try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
 }
 
 async function teardown(): Promise<void> {
     console.error('[teardown] ENTRY');
-    // Stop all test servers.
+    // Stop servers.
     for (const port of [MOCK_PORT, KANBAN_PORT_ISOLATED, KANBAN_PORT]) {
         console.error(`[teardown] killing port ${port}...`);
         killPort(port);
         console.error(`[teardown] port ${port} stopped`);
     }
 
-    // 4. Clean up orphaned sandbox containers
+    // Clean up orphaned sandbox containers
     try {
         const containers = execSync('sudo podman --runtime runsc ps --filter name=kanban-sandbox -q 2>/dev/null || true').toString().trim();
         if (containers) {
@@ -209,7 +211,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Warning: failed to clean up sandbox containers');
     }
 
-    // 5. Delete test data directory
+    // Delete test data
     try {
         fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
         console.log('[global-teardown] Test data directory deleted');
@@ -217,7 +219,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test data directory already gone');
     }
 
-    // 6. Delete isolated test data directory
+    // Delete isolated test data
     try {
         fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true });
         console.log('[global-teardown] Isolated test data directory deleted');
@@ -225,7 +227,7 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Isolated test data directory already gone');
     }
 
-    // 7. Delete test worktrees directory
+    // Delete test worktrees
     try {
         fs.rmSync(TEST_WORKTREES, { recursive: true, force: true });
         console.log('[global-teardown] Test worktrees directory deleted');
@@ -233,20 +235,21 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Test worktrees already gone');
     }
 
-    // 8. Remove lock file
+    // Clean up lock and auth files
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
-    // 9. Remove auth files
-    try { fs.unlinkSync(AUTH_FILE); } catch { /* ignore */ }
-    try { fs.unlinkSync(AUTH_FILE + '.isolated'); } catch { /* ignore */ }
+    try { fs.unlinkSync(STORAGE_STATE_FILE); } catch { /* ignore */ }
+    try { fs.unlinkSync(STORAGE_STATE_FILE_ISOLATED); } catch { /* ignore */ }
+    try { fs.unlinkSync('/tmp/kanban-test-auth.json'); } catch { /* ignore */ }
+    try { fs.unlinkSync('/tmp/kanban-test-auth.json.isolated'); } catch { /* ignore */ }
 }
 
 // --- Helpers ---
 
 function ensureTestRepo(): void {
-    // Always recreate test repos to ensure clean state (no stale branches/files)
+    // Recreate test repos for clean state
     for (const repo of [TEST_REPO, TEST_REPO_2]) {
         const label = repo === TEST_REPO ? 'test git repo' : 'second test git repo';
-        // Remove existing repo and worktrees
+        // Remove existing repo
         try { fs.rmSync(repo, { recursive: true, force: true }); } catch { /* ignore */ }
         console.log(`[global-setup] Creating ${label}...`);
         fs.mkdirSync(repo, { recursive: true });
@@ -263,7 +266,7 @@ function ensureTestRepo(): void {
     }
 }
 
-/** Kill all processes listening on a given port (non-blocking, no shell). */
+/** Kill processes on a port. */
 function killPort(port: number): void {
     try {
         const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', timeout: 3000 }).trim();
@@ -271,7 +274,7 @@ function killPort(port: number): void {
         const myPid = String(process.pid);
         for (const pid of output.split('\n')) {
             const p = pid.trim();
-            if (p === myPid) continue; // don't kill ourselves
+            if (p === myPid) continue;
             try { process.kill(parseInt(p), 'SIGTERM'); } catch { /* ignore */ }
         }
     } catch { /* no processes on this port */ }
@@ -279,16 +282,13 @@ function killPort(port: number): void {
 
 function cleanupStaleState(keepLockFile: boolean): void {
     if (!keepLockFile) {
-        // Remove stale lock file from interrupted runs
         try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     }
-    // Kill stale processes on test ports.
-    // NOTE: Uses lsof + process.kill (no shell pipeline) to avoid the shell
-    // being matched by pkill -f and killing itself.
+    // Kill stale processes (no shell pipeline to avoid self-kill)
     for (const port of [MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]) {
         killPort(port);
     }
-    // Clean up stale test data/worktrees
+    // Clean stale data
     try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
     try { fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true }); } catch { /* ignore */ }
     try { fs.rmSync(TEST_WORKTREES, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -305,9 +305,9 @@ async function killKanbanServer(): Promise<void> {
         }
     } catch { /* no server running */ }
 
-    if (!killed) return; // No server was running, nothing to wait for
+    if (!killed) return;
 
-    // Wait for port to be free (up to 5s)
+    // Wait for port to free (up to 5s)
     for (let attempt = 0; attempt < 10; attempt++) {
         const isFree = await isPortFree(KANBAN_PORT);
         if (isFree) return;
@@ -315,16 +315,14 @@ async function killKanbanServer(): Promise<void> {
     }
 }
 
-/** Return true if the port is not accepting connections. */
+/** Check if port is free. */
 async function isPortFree(port: number): Promise<boolean> {
     return new Promise((resolve) => {
         const req = http.get(`http://localhost:${port}/`, () => {
-            // Got a response — port is still in use
             req.destroy();
             resolve(false);
         });
         req.on('error', () => {
-            // Connection refused — port is free
             resolve(true);
         });
         req.setTimeout(500, () => {
@@ -421,7 +419,6 @@ function getJson(url: string, cookie?: string): Promise<any> {
     });
 }
 
-/** Login to the server and return the session cookie string and CSRF token. */
 async function login(base: string): Promise<{ cookie: string; csrfToken: string }> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify({ password: TEST_PASSWORD });
@@ -441,10 +438,8 @@ async function login(base: string): Promise<{ cookie: string; csrfToken: string 
                     reject(new Error(`Login failed: ${responseData}`));
                     return;
                 }
-                // Extract just the PHPSESSID=token part
                 const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
-                const parts = cookie.split(';')[0].trim();
-                resolve({ cookie: parts, csrfToken: csrfToken || '' });
+                resolve({ cookie: cookie.split(';')[0].trim(), csrfToken: csrfToken || '' });
             });
         });
         req.on('error', reject);
@@ -470,16 +465,20 @@ function deleteRequest(url: string): Promise<any> {
 }
 
 export default async function main(): Promise<void> {
-    // Check teardown phase BEFORE cleanup (cleanup removes the lock file)
-    const isTeardown = fs.existsSync(LOCK_FILE);
+    // Only teardown if lock exists AND servers are running.
+    // Stale lock + dead servers => clean up and run setup fresh.
+    const lockExists = fs.existsSync(LOCK_FILE);
+    const serversRunning = await isPortFree(KANBAN_PORT).then(free => !free);
 
-    if (isTeardown) {
-        // Clean stale state from interrupted runs (but keep lock file for teardown)
+    if (lockExists && serversRunning) {
+        console.log('[global-setup] Teardown phase: stopping running servers');
         cleanupStaleState(true);
         await teardown();
         try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     } else {
-        // Clean stale state from previous interrupted runs
+        if (lockExists && !serversRunning) {
+            console.log('[global-setup] Stale lock detected, cleaning up');
+        }
         cleanupStaleState(false);
         await setup();
     }
