@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
-import { createStreamHandler, type StreamHandlerCallbacks, estimateTokens } from '$lib/services/stream-handler';
+import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
 
 function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
     return {
@@ -73,19 +73,17 @@ describe('createStreamHandler', () => {
     it('token event estimates tokens from batched text', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: 'Hello world this is a batched token event' } }, false, 'p1', 't1');
-        // 43 chars / 4 ≈ 11 tokens
-        expect(stream.state.streamTokenCount).toBe(estimateTokens('Hello world this is a batched token event'));
-        // Second batched event adds more
+        // 41 chars / 4 ≈ 11 tokens
+        expect(stream.state.streamTokenCount).toBe(11);
+        // Second batched event adds more (17 chars / 4 ≈ 5)
         handleEvent({ type: 'token', data: { text: ' more tokens here' } }, false, 'p1', 't1');
-        expect(stream.state.streamTokenCount).toBe(
-            estimateTokens('Hello world this is a batched token event') + estimateTokens(' more tokens here'),
-        );
+        expect(stream.state.streamTokenCount).toBe(16);
     });
 
     it('reasoning event estimates tokens from batched text', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'reasoning', data: { text: 'Let me think about this problem carefully' } }, false, 'p1', 't1');
-        expect(stream.state.streamTokenCount).toBe(estimateTokens('Let me think about this problem carefully'));
+        expect(stream.state.streamTokenCount).toBe(11);
     });
 
     it('reasoning event appends to reasoningContent', () => {
@@ -377,25 +375,4 @@ describe('createStreamHandler', () => {
     });
 });
 
-describe('estimateTokens', () => {
-    it('returns 0 for empty string', () => {
-        expect(estimateTokens('')).toBe(0);
-    });
 
-    it('estimates ~1 token for short text', () => {
-        expect(estimateTokens('Hi')).toBe(1);
-        expect(estimateTokens('Hello')).toBe(2);
-    });
-
-    it('estimates proportionally for longer text', () => {
-        // 11 chars / 4 = 2.75 → 3
-        expect(estimateTokens('Hello world')).toBe(3);
-        // 44 chars / 4 = 11
-        expect(estimateTokens('This is a sentence with multiple words in it')).toBe(11);
-    });
-
-    it('handles newlines and spaces', () => {
-        // 18 chars / 4 = 4.5 → 5
-        expect(estimateTokens('Line one\nLine two')).toBe(5);
-    });
-});

@@ -2,11 +2,6 @@ import type { StreamEvent, DiffData } from '$lib/types';
 import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
 import type { StreamState } from './stream-state.svelte';
 
-/** Estimate token count from text. Average English token ≈ 4 chars. */
-export function estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-}
-
 /** Update context usage from accumulated token counts. */
 function updateContextUsed(s: typeof import('./stream-state.svelte').StreamState['state']) {
     s.contextState = { ...s.contextState, used: s.lastPromptTokens + s.streamTokenCount };
@@ -61,7 +56,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
-                s.streamTokenCount += estimateTokens(data.text);
+                s.streamTokenCount += Math.ceil(data.text.length / 4);
                 updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 if (!s.currentAssistantId) s.currentAssistantId = entry.id;
@@ -75,7 +70,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
-                s.streamTokenCount += estimateTokens(data.text);
+                s.streamTokenCount += Math.ceil(data.text.length / 4);
                 updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;

@@ -1,7 +1,7 @@
 import type { ChatEntry, Thread } from '$lib/types';
 
 /** Checkpoint state for a single entry. */
-export interface CheckpointState {
+interface CheckpointState {
     isPending: boolean;
     commitLabel?: string;
     commitHash?: string;

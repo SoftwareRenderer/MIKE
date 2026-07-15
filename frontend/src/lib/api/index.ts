@@ -17,11 +17,9 @@ export {
     enqueueAction,
     getQueuedTaskIds,
     getQueuedDeleteTaskIds,
-    getQueueLength,
     flushQueueNow,
     waitForFlush,
     applyQueuedActionsToBoard,
-    __debugOfflineStatus,
 } from './queue';
 
 // -- Types --
@@ -38,7 +36,6 @@ export {
     updateProject,
     buildSandboxImage,
     buildSandboxImageStream,
-    validateForwardPorts,
     deleteProject,
     getBoard,
     reorderTasks,
@@ -89,7 +86,6 @@ export {
     testConnection,
     fetchModels,
     testPiConnection,
-    reloadPrompts,
 } from './config';
 
 // -- Git --

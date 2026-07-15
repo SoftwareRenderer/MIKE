@@ -2,6 +2,7 @@
     import type { Task, Provider } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { get } from 'svelte/store';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
@@ -16,7 +17,7 @@
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null } = $props();
 
     // Track if this task has queued offline actions (for diagonal fade effect)
     let taskHasQueuedActions = $state(false);
@@ -105,6 +106,11 @@
 
     let mouseDownPos = $state<{ x: number; y: number } | null>(null);
 
+    // Long-press detection for mobile multi-select
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let longPressTriggered = $state(false);
+    const LONG_PRESS_DURATION = 400; // ms
+
     function handleMouseDown(e: MouseEvent) {
         mouseDownPos = { x: e.clientX, y: e.clientY };
     }
@@ -132,8 +138,62 @@
         // Skip if the click originated from a child button (progress bar, action icons, etc.)
         const target = e.target as HTMLElement;
         if (target.closest('button, input, a, select, .card-edit-panel')) return;
+        // Skip if a long-press multi-select was triggered (mobile)
+        if (longPressTriggered) {
+            longPressTriggered = false;
+            return;
+        }
+        // Skip if multi-select mode is active on mobile (tap toggled selection)
+        if (isMobileCtx.isMobile && multiSelect && multiSelect.hasSelection) {
+            return;
+        }
+        // Ctrl/Cmd + Click: toggle multi-select
+        if (multiSelect && (e.ctrlKey || e.metaKey)) {
+            e.stopPropagation();
+            multiSelect.toggle(task.id);
+            return;
+        }
         if (inline && task.parent_task_id) e.stopPropagation();
         if (onSelect) { onSelect(task); } else { appStore.selectedTask = task; uiStore.showCardDetail = true; }
+    }
+
+    // Touch handlers for mobile long-press multi-select
+    // First selection requires long-press; subsequent taps toggle without long-press
+    function handleTouchStart(e: TouchEvent) {
+        if (!multiSelect || !isMobileCtx.isMobile) return;
+        // Skip if touching a button or interactive element
+        const target = e.target as HTMLElement;
+        if (target.closest('button, input, a, select, .card-edit-panel')) return;
+        longPressTriggered = false;
+        // Only require long-press when nothing is selected yet
+        if (!multiSelect.hasSelection) {
+            longPressTimer = setTimeout(() => {
+                longPressTriggered = true;
+                if (navigator.vibrate) navigator.vibrate(30);
+                multiSelect.toggle(task.id);
+            }, LONG_PRESS_DURATION);
+        }
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+        // If tasks are already selected, tap toggles selection (no long-press needed)
+        if (multiSelect && multiSelect.hasSelection && !longPressTriggered) {
+            e.preventDefault();
+            e.stopPropagation();
+            multiSelect.toggle(task.id);
+        }
+    }
+
+    function handleTouchMove() {
+        // Cancel long-press if finger moves (user is scrolling)
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
     }
 
     const isMobileCtx = useIsMobile();
@@ -573,6 +633,7 @@
 <div
     class="card"
     class:selected={showSelected}
+    class:multi-selected={multiSelect?.isSelected(task.id) ?? false}
     class:has-children={hasChildren}
     class:is-expanded={expanded}
     class:is-subtask={inline && !!task.parent_task_id}
@@ -585,6 +646,9 @@
     ondragstart={handleDragStart}
     onclick={handleCardClick}
     onkeydown={handleCardKeydown}
+    ontouchstart={handleTouchStart}
+    ontouchend={handleTouchEnd}
+    ontouchmove={handleTouchMove}
     role="button"
     tabindex="0"
     aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${task.status === 'backlog' ? 'Backlog' : task.status === 'in_progress' ? 'In Progress' : task.status === 'review' ? 'Review' : 'Done'}`}
@@ -644,7 +708,7 @@
                     </button>
                 {:else if isIdle}
                     <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
-                {:else if columnId === 'done'}
+                {:else if columnId === 'done' && !(multiSelect?.isSelected(task.id) ?? false)}
                     <button
                         type="button"
                         class="action-icon action-delete"
@@ -657,7 +721,7 @@
                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
-                {:else if isDoneSubtask}
+                {:else if isDoneSubtask && !(multiSelect?.isSelected(task.id) ?? false)}
                     <button
                         type="button"
                         class="action-icon action-delete"
@@ -751,7 +815,7 @@
         <div class="subtask-list" transition:slide={{ duration: 200 }}>
             {#each children as child}
                 <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
-                    <Card task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {onRefreshBoard} />
+                    <Card task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {multiSelect} {onRefreshBoard} />
                 </div>
             {/each}
         </div>
@@ -867,6 +931,17 @@
         border-left-color: var(--status-color, var(--color-border));
     }
     .card.selected.has-children:not(.is-subtask) {
+        border-left-color: var(--column-color, var(--color-border));
+    }
+    /* Multi-select visual state */
+    .card.multi-selected {
+        border-color: var(--color-accent);
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-2));
+    }
+    .card.multi-selected.is-subtask {
+        border-left-color: var(--status-color, var(--color-border));
+    }
+    .card.multi-selected.has-children:not(.is-subtask) {
         border-left-color: var(--column-color, var(--color-border));
     }
     .card:active {

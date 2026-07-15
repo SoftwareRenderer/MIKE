@@ -56,16 +56,6 @@ export async function getGitStatus(projectId: string): Promise<{ clean: boolean;
     return res.json();
 }
 
-/** Fetch the unified diff for a single file in the project (staged or working tree).
- * Returns { diff: string, lines: string[], line_count: number, isBinary: boolean }.
- * When staged=true, returns staged (index) diff. When false/omitted, returns working tree diff. */
-export async function getProjectFileDiff(projectId: string, path: string, staged: boolean): Promise<{ diff: string; lines: string[]; line_count: number; isBinary: boolean }> {
-    const params = new URLSearchParams({ path, staged: String(staged) });
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff/file?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch file diff');
-    return res.json();
-}
-
 /** Fetch the unified diff between two commits (or working tree vs ref) as raw text.
  * When cached=true, returns staged changes only (git diff --cached). */
 export async function getProjectDiff(projectId: string, options?: { base?: string; head?: string; ref?: string; cached?: boolean }): Promise<string> {
