@@ -136,16 +136,19 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 newActive.delete(data.tool_id);
                 s.activeToolCalls = newActive;
                 if (ref) {
-                    // Direct property mutation via map reference — no array allocation
-                    const tc = ref.toolCall;
-                    tc.result = data.output;
-                    tc.success = data.success;
-                    tc.duration = data.duration;
-                    tc.isPending = false;
-                    if (data.args) tc.args = data.args;
-                    if (data.raw_args) tc.raw_args = data.raw_args;
-                    if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                    if (data.path !== undefined) tc.path = data.path;
+                    // Access tc through current s.entries proxy so mutations trigger reactivity.
+                    const entry = s.entries.find(e => e.id === ref.entryId);
+                    const tc = entry?.toolCalls?.find(t => t.toolId === data.tool_id);
+                    if (tc) {
+                        tc.result = data.output;
+                        tc.success = data.success;
+                        tc.duration = data.duration;
+                        tc.isPending = false;
+                        if (data.args) tc.args = data.args;
+                        if (data.raw_args) tc.raw_args = data.raw_args;
+                        if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                        if (data.path !== undefined) tc.path = data.path;
+                    }
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();

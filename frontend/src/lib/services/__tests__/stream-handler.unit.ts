@@ -300,17 +300,16 @@ describe('createStreamHandler', () => {
     });
 
     describe('allocation optimizations', () => {
-        it('tool_result mutates in-place without replacing toolCalls array', () => {
+        it('tool_result mutates tc through live entries proxy for Svelte reactivity', () => {
             const { stream, handleEvent } = setup();
             handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
             handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
-            const toolCallsRef = stream.state.entries[0].toolCalls!;
             handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'content', duration: 50 } }, false, 'p1', 't1');
-            // The toolCalls array reference should be the same (no .map() replacement)
-            expect(stream.state.entries[0].toolCalls).toBe(toolCallsRef);
-            // The tool call object reference should be the same (direct mutation)
             expect(stream.state.entries[0].toolCalls![0].toolId).toBe('tc1');
             expect(stream.state.entries[0].toolCalls![0].result).toBe('content');
+            expect(stream.state.entries[0].toolCalls![0].isPending).toBe(false);
+            expect(stream.state.entries[0].toolCalls![0].success).toBe(true);
+            expect(stream.state.entries[0].toolCalls![0].duration).toBe(50);
         });
 
         it('tool_output mutates in-place without replacing toolCalls array', () => {
