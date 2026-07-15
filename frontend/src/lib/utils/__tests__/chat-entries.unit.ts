@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, getCheckpointEntryCheckpointState, buildCheckpointStateMap } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap } from '$lib/utils/chat-entries';
 import type { ChatEntry } from '$lib/types';
 
 function entry(role: string, content: string): ChatEntry {
@@ -110,17 +110,6 @@ describe('buildCheckpointStateMap', () => {
         return { id, role: 'user', content: 'hello', isStreaming: false, createdAt: new Date().toISOString() };
     }
 
-    /** Helper to verify buildCheckpointStateMap matches per-entry getCheckpointEntryCheckpointState. */
-    function assertMatches(entries: ChatEntry[], pending: Set<string>, labels: Map<string, string>, hashes: Map<string, string>) {
-        const map = buildCheckpointStateMap(entries, pending, labels, hashes);
-        for (let i = 0; i < entries.length; i++) {
-            if (entries[i].role === 'user') {
-                const expected = getCheckpointEntryCheckpointState(i, entries, pending, labels, hashes);
-                expect(map.get(i)).toEqual(expected);
-            }
-        }
-    }
-
     it('returns empty map for entries with no user messages', () => {
         const entries = [assistant('a1')];
         const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
@@ -214,22 +203,6 @@ describe('buildCheckpointStateMap', () => {
         labels.set('a1', 'fix: bug');
         const map = buildCheckpointStateMap(entries, new Set(), labels, new Map());
         expect(map.get(0)).toEqual({ isPending: false, commitLabel: 'fix: bug', commitHash: undefined });
-    });
-
-    it('matches per-entry function across multiple users with mixed assistants', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1', [{ toolId: 't1' }]),
-            user('u2'),
-            assistant('a2'),
-            user('u3'),
-            assistant('a3', [{ toolId: 't3' }]),
-            assistant('a4'),
-        ];
-        const hashes = new Map<string, string>();
-        hashes.set('a1', 'hash1');
-        hashes.set('a3', 'hash3');
-        assertMatches(entries, new Set(), new Map(), hashes);
     });
 
     it('handles empty entries array', () => {

@@ -1,5 +1,13 @@
 import type { EditorView } from '@codemirror/view';
 
+/**
+ * Cursor position tracker for CodeMirror editors.
+ * Returns `{ cursorLine, cursorCol, handleUpdate, reset }`.
+ *
+ * Usage:
+ *   const { cursorLine, cursorCol, handleUpdate } = useCursorPosition();
+ *   // Wire handleUpdate into the editor's `updateListener` extension.
+ */
 export function useCursorPosition() {
     let cursorLine = 1;
     let cursorCol = 1;

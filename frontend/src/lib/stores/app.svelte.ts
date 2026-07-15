@@ -1,6 +1,28 @@
 import type { Project, Board, Config, Task, Provider } from '$lib/types';
 import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
 
+// ─── Board Helpers ───
+
+/** Replace a single task in the board's task list.
+ * No-op if the board is null or the task is not found. */
+export function updateTaskInBoard(appStore: AppStore, taskId: string, updated: Task): void {
+    const board = appStore.board;
+    if (!board) return;
+    const idx = board.tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return;
+    const newTasks = [...board.tasks];
+    newTasks[idx] = updated;
+    appStore.board = { ...board, tasks: newTasks };
+}
+
+/** Remove a task from the board's task list.
+ * No-op if the board is null or the task is not found. */
+export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
+    const board = appStore.board;
+    if (!board) return;
+    appStore.board = { ...board, tasks: board.tasks.filter(t => t.id !== taskId) };
+}
+
 // ─── Domain State ───
 
 export interface EditTaskData {

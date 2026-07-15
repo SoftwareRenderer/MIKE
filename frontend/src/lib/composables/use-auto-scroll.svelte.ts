@@ -10,6 +10,8 @@
  *   // Then attach the onScroll handler to the scroll container:
  *   <div onScroll={onScroll}>...</div>
  */
+import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
+
 export function useAutoScroll(getScrollEl: () => HTMLElement | null): {
     atBottom: boolean;
     scroll: (force?: boolean) => void;
@@ -21,9 +23,8 @@ export function useAutoScroll(getScrollEl: () => HTMLElement | null): {
     const checkAtBottom = () => {
         const el = getScrollEl();
         if (!el) return;
-        const threshold = 32; // pixels from bottom to consider "at bottom"
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        atBottom = gap < threshold;
+        atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
     };
 
     const scroll = (force = false) => {

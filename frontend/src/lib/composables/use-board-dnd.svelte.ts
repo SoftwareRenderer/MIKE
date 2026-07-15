@@ -1,5 +1,5 @@
 import type { Task } from '$lib/types';
-import { appStore, dialogStore } from '$lib/stores';
+import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { moveTask } from '$lib/api';
 
 /** Reactive state for board section drag-and-drop. */
@@ -67,7 +67,7 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
             const willConsolidate = task.parent_task_id &&
                 getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
-                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === taskId ? updated : t) };
+                updateTaskInBoard(appStore, taskId, updated);
             }
         } catch (err) {
             console.error('Failed to move task:', err);

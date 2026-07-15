@@ -1,7 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
@@ -1124,7 +1124,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     if (model) task.model_name = model;
                     if (url) task.llama_server_url = url;
                     if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-                    appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+                    updateTaskInBoard(appStore, task.id, task);
                     import('$lib/api').then(({ updateTask }) => updateTask(projectId, taskId, updates)).catch(err => {
                         console.error('Failed to update task:', err);
                     });

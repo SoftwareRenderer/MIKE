@@ -3,11 +3,12 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
-import { appStore, uiStore, dialogStore } from '$lib/stores';
+import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
-    import { useCheckpointTracker } from '$lib/composables/use-checkpoint-tracker.svelte';
+    import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
+import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
@@ -57,14 +58,13 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
     // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
     let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-    const DRAFT_SAVE_DEBOUNCE = 100; // ms
     function handleInputSave(val: string) {
         if (draftSaveTimer) clearTimeout(draftSaveTimer);
         if (val) {
             draftSaveTimer = setTimeout(() => {
                 setDraftText(taskId, val).catch(() => {});
                 draftSaveTimer = null;
-            }, DRAFT_SAVE_DEBOUNCE);
+            }, DRAFT_SAVE_DEBOUNCE_MS);
         }
     }
 
@@ -271,8 +271,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     /** Merge an updated task into the app store. */
     function mergeTaskIntoBoard(updated: any) {
         const existing = appStore.board?.tasks.find(t => t.id === taskId);
-        const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
-        appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === taskId ? merged : t) };
+        const merged = existing ? mergeQueuedUpdate(existing, updated) : updated;
+        updateTaskInBoard(appStore, taskId, merged);
     }
 
     /** Send a message via the API with tracking state. Returns false on failure. */
@@ -577,9 +577,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         if (scrollEl.scrollHeight < (prevScrollHeight || scrollEl.scrollHeight)) {
             const shrinkAmount = (prevScrollHeight || scrollEl.scrollHeight) - scrollEl.scrollHeight;
-            atBottom = gap < shrinkAmount + 32;
+            atBottom = gap < shrinkAmount + SCROLL_BOTTOM_THRESHOLD;
         } else {
-            atBottom = gap < 32;
+            atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
         }
         prevScrollHeight = scrollEl.scrollHeight;
     }

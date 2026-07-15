@@ -9,4 +9,4 @@ export const dialogStore = new DialogStore();
 
 // Re-export types and helper functions
 export type { EditTaskData } from './app.svelte';
-export { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from './app.svelte';
+export { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from './app.svelte';

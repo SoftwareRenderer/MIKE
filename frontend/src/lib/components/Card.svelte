@@ -2,13 +2,14 @@
     import type { Task, Provider } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
     import { fade, slide } from 'svelte/transition';
@@ -224,7 +225,7 @@
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? updated : t) };
+            updateTaskInBoard(appStore, task.id, updated);
         } catch (err) {
             console.error('Failed to update model:', err);
         }
@@ -237,7 +238,7 @@
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? updated : t) };
+            updateTaskInBoard(appStore, task.id, updated);
         } catch (err) {
             console.error('Failed to select agent:', err);
         }
@@ -370,7 +371,7 @@
         if (model) task.model_name = model;
         if (url) task.llama_server_url = url;
         if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-        appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+        updateTaskInBoard(appStore, task.id, task);
         updateTask(projectId, task.id, updates).catch(err => {
             console.error('Failed to update task:', err);
         });
@@ -423,8 +424,8 @@
                 try {
                     const { moveTask: apiMoveTask } = await import('$lib/api');
                     const updated = await apiMoveTask(projectId, task.id, targetStatus);
-                    Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-                    appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+                    Object.assign(task, mergeQueuedUpdate(task, updated));
+                    updateTaskInBoard(appStore, task.id, task);
                 } catch (err) {
                     console.error('Failed to move task:', err);
                 }
@@ -451,8 +452,8 @@
         try {
             const updated = await stopTask(projectId, task.id);
             // Apply optimistic update to task object
-            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+            Object.assign(task, mergeQueuedUpdate(task, updated));
+            updateTaskInBoard(appStore, task.id, task);
         } catch (err) {
             console.error('Failed to pause task:', err);
         }
@@ -463,8 +464,8 @@
         if (!projectId) return;
         try {
             const updated = await resumeTask(projectId, task.id);
-            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+            Object.assign(task, mergeQueuedUpdate(task, updated));
+            updateTaskInBoard(appStore, task.id, task);
         } catch (err) {
             console.error('Failed to resume task:', err);
         }
@@ -500,8 +501,8 @@
             } else {
                 updated = await moveTask(projectId, task.id, nextStatus);
             }
-            Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
+            Object.assign(task, mergeQueuedUpdate(task, updated));
+            updateTaskInBoard(appStore, task.id, task);
         } catch (err) {
             console.error('Failed to move task:', err);
         }
@@ -525,7 +526,7 @@
             // If task has queued actions (optimistic ID), server may not know about it.
             // Remove from UI anyway and let the queue handle cleanup.
             if (getQueuedTaskIds().has(task.id)) {
-                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.filter(t => t.id !== task.id) };
+                removeTaskFromBoard(appStore, task.id);
                 onRefreshBoard?.();
             } else {
                 dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
@@ -548,11 +549,11 @@
             if (task.parent_task_id) {
                 const { startSubtask } = await import('$lib/api');
                 const updated = await startSubtask(projectId, task.id);
-                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === updated.id ? updated : t) };
+                updateTaskInBoard(appStore, updated.id, updated);
             } else {
                 // Parent task or root task — use normal start (backend handles LLM subtask selection)
                 const updated = await startTask(projectId, task.id);
-                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === updated.id ? updated : t) };
+                updateTaskInBoard(appStore, updated.id, updated);
             }
         } catch (err) {
             console.error('Failed to start task:', err);

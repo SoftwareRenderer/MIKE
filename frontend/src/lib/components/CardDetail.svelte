@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
@@ -437,7 +437,7 @@
         try {
             const updated = await moveTask(task.project_id, task.id, status);
             task = updated;
-            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task!.id ? updated : t) };
+            updateTaskInBoard(appStore, task!.id, updated);
         } catch (e) {
             dialogStore.showToast('Failed to move: ' + String(e), 'error');
         }

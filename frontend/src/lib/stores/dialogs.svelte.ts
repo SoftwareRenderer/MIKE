@@ -1,4 +1,5 @@
 // ─── Toast ───
+import { TOAST_DURATION_MS } from '$lib/constants';
 
 export class DialogStore {
     public toast = $state<{ message: string; type: 'error' | 'success' } | null>(null);
@@ -25,7 +26,7 @@ export class DialogStore {
     } | null>(null);
 
     /** Show a toast message that auto-dismisses after `duration` ms. */
-    public showToast(message: string, type: 'error' | 'success' = 'error', duration = 4000) {
+    public showToast(message: string, type: 'error' | 'success' = 'error', duration = TOAST_DURATION_MS) {
         this.toast = { message, type };
         setTimeout(() => this.toast = null, duration);
     }

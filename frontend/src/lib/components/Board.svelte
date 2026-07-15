@@ -4,9 +4,10 @@
     import { tick } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
-    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
+    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
@@ -196,9 +197,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
                 tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
                 // When offline, updated is a partial optimistic result — merge with existing task
-                const merged = (updated as any).queued
-                    ? { ...task, ...updated }
-                    : updated;
+                const merged = mergeQueuedUpdate(task, updated);
                 // Update tasks array directly (Board renders from this prop, not boardStore)
                 const idx = tasks.findIndex(t => t.id === taskId);
                 if (idx !== -1) {
