@@ -240,55 +240,6 @@ export function buildEntriesFromMessages(
 }
 
 /**
- * Get the checkpoint pending/label state for the checkpoint divider before a user message.
- * Looks at the next assistant entry (with tool calls or hash) after the given entry index,
- * since the checkpoint is created after tool calls in the same turn.
- * Falls back to walking backward if no forward entry has a checkpoint.
- * @deprecated Use buildCheckpointStateMap for O(n) batch computation.
- */
-export function getCheckpointEntryCheckpointState(
-    entryIdx: number,
-    entries: ChatEntry[],
-    pendingCheckpoints: Set<string>,
-    checkpointLabels: Map<string, string>,
-    checkpointCommitHashes: Map<string, string>,
-): CheckpointState | null {
-    // First: look forward to find the next assistant entry with tool calls or a checkpoint hash
-    for (let i = entryIdx + 1; i < entries.length; i++) {
-        const next = entries[i];
-        if (next.role === 'assistant') {
-            const hasToolCalls = next.toolCalls && next.toolCalls.length > 0;
-            const hasHash = checkpointCommitHashes.has(next.id);
-            if (hasToolCalls || hasHash) {
-                return {
-                    isPending: pendingCheckpoints.has(next.id),
-                    commitLabel: checkpointLabels.get(next.id),
-                    commitHash: checkpointCommitHashes.get(next.id) || undefined,
-                };
-            }
-            break;
-        }
-    }
-    // Fallback: walk backward
-    for (let i = entryIdx - 1; i >= 0; i--) {
-        const prev = entries[i];
-        if (prev.role === 'assistant') {
-            const hasToolCalls = prev.toolCalls && prev.toolCalls.length > 0;
-            const hasHash = checkpointCommitHashes.has(prev.id);
-            if (hasToolCalls || hasHash) {
-                return {
-                    isPending: pendingCheckpoints.has(prev.id),
-                    commitLabel: checkpointLabels.get(prev.id),
-                    commitHash: checkpointCommitHashes.get(prev.id) || undefined,
-                };
-            }
-        }
-        if (prev.role === 'user') break;
-    }
-    return null;
-}
-
-/**
  * Build a map from user-entry index to checkpoint state in O(n) time.
  * Two-phase approach:
  *  1. Precompute forward scan targets: for each user, find the next assistant
@@ -302,7 +253,8 @@ export function getCheckpointEntryCheckpointState(
  *  2. Backward scan: find the most recent assistant with tool calls/hash,
  *     bounded by the previous user entry.
  *
- * Produces identical output to calling getCheckpointEntryCheckpointState per entry.
+ * For each user entry, resolves the checkpoint state from the nearest qualifying
+ * assistant entry (one with tool calls or a checkpoint commit hash).
  */
 export function buildCheckpointStateMap(
     entries: ChatEntry[],

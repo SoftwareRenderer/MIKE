@@ -1,97 +1,74 @@
-import { writable } from 'svelte/store';
-import type { Project, Board, Config, Task, Provider, EditTaskData } from '$lib/types';
-import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
+// Legacy compat — re-export from reactive store
+// Prefer importing from $lib/stores (appStore, uiStore, dialogStore)
+import { appStore } from './index';
 
-// ─── Domain State ───
+export const projects = {
+    get: () => appStore.projects,
+    set: (v: typeof appStore.projects) => { appStore.projects = v; },
+    update: (fn: (v: typeof appStore.projects) => typeof appStore.projects) => { appStore.projects = fn(appStore.projects); },
+    subscribe: (fn: (v: typeof appStore.projects) => void) => { fn(appStore.projects); return () => {}; },
+} as any;
 
-export const projects = writable<Project[]>([]);
-export const selectedProject = writable<Project | null>(null);
-export const board = writable<Board | null>(null);
-export const selectedTask = writable<Task | null>(null);
-export const config = writable<Config | null>(null);
+export const selectedProject = {
+    get: () => appStore.selectedProject,
+    set: (v: typeof appStore.selectedProject) => { appStore.selectedProject = v; },
+    subscribe: (fn: (v: typeof appStore.selectedProject) => void) => { fn(appStore.selectedProject); return () => {}; },
+} as any;
 
-// Active port mappings for the project-level terminal (broadcast via WebSocket)
-export const projectTerminalPorts = writable<Array<{ host_port: number; container_port: number }>>([]);
+export const board = {
+    get: () => appStore.board,
+    set: (v: typeof appStore.board) => { appStore.board = v; },
+    update: (fn: (v: typeof appStore.board) => typeof appStore.board) => { appStore.board = fn(appStore.board); },
+    subscribe: (fn: (v: typeof appStore.board) => void) => { fn(appStore.board); return () => {}; },
+} as any;
 
-// ─── Sidebar ───
+export const selectedTask = {
+    get: () => appStore.selectedTask,
+    set: (v: typeof appStore.selectedTask) => { appStore.selectedTask = v; },
+    subscribe: (fn: (v: typeof appStore.selectedTask) => void) => { fn(appStore.selectedTask); return () => {}; },
+} as any;
 
-export const sidebarCollapsed = writable(false);
+export const config = {
+    get: () => appStore.config,
+    set: (v: typeof appStore.config) => { appStore.config = v; },
+    subscribe: (fn: (v: typeof appStore.config) => void) => { fn(appStore.config); return () => {}; },
+} as any;
 
-// Load sidebar collapsed state from IndexedDB on init
-loadAppSetting('kanban-sidebar-collapsed', false).then(v => {
-    sidebarCollapsed.set(v === true || v === 'true');
-}).catch(() => {});
+export const projectTerminalPorts = {
+    get: () => appStore.projectTerminalPorts,
+    set: (v: typeof appStore.projectTerminalPorts) => { appStore.projectTerminalPorts = v; },
+    subscribe: (fn: (v: typeof appStore.projectTerminalPorts) => void) => { fn(appStore.projectTerminalPorts); return () => {}; },
+} as any;
 
-// Persist sidebar collapsed state whenever it changes
-sidebarCollapsed.subscribe(v => {
-    saveAppSetting('kanban-sidebar-collapsed', v).catch(() => {});
-});
+export const sidebarCollapsed = {
+    get: () => appStore.sidebarCollapsed,
+    set: (v: typeof appStore.sidebarCollapsed) => { appStore.sidebarCollapsed = v; },
+    subscribe: (fn: (v: typeof appStore.sidebarCollapsed) => void) => { fn(appStore.sidebarCollapsed); return () => {}; },
+} as any;
 
-// ─── Edit Task Modal ───
+export const showEditTask = {
+    get: () => appStore.showEditTask,
+    set: (v: typeof appStore.showEditTask) => { appStore.showEditTask = v; },
+    subscribe: (fn: (v: typeof appStore.showEditTask) => void) => { fn(appStore.showEditTask); return () => {}; },
+} as any;
 
-export type { EditTaskData };
+export const editTaskData = {
+    get: () => appStore.editTaskData,
+    set: (v: typeof appStore.editTaskData) => { appStore.editTaskData = v; },
+    subscribe: (fn: (v: typeof appStore.editTaskData) => void) => { fn(appStore.editTaskData); return () => {}; },
+} as any;
 
-export const showEditTask = writable(false);
-export const editTaskData = writable<EditTaskData | null>(null);
+export const pwaInstallPrompt = {
+    get: () => appStore.pwaInstallPrompt,
+    set: (v: typeof appStore.pwaInstallPrompt) => { appStore.pwaInstallPrompt = v; },
+    subscribe: (fn: (v: typeof appStore.pwaInstallPrompt) => void) => { fn(appStore.pwaInstallPrompt); return () => {}; },
+} as any;
 
-// ─── Expanded Tasks ───
+export const pwaInstalled = {
+    get: () => appStore.pwaInstalled,
+    set: (v: typeof appStore.pwaInstalled) => { appStore.pwaInstalled = v; },
+    subscribe: (fn: (v: typeof appStore.pwaInstalled) => void) => { fn(appStore.pwaInstalled); return () => {}; },
+} as any;
 
-/**
- * Save the current collapsed state to IndexedDB.
- * Collapsed = tasks with children that are NOT in the expanded set.
- */
-export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>): Promise<void> {
-    const collapsed = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!expanded.has(id)) {
-            collapsed.add(id);
-        }
-    }
-    await saveCollapsedTasks(collapsed);
-}
-
-/**
- * Clean stale entries from IndexedDB (task IDs that no longer exist).
- */
-export async function cleanupCollapsedTasks(allTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await loadCollapsedTasks();
-    let changed = false;
-    for (const id of collapsed) {
-        if (!allTaskIds.has(id)) {
-            collapsed.delete(id);
-            changed = true;
-        }
-    }
-    if (changed) {
-        await saveCollapsedTasks(collapsed);
-    }
-    return collapsed;
-}
-
-/**
- * Initialize expandedTasks from IndexedDB.
- * Returns the set of expanded task IDs (all parent IDs minus collapsed).
- */
-export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await loadCollapsedTasks();
-    // Clean stale entries
-    for (const id of collapsed) {
-        if (!parentTaskIds.has(id)) {
-            collapsed.delete(id);
-        }
-    }
-    await saveCollapsedTasks(collapsed);
-    // Expanded = all parent IDs minus collapsed
-    const expanded = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!collapsed.has(id)) {
-            expanded.add(id);
-        }
-    }
-    return expanded;
-}
-
-// ─── PWA ───
-
-export const pwaInstallPrompt = writable<Event | null>(null);
-export const pwaInstalled = writable(false);
+// Re-export helper functions
+export { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, type EditTaskData } from './app.svelte';

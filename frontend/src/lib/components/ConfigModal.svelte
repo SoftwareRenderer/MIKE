@@ -3,9 +3,7 @@
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
-    import { config as configStore, selectedProject, pwaInstallPrompt } from '$lib/stores/app';
-    import { showConfig } from '$lib/stores/ui';
-    import { showConfirm } from '$lib/stores/dialogs';
+    import { appStore, uiStore, dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -480,7 +478,7 @@
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
             } as Config);
-            configStore.set(cfg);
+            appStore.config = cfg;
             onSaved();
         } catch (e) {
             error = String(e);
@@ -494,7 +492,7 @@
     }
 
     async function handleSignOut() {
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Sign out',
             message: 'Are you sure you want to sign out?',
             confirmText: 'Sign out',
@@ -507,7 +505,7 @@
 
     // PWA install handler
     async function handlePwaInstall() {
-        const promptEvent = $pwaInstallPrompt;
+        const promptEvent = appStore.pwaInstallPrompt;
         if (!promptEvent) return;
         // Fire the install prompt
         (promptEvent as any).prompt?.();
@@ -515,7 +513,7 @@
         const { outcome } = await (promptEvent as any).userChoice || { outcome: 'dismissed' };
         if (outcome === 'dismissed') {
             // User dismissed — clear the prompt so the button goes away
-            pwaInstallPrompt.set(null);
+            appStore.pwaInstallPrompt = null;
         }
     }
 </script>
@@ -608,7 +606,7 @@
                     <div class="readonly-value">{config?.database_path || '—'}</div>
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
-                {#if $pwaInstallPrompt}
+                {#if appStore.pwaInstallPrompt}
                     <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                             <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -624,7 +622,7 @@
                 bind:defaultAutoMerge
                 bind:defaultSubtasksAutoMerge
                 bind:defaultMaxFailedTurns
-                originBranch={$selectedProject?.origin_branch || 'main'}
+                originBranch={appStore.selectedProject?.origin_branch || 'main'}
             />
 
             {#if error}

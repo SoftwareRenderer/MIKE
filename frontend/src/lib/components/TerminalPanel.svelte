@@ -1,11 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { get } from 'svelte/store';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { WebglAddon } from '@xterm/addon-webgl';
-    import { selectedProject, selectedTask, projectTerminalPorts } from '$lib/stores/app';
-import { showTerminal } from '$lib/stores/ui';
+    import { appStore, uiStore } from '$lib/stores';
     import { createTerminal, createProjectTerminal, isTerminalStale, getTask, getProject } from '$lib/api';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -36,8 +34,6 @@ import { showTerminal } from '$lib/stores/ui';
     let modAlt = $state(false);
     // Active port mappings for the badge
     let activePorts = $state<import('$lib/types').AssignedPort[]>([]);
-    let unsubTask: (() => void) | null = null;
-    let unsubProjectPorts: (() => void) | null = null;
 
 
     /** Escape sequences sent by xterm.js for each key. */
@@ -129,7 +125,7 @@ import { showTerminal } from '$lib/stores/ui';
     loadHeight().then(h => { panelHeight = h; }).catch(() => {});
 
     // Create/recreate the terminal WebSocket for the current project/task.
-    function createTerminalWS(proj: ReturnType<typeof selectedProject.get> | null, task: ReturnType<typeof selectedTask.get> | null) {
+    function createTerminalWS(proj: import('$lib/types').Project | null, task: import('$lib/types').Task | null) {
         if (proj && task) {
             ws = createTerminal(proj.id, task.id, term!, close, transformInput);
             ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
@@ -145,7 +141,7 @@ import { showTerminal } from '$lib/stores/ui';
         fullscreen = false;
         trap?.destroy();
         trap = null;
-        showTerminal.set(false);
+        uiStore.showTerminal = false;
         if (ws) ws.close();
         ws = null;
         setTimeout(() => triggerEl?.focus(), 50);
@@ -175,20 +171,23 @@ import { showTerminal } from '$lib/stores/ui';
         }
 
         // Subscribe to task updates for task terminals (assigned_ports changes)
-        unsubTask = selectedTask.subscribe(task => {
+        // Track task port changes via $effect
+        $effect(() => {
+            const task = appStore.selectedTask;
             if (task && task.assigned_ports && task.assigned_ports.length > 0) {
                 activePorts = task.assigned_ports;
             } else if (!task) {
                 // Switched to project-level terminal
-                projectTerminalPorts.subscribe(ports => { activePorts = ports; })();
+                activePorts = appStore.projectTerminalPorts;
             } else {
                 activePorts = [];
             }
         });
 
-        // Subscribe to project-level terminal ports
-        unsubProjectPorts = projectTerminalPorts.subscribe(ports => {
-            if (!get(selectedTask)) {
+        // Track project-level terminal ports via $effect
+        $effect(() => {
+            const ports = appStore.projectTerminalPorts;
+            if (!appStore.selectedTask) {
                 activePorts = ports;
             }
         });
@@ -197,8 +196,8 @@ import { showTerminal } from '$lib/stores/ui';
         // Stores can be empty/stale when the terminal opens (e.g., container
         // already exists so no WebSocket broadcast is sent).
         (async () => {
-            const proj = get(selectedProject);
-            const task = get(selectedTask);
+            const proj = appStore.selectedProject;
+            const task = appStore.selectedTask;
             if (!proj) return;
             if (task) {
                 // Task terminal: fetch latest task to get assigned_ports
@@ -214,7 +213,7 @@ import { showTerminal } from '$lib/stores/ui';
                     const fresh = await getProject(proj.id);
                     if (fresh.active_terminal_ports && fresh.active_terminal_ports.length > 0) {
                         activePorts = fresh.active_terminal_ports;
-                        projectTerminalPorts.set(fresh.active_terminal_ports);
+                        appStore.projectTerminalPorts = fresh.active_terminal_ports;
                     }
                 } catch { /* stale data is fine — WebSocket will update */ }
             }
@@ -242,8 +241,8 @@ import { showTerminal } from '$lib/stores/ui';
         fit.fit();
         term.focus();
 
-        const proj = get(selectedProject);
-        const task = get(selectedTask);
+        const proj = appStore.selectedProject;
+        const task = appStore.selectedTask;
         createTerminalWS(proj, task);
 
         // Detect stale terminal WebSocket on visibility change (e.g. phone wakes from sleep).
@@ -251,8 +250,8 @@ import { showTerminal } from '$lib/stores/ui';
             if (!document.hidden && ws && isTerminalStale(ws)) {
                 term?.write('\r\n\x1b[2mReconnecting...\x1b[0m\r\n');
                 ws.close();
-                const p = get(selectedProject);
-                const t = get(selectedTask);
+                const p = appStore.selectedProject;
+                const t = appStore.selectedTask;
                 createTerminalWS(p, t);
             }
         }
@@ -764,8 +763,7 @@ import { showTerminal } from '$lib/stores/ui';
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('visibilitychange', handleTerminalVisibility);
             webglRef = null;
-            if (unsubTask) { unsubTask(); unsubTask = null; }
-            if (unsubProjectPorts) { unsubProjectPorts(); unsubProjectPorts = null; }
+
             try { term?.dispose(); } catch {}
             term = null;
         };

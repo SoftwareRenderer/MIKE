@@ -1,16 +1,14 @@
+
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, selectedTask, showEditTask, editTaskData as editTaskDataStore, projectTerminalPorts } from '$lib/stores/app';
-    import { showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig } from '$lib/stores/ui';
-    import { showConfirm, showToast } from '$lib/stores/dialogs';
-    import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
-    import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
-    import { getBoardCache, boardCacheKey } from '$lib/storage';
-    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { useAppStream } from '$lib/composables/use-app-stream.svelte';
-    import { useAppRouting } from '$lib/composables/use-app-routing.svelte';
-    import type { Project, Task, Config } from '$lib/types';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
+import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+import { getBoardCache, boardCacheKey } from '$lib/storage';
+import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+import kanbanIcon from '$lib/assets/icons/kanban.svg';
+    import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
@@ -29,7 +27,6 @@
     import ExplorerView from './ExplorerView.svelte';
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
-    import kanbanIcon from '$lib/assets/icons/kanban.svg';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -52,9 +49,11 @@
         const name = currentProject?.name;
         if (!name || !currentProject) return 'Kanban Board';
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
+        // If current project has reviews, show it with count
         if (reviewCount > 0) {
             return `🟡 ${name} - ${reviewCount} task${reviewCount === 1 ? '' : 's'} for review`;
         }
+        // Check if any other project has reviews
         for (const [pid, counts] of Object.entries(projectCounts)) {
             if (pid === currentProject.id || !counts.review) continue;
             const project = projects.find(p => p.id === pid);
@@ -64,155 +63,301 @@
         return name;
     }
 
-    // ── Local state ──
+    /**
+     * Update the URL to reflect the current navigation state.
+     * Params are always ordered: project, task, view, thread.
+     * - project/task: must be explicitly provided; omitted = cleared
+     * - view: preserved if omitted; null = cleared
+     * - thread: preserved unless clearThread=true
+     * @param clearThread Also remove the `thread` param (use when leaving task detail).
+     * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
+     */
+    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null; file?: string | null }, clearThread = false, push = false) {
+        const current = new URLSearchParams(location.search);
+        // project/task: explicitly provided or cleared; view: preserve if omitted
+        const project = params.project;
+        const task = params.task;
+        const view = params.view !== undefined ? params.view : current.get('view');
+        const file = params.file !== undefined ? params.file : current.get('file');
+        const thread = clearThread ? null : current.get('thread');
+        // Build query in canonical order: project, task, view, file, thread
+        // Use manual encoding to keep / unencoded in file paths
+        const parts: string[] = [];
+        if (project) parts.push('project=' + encodeURIComponent(project));
+        if (task) parts.push('task=' + encodeURIComponent(task));
+        if (view) parts.push('view=' + encodeURIComponent(view));
+        if (file) parts.push('file=' + file); // keep / unencoded
+        if (thread) parts.push('thread=' + encodeURIComponent(thread));
+        const newUrl = location.pathname + (parts.length ? '?' + parts.join('&') : '');
+        if (location.pathname + location.search !== newUrl) {
+            if (push) {
+                history.pushState(null, '', newUrl);
+            } else {
+                history.replaceState(null, '', newUrl);
+            }
+            // Keep urlFileId in sync — replaceState doesn't fire popstate
+            if (params.file !== undefined) {
+                urlFileId = params.file || '';
+            }
+        }
+    }
+
     let projects: Project[] = $state([]);
     let currentProject: Project | null = $state(null);
     let tasks: Task[] = $state([]);
     let cfg: Config | null = $state(null);
     let collapsed = $state(false);
+    let appStream: ReturnType<typeof createAppStream> | null = $state(null);
+    let wsConnected = $state(false);
+    let lastSyncedAt = $state(Infinity); // epoch ms of last successful data sync
+    let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
+    let countdownSeconds = $state(0);
+    let countdownTimer: ReturnType<typeof setInterval> | null = null;
+    let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
+    let staleTimer: ReturnType<typeof setInterval> | null = null;
+
+    function startCountdown() {
+        stopCountdown();
+        updateCountdown();
+        countdownTimer = setInterval(updateCountdown, 250);
+    }
+    function stopCountdown() {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+    }
+    function updateCountdown() {
+        countdownSeconds = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
+    }
+    function startStaleTick() {
+        stopStaleTick();
+        updateStaleTime();
+        staleTimer = setInterval(updateStaleTime, 1000);
+    }
+    function updateStaleTime() {
+        staleTimeText = lastSyncedAgo();
+    }
+    function stopStaleTick() {
+        if (staleTimer) {
+            clearInterval(staleTimer);
+            staleTimer = null;
+        }
+    }
+
+    /** Format seconds as a human-readable relative time string. */
+    function timeAgo(seconds: number): string {
+        if (seconds < 60) return `just now`;
+        const mins = Math.floor(seconds / 60);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        return `${hrs}h ago`;
+    }
+
+    /** Get relative time since last data sync. */
+    function lastSyncedAgo(): string {
+        if (lastSyncedAt === Infinity) return 'just now';
+        return timeAgo(Math.floor((Date.now() - lastSyncedAt) / 1000));
+    }
+
+    function tryReconnectNow() {
+        if (appStream) {
+            appStream.reconnectNow();
+            nextReconnectAt = 0;
+        }
+    }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
+    let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showFileBrowserVal = $state(false);
+    let showExplorerViewVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
-    let scrollToColumn = $state<string | null>(null);
+let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
     let currentBranch = $state('');
+    let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
+    let selectedTaskVal: Task | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
-    let hasLocalCache = $state(false);
-
+    let servingFromCache = $state(false);
+    let hasLocalCache = $state(false); // true when server unreachable but cache exists
     let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
 
     const isMobileCtx = useIsMobile();
 
-    // ── Context providers ──
+    // Sync reactive stores → local $state
+    $effect(() => { collapsed = appStore.sidebarCollapsed; });
+    $effect(() => { const v = appStore.config; if (v) cfg = v; });
+    $effect(() => {
+        const t = appStore.selectedTask;
+        selectedTaskVal = t;
+        if (t && currentProject) {
+            const urlTask = new URLSearchParams(location.search).get('task');
+            if (urlTask !== t.id) {
+                updateUrl({ project: currentProject.id, task: t.id });
+            }
+            if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
+        }
+    });
+    $effect(() => { taskDiffStats = taskDiffStatsContext.get(); });
+
+    // Manage task-level WebSocket subscription for real-time streaming events.
+    // Subscribes when a task is selected, unsubscribes only when switching to a
+    // different task (not when closing the task detail — avoids unnecessary
+    // unsubscribe/resubscribe when navigating board ↔ task).
+    let lastSubKey = '';
+    let lastSubStream: ReturnType<typeof createAppStream> | null = null;
+    $effect(() => {
+        const taskId = selectedTaskVal?.id;
+        const project = currentProject;
+        const stream = appStream;
+        if (!stream || !project || !taskId) return;
+        const key = `${project.id}:${taskId}`;
+        if (key !== lastSubKey) {
+            if (lastSubKey) {
+                lastSubStream?.unsubscribeTask(lastSubKey.split(':')[0], lastSubKey.split(':')[1]);
+            }
+            stream.subscribeTask(project.id, taskId);
+            lastSubKey = key;
+            lastSubStream = stream;
+        }
+    });
+
+    // Handle browser back/forward
+    function handlePopState() {
+        const params = new URLSearchParams(location.search);
+        const projectId = params.get('project');
+        const taskId = params.get('task');
+        const fileParam = params.get('file') || '';
+        urlFileId = (fileParam && (fileParam.startsWith(currentProject?.path || '') || fileParam.startsWith('/home/sandbox/'))) ? fileParam : '';
+
+        // If URL has no project param, go back to project list
+        if (!projectId && currentProject) {
+            currentProject = null;
+            appStore.selectedProject = null;
+            tasks = [];
+            appStore.board = null;
+            disconnectBoardStream();
+            appStore.selectedTask = null;
+            uiStore.showCardDetail = false;
+            window.dispatchEvent(new CustomEvent('urlchanged'));
+            return;
+        }
+
+        // If URL specifies a different project, switch to it
+        if (projectId && currentProject && projectId !== currentProject.id) {
+            const targetProject = projects.find(p => p.id === projectId);
+            if (targetProject) {
+                selectProject(targetProject);
+                // After board loads, restoreTaskFromUrl will handle the task
+                window.dispatchEvent(new CustomEvent('urlchanged'));
+                return;
+            }
+        }
+
+        if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task) {
+                appStore.selectedTask = task;
+                uiStore.showCardDetail = true;
+            }
+        } else {
+            // Scroll to the task's column when going back via browser back button
+            const prevTask = selectedTaskVal;
+            if (prevTask) scrollToColumn = prevTask.status;
+            appStore.selectedTask = null;
+            uiStore.showCardDetail = false;
+        }
+        // Restore explorer view from URL
+        const viewParam = params.get('view');
+        if (viewParam === 'explorer') {
+            showExplorerViewVal = true;
+        } else {
+            showExplorerViewVal = false;
+        }
+        // Notify child components (e.g., TaskChat) that the URL changed
+        window.dispatchEvent(new CustomEvent('urlchanged'));
+    }
+
+    $effect(() => {
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    });
+
+    async function loadAppData() {
+        try {
+            // Restore offline action queue from IndexedDB
+            await loadQueue();
+            // Flush queued actions via HTTP immediately (don't wait for WebSocket to connect)
+            flushQueueNow();
+            // After offline queue is flushed, replace optimistic tasks with real ones from HTTP responses
+            onQueueFlushed((optimisticIds, resolvedTasks) => {
+                // Replace optimistic tasks with their latest real state
+                // resolvedTasks has: optimisticId → createTask result, AND realId → latest update (start/move/etc.)
+                tasks = tasks.map(t => {
+                    // First: optimisticId → real task from createTask
+                    const created = resolvedTasks.get(t.id);
+                    if (!created) return t;
+                    // Then: realId → latest state from subsequent actions (start, move, etc.)
+                    const latest = resolvedTasks.get(created.id);
+                    return latest || created;
+                });
+                appStore.board = { ...appStore.board!, tasks };
+                // Clear cache indicator after flush succeeds
+                servingFromCache = false;
+            });
+            const projs = await getProjects();
+            projects = projs || [];
+            appStore.projects = projects;
+            portConflict = null; // Clear stale port conflict on reload
+            if (projects.length > 0) {
+                // Check URL for project param to restore previous project
+                const urlParams = new URLSearchParams(location.search);
+                const urlProjectId = urlParams.get('project');
+                const targetProject = urlProjectId
+                    ? projects.find(p => p.id === urlProjectId)
+                    : null;
+                await selectProject(targetProject || projects[0]);
+                // Replay queued actions onto cached board so UI reflects user's last actions
+                tasks = applyQueuedActionsToBoard(tasks);
+                appStore.board = { ...appStore.board!, tasks };
+                // Check if data was served from cache
+                servingFromCache = isFromCache(projs);
+            }
+            // Load config (best-effort — cache fallback inside getConfig)
+            try {
+                const c = await getConfig();
+                cfg = c;
+                appStore.config = c;
+            } catch {
+                // No cached config — proceed without it
+            }
+            // Fetch initial project counts (best-effort, no cache fallback)
+            try {
+                const counts = await getProjectCounts();
+                projectCounts = counts;
+            } catch {
+                // Use defaults — counts are non-critical
+            }
+        } catch (e) {
+            console.error('Failed to load:', e);
+        }
+    }
+
+    // Initialize context providers
     const { taskDiffStats: taskDiffStatsContext, taskDiff: taskDiffContext } = createTaskDiffContext();
     const commitQueueStatusContext = createCommitQueueContext();
     const expandedTasksContext = createExpandedTasksContext();
     const taskEventContext = createTaskEventContext();
     const streamingIdsContext = createStreamingContext();
 
-    // ── Local state shared with composables ──
-    let selectedTaskVal: Task | null = $state(null);
-
-    // ── Composables ──
-    let stream = useAppStream();
-    let routing = useAppRouting({
-        get selectedTaskVal() { return selectedTaskVal; },
-        setSelectedTaskVal: (t: Task | null) => { selectedTaskVal = t; },
-        get currentProject() { return currentProject; },
-        setCurrentProject: (p: Project | null) => { currentProject = p; },
-        get projects() { return projects; },
-        setProjects: (p: Project[]) => { projects = p; },
-        get tasks() { return tasks; },
-        setTasks: (t: Task[]) => { tasks = t; },
-        get cfg() { return cfg; },
-        setCfg: (c: any) => { cfg = c; },
-        get hasAppStream() { return !!stream.appStream; },
-        get wsConnected() { return stream.wsConnected; },
-        setLastSyncedAt: (t: number) => { stream.lastSyncedAt = t; },
-        get servingFromCache() { return stream.servingFromCache; },
-        setServingFromCache: (v: boolean) => { stream.servingFromCache = v; },
-        subscribeProject: (pid: string) => { stream.appStream?.subscribeProject(pid); },
-        unsubscribeProject: (pid: string) => { stream.appStream?.unsubscribeProject(pid); },
-        unsubscribeTask: (pid: string, tid: string) => { stream.appStream?.unsubscribeTask(pid, tid); },
-        subscribeTask: (pid: string, tid: string) => { stream.appStream?.subscribeTask(pid, tid); },
-    });
-
-    // ── Store sync ──
-    $effect(() => {
-        const unsub = [
-            sidebarCollapsed.subscribe(v => collapsed = v),
-            configStore.subscribe(v => { if (v) cfg = v; }),
-            selectedTask.subscribe(t => {
-                (stream as any)._selectedTaskVal = t;
-                if (t && currentProject) {
-                    const urlTask = new URLSearchParams(location.search).get('task');
-                    if (urlTask !== t.id) {
-                        routing.updateUrl({ project: currentProject.id, task: t.id });
-                    }
-                    if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
-                }
-            }),
-            taskDiffStatsContext.subscribe(v => taskDiffStats = v),
-        ].map(unsub => unsub);
-        return () => unsub.forEach(u => u());
-    });
-
-    // ── Task subscription management ──
-    $effect(() => {
-        const taskId = selectedTaskVal?.id;
-        const project = currentProject;
-        const appStr = stream.appStream;
-        if (!appStr || !project || !taskId) return;
-        routing.updateTaskSubscription();
-    });
-
-    // ── Popstate handler ──
-    $effect(() => {
-        window.addEventListener('popstate', routing.handlePopState);
-        return () => window.removeEventListener('popstate', routing.handlePopState);
-    });
-
-    // ── URL change detection ──
-    $effect(() => {
-        if (!isAuthenticated || !currentProject) return;
-        routing._startUrlWatch();
-        return () => { routing._stopUrlWatch(); };
-    });
-
-    // ── Initial data load ──
-    async function loadAppData() {
-        try {
-            await loadQueue();
-            flushQueueNow();
-            onQueueFlushed((optimisticIds, resolvedTasks) => {
-                tasks = tasks.map(t => {
-                    const created = resolvedTasks.get(t.id);
-                    if (!created) return t;
-                    const latest = resolvedTasks.get(created.id);
-                    return latest || created;
-                });
-                boardStore.update(b => b ? { ...b, tasks } : b);
-                stream.servingFromCache = false;
-            });
-            const projs = await getProjects();
-            projects = projs || [];
-            projectsStore.set(projects);
-            portConflict = null;
-            if (projects.length > 0) {
-                const urlParams = new URLSearchParams(location.search);
-                const urlProjectId = urlParams.get('project');
-                const targetProject = urlProjectId ? projects.find(p => p.id === urlProjectId) : null;
-                await routing.selectProject(targetProject || projects[0]);
-                tasks = applyQueuedActionsToBoard(tasks);
-                boardStore.update(b => b ? { ...b, tasks } : b);
-                stream.servingFromCache = isFromCache(projs);
-            }
-            try {
-                const c = await getConfig();
-                cfg = c;
-                configStore.set(c);
-            } catch { /* No cached config */ }
-            try {
-                const counts = await getProjectCounts();
-                projectCounts = counts;
-            } catch { /* Use defaults */ }
-        } catch (e) {
-            console.error('Failed to load:', e);
-        }
-    }
-
-    function getProjectCounts() {
-        return import('$lib/api').then(m => m.getProjectCounts());
-    }
-
-    // ── Auth + Stream initialization ──
     onMount(async () => {
+        // Check auth status first. If this fails, we're offline — load from cache.
+        // Show offline screen after 2s if no response yet (but don't abort the request).
         let authResolved = false;
         const offlineTimer = setTimeout(async () => {
             if (authResolved) return;
@@ -225,7 +370,6 @@
             } catch { /* no cache */ }
             isLoadingAuth = false;
         }, 2000);
-
         try {
             const authRes = await fetch('/api/auth/session', { credentials: 'include' });
             authResolved = true;
@@ -233,12 +377,14 @@
             const authData = await authRes.json();
             isAuthenticated = authData.authenticated;
             if (isAuthenticated) {
+                // Extract CSRF token from session response
                 if (authData.csrf_token) setCsrfToken(authData.csrf_token);
-
                 // Create app-level WebSocket stream
-                stream.appStream = createAppStream({
-                    onProjectCounts: (counts) => { projectCounts = counts; },
-                    onRefresh: () => routing.refreshBoard(),
+                appStream = createAppStream({
+                    onProjectCounts: (counts) => {
+                        projectCounts = counts;
+                    },
+                    onRefresh: () => refreshBoard(),
                     onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, file_hashes, removed_files, staged_paths) => {
                         const stat = short_stat || '';
                         const insMatch = stat.match(/(\d+) insertion\w*/);
@@ -252,6 +398,7 @@
                     },
                     onDiff: (task_id, hash, diff, untracked, files) => {
                         taskDiffContext.update(map => {
+                            // Manifest format (files map) or legacy format (diff string + untracked array)
                             const hasManifest = files && Object.keys(files).length > 0;
                             const hasLegacy = diff || (untracked?.length ?? 0) > 0;
                             if (hasManifest || hasLegacy) {
@@ -264,83 +411,89 @@
                     },
                     onBranch: (branch) => {
                         currentBranch = branch;
-                        if (branch && !routing.showExplorerViewVal) {
+                        // Restore explorer view from URL when branch becomes available
+                        if (branch && !showExplorerViewVal) {
                             const params = new URLSearchParams(location.search);
                             if (params.get('view') === 'explorer') {
-                                routing.showExplorerViewVal = true;
+                                showExplorerViewVal = true;
                             }
                         }
                     },
                     onFsEvent: (op, path) => {
-                        if (routing.showExplorerViewVal) {
+                        if (showExplorerViewVal) {
                             fsEventQueue = [...fsEventQueue, { op, path }];
                         }
                     },
                     onTaskUpdated: (updatedTask: Task) => {
+                        // Replace existing task, or append if it's genuinely new
+                        // (e.g., created via create_task tool call).
                         const idx = tasks.findIndex(t => t.id === updatedTask.id);
                         if (idx >= 0) {
                             tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
                         } else {
                             tasks = [...tasks, updatedTask];
                         }
-                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        appStore.board = { ...appStore.board!, tasks };
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
-                            selectedTask.set(updatedTask);
+                            appStore.selectedTask = updatedTask;
                         }
                     },
                     onTaskDeleted: (task_id: string) => {
                         tasks = tasks.filter(t => t.id !== task_id);
-                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        appStore.board = { ...appStore.board!, tasks };
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
-                            routing.clearTaskDetail();
+                            clearTaskDetail();
                         }
                     },
-                    onCommitStatus: (task_id: string, status: string) => {
+                    onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
                         const proj = currentProject;
                         if (proj) {
                             commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
                         }
                     },
-                    onTaskEvent: (task_id: string, event: any) => {
+                    onTaskEvent: (task_id: string, event: StreamEvent) => {
+                        // Forward task events to the task event store for TaskStream to consume
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             taskEventContext.set({ task_id, ...event });
                         }
                     },
                     onConnected: (connected) => {
-                        stream.wsConnected = connected;
+                        wsConnected = connected;
                         setOfflineStatus(!connected);
                         if (!connected) {
-                            stream.startStaleTick();
+                            startStaleTick();
                         } else {
-                            stream.stopCountdown();
-                            stream.stopStaleTick();
-                            stream.nextReconnectAt = 0;
-                            stream.countdownSeconds = 0;
-                            if (stream.servingFromCache) {
-                                routing.silentRefresh().catch(() => {});
+                            stopCountdown();
+                            stopStaleTick();
+                            nextReconnectAt = 0;
+                            countdownSeconds = 0;
+                            // Auto-refresh cached data on reconnect
+                            if (servingFromCache) {
+                                silentRefresh().catch(() => {});
                             }
                         }
                     },
                     onReconnectScheduled: (nextAttemptAt) => {
-                        stream.nextReconnectAt = nextAttemptAt;
-                        stream.startCountdown();
+                        nextReconnectAt = nextAttemptAt;
+                        startCountdown();
                     },
                     onConnectAttempt: () => {
-                        stream.stopCountdown();
-                        stream.countdownSeconds = 0;
+                        stopCountdown();
+                        countdownSeconds = 0;
                     },
                     onPortConflict: (project_id, conflicted_ports) => {
                         portConflict = { project_id, ports: conflicted_ports };
                     },
                     onProjectPorts: (ports) => {
-                        projectTerminalPorts.set(ports);
+                        appStore.projectTerminalPorts = ports;
                     },
                 });
-                setAppStreamRef(stream.appStream);
-
+                // Expose appStream so TaskChat can subscribe after handler setup
+                setAppStreamRef(appStream);
+                // Restore explorer view state before loadAppData (which calls selectProject)
                 const urlParams = new URLSearchParams(location.search);
                 if (urlParams.get('view') === 'explorer') {
-                    routing.showExplorerViewVal = true;
+                    showExplorerViewVal = true;
                 }
                 await loadAppData();
             }
@@ -349,7 +502,9 @@
             authResolved = true;
             clearTimeout(offlineTimer);
             console.error('Failed to check auth:', e);
+            // Mark as offline so API calls skip network and use cache immediately
             setOfflineStatus(true);
+            // Check if we have cached data to offer the user
             try {
                 const cachedProjects = await getBoardCache<Project[]>('projects');
                 if (cachedProjects && cachedProjects.length > 0) {
@@ -362,21 +517,46 @@
         }
     });
 
-    // ── Visibility change ──
-    window.addEventListener('visibilitychange', stream.handleVisibilityChange);
-    window.addEventListener('focus', stream.handleVisibilityChange);
+    // Detect when the tab becomes visible again (e.g. phone wakes from sleep).
+    // Check the WebSocket for zombie connections, force reconnect if stale,
+    // try immediate reconnect if disconnected, and refresh stale data.
+    function handleVisibilityChange() {
+        if (!document.hidden && appStream) {
+            appStream.checkStale();
+            if (!wsConnected) {
+                appStream.reconnectNow();
+            }
+            // Refresh board data if it's stale (>30s since last sync)
+            if (Date.now() - lastSyncedAt > 30_000) {
+                refreshBoard().catch(() => {});
+            }
+        }
+    }
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    // Backup: some browsers (Safari iOS) don't fire visibilitychange reliably.
+    window.addEventListener('focus', handleVisibilityChange);
 
     onDestroy(() => {
-        stream.cleanup();
+        stopCountdown();
+        window.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('focus', handleVisibilityChange);
+        disconnectBoardStream();
+        if (appStream) {
+            appStream.close();
+            appStream = null;
+        }
+        if (urlRafId !== null) cancelAnimationFrame(urlRafId);
     });
 
-    // ── Offline cache loading ──
+    /** Load the board from local cache after the user clicks "Load Local Cache". */
     async function loadFromCache() {
-        stream.servingFromCache = false;
+        hasLocalCache = false; // hide the offline screen
+        // Keep isLoadingAuth = true so the loading screen bridges the gap
+        // while cached data is read from IndexedDB (avoids flash of empty state)
         isAuthenticated = true;
-        stream.appStream = createAppStream({
-            onProjectCounts: () => {},
-            onRefresh: () => routing.refreshBoard(),
+        appStream = createAppStream({
+            onProjectCounts: (counts) => { projectCounts = counts; },
+            onRefresh: () => refreshBoard(),
             onDiffStats: () => {},
             onDiff: () => {},
             onBranch: (branch) => { currentBranch = branch; },
@@ -386,33 +566,222 @@
             onCommitStatus: () => {},
             onTaskEvent: () => {},
             onConnected: (connected) => {
-                stream.wsConnected = connected;
+                wsConnected = connected;
                 setOfflineStatus(!connected);
                 if (!connected) {
-                    stream.startStaleTick();
+                    startStaleTick();
                 } else {
-                    stream.stopCountdown();
-                    stream.stopStaleTick();
-                    stream.nextReconnectAt = 0;
-                    stream.countdownSeconds = 0;
+                    stopCountdown();
+                    stopStaleTick();
+                    nextReconnectAt = 0;
+                    countdownSeconds = 0;
+                    if (servingFromCache) {
+                        silentRefresh().catch(() => {});
+                    }
                 }
             },
             onReconnectScheduled: (nextAttemptAt) => {
-                stream.nextReconnectAt = nextAttemptAt;
-                stream.startCountdown();
+                nextReconnectAt = nextAttemptAt;
+                startCountdown();
             },
             onConnectAttempt: () => {
-                stream.stopCountdown();
-                stream.countdownSeconds = 0;
+                stopCountdown();
+                countdownSeconds = 0;
             },
             onPortConflict: () => {},
         });
-        setAppStreamRef(stream.appStream);
+        setAppStreamRef(appStream);
         await loadAppData();
-        isLoadingAuth = false;
+        isLoadingAuth = false; // hide loading screen after data is loaded
     }
 
-    // ── Project management ──
+    // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
+    // Uses requestAnimationFrame with throttling — only checks when frame fires,
+    // skips if URL hasn't changed. ~10-60ms latency vs 500ms setInterval.
+    let urlRafId: number | null = null;
+    let lastUrlCheck = '';
+    let lastUrlCheckTime = 0;
+    const URL_CHECK_THROTTLE = 250; // ms between checks
+
+    function checkUrlChange() {
+        const now = Date.now();
+        if (now - lastUrlCheckTime < URL_CHECK_THROTTLE) {
+            urlRafId = requestAnimationFrame(checkUrlChange);
+            return;
+        }
+        if (location.search !== lastUrlCheck) {
+            lastUrlCheck = location.search;
+            lastUrlCheckTime = now;
+            if (tasks.length > 0) {
+                restoreTaskFromUrl();
+            }
+        }
+        urlRafId = requestAnimationFrame(checkUrlChange);
+    }
+
+    $effect(() => {
+        if (!isAuthenticated || !currentProject) return;
+        lastUrlCheck = location.search;
+        lastUrlCheckTime = Date.now();
+        urlRafId = requestAnimationFrame(checkUrlChange);
+        return () => { if (urlRafId !== null) cancelAnimationFrame(urlRafId); };
+    });
+
+    // Function to restore task from URL after board loads.
+    // When task is not in local tasks array (e.g., created via API, board stream
+    // hasn't pushed yet), refresh board from server to pick up new tasks.
+    async function restoreTaskFromUrl() {
+        const params = new URLSearchParams(location.search);
+        const taskId = params.get('task');
+        if (!taskId || !currentProject) return;
+        let task = tasks.find(t => t.id === taskId);
+        if (!task) {
+            try {
+                // Refresh board to pick up tasks created via API
+                const b = await getBoard(currentProject.id);
+                tasks = b.tasks || [];
+                appStore.board = b;
+                task = tasks.find(t => t.id === taskId);
+                if (!task) {
+                    // Task truly doesn't exist — clear task param
+                    const url = new URL(location.href);
+                    url.searchParams.delete('task');
+                    history.replaceState(null, '', location.pathname + url.search);
+                    return;
+                }
+            } catch {
+                return;
+            }
+        }
+        selectedTaskVal = task;
+        uiStore.showCardDetail = true;
+        appStore.selectedTask = task;
+    }
+
+    function disconnectBoardStream() {
+        if (currentProject && appStream) {
+            appStream.unsubscribeProject(currentProject.id);
+        }
+        // Task unsubscribe is handled by the $effect cleanup when selectedTaskVal changes
+    }
+
+    async function refreshBoard() {
+        if (!currentProject || boardRefreshPending) return;
+        boardRefreshPending = true;
+        try {
+            // Wait for pending queue flush
+            await waitForFlush();
+            const b = await getBoard(currentProject.id);
+            tasks = b.tasks || [];
+            appStore.board = b;
+            // Update selected task reference to point to fresh object from API
+            const task = selectedTaskVal;
+            if (task) {
+                const fresh = tasks.find(t => t.id === task.id);
+                if (fresh) {
+                    selectedTaskVal = fresh;
+                    appStore.selectedTask = fresh;
+                }
+            }
+            // Live data received — clear cache indicator
+            servingFromCache = false;
+            if (wsConnected) lastSyncedAt = Date.now();
+        } catch (e) {
+            // When offline, sync tasks from appStore (has optimistic updates)
+            const b = appStore.board;
+            if (b?.tasks) {
+                tasks = b.tasks;
+            }
+        } finally {
+            boardRefreshPending = false;
+        }
+    }
+
+    /** Silently refresh all cached data after reconnection. No flicker, no URL changes. */
+    async function silentRefresh() {
+        try {
+            // Wait for pending queue flush
+            await waitForFlush();
+            const projs = await getProjects();
+            projects = projs || [];
+            appStore.projects = projects;
+            if (currentProject) {
+                const b = await getBoard(currentProject.id);
+                tasks = b.tasks || [];
+                appStore.board = b;
+                // Update selected task reference
+                if (selectedTaskVal) {
+                    const fresh = tasks.find(t => t.id === selectedTaskVal.id);
+                    if (fresh) {
+                        selectedTaskVal = fresh;
+                        appStore.selectedTask = fresh;
+                    }
+                }
+            }
+            const c = await getConfig();
+            cfg = c;
+            appStore.config = c;
+            servingFromCache = false;
+            if (wsConnected) lastSyncedAt = Date.now();
+        } catch {
+            // Still offline — keep cached data
+        }
+    }
+
+    function clearTaskDetail() {
+        // Push URL first so the subscription sees updated URL
+        updateUrl({ project: currentProject?.id }, true, true);
+        selectedTaskVal = null;
+        appStore.selectedTask = null;
+        uiStore.showCardDetail = false;
+    }
+
+    async function selectProject(p: Project) {
+        disconnectBoardStream();
+        const wasExplorerViewOpen = showExplorerViewVal;
+        const wasProjectSwitch = !!currentProject;
+        currentProject = p;
+        currentBranch = '';
+        appStore.selectedProject = p;
+        // Re-mount explorer view for the new project (only on project switch, not initial load)
+        if (wasProjectSwitch && wasExplorerViewOpen) {
+            showExplorerViewVal = false;
+            fsEventQueue = [];
+        }
+        // Update URL with project param
+        // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
+        const urlTaskId = new URLSearchParams(location.search).get('task');
+        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId, view: wasExplorerViewOpen ? 'explorer' : null, file: urlFileId || null }, false, true);
+        if (wasProjectSwitch && wasExplorerViewOpen) {
+            queueMicrotask(() => { showExplorerViewVal = true; });
+        }
+        try {
+            const b = await getBoard(p.id);
+            tasks = b.tasks || [];
+            appStore.board = b;
+            lastSyncedAt = Date.now();
+            // Restore task from URL after board loads (await so task detail renders before return)
+            await restoreTaskFromUrl();
+            // Subscribe to project for real-time updates
+            if (appStream) {
+                appStream.subscribeProject(p.id);
+            }
+        } catch (e) {
+            console.error('Failed to load board:', e);
+            // Fallback: load board from cache if available
+            try {
+                const cachedBoard = await getBoardCache<{ tasks: Task[] }>(boardCacheKey(p.id));
+                if (cachedBoard) {
+                    tasks = cachedBoard.tasks || [];
+                    appStore.board = cachedBoard;
+                    await restoreTaskFromUrl();
+                }
+            } catch {
+                // No cached board available
+            }
+        }
+    }
+
     function openAddProject() {
         showFileBrowserVal = true;
         addProjectError = '';
@@ -435,9 +804,9 @@
         try {
             const proj = await createProject(path, sandboxEnabled);
             projects.push(proj);
-            projectsStore.set(projects);
-            routing.clearTaskDetail();
-            routing.selectProject(proj);
+            appStore.projects = projects;
+            clearTaskDetail();
+            selectProject(proj);
         } catch (e) {
             addProjectError = String(e);
         }
@@ -445,51 +814,60 @@
 
     function toggleSidebar() {
         collapsed = !collapsed;
-        sidebarCollapsed.set(collapsed);
+        // sidebarCollapsed persisted via AppStore;
+        // Manage focus: when collapsing, focus the toggle button; when expanding, focus the first project
         queueMicrotask(() => {
             if (collapsed) {
+                // Focus the collapse toggle button
                 document.querySelector('.desktop-collapse-btn')?.focus();
             } else {
+                // Focus the first project item
                 document.querySelector('.project-item')?.focus();
             }
         });
     }
 
+    // Track whether sidebar was auto-collapsed for tablet Explorer (so we can restore it)
     let sidebarAutoCollapsed = $state(false);
 
+    /** Check if viewport is tablet-sized (>768px and <=1024px). */
     function isTablet(): boolean {
         return !isMobileCtx.isMobile && window.innerWidth <= 1024;
     }
 
+    /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
     function handleExplorerFileChange(path: string | null) {
         const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'));
         if (isFileOpen) {
-            routing.updateUrl({ project: currentProject?.id, view: 'explorer', file: path });
+            updateUrl({ project: currentProject?.id, view: 'explorer', file: path });
+            // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
-                sidebarCollapsed.set(true);
+                // sidebarCollapsed persisted via AppStore;
                 sidebarAutoCollapsed = true;
             }
         } else {
-            routing.updateUrl({ project: currentProject?.id, view: 'explorer', file: null });
+            updateUrl({ project: currentProject?.id, view: 'explorer', file: null });
+            // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
-                sidebarCollapsed.set(false);
+                // sidebarCollapsed persisted via AppStore;
                 sidebarAutoCollapsed = false;
             }
         }
     }
 
+    /** Restore sidebar if it was auto-collapsed for the Explorer. */
     function restoreExplorerSidebar() {
         if (sidebarAutoCollapsed) {
             collapsed = false;
-            sidebarCollapsed.set(false);
+            // sidebarCollapsed persisted via AppStore;
             sidebarAutoCollapsed = false;
         }
     }
 
     async function removeProject(p: Project) {
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Remove Project',
             message: `Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`,
             confirmText: 'Remove',
@@ -500,17 +878,18 @@
             await deleteProject(p.id);
             const index = projects.indexOf(p);
             projects.splice(index, 1);
-            projectsStore.set(projects);
+            appStore.projects = projects;
+            // Auto-select next project (or previous if it was the last)
             if (projects.length > 0) {
                 const nextIndex = Math.min(index, projects.length - 1);
-                routing.clearTaskDetail();
-                routing.selectProject(projects[nextIndex]);
+                clearTaskDetail();
+                selectProject(projects[nextIndex]);
             } else {
-                routing.clearTaskDetail();
+                clearTaskDetail();
                 currentProject = null;
-                selectedProject.set(null);
+                appStore.selectedProject = null;
                 tasks = [];
-                boardStore.set(null);
+                appStore.board = null;
             }
         } catch (e) {
             addProjectError = String(e);
@@ -519,27 +898,30 @@
 
     function openSandboxConfig(p: Project) {
         if ((projectCounts[p.id]?.in_progress ?? 0) > 0) {
-            showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
+            dialogStore.showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
             return;
         }
+        // Clear port conflict when opening modal (user will see/fix it in modal)
         portConflict = null;
-        showSandboxConfig.set(true);
+        uiStore.showSandboxConfig = true;
     }
 
     async function handleSandboxSaved() {
-        showSandboxConfig.set(false);
-        portConflict = null;
+        uiStore.showSandboxConfig = false;
+        portConflict = null; // Clear port conflict on successful save
+        // Refresh projects list to pick up changes
         try {
             const projs = await getProjects();
             projects = projs || [];
-            projectsStore.set(projects);
+            appStore.projects = projects;
             const proj = currentProject;
             if (proj) {
                 const updated = projects.find(p => p.id === proj.id);
                 if (updated) {
                     currentProject = updated;
-                    selectedProject.set(updated);
-                    showTerminal.set(false);
+                    appStore.selectedProject = updated;
+                    // Close terminal so it restarts with updated sandbox mode
+                    uiStore.showTerminal = false;
                 }
             }
         } catch (e) {
@@ -569,28 +951,31 @@
     }} />
 {:else}
 <!-- WebSocket reconnecting banner -->
-{#if !stream.wsConnected}
+{#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting {#if stream.countdownSeconds > 0}in {stream.countdownSeconds}s {/if}...
-        <span class="reconnecting-stale">Data from {stream.staleTimeText}</span>
-        <button class="reconnecting-btn" onclick={stream.tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
+        Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s {/if}...
+        <span class="reconnecting-stale">Data from {staleTimeText}</span>
+        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
     </div>
 {/if}
 <!-- Offline cache banner -->
-{#if stream.servingFromCache}
+{#if servingFromCache}
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Viewing cached data
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={$showCardDetail && !!selectedTaskVal} class:ws-disconnected={!stream.wsConnected} class:cache-visible={stream.servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+    <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
+    <!-- Mobile sidebar backdrop -->
     {#if isMobileCtx.isMobile && mobileMenuOpen}
         <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu"></button>
     {/if}
 
+    <!-- Sidebar -->
     <Sidebar
         {projects}
         {currentProject}
@@ -599,11 +984,11 @@
         isMobile={isMobileCtx.isMobile}
         {mobileMenuOpen}
         {getProjectAbbr}
-        onSelectProject={(p) => { routing.clearTaskDetail(); routing.selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onRemoveProject={removeProject}
         onToggleSidebar={toggleSidebar}
-        onShowStats={() => { showStats.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-        onShowConfig={() => { showConfig.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onShowStats={() => { uiStore.showStats = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onShowConfig={() => { uiStore.showConfig = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onToggleFullScreen={() => {
             if (document.fullscreenElement) {
                 document.exitFullscreen().catch(() => {});
@@ -615,9 +1000,10 @@
         onAddProject={() => { openAddProject(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
     />
 
+    <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !($showCardDetail && selectedTaskVal) && !routing.showExplorerViewVal}
+            {#if !(uiStore.showCardDetail && selectedTaskVal) && !showExplorerViewVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -625,52 +1011,53 @@
                 hasPortConflict={portConflict?.project_id === currentProject?.id}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
-                onOpenExplorerView={() => { routing.showExplorerViewVal = true; routing.updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
-                onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                onShowStats={() => showStats.set(true)}
-                onShowConfig={() => showConfig.set(true)}
+                onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
+                onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                onShowStats={() => uiStore.showStats = true}
+                onShowConfig={() => uiStore.showConfig = true}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
-                {#if routing.showExplorerViewVal && currentProject}
+                {#if showExplorerViewVal && currentProject}
                     <ExplorerView
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
-                        initialFile={routing.urlFileId || ''}
+                        initialFile={urlFileId || ''}
                         sandboxEnabled={currentProject.sandbox_enabled}
                         fsEventQueue={fsEventQueue}
-                        onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
+                        onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
                         onUpdateFile={handleExplorerFileChange}
-                        onClose={() => { restoreExplorerSidebar(); routing.showExplorerViewVal = false; routing.updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
-                {:else if $showCardDetail && selectedTaskVal}
+                {:else if uiStore.showCardDetail && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
-                        showCardDetail.set(false);
-                        selectedTask.set(null);
-                        routing.updateUrl({ project: currentProject?.id }, true, true);
+                        uiStore.showCardDetail = false;
+                        appStore.selectedTask = null;
+                        updateUrl({ project: currentProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
-                        routing.updateUrl({ project: currentProject?.id, task: t.id }, true, true);
+                        // Push URL first so the subscription sees updated URL and skips replaceState
+                        updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         selectedTaskVal = t;
-                        selectedTask.set(t);
-                    }} onRefreshBoard={() => routing.refreshBoard()} />
+                        appStore.selectedTask = t;
+                    }} onRefreshBoard={() => refreshBoard()} />
                 {:else}
                     <Board
                         {tasks}
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         scrollToColumn={scrollToColumn}
-                        onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
-                        onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
-                        onRefreshBoard={() => routing.refreshBoard()}
+                        onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
+                        onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
+                        onRefreshBoard={() => refreshBoard()}
                     />
                 {/if}
             </section>
         {:else}
             <div class="empty-state">
-                <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings" title="Settings">
+                <button class="icon-btn" onclick={() => uiStore.showConfig = true} aria-label="Settings" title="Settings">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -679,7 +1066,7 @@
                 {#if !hasProviders}
                     <h2>Welcome to Kanban</h2>
                     <p>Configure an LLM provider to get started. Supports any OpenAI-compatible API.</p>
-                    <button class="btn-primary" onclick={() => showConfig.set(true)} title="Configure an LLM provider">Configure Provider</button>
+                    <button class="btn-primary" onclick={() => uiStore.showConfig = true} title="Configure an LLM provider">Configure Provider</button>
                 {:else}
                     <h2>No Projects</h2>
                     <p>Add a project to get started. Projects must be git repositories.</p>
@@ -690,33 +1077,34 @@
     </main>
 
     <!-- Modals -->
-    {#if $showCreateTask}
+    {#if uiStore.showCreateTask}
         <CreateTaskModal
             projectId={currentProject?.id}
-            parentId={$creatingChildOfStore ?? undefined}
-            onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
-            onTaskCreated={() => { creatingChildOfStore.set(null); }}
+            parentId={uiStore.creatingChildOf ?? undefined}
+            onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; }}
+            onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
         />
     {/if}
-    {#if $showEditTask && $editTaskDataStore}
+    {#if appStore.showEditTask && appStore.editTaskData}
         <EditTaskModal
-            taskTitle={$editTaskDataStore.taskTitle}
-            taskPrompt={$editTaskDataStore.taskPrompt}
-            editProviders={$editTaskDataStore.editProviders}
-            editModel={$editTaskDataStore.editModel}
-            editUrl={$editTaskDataStore.editUrl}
-            editReasoningEffort={$editTaskDataStore.editReasoningEffort}
-            editPlanMode={$editTaskDataStore.editPlanMode}
-            editAutoMerge={$editTaskDataStore.editAutoMerge}
-            editSubtasksAutoMerge={$editTaskDataStore.editSubtasksAutoMerge}
-            taskHasParent={$editTaskDataStore.taskHasParent}
-            targetBranch={$editTaskDataStore.targetBranch}
-            isAgentSelected={$editTaskDataStore.isAgentSelected}
+            taskTitle={appStore.editTaskData.taskTitle}
+            taskPrompt={appStore.editTaskData.taskPrompt}
+            editProviders={appStore.editTaskData.editProviders}
+            editModel={appStore.editTaskData.editModel}
+            editUrl={appStore.editTaskData.editUrl}
+            editReasoningEffort={appStore.editTaskData.editReasoningEffort}
+            editPlanMode={appStore.editTaskData.editPlanMode}
+            editAutoMerge={appStore.editTaskData.editAutoMerge}
+            editSubtasksAutoMerge={appStore.editTaskData.editSubtasksAutoMerge}
+            taskHasParent={appStore.editTaskData.taskHasParent}
+            targetBranch={appStore.editTaskData.targetBranch}
+            isAgentSelected={appStore.editTaskData.isAgentSelected}
             onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => {
-                const taskId = $editTaskDataStore!.taskId;
-                const projectId = $editTaskDataStore!.projectId;
+                const taskId = appStore.editTaskData!.taskId;
+                const projectId = appStore.editTaskData!.projectId;
+                // Find the task in the board and update it
                 const task = tasks.find(t => t.id === taskId);
                 if (task) {
                     const trimmed = title.trim();
@@ -736,32 +1124,29 @@
                     if (model) task.model_name = model;
                     if (url) task.llama_server_url = url;
                     if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-                    boardStore.update(b => {
-                        if (!b) return b;
-                        return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
-                    });
+                    updateTaskInBoard(appStore, task.id, task);
                     import('$lib/api').then(({ updateTask }) => updateTask(projectId, taskId, updates)).catch(err => {
                         console.error('Failed to update task:', err);
                     });
                 }
-                showEditTask.set(false);
-                editTaskDataStore.set(null);
+                appStore.showEditTask = false;
+                appStore.editTaskData = null;
             }}
             onCancel={() => {
-                showEditTask.set(false);
-                editTaskDataStore.set(null);
+                appStore.showEditTask = false;
+                appStore.editTaskData = null;
             }}
         />
     {/if}
-    {#if $showConfig}
+    {#if uiStore.showConfig}
         <ConfigModal
             config={cfg}
-            onClose={() => showConfig.set(false)}
-            onSaved={() => showConfig.set(false)}
+            onClose={() => uiStore.showConfig = false}
+            onSaved={() => uiStore.showConfig = false}
             onSignOut={handleLogout}
         />
     {/if}
-    {#if $showTerminal && TerminalPanelComponent}
+    {#if uiStore.showTerminal && TerminalPanelComponent}
         {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
             {@const Terminal = TerminalPanelComponent}
             {#if Terminal}
@@ -769,10 +1154,10 @@
             {/if}
         {/key}
     {/if}
-    {#if $showStats && currentProject}
+    {#if uiStore.showStats && currentProject}
         <StatsModal
             projectId={currentProject.id}
-            onClose={() => showStats.set(false)}
+            onClose={() => uiStore.showStats = false}
         />
     {/if}
     {#if showFileBrowserVal}
@@ -781,11 +1166,11 @@
             onSelect={handleSelectProjectPath}
         />
     {/if}
-    {#if $showSandboxConfig && currentProject}
+    {#if uiStore.showSandboxConfig && currentProject}
         <SandboxConfigModal
             project={currentProject}
             inProgressCount={projectCounts[currentProject.id]?.in_progress ?? 0}
-            onClose={() => showSandboxConfig.set(false)}
+            onClose={() => uiStore.showSandboxConfig = false}
             onSaved={handleSandboxSaved}
         />
     {/if}
@@ -803,6 +1188,7 @@
 </svelte:head>
 
 <style>
+    /* -- Loading screen -- */
     .loading-screen {
         position: fixed;
         inset: 0;
@@ -816,6 +1202,8 @@
     .offline-icon {
         opacity: 0.8;
     }
+
+    /* -- Offline screen -- */
     .offline-screen {
         position: fixed;
         inset: 0;
@@ -827,12 +1215,14 @@
         gap: 1.5rem;
         background: #000;
     }
+
     .offline-text {
         color: #99AAB5;
         font-size: 0.875rem;
         font-family: inherit;
         margin: 0;
     }
+
     .offline-btn {
         font-family: inherit;
         font-size: 0.875rem;
@@ -847,10 +1237,17 @@
         cursor: pointer;
         transition: background 0.15s, border-color 0.15s;
     }
+
+    .offline-btn svg {
+        flex-shrink: 0;
+    }
+
     .offline-btn:hover {
         background: #252525;
         border-color: #555;
     }
+
+    /* -- Reconnecting banner -- */
     .reconnecting-banner {
         position: fixed;
         top: 0;
@@ -899,15 +1296,24 @@
         animation: spin 0.6s linear infinite;
     }
     @keyframes slide-down {
-        from { transform: translateY(-100%); }
-        to { transform: translateY(0); }
+        from {
+            transform: translateY(-100%);
+        }
+        to {
+            transform: translateY(0);
+        }
     }
     @keyframes spin {
-        to { transform: rotate(360deg); }
+        to {
+            transform: rotate(360deg);
+        }
     }
+    /* Shift app content down when banner is visible */
     .app.ws-disconnected {
         padding-top: 30px;
     }
+
+    /* -- Cache banner (offline mirror) -- */
     .cache-banner {
         position: fixed;
         top: 0;
@@ -933,23 +1339,30 @@
     .app.cache-visible {
         padding-top: 28px;
     }
+
+    /* When both banners are visible, stack them */
     .app.ws-disconnected.cache-visible {
         padding-top: 58px;
     }
+
+    /* -- Global mobile styles -- */
     @media (max-width: 768px) {
         :global(input),
         :global(textarea),
         :global(select) {
             font-size: 1rem !important;
         }
+
         :global(*) {
             -webkit-tap-highlight-color: transparent;
         }
+
         :global(button),
         :global(a),
         :global([role="button"]) {
             touch-action: manipulation;
         }
+
         :global(.action-btn),
         :global(.icon-btn),
         :global(.toggle-btn),
@@ -961,6 +1374,7 @@
             min-height: 44px;
         }
     }
+
     .skip-link {
         position: absolute;
         top: -100%;
@@ -977,17 +1391,20 @@
     .skip-link:focus {
         top: 16px;
     }
+
     .app {
         display: flex;
         height: 100dvh;
         overflow: hidden;
     }
+    /* Fullscreen: add top margin for camera cutout on phones */
     :global(html:fullscreen) .app {
         padding-top: env(safe-area-inset-top, 0px);
     }
     .app.task-detail :global(aside#sidebar) {
         display: none;
     }
+
     .main {
         flex: 1;
         display: flex;
@@ -1044,6 +1461,7 @@
     .sidebar-backdrop {
         display: none;
     }
+
     @media (max-width: 768px) {
         .sidebar-backdrop {
             display: block;

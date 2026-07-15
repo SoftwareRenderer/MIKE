@@ -1,5 +1,6 @@
 import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
 import { API_BASE } from './helpers';
+import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
 
 /**
  * App stream - single WebSocket for all real-time events.
@@ -39,13 +40,11 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectAttempts = 0;
     let isClosed = false;
-    const maxDelay = 30_000;
+    const maxDelay = RECONNECT_MAX_DELAY_MS;
     let currentWs: WebSocket | null = null;
     // Client-side heartbeat — tracks last activity to detect zombie connections
     // (e.g. phone sleep: WebSocket appears OPEN but server closed its end)
     let lastActivityAt = Date.now();
-    const STALE_THRESHOLD = 60_000; // 60s — server pings at 27s + 10s timeout = ~37s, plus buffer
-    const HEARTBEAT_INTERVAL = 30_000; // check every 30s
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
     const subscribedTasks = new Set<string>(); // "projectId:taskId"
@@ -76,7 +75,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             if (currentWs && currentWs.readyState === WebSocket.OPEN) {
                 checkStale();
             }
-        }, HEARTBEAT_INTERVAL);
+        }, HEARTBEAT_INTERVAL_MS);
     }
 
     function stopHeartbeat() {
@@ -90,7 +89,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
     function checkStale() {
         if (currentWs && currentWs.readyState === WebSocket.OPEN) {
             const idle = Date.now() - lastActivityAt;
-            if (idle > STALE_THRESHOLD) {
+            if (idle > STALE_THRESHOLD_MS) {
                 // Connection appears open but hasn't received data in too long.
                 // Force-close to trigger the reconnect logic.
                 currentWs.close();

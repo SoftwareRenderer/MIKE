@@ -4,11 +4,10 @@
     import { tick } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
-    import { board as boardStore, selectedTask, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
-import { showCardDetail } from '$lib/stores/ui';
-import { showConfirm, showToast } from '$lib/stores/dialogs';
+    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
+    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
@@ -126,8 +125,8 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         const newUrl = location.pathname + (url.search || '');
         history.pushState(null, '', newUrl);
         // Then set stores (subscription will see updated URL and skip updateUrl)
-        selectedTask.set(t);
-        showCardDetail.set(true);
+        appStore.selectedTask = t;
+        uiStore.showCardDetail = true;
     }
 
     const columns = [
@@ -182,7 +181,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         if (!task || task.status === targetStatus) return;
         // Block subtasks from moving to Backlog when an ancestor is In Progress.
         if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) {
-            showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+            dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
             draggedTaskId = null;
             return;
         }
@@ -198,20 +197,18 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                 tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
                 // When offline, updated is a partial optimistic result — merge with existing task
-                const merged = (updated as any).queued
-                    ? { ...task, ...updated }
-                    : updated;
+                const merged = mergeQueuedUpdate(task, updated);
                 // Update tasks array directly (Board renders from this prop, not boardStore)
                 const idx = tasks.findIndex(t => t.id === taskId);
                 if (idx !== -1) {
                     tasks[idx] = merged;
                 }
                 // Also sync boardStore
-                boardStore.update(b => b ? { ...b, tasks: [...tasks] } : b);
+                appStore.board = { ...appStore.board!, tasks: [...tasks] };
             }
         } catch (e) {
             console.error('Failed to move task:', e);
-            showToast('Failed to move task: ' + String(e), 'error');
+            dialogStore.showToast('Failed to move task: ' + String(e), 'error');
         }
         draggedTaskId = null;
     }
@@ -219,7 +216,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     async function handleClearDone() {
         const doneTasks = getTasksForColumn('done');
         if (doneTasks.length === 0) return;
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Clear Done Tasks',
             message: `Permanently delete ${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''}? This cannot be undone.`,
             confirmText: 'Delete',
@@ -231,7 +228,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             // Board stream WebSocket will push the update
             liveAnnouncement = `${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''} deleted`;
         } catch (e) {
-            showToast('Failed to clear done tasks: ' + String(e), 'error');
+            dialogStore.showToast('Failed to clear done tasks: ' + String(e), 'error');
         }
     }
 

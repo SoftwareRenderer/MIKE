@@ -1,45 +1,32 @@
-import { writable } from 'svelte/store';
+// Legacy compat — re-export from reactive store
+// Prefer importing from $lib/stores (appStore, uiStore, dialogStore)
+import { dialogStore } from './index';
 
-// ─── Toast ───
+export const toast = {
+    get: () => dialogStore.toast,
+    set: (v: typeof dialogStore.toast) => { dialogStore.toast = v; },
+    subscribe: (fn: (v: typeof dialogStore.toast) => void) => { fn(dialogStore.toast); return () => {}; },
+} as any;
 
-// Toast notification — empty string means no toast visible
-export const toast = writable<{ message: string; type: 'error' | 'success' } | null>(null);
-
-/** Show a toast message that auto-dismisses after `duration` ms. */
 export function showToast(message: string, type: 'error' | 'success' = 'error', duration = 4000) {
-    toast.set({ message, type });
-    setTimeout(() => toast.set(null), duration);
+    dialogStore.showToast(message, type, duration);
 }
 
-// ─── Confirmation Dialog ───
+export const confirmation = {
+    get: () => dialogStore.confirmation,
+    set: (v: typeof dialogStore.confirmation) => { dialogStore.confirmation = v; },
+    subscribe: (fn: (v: typeof dialogStore.confirmation) => void) => { fn(dialogStore.confirmation); return () => {}; },
+} as any;
 
-export interface ConfirmOptions {
+export function showConfirm(options: {
     title: string;
     message: string;
     confirmText?: string;
     cancelText?: string;
     variant?: 'default' | 'destructive';
+}): Promise<boolean> {
+    return dialogStore.showConfirm(options);
 }
-
-export const confirmation = writable<ConfirmOptions | null>(null);
-
-/**
- * Show a confirmation dialog and return a Promise that resolves to true (confirmed) or false (cancelled).
- */
-export function showConfirm(options: ConfirmOptions): Promise<boolean> {
-    return new Promise((resolve) => {
-        confirmation.set({
-            title: options.title,
-            message: options.message,
-            confirmText: options.confirmText ?? 'Confirm',
-            cancelText: options.cancelText ?? 'Cancel',
-            variant: options.variant ?? 'destructive',
-            _resolve: resolve,
-        } as ConfirmOptions & { _resolve?: (value: boolean) => void });
-    });
-}
-
-// ─── Commit Dialog ───
 
 export interface CommitDialogOptions {
     message: string;
@@ -48,32 +35,18 @@ export interface CommitDialogOptions {
     authorName?: string;
     authorEmail?: string;
     mergeTarget?: string;
-    // Streaming support
-    streaming?: boolean;       // true while LLM is streaming tokens
-    promptProgress?: number;   // 0-100 prompt processing percentage
-    projectId?: string;        // needed for streaming endpoint
-    taskId?: string;           // needed for streaming endpoint
+    streaming?: boolean;
+    promptProgress?: number;
+    projectId?: string;
+    taskId?: string;
 }
 
-export const commitDialog = writable<CommitDialogOptions | null>(null);
+export const commitDialog = {
+    get: () => dialogStore.commitDialog,
+    set: (v: typeof dialogStore.commitDialog) => { dialogStore.commitDialog = v; },
+    subscribe: (fn: (v: typeof dialogStore.commitDialog) => void) => { fn(dialogStore.commitDialog); return () => {}; },
+} as any;
 
-/**
- * Show a commit confirmation dialog and return a Promise that resolves with the edited message or null (cancelled).
- */
 export function showCommitDialog(options: CommitDialogOptions): Promise<string | null> {
-    return new Promise((resolve) => {
-        commitDialog.set({
-            message: options.message,
-            confirmText: options.confirmText ?? 'Commit and move to Done',
-            cancelText: options.cancelText ?? 'Cancel',
-            authorName: options.authorName,
-            authorEmail: options.authorEmail,
-            mergeTarget: options.mergeTarget,
-            streaming: options.streaming,
-            promptProgress: options.promptProgress,
-            projectId: options.projectId,
-            taskId: options.taskId,
-            _resolve: resolve,
-        } as CommitDialogOptions & { _resolve?: (value: string | null) => void });
-    });
+    return dialogStore.showCommitDialog(options);
 }

@@ -1,6 +1,21 @@
 <script lang="ts">
     import type { DiffFile } from '$lib/types/diff';
-    import DiffViewer from '../DiffViewer.svelte';
+
+    // DiffViewer is lazy-loaded by CardDetail — use dynamic import here too
+    let DiffViewerComponent: typeof import('../DiffViewer.svelte').default | null = $state(null);
+    let diffViewerLoading = $state(false);
+    function loadDiffViewer(): void {
+        if (DiffViewerComponent || diffViewerLoading) return;
+        diffViewerLoading = true;
+        import('../DiffViewer.svelte').then((mod) => {
+            DiffViewerComponent = mod.default;
+            diffViewerLoading = false;
+        }).catch(() => { diffViewerLoading = false; });
+    }
+
+    $effect(() => {
+        loadDiffViewer();
+    });
 
     let { files, untracked, loading, onClose, onExpandFile, onLineClick }: {
         files: DiffFile[];
@@ -33,7 +48,16 @@
             </svg>
         </div>
     {:else}
-        <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} />
+        {#if DiffViewerComponent}
+            {@const DiffViewer = DiffViewerComponent}
+            <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} />
+        {:else}
+            <div class="checkpoint-diff-loading">
+                <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>
+            </div>
+        {/if}
     {/if}
 </div>
 

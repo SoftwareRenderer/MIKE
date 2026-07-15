@@ -1,8 +1,8 @@
 import { API_BASE } from './helpers';
+import { STALE_THRESHOLD_MS } from '$lib/constants';
 
 // Track last activity per terminal WebSocket for stale connection detection
 const terminalActivity = new WeakMap<WebSocket, number>();
-const TERMINAL_STALE_THRESHOLD = 60_000; // same as app stream
 
 /**
  * Terminal WebSocket connections.
@@ -82,6 +82,6 @@ export function isTerminalStale(ws: WebSocket): boolean {
     if (ws.readyState !== WebSocket.OPEN) return false;
     const lastActivity = terminalActivity.get(ws);
     if (!lastActivity) return false;
-    return Date.now() - lastActivity > TERMINAL_STALE_THRESHOLD;
+    return Date.now() - lastActivity > STALE_THRESHOLD_MS;
 }
 

@@ -1,5 +1,5 @@
 import type { Task } from '$lib/types';
-import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app';
+import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores';
 import { sortByActivity } from '$lib/utils/sort-tasks';
 
 /** Composable for subtask hierarchy management.

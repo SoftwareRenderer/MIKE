@@ -1,32 +1,28 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
-    import { toast } from '$lib/stores/dialogs';
+    import { onDestroy } from 'svelte';
+    import { dialogStore } from '$lib/stores';
 
     let visible = $state(false);
     let message = $state('');
     let type = $state<'error' | 'success'>('error');
-
-    let unsub: (() => void) | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    onMount(() => {
-        unsub = toast.subscribe(value => {
-            if (value) {
-                message = value.message;
-                type = value.type;
-                visible = true;
-                if (timeoutId) clearTimeout(timeoutId);
-                timeoutId = setTimeout(() => {
-                    visible = false;
-                }, 4000);
-            } else {
+    $effect(() => {
+        const value = dialogStore.toast;
+        if (value) {
+            message = value.message;
+            type = value.type;
+            visible = true;
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
                 visible = false;
-            }
-        });
+            }, 4000);
+        } else {
+            visible = false;
+        }
     });
 
     onDestroy(() => {
-        unsub?.();
         if (timeoutId) clearTimeout(timeoutId);
     });
 </script>

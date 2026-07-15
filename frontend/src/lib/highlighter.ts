@@ -1,5 +1,6 @@
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { syntaxTree, Language } from '@codemirror/language';
+import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
 
 /**
  * GitHub Dark highlighter — matches the FileEditor's githubDarkHighlight colors.
@@ -147,7 +148,7 @@ function escapeHtml(text: string): string {
 
 /** Simple LRU cache for highlight results (keyed by path + content hash). */
 const highlightCache = new Map<string, string[]>();
-const HIGHLIGHT_CACHE_MAX = 50;
+
 
 /** Compute a simple hash for cache key. */
 function contentHash(lines: string[]): string {

@@ -1,6 +1,12 @@
-// Barrel re-export — all stores in one place for backward compatibility.
-// Prefer importing from specific modules: $lib/stores/app, $lib/stores/ui, $lib/stores/dialogs
+import { AppStore } from './app.svelte';
+import { UiStore } from './ui.svelte';
+import { DialogStore } from './dialogs.svelte';
 
-export * from './app';
-export * from './ui';
-export * from './dialogs';
+// Singleton instances
+export const appStore = new AppStore();
+export const uiStore = new UiStore();
+export const dialogStore = new DialogStore();
+
+// Re-export types and helper functions
+export type { EditTaskData } from './app.svelte';
+export { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from './app.svelte';
