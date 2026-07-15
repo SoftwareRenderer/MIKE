@@ -89,9 +89,21 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 	}, nil
 }
 
-// buildLLMContext filters out summarization messages (summary is in system prompt)
-// and assistant messages containing request_review tool calls, plus their orphaned results.
+// buildLLMContext filters out summarization messages (summary is in system prompt),
+// assistant messages containing request_review tool calls, plus their orphaned results.
+// When a summarization message exists, all messages between the system prompt and
+// the last summarization are dropped — their content is captured by the summary
+// in the system prompt. The system message itself is always preserved.
 func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
+	// Find the last summarization message — everything between system and it is compressed.
+	lastSummaryIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "summarization" {
+			lastSummaryIdx = i
+			break
+		}
+	}
+
 	// Collect tool_call_ids from assistants with request_review — their results become orphans.
 	filteredIDs := make(map[string]bool)
 	for _, m := range messages {
@@ -102,12 +114,18 @@ func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
 		}
 	}
 
-	// Filter: summarization, request_review assistants, and orphaned tool results.
+	// Always keep the system message (index 0, contains summary in system prompt).
+	// When a summary exists, skip all messages between system and post-summary.
 	var result []types.ChatMessage
-	for _, m := range messages {
-		if m.Role == "summarization" {
-			continue
-		}
+	if len(messages) > 0 {
+		result = append(result, messages[0]) // system prompt
+	}
+	startIdx := 1 // skip system
+	if lastSummaryIdx >= 0 {
+		startIdx = lastSummaryIdx + 1 // skip pre-summary + summarization itself
+	}
+	for i := startIdx; i < len(messages); i++ {
+		m := messages[i]
 		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "request_review") {
 			continue
 		}

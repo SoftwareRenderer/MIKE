@@ -1724,10 +1724,10 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 	}
 	result := buildLLMContext(messages)
 
-	// Summary is in system prompt; summarization messages are filtered out.
-	// All other messages pass through: system + 2 old turns + 2 new = 7
-	if len(result) != 7 {
-		t.Fatalf("expected 7 messages, got %d", len(result))
+	// Summary is in system prompt; summarization message and all pre-summary
+	// messages are dropped. System prompt + post-summary messages remain: 3
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
 	// No summarization role in output
 	for _, m := range result {
@@ -1735,13 +1735,9 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 			t.Error("summarization messages should be filtered out")
 		}
 	}
-	// All non-summarization messages preserved in order
+	// System prompt + only post-summary messages preserved
 	expected := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "old message 1"},
-		{Role: "assistant", Content: "old response 1"},
-		{Role: "user", Content: "old message 2"},
-		{Role: "assistant", Content: "old response 2"},
 		{Role: "user", Content: "new message"},
 		{Role: "assistant", Content: "new response"},
 	}
@@ -1752,8 +1748,8 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 	}
 }
 
-func TestBuildLLMContext_KeepsAllMessagesExceptSummarization(t *testing.T) {
-	// All non-summarization messages are kept (no 3-turn limit).
+func TestBuildLLMContext_DropsPreSummaryMessages(t *testing.T) {
+	// Pre-summary messages are dropped (their content is in the system prompt summary).
 	var messages []types.ChatMessage
 	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
 	for i := 1; i <= 5; i++ {
@@ -1765,27 +1761,62 @@ func TestBuildLLMContext_KeepsAllMessagesExceptSummarization(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// All 12 non-summarization messages should be present (13 - 1 summarization)
-	if len(result) != 12 {
-		t.Fatalf("expected 11 messages, got %d", len(result))
+	// Only system prompt + post-summary messages: 2
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
-	// All old messages should be present (no truncation)
+	// System prompt preserved
+	if result[0].Role != "system" {
+		t.Errorf("expected system message, got %s", result[0].Role)
+	}
+	// All old messages should be absent
 	for i := 1; i <= 5; i++ {
-		found := false
 		for _, m := range result {
 			if m.Content == fmt.Sprintf("old message %d", i) {
-				found = true
-				break
+				t.Errorf("pre-summary message 'old message %d' should be dropped", i)
 			}
 		}
-		if !found {
-			t.Errorf("expected 'old message %d' in context", i)
-		}
+	}
+	// Post-summary message preserved
+	if result[1].Content != "new message" {
+		t.Errorf("expected 'new message', got %q", result[1].Content)
 	}
 	// No summarization in output
 	for _, m := range result {
 		if m.Role == "summarization" {
 			t.Error("summarization messages should be filtered out")
+		}
+	}
+}
+
+func TestBuildLLMContext_MultipleSummaries(t *testing.T) {
+	// With re-summarization, only messages after the LAST summary are kept.
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "very old message"},
+		{Role: "assistant", Content: "very old response"},
+		{Role: "summarization", Content: "first summary"},
+		{Role: "user", Content: "mid message"},
+		{Role: "assistant", Content: "mid response"},
+		{Role: "summarization", Content: "second summary (includes first)"},
+		{Role: "user", Content: "latest message"},
+	}
+	result := buildLLMContext(messages)
+
+	// System + only post-last-summary messages: 2
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+	if result[0].Role != "system" {
+		t.Errorf("expected system, got %s", result[0].Role)
+	}
+	if result[1].Content != "latest message" {
+		t.Errorf("expected 'latest message', got %q", result[1].Content)
+	}
+	// Mid messages (between summaries) should also be dropped
+	for _, m := range result {
+		if m.Content == "mid message" || m.Content == "mid response" {
+			t.Error("messages between summaries should be dropped")
 		}
 	}
 }
@@ -1811,26 +1842,16 @@ func TestBuildLLMContext_WithToolCalls(t *testing.T) {
 	}
 	result := buildLLMContext(messages)
 
-	// Tool calls and all messages pass through; summarization filtered.
-	// Expected: system + user + assistant(tool) + tool + user = 5
-	if len(result) != 5 {
-		t.Fatalf("expected 5 messages, got %d", len(result))
+	// Pre-summary tool calls are dropped (captured by summary in system prompt).
+	// Expected: system + user = 2
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
-	hasToolCall := false
-	hasToolResult := false
-	for _, m := range result {
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			hasToolCall = true
-		}
-		if m.Role == "tool" {
-			hasToolResult = true
-		}
+	if result[0].Role != "system" {
+		t.Errorf("expected system, got %s", result[0].Role)
 	}
-	if !hasToolCall {
-		t.Error("expected tool call in context")
-	}
-	if !hasToolResult {
-		t.Error("expected tool result in context")
+	if result[1].Content != "done" {
+		t.Errorf("expected 'done', got %q", result[1].Content)
 	}
 }
 
