@@ -4,7 +4,6 @@ import {
     getOfflineStatus,
     queueWrite,
     updateConfigRaw,
-    reloadPromptsRaw,
 } from './queue';
 import { setBoardCache, getBoardCache } from '../storage';
 import { markCached } from './cache';
@@ -74,10 +73,4 @@ export async function testPiConnection(): Promise<{ success: boolean; message: s
     return res.json();
 }
 
-/** Reload prompt templates from disk. Queued when offline. */
-export async function reloadPrompts(): Promise<{ status: string; message: string; files: string[] }> {
-    if (getOfflineStatus()) {
-        return await queueWrite('reloadPrompts', {}, { status: 'queued', message: 'Queued', files: [] });
-    }
-    return reloadPromptsRaw();
-}
+

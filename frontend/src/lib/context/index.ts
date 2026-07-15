@@ -44,10 +44,6 @@ export function getTaskDiffStatsContext(): Writable<Record<string, DiffStatsEntr
     return getContext(TASK_DIFF_STATS_KEY);
 }
 
-export function getTaskDiffContext(): Writable<Record<string, DiffEntry>> {
-    return getContext(TASK_DIFF_KEY);
-}
-
 // =============================================================================
 // Commit Queue Status Context
 // =============================================================================

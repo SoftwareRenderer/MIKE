@@ -2,37 +2,6 @@
 // Shared constants — magic numbers and strings extracted from components/utils
 // =============================================================================
 
-// ─── Task Statuses ───
-
-/** Valid task column/status values. */
-export const TASK_STATUSES = ['backlog', 'in_progress', 'review', 'done'] as const;
-export type TaskStatus = (typeof TASK_STATUSES)[number];
-
-/** Human-readable labels for each task status. */
-export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-    backlog: 'Backlog',
-    in_progress: 'In Progress',
-    review: 'Review',
-    done: 'Done',
-};
-
-// ─── Execution States ───
-
-/** Valid task execution states. */
-export const EXECUTION_STATES = [
-    'idle',
-    'running',
-    'stopped',
-    'failed',
-    'pulling_image',
-    'building_image',
-    'starting_container',
-    'cancelled',
-    'awaiting_review',
-    'completed',
-] as const;
-export type ExecutionState = (typeof EXECUTION_STATES)[number];
-
 // ─── Scroll Thresholds ───
 
 /** Pixels from bottom of scroll container to consider "at bottom" (auto-scroll). */
