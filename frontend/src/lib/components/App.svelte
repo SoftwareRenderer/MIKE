@@ -433,19 +433,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         }
                     },
                     onTaskUpdated: (updatedTask: Task) => {
-                        // Replace existing task or optimistic (queued) placeholder.
-                        // Genuinely new tasks are picked up by board_refresh (Broadcast).
-                        let changed = false;
-                        tasks = tasks.map(t => {
-                            if (t.id === updatedTask.id || (t as any).queued) {
-                                changed = true;
-                                return updatedTask;
-                            }
-                            return t;
-                        });
-                        if (changed) {
-                            boardStore.update(b => b ? { ...b, tasks } : b);
+                        // Replace existing task, or append if it's genuinely new
+                        // (e.g., created via create_task tool call).
+                        const idx = tasks.findIndex(t => t.id === updatedTask.id);
+                        if (idx >= 0) {
+                            tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
+                        } else {
+                            tasks = [...tasks, updatedTask];
                         }
+                        boardStore.update(b => b ? { ...b, tasks } : b);
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
                             selectedTask.set(updatedTask);
                         }
