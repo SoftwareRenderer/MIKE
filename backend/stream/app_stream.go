@@ -1062,18 +1062,4 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 	}
 }
 
-// ResetForTest closes all connections and clears state. Used by e2e tests.
-func (asm *AppStreamManager) ResetForTest() {
-	asm.mu.Lock()
-	defer asm.mu.Unlock()
-	for conn := range asm.clients {
-		conn.CloseNow()
-	}
-	asm.clients = make(map[*websocket.Conn]*clientState)
-	asm.branchPollersMu.Lock()
-	for _, cancel := range asm.branchPollers {
-		cancel()
-	}
-	asm.branchPollers = make(map[string]context.CancelFunc)
-	asm.branchPollersMu.Unlock()
-}
+

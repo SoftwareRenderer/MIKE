@@ -179,17 +179,6 @@ func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelNa
 	return usage, err
 }
 
-// ResetForTest stops all running executors and clears state.
-func (te *TaskExecutor) ResetForTest() {
-	te.taskMu.Lock()
-	defer te.taskMu.Unlock()
-	for taskID, state := range te.tasks {
-		state.cancel()
-		delete(te.tasks, taskID)
-	}
-	te.appStreamMgr.ResetForTest()
-}
-
 // -- Subtask auto-start methods --
 
 // findDeepestIncompleteSubtasks recursively finds all incomplete subtasks at the deepest level.

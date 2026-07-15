@@ -1687,7 +1687,7 @@ func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 
 	// Create a worktree for the task at the path the worktree manager expects.
 	// WORKTREES_DIR env var is set by testServer and takes priority over config.
-	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Verify worktree exists at the expected path
@@ -1788,7 +1788,7 @@ func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
-	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info
@@ -1875,7 +1875,7 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
-	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), taskID)
+	wtPath := filepath.Join(os.Getenv("WORKTREES_DIR"), projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info

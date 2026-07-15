@@ -33,7 +33,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree for the task
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/test-branch")
 	runGitInDir(t, wtPath, "checkout", "task/test-branch")
@@ -77,7 +77,7 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree for the task
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/clean-branch")
 	runGitInDir(t, wtPath, "checkout", "task/clean-branch")
@@ -131,7 +131,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree for the task
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-branch")
 	runGitInDir(t, wtPath, "checkout", "task/conflict-branch")
@@ -229,7 +229,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create parent worktree
-	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), parentID)
+	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, parentID)
 	os.MkdirAll(parentWtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/parent-branch")
 	runGitInDir(t, parentWtPath, "checkout", "task/parent-branch")
@@ -257,7 +257,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGitInDir(t, parentWtPath, "checkout", "task/parent-branch")
 
 	// Create child worktree
-	childWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), childID)
+	childWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, childID)
 	os.MkdirAll(childWtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", childWtPath, "task/child-branch")
 	runGitInDir(t, childWtPath, "checkout", "task/child-branch")

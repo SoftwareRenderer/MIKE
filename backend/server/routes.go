@@ -23,10 +23,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config/test-pi-connection", s.configStore.HandleTestPiConnection)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
 
-	// Test endpoints
-	s.mux.HandleFunc("/api/test/reset", s.handleTestReset)
-	s.mux.HandleFunc("/api/test/create-orphan", s.handleCreateOrphan)
-
 	// WebSocket stream
 	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
 

@@ -42,7 +42,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree for the task
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-resolve")
 	runGitInDir(t, wtPath, "checkout", "task/conflict-resolve")
@@ -183,7 +183,7 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/multi-conflict")
 	runGitInDir(t, wtPath, "checkout", "task/multi-conflict")
@@ -273,7 +273,7 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "task edit")
 	runGit(t, repoDir, "checkout", "master")
 
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/commit-msg")
 	runGitInDir(t, wtPath, "checkout", "task/commit-msg")
@@ -338,7 +338,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/full-flow")
 	runGitInDir(t, wtPath, "checkout", "task/full-flow")
@@ -428,7 +428,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/stash-restore")
 	runGitInDir(t, wtPath, "checkout", "task/stash-restore")
@@ -517,7 +517,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/auto-resolve")
 	runGitInDir(t, wtPath, "checkout", "task/auto-resolve")
@@ -579,7 +579,7 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/unresolved")
 	runGitInDir(t, wtPath, "checkout", "task/unresolved")
@@ -646,7 +646,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create parent worktree
-	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), parentID)
+	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, parentID)
 	os.MkdirAll(parentWtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/"+parentID)
 	runGitInDir(t, parentWtPath, "checkout", "task/"+parentID)
@@ -675,7 +675,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	runGitInDir(t, parentWtPath, "checkout", "task/"+parentID)
 
 	// Create subtask worktree
-	subtaskWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), subtaskID)
+	subtaskWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, subtaskID)
 	os.MkdirAll(subtaskWtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", subtaskWtPath, "task/"+subtaskID)
 	runGitInDir(t, subtaskWtPath, "checkout", "task/"+subtaskID)
@@ -763,7 +763,7 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/partial-resolve")
 	runGitInDir(t, wtPath, "checkout", "task/partial-resolve")
@@ -840,7 +840,7 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 
 	// Create worktree
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), taskID)
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/merge-commit")
 	runGitInDir(t, wtPath, "checkout", "task/merge-commit")

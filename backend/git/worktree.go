@@ -138,8 +138,13 @@ func (wm *WorktreeManager) GetProjectStashMu(projectID string) *sync.Mutex {
 }
 
 // WorktreePath returns the filesystem path for a task's worktree.
+// Path format: worktreesDir/projectID/taskID
 // Respects WORKTREES_DIR env var override (same as CreateWorktree).
 func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
+	task, err := wm.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return "", err
+	}
 	cfg, err := wm.configStore.GetConfig()
 	if err != nil {
 		return "", err
@@ -148,7 +153,7 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
 		worktreesDir = wtDir
 	}
-	return filepath.Join(worktreesDir, taskID), nil
+	return filepath.Join(worktreesDir, task.ProjectID, taskID), nil
 }
 
 // CreateWorktree creates a git worktree for a task, capturing the current working tree state.
@@ -175,7 +180,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 			worktreesDir = abs
 		}
 	}
-	worktreePath := filepath.Join(worktreesDir, taskID)
+	worktreePath := filepath.Join(worktreesDir, projectID, taskID)
 
 	// Acquire per-project mutex with timeout
 	mu := wm.getProjectWorktreeMu(projectID)
@@ -192,7 +197,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	}
 	defer mu.Unlock()
 
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(worktreesDir, projectID), 0o755); err != nil {
 		return "", "", fmt.Errorf("create worktrees dir: %w", err)
 	}
 
@@ -334,41 +339,59 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		activeThreadSet[id] = true
 	}
 
-	entries, err := os.ReadDir(worktreesDir)
+	projects, err := wm.store.ListProjects()
 	if err != nil {
-		return 0, fmt.Errorf("read worktrees dir: %w", err)
+		log.Printf("[gc] error listing projects: %v", err)
+		return 0, nil
 	}
 
+	// Build project ID set for scanning worktrees directory
+	projectSet := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		projectSet[p.ID] = true
+	}
+
+	// Scan worktrees directory for orphaned task worktrees.
+	// Path structure: worktreesDir/projectID/taskID
 	removed := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if name[0] == '.' {
-			continue
-		}
-		if !activeSet[name] {
-			orphanPath := filepath.Join(worktreesDir, name)
-			if dryRun {
-				log.Printf("[gc] would remove orphaned worktree: %s", orphanPath)
-				removed++
-			} else {
-				log.Printf("[gc] removing orphaned worktree: %s", orphanPath)
-				if err := os.RemoveAll(orphanPath); err != nil {
-					log.Printf("[gc] error removing %s: %v", orphanPath, err)
-				} else {
-					removed++
+	if entries, err := os.ReadDir(worktreesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name()[0] == '.' {
+				continue
+			}
+			projectID := entry.Name()
+			if !projectSet[projectID] {
+				continue // skip unknown project dirs (e.g., stale or test artifacts)
+			}
+			projectDir := filepath.Join(worktreesDir, projectID)
+			taskEntries, err := os.ReadDir(projectDir)
+			if err != nil {
+				continue
+			}
+			for _, taskEntry := range taskEntries {
+				if !taskEntry.IsDir() || taskEntry.Name()[0] == '.' {
+					continue
+				}
+				taskName := taskEntry.Name()
+				if !activeSet[taskName] {
+					orphanPath := filepath.Join(projectDir, taskName)
+					if dryRun {
+						log.Printf("[gc] would remove orphaned worktree: %s", orphanPath)
+						removed++
+					} else {
+						log.Printf("[gc] removing orphaned worktree: %s", orphanPath)
+						if err := os.RemoveAll(orphanPath); err != nil {
+							log.Printf("[gc] error removing %s: %v", orphanPath, err)
+						} else {
+							removed++
+						}
+					}
 				}
 			}
 		}
 	}
 
-	projects, err := wm.store.ListProjects()
-	if err != nil {
-		log.Printf("[gc] error listing projects for prune: %v", err)
-		return removed, nil
-	}
+	// Prune git worktree registrations and orphaned branches per project
 	for _, p := range projects {
 		wm.gitRun(p.Path, "worktree", "prune")
 		// Prune orphaned task branches (task/<id> with no matching task in DB)

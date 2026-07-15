@@ -34,7 +34,7 @@ test.describe.serial('Merge Sync', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const worktreePath = `${config.workspace_dir}/${taskId}`;
+    const worktreePath = `${config.workspace_dir}/${projectId}/${taskId}`;
     const projectPath = taskInfo.project_path || taskInfo.path;
 
     // Write a file in the task's worktree (simulating task work)

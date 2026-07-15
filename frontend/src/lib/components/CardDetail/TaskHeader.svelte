@@ -50,7 +50,7 @@
                     </span>
                 {/if}
             {/if}
-            <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', taskId)}>{getWorktreeDisplayPath(workspaceDir || '', taskId)}</span>
+            <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId)}>{getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId)}</span>
             <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                 {badge.text}
             </span>

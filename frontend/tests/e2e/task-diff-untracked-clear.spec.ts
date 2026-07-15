@@ -10,11 +10,17 @@ function getConfig() {
 function findWorktreeDir(): string | null {
     const worktreesDir = getConfig().workspace_dir;
     try {
-        const entries = readdirSync(worktreesDir);
-        for (const entry of entries) {
-            const fullPath = join(worktreesDir, entry);
-            if (statSync(fullPath).isDirectory()) {
-                return fullPath;
+        // Path structure: worktreesDir/projectID/taskID
+        const projectEntries = readdirSync(worktreesDir);
+        for (const projEntry of projectEntries) {
+            const projPath = join(worktreesDir, projEntry);
+            if (!statSync(projPath).isDirectory()) continue;
+            const taskEntries = readdirSync(projPath);
+            for (const taskEntry of taskEntries) {
+                const fullPath = join(projPath, taskEntry);
+                if (statSync(fullPath).isDirectory()) {
+                    return fullPath;
+                }
             }
         }
     } catch { /* ignore */ }

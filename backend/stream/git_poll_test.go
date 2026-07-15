@@ -218,7 +218,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 
 	// Verify that the worktree manager can detect changes
-	worktreePath := filepath.Join(worktreesDir, taskID)
+	worktreePath := filepath.Join(worktreesDir, projID, taskID)
 
 	// Initial state — no diff
 	raw1, err := wm.GitDiffRaw(taskID, "")

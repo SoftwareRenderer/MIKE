@@ -63,10 +63,10 @@ test.describe.serial('Commit Dialog', () => {
     const worktreePath = await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
       const task = await res.json();
-      // Worktree path is derived from workspace_dir + task_id
+      // Worktree path is derived from workspace_dir + project_id + task_id
       const configRes = await fetch('/api/config');
       const config = await configRes.json();
-      return `${config.workspace_dir}/${tid}`;
+      return `${config.workspace_dir}/${pid}/${tid}`;
     }, { pid: projectId, tid: taskId });
 
     // Check if worktree exists and create a change
@@ -179,7 +179,7 @@ test.describe.serial('Commit Dialog', () => {
     const worktreePath = await page.evaluate(async ({ pid, tid }) => {
       const configRes = await fetch('/api/config');
       const config = await configRes.json();
-      return `${config.workspace_dir}/${tid}`;
+      return `${config.workspace_dir}/${pid}/${tid}`;
     }, { pid: projectId, tid: taskId });
 
     const worktreeExists = await page.evaluate(async (path) => {
