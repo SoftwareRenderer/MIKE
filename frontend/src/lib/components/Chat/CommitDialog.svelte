@@ -15,12 +15,14 @@
     let promptProgress = $state(0);
     let resolveFn: ((value: string | null) => void) | null = $state(null);
     let textareaRef: HTMLTextAreaElement | null = $state(null);
-    // Abort controller for streaming cancellation
     let abortController: AbortController | null = null;
+    // Ref to survive effect re-runs; guards against duplicate stream requests.
+    const streamState = { count: 0 };
 
     function dismiss(value: string | null) {
         open = false;
         streaming = false;
+        streamState.count = 0;
         if (abortController) {
             abortController.abort();
             abortController = null;
@@ -166,29 +168,39 @@
     $effect(() => {
         const value = dialogStore.commitDialog;
         if (value) {
-            message = value.message || '';
-            editedMessage = value.message || '';
-            confirmText = value.confirmText ?? 'Commit and move to Done';
-            cancelText = value.cancelText ?? 'Cancel';
-            authorName = value.authorName || '';
-            authorEmail = value.authorEmail || '';
-            mergeTarget = value.mergeTarget || '';
-            promptProgress = value.promptProgress || 0;
-            streaming = value.streaming ?? false;
-            resolveFn = value._resolve ?? null;
-            open = true;
+            // Only initialize on first run; re-runs would wipe streamed tokens.
+            if (streamState.count === 0) {
+                message = value.message || '';
+                editedMessage = value.message || '';
+                confirmText = value.confirmText ?? 'Commit and move to Done';
+                cancelText = value.cancelText ?? 'Cancel';
+                authorName = value.authorName || '';
+                authorEmail = value.authorEmail || '';
+                mergeTarget = value.mergeTarget || '';
+                promptProgress = value.promptProgress || 0;
+                streaming = value.streaming ?? false;
+                resolveFn = value._resolve ?? null;
+                open = true;
 
-            // Start streaming if projectId and taskId are provided
-            if (value.projectId && value.taskId && !value.message) {
-                streamCommitPreview(value.projectId, value.taskId);
+                if (value.projectId && value.taskId && !value.message) {
+                    streamState.count++;
+                    streamCommitPreview(value.projectId, value.taskId);
+                }
+
+                if (!streaming) {
+                    setTimeout(() => {
+                        textareaRef?.focus();
+                    }, 100);
+                }
             }
 
-            // Focus textarea when dialog opens (after streaming starts).
-            if (!streaming) {
-                setTimeout(() => {
-                    textareaRef?.focus();
-                }, 100);
-            }
+            // Abort only on dialog close, not on effect re-runs.
+            return () => {
+                if (dialogStore.commitDialog === null && abortController) {
+                    abortController.abort();
+                    abortController = null;
+                }
+            };
         }
     });
 
