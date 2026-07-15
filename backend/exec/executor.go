@@ -621,19 +621,18 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		return nil, fmt.Errorf("get project for sandbox check: %w", err)
 	}
 
-	// Block agent providers when network isolation is enabled
+	// Block agent providers when network isolation is enabled.
+	// Keep the worktree and branch — the task is being prepared for work,
+	// not deleted. The user can fix the config (enable network) and restart.
 	if project.SandboxNetworkIsolation && te.configStore.IsAgentProvider(serverURL) {
 		cancel()
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
-		// Clean up resources created before this check
 		task.ExecutionState = "idle"
 		task.Status = "backlog"
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.store.UpdateTask(task)
-		te.appStreamMgr.UnwatchWorktree(taskID)
-		_ = te.worktreeMgr.RemoveWorktree(projectID, taskID, task.Branch)
 		return nil, fmt.Errorf("agent requires network to be enabled")
 	}
 
