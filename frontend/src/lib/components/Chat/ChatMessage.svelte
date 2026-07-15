@@ -483,9 +483,7 @@
 
 <style>
     .chat-message {
-        padding: 8px 0;
-        content-visibility: auto;
-        contain-intrinsic-size: 1px 300px;
+        padding: 12px 0;
     }
     .message-wrapper {
         display: flex;

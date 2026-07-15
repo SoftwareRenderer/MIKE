@@ -120,12 +120,15 @@
         const scrollTop = chatScrollEl.scrollTop;
         // Walk through entries computing cumulative offsets to find
         // the latest user message whose top has scrolled above the viewport.
+        // Only show the sticky header once the first user message is out of view.
         let offset = 0;
         let latestFirstLine = '';
+        let firstUserBottom = -1;
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
             const h = getEstimatedHeight(entry, i);
             if (entry.role === 'user') {
+                if (firstUserBottom < 0) firstUserBottom = offset + h;
                 if (offset <= scrollTop) {
                     latestFirstLine = entry.content.split('\n')[0];
                 }
@@ -133,7 +136,7 @@
             offset += h;
         }
         computedStickyMessage = latestFirstLine;
-        computedShowHeader = !!latestFirstLine;
+        computedShowHeader = !!latestFirstLine && firstUserBottom >= 0 && scrollTop >= firstUserBottom;
     }
 
     /** Scroll to the user message shown in the sticky header. */
@@ -315,7 +318,6 @@
         position: absolute;
         top: 0;
         left: 0;
-        right: 0;
         z-index: 5;
         display: flex;
         justify-content: flex-end;
@@ -323,6 +325,8 @@
         padding: 6px 12px;
         background: var(--color-surface-1);
         border-bottom: 1px solid var(--color-border);
+        width: calc(100% - 14px);
+        border-bottom-right-radius: 1.125rem;
     }
     .chat-sticky-bubble {
         font-size: 0.8125rem;

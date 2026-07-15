@@ -289,6 +289,7 @@
         right: 0;
     }
     .virtual-item {
+        padding: 0 12px;
         will-change: transform;
     }
 </style>
