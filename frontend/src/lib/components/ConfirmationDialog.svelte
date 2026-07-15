@@ -6,6 +6,7 @@
     let open = $state(false);
     let title = $state('');
     let message = $state('');
+    let items = $state<string[]>([]);
     let confirmText = $state('Confirm');
     let cancelText = $state('Cancel');
     let variant = $state<'default' | 'destructive'>('destructive');
@@ -41,6 +42,7 @@
         if (value) {
             title = value.title;
             message = value.message;
+            items = value.items ?? [];
             confirmText = value.confirmText ?? 'Confirm';
             cancelText = value.cancelText ?? 'Cancel';
             variant = value.variant ?? 'destructive';
@@ -65,6 +67,13 @@
 
     <BaseModal title={title} width="360px" zIndex={1000} footer={footer} onClose={handleCancel}>
         <p class="confirm-message">{message}</p>
+        {#if items.length > 0}
+            <ul class="confirm-list">
+                {#each items as item}
+                    <li>{item}</li>
+                {/each}
+            </ul>
+        {/if}
     </BaseModal>
 {/if}
 
@@ -92,17 +101,25 @@
         line-height: 1.5;
         white-space: pre-wrap;
     }
+    .confirm-list {
+        margin: 8px 0 0 0;
+        padding-left: 18px;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+        line-height: 1.6;
+    }
 
     .btn-confirm {
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
+        padding: 8px 16px;
+        border-radius: var(--radius-md);
         border: none;
         background: var(--color-status-blue);
         color: white;
-        font-size: 0.8125rem;
+        font-size: 0.875rem;
         font-weight: 500;
+        font-family: inherit;
         cursor: pointer;
-        transition: opacity 0.15s;
+        transition: background 0.15s, opacity 0.15s;
     }
     .btn-confirm:hover {
         opacity: 0.85;

@@ -40,7 +40,7 @@ const languageCache = new Map<string, Language | null>();
  * Caches the result so subsequent calls for the same extension are instant.
  * Returns null for unsupported file types (plain text fallback).
  */
-export async function loadLanguage(path: string): Promise<Language | null> {
+async function loadLanguage(path: string): Promise<Language | null> {
     const ext = path.split('.').pop()?.toLowerCase() || '';
     const base = path.split('/').pop()?.toLowerCase() || '';
 
@@ -474,27 +474,7 @@ function _highlightWithLang(lines: string[], path: string, lang: Language): stri
     }
 }
 
-/**
- * Highlight multiple lines of code and return an array of HTML fragments (one per line).
- * Uses Lezer parsers from CodeMirror language packages for token-level highlighting.
- * Returns empty string for lines that should fall back to plain text rendering
- * (when the language hasn't been loaded yet — use highlightLinesAsync to preload).
- * Results are cached per file path + content hash to avoid redundant parsing.
- */
-export function highlightLines(lines: string[], path: string): string[] {
-    if (lines.length === 0) return [];
 
-    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'tmpl' || ext === 'gohtml') {
-        return highlightGoTemplateLines(lines);
-    }
-
-    const lang = getLanguage(path);
-    if (!lang) return lines.map(() => '');
-
-    return _highlightWithLang(lines, path, lang);
-}
 
 /**
  * Async version of highlightLines — loads the language package on first use

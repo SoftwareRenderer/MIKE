@@ -401,21 +401,3 @@ export type CommitQueueEntry = { taskID: string; status: 'queued' | 'processing'
 
 export type TaskEventData = { task_id: string; type: string; data: any };
 
-// ─── Edit Task Modal ───
-
-export interface EditTaskData {
-    taskId: string;
-    projectId: string;
-    taskTitle: string;
-    taskPrompt: string;
-    editProviders: Provider[];
-    editModel: string;
-    editUrl: string;
-    editReasoningEffort: string;
-    editPlanMode: boolean;
-    editAutoMerge: boolean;
-    editSubtasksAutoMerge: boolean;
-    taskHasParent: boolean;
-    targetBranch: string;
-    isAgentSelected: () => boolean;
-}

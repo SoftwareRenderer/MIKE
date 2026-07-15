@@ -1,16 +1,84 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
-    import { tick } from 'svelte';
-    import { moveTask, reorderTasks, clearDoneTasks } from '$lib/api';
+    import MultiSelectBar from './MultiSelectBar.svelte';
+    import { tick, onMount, onDestroy } from 'svelte';
+    import { moveTask, reorderTasks, clearDoneTasks, deleteTask, startTask } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
-    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
+
+    // Multi-select state
+    let multiSelect = $state(new MultiSelect());
+
+    // Listen for multi-select action events from the floating bar
+    function handleMultiSelectDelete(e: CustomEvent) {
+        const taskIds = e.detail.taskIds as string[];
+        const titles = e.detail.titles as string[];
+        dialogStore.showConfirm({
+            title: 'Delete Tasks',
+            message: `Permanently delete ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}? This cannot be undone.`,
+            items: titles,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        }).then(async (confirmed) => {
+            if (!confirmed) return;
+            for (const id of taskIds) {
+                try {
+                    await deleteTask(projectId, id);
+                    removeTaskFromBoard(appStore, id);
+                } catch (err) {
+                    dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
+                }
+            }
+            multiSelect.clear();
+            onRefreshBoard?.();
+        });
+    }
+
+    function handleMultiSelectStart(e: CustomEvent) {
+        const taskIds = e.detail.taskIds as string[];
+        (async () => {
+            let started = 0;
+            for (const id of taskIds) {
+                try {
+                    const task = tasks.find(t => t.id === id);
+                    if (!task) continue;
+                    // Use startSubtask for child tasks
+                    if (task.parent_task_id) {
+                        const { startSubtask } = await import('$lib/api');
+                        const updated = await startSubtask(projectId, id);
+                        updateTaskInBoard(appStore, updated.id, updated);
+                    } else {
+                        const updated = await startTask(projectId, id);
+                        updateTaskInBoard(appStore, updated.id, updated);
+                    }
+                    started++;
+                } catch (err) {
+                    dialogStore.showToast(`Failed to start task: ${String(err)}`, 'error');
+                }
+            }
+            multiSelect.clear();
+            if (started > 0) {
+                dialogStore.showToast(`${started} task${started > 1 ? 's' : ''} started`, 'success');
+            }
+        })();
+    }
+
+    onMount(() => {
+        window.addEventListener('multi-select-delete', handleMultiSelectDelete as EventListener);
+        window.addEventListener('multi-select-start', handleMultiSelectStart as EventListener);
+        return () => {
+            window.removeEventListener('multi-select-delete', handleMultiSelectDelete as EventListener);
+            window.removeEventListener('multi-select-start', handleMultiSelectStart as EventListener);
+        };
+    });
 
     // Build a lookup map for children of each task
     const childrenMap = $derived.by(() => {
@@ -265,7 +333,8 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     });
 </script>
 
-<div class="board" bind:this={boardEl} role="region" aria-label="Task board">
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+<div class="board" bind:this={boardEl} role="region" aria-label="Task board" onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }}>
     <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     {#each columns as col}
         <Column
@@ -289,9 +358,16 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
             onClearAll={col.id === 'done' ? async () => { await handleClearDone(); onRefreshBoard?.(); } : undefined}
             onSelect={handleSelectTask}
             {projectId}
+            {multiSelect}
             onRefreshBoard={onRefreshBoard}
         />
     {/each}
+    <MultiSelectBar
+        {multiSelect}
+        {tasks}
+        {projectId}
+        onClear={() => multiSelect.clear()}
+    />
 </div>
 
 <style>

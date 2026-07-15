@@ -97,11 +97,6 @@ export async function buildSandboxImage(id: string): Promise<{ status: string; i
 /** Trigger a sandbox image build with live progress streaming. */
 export { buildSandboxImageStream } from './queue';
 
-/** @deprecated Port validation removed — host ports are auto-assigned at runtime. */
-export async function validateForwardPorts(_projectId: string, _ports: { container_port: number }[]): Promise<number[]> {
-    return [];
-}
-
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {
     if (getOfflineStatus()) {
