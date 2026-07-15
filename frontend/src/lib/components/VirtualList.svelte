@@ -139,12 +139,12 @@
 
     // New mode: ResizeObserver for measuring items
     let itemObserver: ResizeObserver | null = null;
+    let observedIndices = new Set<number>();
 
     $effect(() => {
         if (!scrollEl || isLegacyApi || !vs) return;
 
-        if (itemObserver) itemObserver.disconnect();
-
+        // ResizeObserver: measures item heights when they render/change.
         itemObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 const target = entry.target as HTMLElement;
@@ -157,14 +157,46 @@
             }
         });
 
+        // Observe initially rendered items.
         const itemEls = scrollEl.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]');
         for (const el of itemEls) {
+            const index = parseInt(el.getAttribute('data-virtual-index') ?? '', 10);
+            if (isNaN(index) || observedIndices.has(index)) continue;
+            observedIndices.add(index);
             itemObserver.observe(el);
+        }
+
+        // MutationObserver picks up new items from scroll (no reactive cycle).
+        const spacer = scrollEl.querySelector('.virtual-spacer');
+        let mo: MutationObserver | null = null;
+        if (spacer) {
+            mo = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType !== 1) continue; // Element
+                        const el = node as HTMLElement;
+                        // Direct virtual-item or parent of one
+                        const items = el.classList?.contains('virtual-item')
+                            ? [el]
+                            : Array.from(el.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]'));
+                        for (const item of items) {
+                            const index = parseInt(item.getAttribute('data-virtual-index') ?? '', 10);
+                            if (isNaN(index) || observedIndices.has(index)) continue;
+                            observedIndices.add(index);
+                            itemObserver?.observe(item);
+                        }
+                    }
+                }
+            });
+            mo.observe(spacer, { childList: true });
         }
 
         return () => {
             itemObserver?.disconnect();
             itemObserver = null;
+            mo?.disconnect();
+            mo = null;
+            observedIndices.clear();
         };
     });
 

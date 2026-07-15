@@ -106,12 +106,14 @@
                     toolCall: { toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name, args: data.args, sandbox: data.sandbox }
                 };
                 sections.push(sec);
+                activeToolCalls = new Map(activeToolCalls);
                 activeToolCalls.set(data.tool_id, sec);
                 break;
             }
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number };
                 const sec = activeToolCalls.get(data.tool_id);
+                activeToolCalls = new Map(activeToolCalls);
                 activeToolCalls.delete(data.tool_id);
                 if (sec && sec.toolCall) {
                     // Create a completely new section object to force Svelte 5 reactivity

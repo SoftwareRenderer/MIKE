@@ -97,8 +97,8 @@ export function useChatActions(deps: ChatActionsDeps) {
             if (deps.stream.state.currentAssistantId) {
                 deps.stream.state.currentAssistantId = null;
             }
-            deps.stream.state.activeToolCalls.clear();
-            deps.stream.state.processedToolIds.clear();
+            deps.stream.state.activeToolCalls = new Map();
+            deps.stream.state.processedToolIds = new Set();
             deps.markNotStreaming();
         }
         // If task is in Done, move it back to In Progress before sending
@@ -213,8 +213,8 @@ export function useChatActions(deps: ChatActionsDeps) {
             (e: any) => e.id !== streamingId && !(e.toolCalls?.some((tc: any) => tc.isPending))
         );
         // Clear active tool calls (immediate UI update)
-        deps.stream.state.activeToolCalls.clear();
-        deps.stream.state.processedToolIds.clear();
+        deps.stream.state.activeToolCalls = new Map();
+        deps.stream.state.processedToolIds = new Set();
         try {
             await stopTask(deps.projectId, deps.taskId);
         } catch (e) {

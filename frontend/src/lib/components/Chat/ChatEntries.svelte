@@ -70,18 +70,19 @@
         onScrollElChange?: (el: HTMLElement | null) => void;
     } = $props();
 
-    // Estimated heights per entry type for virtual scrolling
+    // Estimated heights — must be >= actual minimums to prevent overlap.
+    // Corrected by ResizeObserver on first paint.
     function getEstimatedHeight(entry: ChatEntry, _index: number): number {
-        if (entry.role === 'user') return 60;
-        if (entry.role === 'error') return 80;
-        if (entry.role === 'summarization') return 100;
-        if (entry.role === 'merge_resolution') return 80;
+        if (entry.role === 'user') return 80;
+        if (entry.role === 'error') return 100;
+        if (entry.role === 'summarization') return 150;
+        if (entry.role === 'merge_resolution') return 100;
         // assistant entries: base height + extra for tool calls and reasoning
-        let h = 80;
+        let h = 90;
         if (entry.toolCalls && entry.toolCalls.length > 0) {
-            h += entry.toolCalls.length * 60;
+            h += entry.toolCalls.length * 85;
         }
-        if (entry.hasReasoning) h += 40;
+        if (entry.hasReasoning) h += 60;
         if (entry.isStreaming) h += 20;
         return h;
     }

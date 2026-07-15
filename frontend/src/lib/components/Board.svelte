@@ -98,7 +98,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
                     next.add(parentId);
                     expandedTasksContext.set(next);
                 }
-                lastExpandedParents.add(parentId);
+                lastExpandedParents = new Set([...lastExpandedParents, parentId]);
             }
         }
     });

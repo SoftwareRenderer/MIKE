@@ -30,6 +30,12 @@ export interface VirtualScrollState {
     /** Total virtual height of all items */
     totalHeight: number;
     /**
+     * Monotonically increasing counter. Changes whenever the visible
+     * range is recomputed. Used as a reactive signal so that consumer
+     * effects (e.g., ResizeObserver setup) re-run when items change.
+     */
+    renderSignal: number;
+    /**
      * Record the measured height of an item.
      * Future height lookups for this index will use the measured value.
      */
@@ -130,8 +136,8 @@ export function useVirtualScroll(
     getEstimatedHeight: (index: number) => number,
     overscan: number = 3,
 ): VirtualScrollState {
-    // Cache of measured heights, keyed by index.
-    let measuredHeights = $state(new Map<number, number>());
+    // Measured heights by index (plain object, not Map, to avoid $state mutation).
+    let measuredHeights = $state<Record<number, number>>({});
 
     /** Get the current item count (supports both number and getter). */
     function getCount(): number {
@@ -140,7 +146,7 @@ export function useVirtualScroll(
 
     /** Get the height for an item (measured if available, estimated otherwise). */
     function getHeight(index: number): number {
-        const measured = measuredHeights.get(index);
+        const measured = measuredHeights[index];
         if (measured !== undefined) return measured;
         return getEstimatedHeight(index);
     }
@@ -154,30 +160,36 @@ export function useVirtualScroll(
     function recomputeOffsets() {
         if (!dirty) return;
         const n = getCount();
-        // Extend the offsets array if itemCount grew
-        if (offsets.length < n + 1) {
-            const newOffsets = new Float64Array(Math.max(n + 1, offsets.length * 2));
-            newOffsets.set(offsets);
-            offsets = newOffsets;
-        }
+        // New array each time — $state(Float64Array) can't be mutated in place.
+        const newOffsets = new Float64Array(n + 1);
         let sum = 0;
-        offsets[0] = 0;
+        newOffsets[0] = 0;
         for (let i = 0; i < n; i++) {
             sum += getHeight(i);
-            offsets[i + 1] = sum;
+            newOffsets[i + 1] = sum;
         }
+        offsets = newOffsets;
         totalHeight = sum;
         dirty = false;
     }
+
+    // Recompute before render so getItemOffset is a pure read from $derived.
+    $effect.pre(() => {
+        if (dirty) recomputeOffsets();
+    });
 
     // Reactive state
     let startIdx = $state(0);
     let endIdx = $state(0);
     let paddingTop = $state(0);
     let paddingBottom = $state(0);
+    let renderSignal = $state(0); // bump to trigger re-render
+    let computing = false; // prevent re-entrant calls
 
     /** Recompute the visible range based on current scroll position. */
     function computeVisibleRange() {
+        if (computing) return; // prevent re-entrant reactive cycles
+        computing = true;
         const el = containerRef();
         const n = getCount();
         if (!el || n === 0) {
@@ -185,6 +197,7 @@ export function useVirtualScroll(
             endIdx = 0;
             paddingTop = 0;
             paddingBottom = 0;
+            computing = false;
             return;
         }
 
@@ -228,6 +241,7 @@ export function useVirtualScroll(
         paddingTop = offsets[startIdx];
         // Padding: remaining height after the last rendered item
         paddingBottom = totalHeight - offsets[endIdx];
+        computing = false;
     }
 
     // Scroll handler — rAF-throttled to avoid excessive recomputation
@@ -263,18 +277,27 @@ export function useVirtualScroll(
     /**
      * Measure an item's actual height and trigger recomputation.
      * Call this from a ResizeObserver on each rendered item.
+     *
+     * Measurements are batched into a single rAF tick to avoid cascading
+     * re-layouts from multiple items being measured in the same frame.
      */
+    let measureRafPending = false;
     function measureItem(index: number, height: number) {
-        const prev = measuredHeights.get(index);
+        const prev = measuredHeights[index];
         if (prev === height) return; // no change
-        measuredHeights.set(index, height);
+        measuredHeights = { ...measuredHeights, [index]: height };
         dirty = true;
-        computeVisibleRange();
+        if (!measureRafPending) {
+            measureRafPending = true;
+            requestAnimationFrame(() => {
+                measureRafPending = false;
+                computeVisibleRange();
+            });
+        }
     }
 
-    /** Get the Y offset of an item (sum of all preceding item heights). */
+    /** Cumulative Y offset of an item. */
     function getItemOffset(index: number): number {
-        recomputeOffsets();
         if (index <= 0) return 0;
         if (index >= getCount()) return totalHeight;
         return offsets[index];
@@ -286,6 +309,7 @@ export function useVirtualScroll(
         get paddingTop() { return paddingTop; },
         get paddingBottom() { return paddingBottom; },
         get totalHeight() { return totalHeight; },
+        get renderSignal() { return renderSignal; },
         measureItem,
         getItemOffset,
     };

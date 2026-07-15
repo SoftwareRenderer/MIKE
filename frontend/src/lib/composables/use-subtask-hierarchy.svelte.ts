@@ -106,7 +106,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
                     next.add(parentId);
                     expandedTasksContext.set(next);
                 }
-                lastExpandedParents.add(parentId);
+                lastExpandedParents = new Set([...lastExpandedParents, parentId]);
             }
         }
     });

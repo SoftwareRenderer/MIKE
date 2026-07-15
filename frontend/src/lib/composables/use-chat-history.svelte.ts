@@ -53,8 +53,8 @@ export function useChatHistory(deps: ChatHistoryDeps) {
     /** Reset stream state before loading a new thread's messages. */
     function resetStreamState() {
         deps.stream.closeCurrentAssistant();
-        deps.stream.state.activeToolCalls.clear();
-        deps.stream.state.processedToolIds.clear();
+        deps.stream.state.activeToolCalls = new Map();
+        deps.stream.state.processedToolIds = new Set();
         deps.stream.state.entries = [];
         deps.stream.state.currentAssistantId = null;
         deps.stream.state.streamTokenCount = 0;
@@ -120,7 +120,7 @@ export function useChatHistory(deps: ChatHistoryDeps) {
             if (lastAssistant?.stats) {
                 deps.stream.state.lastPromptTokens =
                     (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-                deps.stream.state.contextState.used = deps.stream.state.lastPromptTokens;
+                deps.stream.state.contextState = { ...deps.stream.state.contextState, used: deps.stream.state.lastPromptTokens };
             }
             // Scroll to bottom on the next frame.
             if (scrollAfter) {

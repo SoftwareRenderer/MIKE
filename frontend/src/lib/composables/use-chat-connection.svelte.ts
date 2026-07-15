@@ -82,7 +82,7 @@ export function useChatConnection(deps: ChatConnectionDeps) {
         deps.stream.state.queuePosition = 0;
         deps.stream.state.queueEstimatedWait = 0;
         deps.stream.state.streamTokenCount = 0;
-        deps.stream.state.contextState.used = deps.stream.state.lastPromptTokens;
+        deps.stream.state.contextState = { ...deps.stream.state.contextState, used: deps.stream.state.lastPromptTokens };
         deps.stream.state.promptProgress = 0;
     }
 

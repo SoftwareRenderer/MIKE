@@ -25,7 +25,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let scrollEl: HTMLElement | null = null;
 
     let atBottom = $state(true);
-    let prevScrollHeight = 0;
     let userInputPending = false;
     let inputTimeout: ReturnType<typeof setTimeout> | null = null;
     let inputValue = $state('');
@@ -258,8 +257,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     /** Reset stream state before loading a new thread's messages. */
     function resetStreamState() {
         stream.closeCurrentAssistant();
-        stream.state.activeToolCalls.clear();
-        stream.state.processedToolIds.clear();
+        stream.state.activeToolCalls = new Map();
+        stream.state.processedToolIds = new Set();
         stream.state.entries = [];
         stream.state.currentAssistantId = null;
         stream.state.streamTokenCount = 0;
@@ -297,7 +296,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         stream.state.queuePosition = 0;
         stream.state.queueEstimatedWait = 0;
         stream.state.streamTokenCount = 0;
-        stream.state.contextState.used = stream.state.lastPromptTokens;
+        stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
         stream.state.promptProgress = 0;
     }
 
@@ -385,11 +384,11 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             provider = providers.find(p => isAgentProvider(p));
         }
         if (!provider) {
-            stream.state.contextState.limit = 0;
+            stream.state.contextState = { ...stream.state.contextState, limit: 0 };
             return;
         }
         const model = provider.models.find((m: { name: string }) => m.name === selectedModel);
-        stream.state.contextState.limit = (model as { context_window?: number })?.context_window || 0;
+        stream.state.contextState = { ...stream.state.contextState, limit: (model as { context_window?: number })?.context_window || 0 };
     }
 
     async function loadHistory(scrollAfter = false) {
@@ -441,7 +440,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
             if (lastAssistant?.stats) {
                 stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-                stream.state.contextState.used = stream.state.lastPromptTokens;
+                stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
             }
             // After replacing entries, the DOM re-renders and scroll state may be lost.
             // Scroll to bottom on the next frame.
@@ -558,15 +557,9 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         // Don't clear flag here — keep it active during inertial scrolling.
         // Reset a timeout instead; flag clears when scrolling settles.
         if (inputTimeout) clearTimeout(inputTimeout);
-        inputTimeout = setTimeout(() => { userInputPending = false; inputTimeout = null; }, 150);
+        inputTimeout = setTimeout(() => { userInputPending = false; inputTimeout = null; }, 300);
         const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-        if (scrollEl.scrollHeight < (prevScrollHeight || scrollEl.scrollHeight)) {
-            const shrinkAmount = (prevScrollHeight || scrollEl.scrollHeight) - scrollEl.scrollHeight;
-            atBottom = gap < shrinkAmount + SCROLL_BOTTOM_THRESHOLD;
-        } else {
-            atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
-        }
-        prevScrollHeight = scrollEl.scrollHeight;
+        atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
     }
 
     function markUserInput() {
@@ -581,8 +574,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             if (currentAssistantId) {
                 stream.state.currentAssistantId = null;
             }
-            stream.state.activeToolCalls.clear();
-                    stream.state.processedToolIds.clear();
+            stream.state.activeToolCalls = new Map();
+                    stream.state.processedToolIds = new Set();
             markNotStreaming();
         }
         // If task is in Done, move it back to In Progress before sending
@@ -622,7 +615,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
         if (lastAssistant?.stats) {
             stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-            stream.state.contextState.used = stream.state.lastPromptTokens;
+            stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
         }
         // Update task with new model/provider
         modelUpdatePending = true;
@@ -781,8 +774,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         // Remove the streaming assistant entry and entries with pending tool calls.
         stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
         // Clear active tool calls (immediate UI update)
-        stream.state.activeToolCalls.clear();
-        stream.state.processedToolIds.clear();
+        stream.state.activeToolCalls = new Map();
+        stream.state.processedToolIds = new Set();
         try {
             await stopTask(projectId, taskId);
         } catch (e) {

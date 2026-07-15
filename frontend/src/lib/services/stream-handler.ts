@@ -9,7 +9,7 @@ export function estimateTokens(text: string): number {
 
 /** Update context usage from accumulated token counts. */
 function updateContextUsed(s: typeof import('./stream-state.svelte').StreamState['state']) {
-    s.contextState.used = s.lastPromptTokens + s.streamTokenCount;
+    s.contextState = { ...s.contextState, used: s.lastPromptTokens + s.streamTokenCount };
 }
 
 /** External callbacks the component must provide. */
@@ -111,7 +111,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 } else if (s.processedToolIds.has(data.tool_id)) {
                     break;
                 } else {
-                    s.processedToolIds.add(data.tool_id);
+                    s.processedToolIds = new Set([...s.processedToolIds, data.tool_id]);
                     const ci = entry.content.length;
                     const ri = (entry.reasoningContent || '').length;
                     const newTc = {
@@ -120,10 +120,11 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         linesAdded: data.lines_added, linesRemoved: data.lines_removed,
                         isPending: true, contentIndex: ci, reasoningIndex: ri,
                     };
-                    // In-place push — Svelte 5 deep reactivity tracks array mutations
-                    entry.toolCalls.push(newTc);
+                    entry.toolCalls = [...(entry.toolCalls || []), newTc];
                     entry.isStreaming = true;
-                    s.activeToolCalls.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
+                    const newActive = new Map(s.activeToolCalls);
+                    newActive.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
+                    s.activeToolCalls = newActive;
                 }
                 scheduleScroll();
                 break;
@@ -131,7 +132,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
                 const ref = s.activeToolCalls.get(data.tool_id);
-                s.activeToolCalls.delete(data.tool_id);
+                const newActive = new Map(s.activeToolCalls);
+                newActive.delete(data.tool_id);
+                s.activeToolCalls = newActive;
                 if (ref) {
                     // Direct property mutation via map reference — no array allocation
                     const tc = ref.toolCall;
@@ -214,7 +217,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 }
                 if (data.prompt_tokens !== undefined) {
                     s.lastPromptTokens = data.prompt_tokens + (data.predicted_tokens || 0);
-                    s.contextState.used = s.lastPromptTokens;
+                    s.contextState = { ...s.contextState, used: s.lastPromptTokens };
                 }
                 const lastAssistant = [...s.entries].reverse().find(e => e.role === 'assistant' && !e.toolCalls);
                 if (lastAssistant && data.predicted_tokens !== undefined) {
@@ -252,15 +255,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         const entry = s.entries.find(e => e.id === s.currentAssistantId);
                         if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
                     }
-                    s.activeToolCalls.clear();
+                    s.activeToolCalls = new Map();
                     s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
                     markStreaming();
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;
                 } else if (data.state === 'cancelled') {
                     stream.closeCurrentAssistant();
-                    s.activeToolCalls.clear();
-                    s.processedToolIds.clear();
+                    s.activeToolCalls = new Map();
+                    s.processedToolIds = new Set();
                     s.entries = s.entries.filter(e => !e.isStreaming);
                     markNotStreaming();
                     s.awaitingResponse = false;
@@ -293,9 +296,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 }
                 // Pi mode: use direct context usage from get_session_stats
                 if (data.context_used !== undefined) {
-                    s.contextState.used = data.context_used;
+                    s.contextState = { ...s.contextState, used: data.context_used };
                     if (data.context_limit !== undefined) {
-                        s.contextState.limit = data.context_limit;
+                        s.contextState = { ...s.contextState, limit: data.context_limit };
                     }
                 } else {
                     updateContextUsed(s);

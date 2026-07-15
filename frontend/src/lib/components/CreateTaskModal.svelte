@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
@@ -203,9 +203,7 @@
         }
     });
 
-    onDestroy(() => {
-        unsubConfig();
-    });
+
 
     function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
