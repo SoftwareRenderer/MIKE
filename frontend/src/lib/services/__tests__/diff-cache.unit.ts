@@ -163,6 +163,82 @@ describe('DiffCache', () => {
         expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', false);
     });
 
+    it('revertStageFile mutates in-place without object spread', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
+        };
+        const fileRef = cache.state.files['a.ts'];
+        cache.revertStageFile('a.ts', true);
+        // Same object reference, staged flipped
+        expect(cache.state.files['a.ts']).toBe(fileRef);
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+    });
+
+    it('setFile mutates in-place without object spread', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
+        };
+        const filesRef = cache.state.files;
+        cache.setFile('a.ts', { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 });
+        // Same files record reference
+        expect(cache.state.files).toBe(filesRef);
+    });
+
+    it('setUntrackedMeta mutates in-place without object spread', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.untracked = {
+            'a.ts': { fileSize: 100, loading: false },
+        };
+        const untrackedRef = cache.state.untracked;
+        cache.setUntrackedMeta('a.ts', { fileSize: 200, loading: true });
+        // Same untracked record reference
+        expect(cache.state.untracked).toBe(untrackedRef);
+    });
+
+    it('applyStagedPaths mutates in-place without object spread', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
+        };
+        const filesRef = cache.state.files;
+        cache.applyStagedPaths(['a.ts']);
+        // Same files record reference
+        expect(cache.state.files).toBe(filesRef);
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+        expect(cache.state.files['b.ts'].staged).toBe(false);
+    });
+
+    it('processStats removes files via direct delete without spread', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0 },
+        };
+        cache.state.untracked = {
+            'b.ts': { fileSize: 100 },
+        };
+        cache.fileHashes = { 'a.ts': 'h1', 'b.ts': 'h2' };
+        cache.tracker.hash = 'old-hash';
+        const filesRef = cache.state.files;
+        const untrackedRef = cache.state.untracked;
+        cache.processStats({
+            hash: 'new-hash',
+            files: 1,
+            additions: 0,
+            deletions: 0,
+            removed_files: ['b.ts'],
+        }, false);
+        // Same record references (direct delete, not spread)
+        expect(cache.state.files).toBe(filesRef);
+        expect(cache.state.untracked).toBe(untrackedRef);
+        expect(cache.state.files['a.ts']).toBeDefined();
+        expect(cache.state.files['b.ts']).toBeUndefined();
+        expect(cache.state.untracked['b.ts']).toBeUndefined();
+    });
+
     it('getters reflect changes mid-flight for subsequent calls', async () => {
         let resolveDiff: (value: unknown) => void;
         let currentProject = 'proj-1';

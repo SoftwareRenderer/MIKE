@@ -103,19 +103,22 @@ export class DiffCache {
 
     /** Revert a stage/unstage operation after server failure. */
     revertStageFile(path: string, stage: boolean) {
+        // Direct property mutation — Svelte 5 deep reactivity tracks it
         if (this.state.files[path]) {
-            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: !stage } };
+            this.state.files[path].staged = !stage;
         }
     }
 
     /** Update a single file in the cache (e.g. expand truncated). */
     setFile(path: string, file: DiffFile) {
-        this.state.files = { ...this.state.files, [path]: file };
+        // Direct property mutation — Svelte 5 deep reactivity tracks it
+        this.state.files[path] = file;
     }
 
     /** Update metadata for an untracked file. */
     setUntrackedMeta(path: string, meta: UntrackedMeta) {
-        this.state.untracked = { ...this.state.untracked, [path]: meta };
+        // Direct property mutation — Svelte 5 deep reactivity tracks it
+        this.state.untracked[path] = meta;
     }
 
     /** Serialize staged_paths for deterministic change detection. */
@@ -127,11 +130,10 @@ export class DiffCache {
     applyStagedPaths(paths: string[] | null | undefined) {
         if (Object.keys(this.state.files).length === 0) return;
         const stagedSet = paths ? new Set(paths) : new Set();
-        const updated: Record<string, DiffFile> = {};
-        for (const [path, entry] of Object.entries(this.state.files)) {
-            updated[path] = { ...entry, staged: stagedSet.has(path) };
+        // Direct property mutation — no new object allocation
+        for (const path of Object.keys(this.state.files)) {
+            this.state.files[path].staged = stagedSet.has(path);
         }
-        this.state.files = updated;
     }
 
     /** Process a diff stats update from WebSocket. Called by component's $effect. */
@@ -150,19 +152,13 @@ export class DiffCache {
             const fileHashes = stat?.file_hashes;
             const removedFiles = stat?.removed_files || [];
 
-            // Remove deleted files from cache
+            // Remove deleted files from cache — direct mutation
             if (removedFiles.length > 0) {
-                const newDiff = { ...this.state.files };
-                const newUntracked = { ...this.state.untracked };
-                const newHashes = { ...this.fileHashes };
                 for (const path of removedFiles) {
-                    delete newDiff[path];
-                    delete newUntracked[path];
-                    delete newHashes[path];
+                    delete this.state.files[path];
+                    delete this.state.untracked[path];
+                    delete this.fileHashes[path];
                 }
-                this.state.files = newDiff;
-                this.state.untracked = newUntracked;
-                this.fileHashes = newHashes;
             }
 
             // Empty diff — clear cache
@@ -314,9 +310,8 @@ export class DiffCache {
                 const cachedRows = cachedEntry.rows;
                 if (cachedRows.length === (entry.added ?? 0) && cachedRows.every((r: DiffRow) => r.variant === 'added')) {
                     updatedDiff[path] = { ...cachedEntry, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: !!entry.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, staged: entry.staged };
-                    const newUntracked = { ...this.state.untracked };
-                    delete newUntracked[path];
-                    this.state.untracked = newUntracked;
+                    // Direct delete — Svelte 5 deep reactivity tracks property deletion
+                    delete this.state.untracked[path];
                     continue;
                 }
             }
@@ -340,13 +335,12 @@ export class DiffCache {
         }
 
         await Promise.all(fetches);
-        this.state.files = { ...this.state.files, ...updatedDiff };
-        if (Object.keys(updatedUntracked).length > 0) {
-            const newUntracked = { ...this.state.untracked };
-            for (const path of Object.keys(updatedUntracked)) {
-                newUntracked[path] = { ...(this.state.untracked[path] || {}), loading: false };
-            }
-            this.state.untracked = newUntracked;
+        // Direct property assignment — no new object allocation
+        for (const [path, file] of Object.entries(updatedDiff)) {
+            this.state.files[path] = file;
+        }
+        for (const path of Object.keys(updatedUntracked)) {
+            this.state.untracked[path] = { ...(this.state.untracked[path] || {}), loading: false };
         }
     }
 
@@ -366,9 +360,8 @@ export class DiffCache {
                 if (cachedRows.every((r: DiffRow) => r.variant === 'added')) {
                     const existing = this.state.files[path];
                     updatedDiff[path] = { ...existing, staged: existing?.staged };
-                    const newUntracked = { ...this.state.untracked };
-                    delete newUntracked[path];
-                    this.state.untracked = newUntracked;
+                    // Direct delete — Svelte 5 deep reactivity tracks property deletion
+                    delete this.state.untracked[path];
                     continue;
                 }
             }
@@ -406,27 +399,30 @@ export class DiffCache {
         await Promise.all(fetches);
         if (gen !== this.loadGen) return;
 
-        // Merge, preserving newer staged values
+        // Merge, preserving newer staged values — direct property mutation
         const currentStaged = new Map(Object.entries(this.state.files).map(([p, f]) => [p, f.staged]));
-        this.state.files = { ...this.state.files, ...updatedDiff };
+        for (const [path, file] of Object.entries(updatedDiff)) {
+            this.state.files[path] = file;
+        }
         for (const path of Object.keys(updatedDiff)) {
             const staged = currentStaged.get(path);
             if (staged !== undefined) {
-                this.state.files[path] = { ...this.state.files[path], staged };
+                this.state.files[path].staged = staged;
             }
         }
         for (const path of Object.keys(changedHashes)) {
             delete this.abortControllers[path];
         }
-        if (Object.keys(updatedUntracked).length > 0) {
-            this.state.untracked = { ...this.state.untracked, ...updatedUntracked };
+        for (const [path, meta] of Object.entries(updatedUntracked)) {
+            this.state.untracked[path] = meta;
         }
     }
 
     /** Stage or unstage a single file. Optimistic update + server call. */
     async stageFile(path: string, stage: boolean, onRevert: (path: string, stage: boolean) => void) {
+        // Direct property mutation — Svelte 5 deep reactivity tracks it
         if (this.state.files[path]) {
-            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: stage } };
+            this.state.files[path].staged = stage;
         }
         try {
             await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, stage);
