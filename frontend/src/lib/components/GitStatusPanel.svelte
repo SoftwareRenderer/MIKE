@@ -3,10 +3,30 @@
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { getGitStatus, getProjectDiff, stageProjectFile, commitProject } from '$lib/api/git';
-    import { showCommitDialog, showConfirm, showToast } from '$lib/stores/dialogs';
+    import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
-    import DiffViewer from './DiffViewer.svelte';
-    import BranchEditor from './BranchEditor.svelte';
+    // Lazy-loaded on first diff view
+    let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
+    let diffViewerLoading = $state(false);
+    function loadDiffViewer(): void {
+        if (DiffViewerComponent || diffViewerLoading) return;
+        diffViewerLoading = true;
+        import('./DiffViewer.svelte').then((mod) => {
+            DiffViewerComponent = mod.default;
+            diffViewerLoading = false;
+        }).catch(() => { diffViewerLoading = false; });
+    }
+    // Lazy-loaded on first file edit
+    let BranchEditorComponent: typeof import('./BranchEditor.svelte').default | null = $state(null);
+    let branchEditorLoading = $state(false);
+    function loadBranchEditor(): void {
+        if (BranchEditorComponent || branchEditorLoading) return;
+        branchEditorLoading = true;
+        import('./BranchEditor.svelte').then((mod) => {
+            BranchEditorComponent = mod.default;
+            branchEditorLoading = false;
+        }).catch(() => { branchEditorLoading = false; });
+    }
     import ResizeHandle from './ResizeHandle.svelte';
 
     let { projectId, projectPath, onClose, isMobile, onUpdateFile }: {
@@ -108,6 +128,8 @@
 
     async function loadData() {
         loading = true;
+        // Preload the diff viewer chunk while fetching data
+        loadDiffViewer();
         try {
             // Fetch git status for sidebar
             const { status, head, authorName: author, authorEmail: email } = await getGitStatus(projectId);
@@ -235,7 +257,7 @@
             try {
                 const { head: currentHead } = await getGitStatus(projectId);
                 if (currentHead !== headHash) {
-                    const proceed = await showConfirm({
+                    const proceed = await dialogStore.showConfirm({
                         title: 'Repository has changed',
                         message: 'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
                         confirmText: 'Refresh and commit',
@@ -249,7 +271,7 @@
                 // If status check fails, proceed with commit anyway
             }
         }
-        const message = await showCommitDialog({
+        const message = await dialogStore.showCommitDialog({
             message: '',
             confirmText: 'Commit',
             cancelText: 'Cancel',
@@ -261,7 +283,7 @@
             await commitProject(projectId, message.trim());
             onClose();
         } catch (e: any) {
-            showToast(e.message || 'Commit failed', 'error');
+            dialogStore.showToast(e.message || 'Commit failed', 'error');
         }
     }
 
@@ -272,6 +294,7 @@
         editorFilePath = absPath;
         editorTargetLine = lineNumber;
         if (onUpdateFile) onUpdateFile(absPath);
+        loadBranchEditor();
     }
 
     /** Close the inline editor and return to diff view. */
@@ -454,27 +477,37 @@
                         <span class="changes-editor-path" title={editorFilePath}>{editorFilePath.replace(projectPath + '/', '')}</span>
                     </div>
                     <div class="changes-editor-body">
-                        <BranchEditor
-                            projectId={projectId}
-                            filePath={editorFilePath}
-                            targetLine={editorTargetLine}
-                            onFocused={() => {}}
-                            onSymbolsUpdate={() => {}}
-                            onHasChanges={handleInlineEditorHasChanges}
-                            onClose={closeInlineEditor}
-                            isMobile={isMobile}
-                        />
+                        {#if BranchEditorComponent}
+                            {@const BranchEditor = BranchEditorComponent}
+                            <BranchEditor
+                                projectId={projectId}
+                                filePath={editorFilePath}
+                                targetLine={editorTargetLine}
+                                onFocused={() => {}}
+                                onSymbolsUpdate={() => {}}
+                                onHasChanges={handleInlineEditorHasChanges}
+                                onClose={closeInlineEditor}
+                                isMobile={isMobile}
+                            />
+                        {:else}
+                            <div class="branch-editor-loading">Loading editor...</div>
+                        {/if}
                     </div>
                 {:else}
-                    <DiffViewer
-                        stagedFiles={sortedStagedFiles}
-                        unstagedFiles={sortedUnstagedFiles}
-                        selectedPath={selectedPath}
-                        onStageFile={handleStageFile}
-                        onStageAll={handleStageAll}
-                        onUnstageAll={handleUnstageAll}
-                        onLineClick={handleLineClick}
-                    />
+                    {#if DiffViewerComponent}
+                        {@const DiffViewer = DiffViewerComponent}
+                        <DiffViewer
+                            stagedFiles={sortedStagedFiles}
+                            unstagedFiles={sortedUnstagedFiles}
+                            selectedPath={selectedPath}
+                            onStageFile={handleStageFile}
+                            onStageAll={handleStageAll}
+                            onUnstageAll={handleUnstageAll}
+                            onLineClick={handleLineClick}
+                        />
+                    {:else}
+                        <div class="diff-viewer-loading">Loading diff viewer...</div>
+                    {/if}
                 {/if}
             </div>
         </div>
@@ -776,6 +809,16 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+    }
+    .branch-editor-loading,
+    .diff-viewer-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        flex: 1;
     }
 
     /* Mobile: hide sidebar, show only diff */

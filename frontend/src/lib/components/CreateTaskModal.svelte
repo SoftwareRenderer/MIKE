@@ -3,8 +3,7 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
-    import { config as configStore, board as boardStore, selectedProject } from '$lib/stores/app';
-    import { showCreateTask } from '$lib/stores/ui';
+    import { appStore, uiStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
@@ -158,10 +157,10 @@
         return p ? isAgentProvider(p) : false;
     });
 
-    // Subscribe to config store to pick up providers (may load after modal opens)
+    // Config is now reactive via appStore
     let cfg: Config | null = $state(null);
-    const unsubConfig = configStore.subscribe(val => { cfg = val; });
-    let targetBranch = $derived($selectedProject?.origin_branch || 'main');
+    $effect(() => { cfg = appStore.config; });
+    let targetBranch = $derived(appStore.selectedProject?.origin_branch || 'main');
     let configLoaded = $state(false);
     $effect(() => {
         if (cfg?.providers) {
@@ -243,12 +242,9 @@
             const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
             (optimisticTask as any).actionId = queued.id;
         }
-        boardStore.update(b => {
-            if (!b) return b;
-            return { ...b, tasks: [...(b.tasks || []), optimisticTask] };
-        });
+        appStore.board = { ...appStore.board!, tasks: [...(appStore.board!.tasks || []), optimisticTask] };
         onOptimisticTaskCreated?.(optimisticTask);
-        showCreateTask.set(false);
+        uiStore.showCreateTask = false;
         onTaskCreated?.();
         onClose();
         loading = false;
@@ -258,17 +254,13 @@
         // If offline, createTask() returns the queued result (no-op since already queued above).
         if (!isOfflineNow) {
             createTask(projectId, taskData).then((realTask) => {
-                // Replace optimistic task with real one in boardStore
-                boardStore.update(b => {
-                    if (!b) return b;
-                    const idx = b.tasks.findIndex(t => t.id === id);
-                    if (idx !== -1) {
-                        const updated = [...b.tasks];
-                        updated[idx] = realTask;
-                        return { ...b, tasks: updated };
-                    }
-                    return b;
-                });
+                // Replace optimistic task with real one in appStore
+                const idx = appStore.board?.tasks.findIndex(t => t.id === id) ?? -1;
+                if (idx !== -1 && appStore.board) {
+                    const updated = [...appStore.board.tasks];
+                    updated[idx] = realTask;
+                    appStore.board = { ...appStore.board, tasks: updated };
+                }
                 // Also replace in App's tasks array
                 onReplaceOptimisticTask?.(id, realTask);
             }).catch(async () => {

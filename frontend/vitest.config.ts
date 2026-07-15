@@ -11,6 +11,6 @@ export default defineConfig({
     },
     test: {
         environment: 'jsdom',
-        include: ['src/**/*.unit.ts', 'src/**/*.unit.spec.ts'],
+        include: ['src/**/*.unit.ts', 'src/**/*.unit.svelte.ts', 'src/**/*.unit.spec.ts'],
     },
 });

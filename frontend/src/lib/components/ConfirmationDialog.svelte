@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
-    import { confirmation, type ConfirmOptions } from '$lib/stores/dialogs';
+    import { onDestroy } from 'svelte';
+    import { dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
 
     let open = $state(false);
@@ -17,7 +17,7 @@
             resolveFn(value);
             resolveFn = null;
         }
-        confirmation.set(null);
+        dialogStore.confirmation = null;
     }
 
     function handleConfirm() {
@@ -36,27 +36,22 @@
         }
     }
 
-    let unsub: (() => void) | null = null;
-
-    onMount(() => {
-        unsub = confirmation.subscribe((value) => {
-            if (value) {
-                title = value.title;
-                message = value.message;
-                confirmText = value.confirmText ?? 'Confirm';
-                cancelText = value.cancelText ?? 'Cancel';
-                variant = value.variant ?? 'destructive';
-                resolveFn = (value as ConfirmOptions & { _resolve?: (value: boolean) => void })._resolve ?? null;
-                open = true;
-            }
-        });
-
-        window.addEventListener('keydown', handleKeydown);
+    $effect(() => {
+        const value = dialogStore.confirmation;
+        if (value) {
+            title = value.title;
+            message = value.message;
+            confirmText = value.confirmText ?? 'Confirm';
+            cancelText = value.cancelText ?? 'Cancel';
+            variant = value.variant ?? 'destructive';
+            resolveFn = value._resolve ?? null;
+            open = true;
+        }
     });
 
-    onDestroy(() => {
-        unsub?.();
-        window.removeEventListener('keydown', handleKeydown);
+    $effect(() => {
+        window.addEventListener('keydown', handleKeydown);
+        return () => window.removeEventListener('keydown', handleKeydown);
     });
 </script>
 

@@ -8,7 +8,17 @@
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
-    import BranchEditor from './BranchEditor.svelte';
+    // Lazy-loaded on first file edit
+    let BranchEditorComponent: typeof import('./BranchEditor.svelte').default | null = $state(null);
+    let branchEditorLoading = $state(false);
+    function loadBranchEditor(): void {
+        if (BranchEditorComponent || branchEditorLoading) return;
+        branchEditorLoading = true;
+        import('./BranchEditor.svelte').then((mod) => {
+            BranchEditorComponent = mod.default;
+            branchEditorLoading = false;
+        }).catch(() => { branchEditorLoading = false; });
+    }
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
@@ -245,6 +255,7 @@
         targetLine = 0;
         onUpdateFile(path);
         if (isMobileCtx.isMobile) activeTab = 'editor';
+        loadBranchEditor();
     }
 
     // Commit diff overlay handlers
@@ -606,18 +617,33 @@
                         isMobile={isMobileCtx.isMobile}
                     />
                 {:else}
-                    <BranchEditor
-                        projectId={projectId}
-                        filePath={selectedFilePath}
-                        targetLine={targetLine}
-                        onFocused={handleEditorFocused}
-                        onSymbolsUpdate={handleSymbolsUpdate}
-                        onHasChanges={handleHasChanges}
-                        onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
-                        onToggleFullscreen={toggleEditorFullscreen}
-                        mobileFullscreen={editorFullscreen}
-                        isMobile={isMobileCtx.isMobile}
-                    />
+                    {#if selectedFilePath}
+                        {#if BranchEditorComponent}
+                            {@const BranchEditor = BranchEditorComponent}
+                            <BranchEditor
+                                projectId={projectId}
+                                filePath={selectedFilePath}
+                                targetLine={targetLine}
+                                onFocused={handleEditorFocused}
+                                onSymbolsUpdate={handleSymbolsUpdate}
+                                onHasChanges={handleHasChanges}
+                                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
+                                onToggleFullscreen={toggleEditorFullscreen}
+                                mobileFullscreen={editorFullscreen}
+                                isMobile={isMobileCtx.isMobile}
+                            />
+                        {:else}
+                            <div class="branch-editor-loading">Loading editor...</div>
+                        {/if}
+                    {:else}
+                        <div class="branch-editor-placeholder">
+                            <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
+                                <path d="M3 1h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/>
+                                <polyline points="9,1 9,5 13,5"/>
+                            </svg>
+                            <p>Select a file to edit</p>
+                        </div>
+                    {/if}
                 {/if}
             </div>
 
@@ -906,6 +932,19 @@
         background: var(--color-surface-1);
         overflow: hidden;
         min-width: 0;
+    }
+
+    .branch-editor-loading,
+    .branch-editor-placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 48px 24px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        flex: 1;
     }
 
     .mobile-tab-bar {

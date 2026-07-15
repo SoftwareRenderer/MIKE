@@ -39,6 +39,16 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
     const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, createTaskMessage } = cb;
     const s = stream.state;
 
+    // rAF batching for scroll — coalesces rapid calls during token bursts
+    let scrollRaf: number | null = null;
+    function scheduleScroll() {
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(() => {
+            scrollRaf = null;
+            scroll();
+        });
+    }
+
     function ensureAssistantEntry(): ChatEntry {
         return stream.ensureAssistantEntry(genId);
     }
@@ -56,7 +66,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const entry = ensureAssistantEntry();
                 if (!s.currentAssistantId) s.currentAssistantId = entry.id;
                 entry.content += data.text;
-                scroll();
+                scheduleScroll();
                 break;
             }
             case 'reasoning': {
@@ -70,7 +80,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
                 entry.hasReasoning = true;
-                scroll();
+                scheduleScroll();
                 break;
             }
             case 'tool_call': {
@@ -110,11 +120,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         linesAdded: data.lines_added, linesRemoved: data.lines_removed,
                         isPending: true, contentIndex: ci, reasoningIndex: ri,
                     };
-                    entry.toolCalls = [...(entry.toolCalls || []), newTc];
+                    // In-place push — Svelte 5 deep reactivity tracks array mutations
+                    entry.toolCalls.push(newTc);
                     entry.isStreaming = true;
                     s.activeToolCalls.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
                 }
-                scroll();
+                scheduleScroll();
                 break;
             }
             case 'tool_result': {
@@ -122,19 +133,22 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const ref = s.activeToolCalls.get(data.tool_id);
                 s.activeToolCalls.delete(data.tool_id);
                 if (ref) {
-                    // Replace object in array for Svelte 5 reactivity
-                    const entry = s.entries.find(e => e.id === ref.entryId);
-                    if (entry && entry.toolCalls) {
-                        entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
-                            ? { ...tc, result: data.output, success: data.success, duration: data.duration, isPending: false, args: data.args ?? tc.args, raw_args: data.raw_args ?? tc.raw_args, sandbox: data.sandbox ?? tc.sandbox, path: data.path ?? tc.path }
-                            : tc);
-                    }
+                    // Direct property mutation via map reference — no array allocation
+                    const tc = ref.toolCall;
+                    tc.result = data.output;
+                    tc.success = data.success;
+                    tc.duration = data.duration;
+                    tc.isPending = false;
+                    if (data.args) tc.args = data.args;
+                    if (data.raw_args) tc.raw_args = data.raw_args;
+                    if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                    if (data.path !== undefined) tc.path = data.path;
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();
                     s.awaitingResponse = true;
                 }
-                scroll();
+                scheduleScroll();
                 break;
             }
             case 'tool_progress': {
@@ -142,22 +156,21 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (data.tool_id) {
                     const ref = s.activeToolCalls.get(data.tool_id);
                     if (ref) {
-                        const entry = s.entries.find(e => e.id === ref.entryId);
-                        if (entry && entry.toolCalls) {
-                            entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
-                                ? { ...tc, bytesWritten: data.bytes_written ?? tc.bytesWritten, linesAdded: data.lines_added ?? tc.linesAdded, linesRemoved: data.lines_removed ?? tc.linesRemoved, path: data.path ?? tc.path }
-                                : tc);
-                        }
+                        // Direct property mutation via map reference — no array allocation
+                        const tc = ref.toolCall;
+                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
+                        if (data.path !== undefined) tc.path = data.path;
                     }
                 } else {
-                    // Broadcast: update all active tool calls
+                    // Broadcast: update all active tool calls via direct mutation
                     for (const ref of s.activeToolCalls.values()) {
-                        const entry = s.entries.find(e => e.id === ref.entryId);
-                        if (entry && entry.toolCalls) {
-                            entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === ref.toolCall.toolId
-                                ? { ...tc, bytesWritten: data.bytes_written ?? tc.bytesWritten, linesAdded: data.lines_added ?? tc.linesAdded, linesRemoved: data.lines_removed ?? tc.linesRemoved, path: data.path ?? tc.path }
-                                : tc);
-                        }
+                        const tc = ref.toolCall;
+                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
+                        if (data.path !== undefined) tc.path = data.path;
                     }
                 }
                 break;
@@ -166,14 +179,11 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { tool_id: string; text: string };
                 const ref = s.activeToolCalls.get(data.tool_id);
                 if (ref) {
-                    const entry = s.entries.find(e => e.id === ref.entryId);
-                    if (entry && entry.toolCalls) {
-                        entry.toolCalls = entry.toolCalls.map(tc => tc.toolId === data.tool_id
-                            ? { ...tc, result: (tc.result || '') + data.text }
-                            : tc);
-                    }
+                    // Direct string concatenation via map reference — no array allocation
+                    const tc = ref.toolCall;
+                    tc.result = (tc.result || '') + data.text;
                 }
-                scroll();
+                scheduleScroll();
                 break;
             }
             case 'user_message': {
