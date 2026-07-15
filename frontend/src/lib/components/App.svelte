@@ -395,7 +395,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         const additions = (insMatch ? parseInt(insMatch[1]) : 0) + (untracked_lines || 0);
                         const deletions = delMatch ? parseInt(delMatch[1]) : 0;
                         taskDiffStatsContext.update(map => {
-                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, file_hashes, removed_files, staged_paths };
+                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths };
                             return { ...map };
                         });
                     },
@@ -1045,7 +1045,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         selectedTaskVal = t;
                         appStore.selectedTask = t;
-                    }} onRefreshBoard={() => refreshBoard()} />
+                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} />
                 {:else}
                     <Board
                         {tasks}

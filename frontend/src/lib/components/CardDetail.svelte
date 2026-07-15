@@ -24,7 +24,10 @@
         import('./DiffViewer.svelte').then((mod) => {
             DiffViewerComponent = mod.default;
             diffViewerLoading = false;
-        }).catch(() => { diffViewerLoading = false; });
+        }).catch((e) => {
+            console.error('[diff] Failed to load DiffViewer:', e);
+            diffViewerLoading = false;
+        });
     }
     import CheckpointOverlay from './CardDetail/CheckpointOverlay.svelte';
     import DiffComparison from './CardDetail/DiffComparison.svelte';
@@ -43,7 +46,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
 
-    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
+    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
     let allTasks = $derived(appStore.board?.tasks || []);
 
@@ -291,6 +294,15 @@
             loadDiff();
         }
         previousTaskId = taskId;
+    });
+
+    // Load diff when task transitions from backlog to active (e.g., user starts the task)
+    $effect(() => {
+        const status = task.status;
+        const branch = task.branch;
+        if (status !== 'backlog' && branch && !DiffViewerComponent && !diffViewerLoading) {
+            loadDiff();
+        }
     });
 
 
@@ -602,7 +614,7 @@
             {worktreeExists}
             {task}
             {onClose}
-            onOpenTerminal={() => uiStore.showTerminal = true}
+            onOpenTerminal={onOpenTerminal || (() => uiStore.showTerminal = true)}
             onDelete={handleDelete}
         />
 

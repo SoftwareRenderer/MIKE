@@ -163,55 +163,45 @@ describe('DiffCache', () => {
         expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', false);
     });
 
-    it('revertStageFile mutates in-place without object spread', () => {
+    it('revertStageFile replaces file via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
         };
-        const fileRef = cache.state.files['a.ts'];
         cache.revertStageFile('a.ts', true);
-        // Same object reference, staged flipped
-        expect(cache.state.files['a.ts']).toBe(fileRef);
         expect(cache.state.files['a.ts'].staged).toBe(false);
     });
 
-    it('setFile mutates in-place without object spread', () => {
+    it('setFile replaces files record via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
         };
-        const filesRef = cache.state.files;
         cache.setFile('a.ts', { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 });
-        // Same files record reference
-        expect(cache.state.files).toBe(filesRef);
+        expect(cache.state.files['a.ts'].rows.length).toBe(1);
     });
 
-    it('setUntrackedMeta mutates in-place without object spread', () => {
+    it('setUntrackedMeta replaces untracked record via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.untracked = {
             'a.ts': { fileSize: 100, loading: false },
         };
-        const untrackedRef = cache.state.untracked;
         cache.setUntrackedMeta('a.ts', { fileSize: 200, loading: true });
-        // Same untracked record reference
-        expect(cache.state.untracked).toBe(untrackedRef);
+        expect(cache.state.untracked['a.ts'].fileSize).toBe(200);
     });
 
-    it('applyStagedPaths mutates in-place without object spread', () => {
+    it('applyStagedPaths replaces files record via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        const filesRef = cache.state.files;
         cache.applyStagedPaths(['a.ts']);
-        // Same files record reference
-        expect(cache.state.files).toBe(filesRef);
         expect(cache.state.files['a.ts'].staged).toBe(true);
         expect(cache.state.files['b.ts'].staged).toBe(false);
     });
 
-    it('processStats removes files via direct delete without spread', () => {
+    it('processStats removes files via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
@@ -222,8 +212,6 @@ describe('DiffCache', () => {
         };
         cache.fileHashes = { 'a.ts': 'h1', 'b.ts': 'h2' };
         cache.tracker.hash = 'old-hash';
-        const filesRef = cache.state.files;
-        const untrackedRef = cache.state.untracked;
         cache.processStats({
             hash: 'new-hash',
             files: 1,
@@ -231,12 +219,32 @@ describe('DiffCache', () => {
             deletions: 0,
             removed_files: ['b.ts'],
         }, false);
-        // Same record references (direct delete, not spread)
-        expect(cache.state.files).toBe(filesRef);
-        expect(cache.state.untracked).toBe(untrackedRef);
         expect(cache.state.files['a.ts']).toBeDefined();
         expect(cache.state.files['b.ts']).toBeUndefined();
         expect(cache.state.untracked['b.ts']).toBeUndefined();
+    });
+
+    it('loadDiff includes blank untracked files (line_count=0)', async () => {
+        const apis = makeApis({
+            getTaskDiff: vi.fn(async () => ({
+                files: {
+                    'empty.txt': { hash: 'h-blank', type: 'untracked', line_count: 0, added: 0, staged: false },
+                    'has-content.txt': { hash: 'h-content', type: 'untracked', line_count: 3, added: 3, staged: false },
+                },
+            })),
+            getDiffFile: vi.fn(async (projectId, taskId, path) => {
+                if (path === 'empty.txt') return { lines: [] };
+                return { lines: ['a', 'b', 'c'] };
+            }),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        await cache.loadDiff(() => {});
+        // Both files should be in the cache, including the blank one
+        expect(cache.state.files['empty.txt']).toBeDefined();
+        expect(cache.state.files['empty.txt'].rows).toEqual([]);
+        expect(cache.state.untracked['empty.txt']).toBeDefined();
+        expect(cache.state.files['has-content.txt']).toBeDefined();
+        expect(cache.state.files['has-content.txt'].rows.length).toBe(3);
     });
 
     it('getters reflect changes mid-flight for subsequent calls', async () => {

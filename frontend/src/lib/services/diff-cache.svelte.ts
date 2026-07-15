@@ -15,6 +15,7 @@ export interface DiffStats {
     files: number;
     additions: number;
     deletions: number;
+    untracked_n?: number;
     file_hashes?: Record<string, string>;
     removed_files?: string[];
     staged_paths?: string[];
@@ -89,7 +90,7 @@ export class DiffCache {
     abortControllers: Record<string, AbortController> = {};
 
     /** Tracker for WebSocket diff stats effect. */
-    tracker = { hash: null as string | null, stagedPathsKey: '' };
+    tracker = { hash: null as string | null, stagedPathsKey: '', untrackedN: 0 };
 
     private _apis: DiffCacheApis;
     private _getProjectId: () => string;
@@ -103,22 +104,19 @@ export class DiffCache {
 
     /** Revert a stage/unstage operation after server failure. */
     revertStageFile(path: string, stage: boolean) {
-        // Direct property mutation — Svelte 5 deep reactivity tracks it
         if (this.state.files[path]) {
-            this.state.files[path].staged = !stage;
+            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: !stage } };
         }
     }
 
     /** Update a single file in the cache (e.g. expand truncated). */
     setFile(path: string, file: DiffFile) {
-        // Direct property mutation — Svelte 5 deep reactivity tracks it
-        this.state.files[path] = file;
+        this.state.files = { ...this.state.files, [path]: file };
     }
 
     /** Update metadata for an untracked file. */
     setUntrackedMeta(path: string, meta: UntrackedMeta) {
-        // Direct property mutation — Svelte 5 deep reactivity tracks it
-        this.state.untracked[path] = meta;
+        this.state.untracked = { ...this.state.untracked, [path]: meta };
     }
 
     /** Serialize staged_paths for deterministic change detection. */
@@ -130,10 +128,11 @@ export class DiffCache {
     applyStagedPaths(paths: string[] | null | undefined) {
         if (Object.keys(this.state.files).length === 0) return;
         const stagedSet = paths ? new Set(paths) : new Set();
-        // Direct property mutation — no new object allocation
-        for (const path of Object.keys(this.state.files)) {
-            this.state.files[path].staged = stagedSet.has(path);
+        const updated = {};
+        for (const [path, file] of Object.entries(this.state.files)) {
+            updated[path] = { ...file, staged: stagedSet.has(path) };
         }
+        this.state.files = updated;
     }
 
     /** Process a diff stats update from WebSocket. Called by component's $effect. */
@@ -143,22 +142,31 @@ export class DiffCache {
         const stagedKey = DiffCache.stagedPathsKey(stagedPaths);
         const hashChanged = currentHash !== this.tracker.hash;
         const stagedChanged = stagedKey !== this.tracker.stagedPathsKey;
+        const untrackedN = stat?.untracked_n ?? 0;
+        const untrackedChanged = untrackedN !== this.tracker.untrackedN;
 
         // Skip processing while loadDiff() is in progress.
         if (diffLoading) return;
 
         if (hashChanged) {
             this.tracker.hash = currentHash;
+            this.tracker.untrackedN = untrackedN;
             const fileHashes = stat?.file_hashes;
             const removedFiles = stat?.removed_files || [];
 
-            // Remove deleted files from cache — direct mutation
+            // Remove deleted files from cache.
             if (removedFiles.length > 0) {
+                const newFiles = { ...this.state.files };
+                const newUntracked = { ...this.state.untracked };
+                const newHashes = { ...this.fileHashes };
                 for (const path of removedFiles) {
-                    delete this.state.files[path];
-                    delete this.state.untracked[path];
-                    delete this.fileHashes[path];
+                    delete newFiles[path];
+                    delete newUntracked[path];
+                    delete newHashes[path];
                 }
+                this.state.files = newFiles;
+                this.state.untracked = newUntracked;
+                this.fileHashes = newHashes;
             }
 
             // Empty diff — clear cache
@@ -179,8 +187,13 @@ export class DiffCache {
                 return;
             }
 
-            // Delta fetch for changed files
-            if (fileHashes && !diffLoading) {
+            // If untracked file count changed, fetch full manifest to discover new/removed untracked files.
+            // Otherwise, do a cheaper delta fetch for tracked files only.
+            if (untrackedChanged) {
+                const oldHashes = { ...this.fileHashes };
+                this.fileHashes = { ...this.fileHashes, ...fileHashes };
+                this.fetchFullManifest(oldHashes);
+            } else if (fileHashes && !diffLoading) {
                 const oldHashes = { ...this.fileHashes };
                 this.fileHashes = { ...this.fileHashes, ...fileHashes };
                 const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
@@ -243,6 +256,7 @@ export class DiffCache {
         }
         this.state.files = newCache;
         this.state.untracked = newUntracked;
+        this.tracker.untrackedN = Object.keys(newUntracked).length;
         const newHashes: Record<string, string> = {};
         for (const [path, entry] of Object.entries(data.files)) {
             newHashes[path] = entry.hash;
@@ -267,6 +281,7 @@ export class DiffCache {
         // Reset tracker
         this.tracker.hash = null;
         this.tracker.stagedPathsKey = '';
+        this.tracker.untrackedN = 0;
         // Call external callback to reset overlay/comparison state
         onResetState();
         this.state.loading = true;
@@ -296,11 +311,10 @@ export class DiffCache {
     ) {
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, boolean> = {};
+        const removedUntracked = new Set<string>();
         const fetches: Promise<void>[] = [];
 
         for (const [path, entry] of Object.entries(manifest)) {
-            if (entry.type === 'untracked' && (entry.line_count ?? 0) === 0) continue;
-
             const cachedEntry = this.state.files[path];
             const stagedMatch = cachedEntry?.staged === (entry.staged ?? false);
             if (oldHashes && oldHashes[path] === entry.hash && cachedEntry?.rows && cachedEntry.rows.length > 0 && stagedMatch) continue;
@@ -310,8 +324,7 @@ export class DiffCache {
                 const cachedRows = cachedEntry.rows;
                 if (cachedRows.length === (entry.added ?? 0) && cachedRows.every((r: DiffRow) => r.variant === 'added')) {
                     updatedDiff[path] = { ...cachedEntry, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: !!entry.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, staged: entry.staged };
-                    // Direct delete — Svelte 5 deep reactivity tracks property deletion
-                    delete this.state.untracked[path];
+                    removedUntracked.add(path);
                     continue;
                 }
             }
@@ -335,13 +348,15 @@ export class DiffCache {
         }
 
         await Promise.all(fetches);
-        // Direct property assignment — no new object allocation
-        for (const [path, file] of Object.entries(updatedDiff)) {
-            this.state.files[path] = file;
-        }
+        // Spread reassignment to trigger Svelte reactivity.
+        const mergedFiles = { ...this.state.files, ...updatedDiff };
+        this.state.files = mergedFiles;
+        const mergedUntracked = { ...this.state.untracked };
+        for (const path of removedUntracked) delete mergedUntracked[path];
         for (const path of Object.keys(updatedUntracked)) {
-            this.state.untracked[path] = { ...(this.state.untracked[path] || {}), loading: false };
+            mergedUntracked[path] = { ...(mergedUntracked[path] || {}), loading: false };
         }
+        this.state.untracked = mergedUntracked;
     }
 
     /** Fetch changed files directly (no manifest). Used for delta updates. */
@@ -349,6 +364,7 @@ export class DiffCache {
         const gen = this.loadGen;
         const updatedDiff: Record<string, DiffFile> = {};
         const updatedUntracked: Record<string, UntrackedMeta> = {};
+        const removedUntracked = new Set<string>();
         const fetches: Promise<void>[] = [];
 
         for (const path of Object.keys(changedHashes)) {
@@ -360,8 +376,7 @@ export class DiffCache {
                 if (cachedRows.every((r: DiffRow) => r.variant === 'added')) {
                     const existing = this.state.files[path];
                     updatedDiff[path] = { ...existing, staged: existing?.staged };
-                    // Direct delete — Svelte 5 deep reactivity tracks property deletion
-                    delete this.state.untracked[path];
+                    removedUntracked.add(path);
                     continue;
                 }
             }
@@ -399,30 +414,121 @@ export class DiffCache {
         await Promise.all(fetches);
         if (gen !== this.loadGen) return;
 
-        // Merge, preserving newer staged values — direct property mutation
+        // Merge with spread reassignment to trigger Svelte reactivity.
         const currentStaged = new Map(Object.entries(this.state.files).map(([p, f]) => [p, f.staged]));
+        const mergedFiles = { ...this.state.files };
         for (const [path, file] of Object.entries(updatedDiff)) {
-            this.state.files[path] = file;
-        }
-        for (const path of Object.keys(updatedDiff)) {
             const staged = currentStaged.get(path);
-            if (staged !== undefined) {
-                this.state.files[path].staged = staged;
-            }
+            mergedFiles[path] = staged !== undefined ? { ...file, staged } : file;
         }
+        this.state.files = mergedFiles;
+
         for (const path of Object.keys(changedHashes)) {
             delete this.abortControllers[path];
         }
+        const mergedUntracked = { ...this.state.untracked };
+        for (const path of removedUntracked) delete mergedUntracked[path];
         for (const [path, meta] of Object.entries(updatedUntracked)) {
-            this.state.untracked[path] = meta;
+            mergedUntracked[path] = meta;
+        }
+        this.state.untracked = mergedUntracked;
+    }
+
+    /** Fetch full diff manifest to sync untracked files. Used when untracked count changes. */
+    private async fetchFullManifest(oldHashes: Record<string, string>) {
+        const gen = this.loadGen;
+        try {
+            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId());
+            if (gen !== this.loadGen) return;
+            if (!result.files || Object.keys(result.files).length === 0) {
+                this.state.files = {};
+                this.state.untracked = {};
+                this.fileHashes = {};
+                return;
+            }
+            // Merge manifest with delta semantics: skip unchanged tracked files,
+            // but always process untracked files (they may be new).
+            const updatedDiff: Record<string, DiffFile> = {};
+            const updatedUntracked: Record<string, UntrackedMeta> = {};
+            const manifestPaths = new Set(Object.keys(result.files));
+            const fetches: Promise<void>[] = [];
+
+            for (const [path, entry] of Object.entries(result.files)) {
+                // Skip unchanged tracked files that are already cached
+                if (entry.type === 'tracked' && oldHashes[path] === entry.hash) {
+                    const cached = this.state.files[path];
+                    if (cached?.rows && cached.rows.length > 0 && cached.staged === (entry.staged ?? false)) {
+                        continue;
+                    }
+                }
+
+
+                fetches.push((async () => {
+                    try {
+                        const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path);
+                        const isStaged = entry.staged ?? false;
+                        if (data.rows) {
+                            const rows = this._apis.enrichRows(data.rows);
+                            updatedDiff[path] = { path, rows, added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, staged: isStaged };
+                        } else if (data.lines) {
+                            updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: entry.origAdded, staged: isStaged };
+                            updatedUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
+                        } else if (data.isBinary || data.fileSize) {
+                            updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, staged: isStaged };
+                            if (entry.type === 'untracked') {
+                                updatedUntracked[path] = { fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, origAdded: 0, loading: false };
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`[diff] Failed to fetch file ${path}:`, e);
+                    }
+                })());
+            }
+
+            await Promise.all(fetches);
+            if (gen !== this.loadGen) return;
+
+            // Remove files no longer in manifest
+            const mergedFiles = { ...this.state.files };
+            for (const path of Object.keys(mergedFiles)) {
+                if (!manifestPaths.has(path) && !this.state.untracked[path]) {
+                    delete mergedFiles[path];
+                }
+            }
+            for (const [path, file] of Object.entries(updatedDiff)) {
+                mergedFiles[path] = file;
+            }
+            this.state.files = mergedFiles;
+
+            // Update untracked: remove paths no longer in manifest, add new ones
+            const mergedUntracked = { ...this.state.untracked };
+            for (const path of Object.keys(mergedUntracked)) {
+                if (!manifestPaths.has(path)) {
+                    delete mergedUntracked[path];
+                }
+            }
+            for (const [path, meta] of Object.entries(updatedUntracked)) {
+                mergedUntracked[path] = meta;
+            }
+            this.state.untracked = mergedUntracked;
+
+            // Update file hashes
+            const newHashes = { ...this.fileHashes };
+            for (const [path, entry] of Object.entries(result.files)) {
+                if (entry.type === 'tracked') {
+                    newHashes[path] = entry.hash;
+                }
+            }
+            this.fileHashes = newHashes;
+        } catch (e) {
+            console.error('[diff] Failed to fetch full manifest:', e);
         }
     }
 
     /** Stage or unstage a single file. Optimistic update + server call. */
     async stageFile(path: string, stage: boolean, onRevert: (path: string, stage: boolean) => void) {
-        // Direct property mutation — Svelte 5 deep reactivity tracks it
         if (this.state.files[path]) {
-            this.state.files[path].staged = stage;
+            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: stage } };
         }
         try {
             await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, stage);
