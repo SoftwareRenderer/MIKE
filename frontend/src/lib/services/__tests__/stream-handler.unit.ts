@@ -298,6 +298,84 @@ describe('createStreamHandler', () => {
         expect(ref!.toolCall.toolId).toBe(entryTc.toolId);
         expect(ref!.toolCall.toolName).toBe(entryTc.toolName);
     });
+
+    describe('allocation optimizations', () => {
+        it('tool_result mutates in-place without replacing toolCalls array', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false, 'p1', 't1');
+            const toolCallsRef = stream.state.entries[0].toolCalls!;
+            handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'content', duration: 50 } }, false, 'p1', 't1');
+            // The toolCalls array reference should be the same (no .map() replacement)
+            expect(stream.state.entries[0].toolCalls).toBe(toolCallsRef);
+            // The tool call object reference should be the same (direct mutation)
+            expect(stream.state.entries[0].toolCalls![0].toolId).toBe('tc1');
+            expect(stream.state.entries[0].toolCalls![0].result).toBe('content');
+        });
+
+        it('tool_output mutates in-place without replacing toolCalls array', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc2', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
+            const toolCallsRef = stream.state.entries[0].toolCalls!;
+            handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line1' } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_output', data: { tool_id: 'tc2', text: 'line2' } }, false, 'p1', 't1');
+            // Array reference unchanged
+            expect(stream.state.entries[0].toolCalls).toBe(toolCallsRef);
+            expect(stream.state.entries[0].toolCalls![0].result).toBe('line1line2');
+        });
+
+        it('tool_progress mutates in-place without replacing toolCalls array', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc3', tool_name: 'write_file', args: {} } }, false, 'p1', 't1');
+            const toolCallsRef = stream.state.entries[0].toolCalls!;
+            handleEvent({ type: 'tool_progress', data: { tool_id: 'tc3', bytes_written: 42 } }, false, 'p1', 't1');
+            // Array reference unchanged
+            expect(stream.state.entries[0].toolCalls).toBe(toolCallsRef);
+            expect(stream.state.entries[0].toolCalls![0].bytesWritten).toBe(42);
+        });
+
+        it('tool_progress broadcast mutates all active tool calls in-place', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tcA', tool_name: 'write_file', args: {} } }, false, 'p1', 't1');
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tcB', tool_name: 'edit_file', args: {} } }, false, 'p1', 't1');
+            const toolCallsRef = stream.state.entries[0].toolCalls!;
+            // Broadcast progress (no tool_id)
+            handleEvent({ type: 'tool_progress', data: { bytes_written: 100 } }, false, 'p1', 't1');
+            // Array reference unchanged
+            expect(stream.state.entries[0].toolCalls).toBe(toolCallsRef);
+            expect(stream.state.entries[0].toolCalls![0].bytesWritten).toBe(100);
+            expect(stream.state.entries[0].toolCalls![1].bytesWritten).toBe(100);
+        });
+
+        it('token events do not replace entries array (push in-place)', () => {
+            const { stream, handleEvent } = setup();
+            // First token creates the entry
+            handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+            const entriesRef = stream.state.entries;
+            // Subsequent tokens should NOT replace the array
+            handleEvent({ type: 'token', data: { text: ' world' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toBe(entriesRef);
+            expect(stream.state.entries[0].content).toBe('Hello world');
+        });
+
+        it('100 token events produce no array allocations', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: 'first' } }, false, 'p1', 't1');
+            const entriesRef = stream.state.entries;
+            const entryRef = stream.state.entries[0];
+            for (let i = 0; i < 100; i++) {
+                handleEvent({ type: 'token', data: { text: ` token${i}` } }, false, 'p1', 't1');
+            }
+            // Entries array and entry object should be the same references
+            expect(stream.state.entries).toBe(entriesRef);
+            expect(stream.state.entries[0]).toBe(entryRef);
+            expect(stream.state.entries[0].content).toContain(' token99');
+            expect(stream.state.entries.length).toBe(1);
+        });
+    });
 });
 
 describe('estimateTokens', () => {

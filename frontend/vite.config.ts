@@ -71,6 +71,8 @@ export default defineConfig({
         },
     },
     build: {
+        // Performance budgets (gzipped sizes)
+        chunkSizeWarningLimit: 500,
         rollupOptions: {
             output: {
                 manualChunks(id) {
@@ -78,6 +80,26 @@ export default defineConfig({
                     // so they're only loaded when a diff of that language is viewed.
                     if (id.includes('/@codemirror/lang-') || id.includes('/@replit/codemirror-lang-svelte')) {
                         return 'codemirror-langs';
+                    }
+                    // CodeMirror core + theme — only needed by FileEditor / BranchEditor
+                    if (
+                        id.includes('/codemirror/') ||
+                        id.includes('/@codemirror/') ||
+                        id.includes('/@lezer/')
+                    ) {
+                        return 'codemirror-core';
+                    }
+                    // xterm — only needed by TerminalPanel
+                    if (id.includes('/@xterm/')) {
+                        return 'xterm';
+                    }
+                    // marked — only needed for chat message rendering
+                    if (id.includes('/marked/')) {
+                        return 'marked';
+                    }
+                    // diff — only needed for diff viewers
+                    if (id.includes('/diff/') || id.includes('diff-parser') || id.includes('diff-gutter')) {
+                        return 'diff';
                     }
                 },
             },

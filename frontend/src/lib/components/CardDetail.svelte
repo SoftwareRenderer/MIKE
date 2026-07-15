@@ -14,7 +14,17 @@
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
-    import DiffViewer from './DiffViewer.svelte';
+    // Lazy-loaded on first diff view
+    let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
+    let diffViewerLoading = $state(false);
+    function loadDiffViewer(): void {
+        if (DiffViewerComponent || diffViewerLoading) return;
+        diffViewerLoading = true;
+        import('./DiffViewer.svelte').then((mod) => {
+            DiffViewerComponent = mod.default;
+            diffViewerLoading = false;
+        }).catch(() => { diffViewerLoading = false; });
+    }
     import CheckpointOverlay from './CardDetail/CheckpointOverlay.svelte';
     import DiffComparison from './CardDetail/DiffComparison.svelte';
     // Lazy-loaded on first file edit
@@ -482,6 +492,8 @@
         diffTo = 'working';
         clearHighlightCache();
         diffLoading = true;
+        // Preload the diff viewer chunk while fetching diff data
+        loadDiffViewer();
         try {
             await Promise.all([loadCommits(), diffCache.loadDiff(() => {})]);
         } finally {
@@ -733,7 +745,12 @@
                                 isFullscreen={diffFullscreen}
                             />
                         {/if}
-                        <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                        {#if DiffViewerComponent}
+                            {@const DiffViewer = DiffViewerComponent}
+                            <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                        {:else}
+                            <div class="diff-viewer-loading">Loading diff viewer...</div>
+                        {/if}
                     {/if}
                 </div>
             </div>
@@ -786,6 +803,15 @@
         min-height: 0;
         overflow: hidden;
         position: relative;
+    }
+    .diff-viewer-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        flex: 1;
     }
     .column.hidden {
         display: none;

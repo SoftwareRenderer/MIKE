@@ -216,6 +216,43 @@ async function dbDeleteKeys(store: string, keys: string[]): Promise<void> {
     } catch { /* ignore */ }
 }
 
+/** Batch put multiple values across different stores in a single transaction.
+ * This is more efficient than individual dbPut calls as it avoids opening
+ * a new transaction per operation. */
+export async function dbBatchPut(operations: Array<{ store: string; key: string; value: unknown }>): Promise<void> {
+    if (operations.length === 0) return;
+    try {
+        const db = await openDB();
+        // Group operations by store
+        const storeOps = new Map<string, Array<{ key: string; value: unknown }>>();
+        for (const op of operations) {
+            const list = storeOps.get(op.store);
+            if (list) {
+                list.push({ key: op.key, value: op.value });
+            } else {
+                storeOps.set(op.store, [{ key: op.key, value: op.value }]);
+            }
+        }
+        // Execute each store's operations in its own transaction
+        // (IndexedDB requires separate transactions per store)
+        await Promise.all(
+            [...storeOps.entries()].map(([store, ops]) => {
+                return new Promise<void>((resolve, reject) => {
+                    const tx = db.transaction(store, 'readwrite');
+                    const s = tx.objectStore(store);
+                    for (const { key, value } of ops) {
+                        s.put(toPlain(value), key);
+                    }
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                });
+            })
+        );
+    } catch {
+        // IndexedDB unavailable — silently ignore
+    }
+}
+
 // ─── Draft text (IndexedDB: drafts store) ────────────────────────────────────
 
 /** Get saved draft text for a task. Returns `null` if no draft exists. */

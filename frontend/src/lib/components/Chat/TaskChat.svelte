@@ -28,8 +28,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let prevScrollHeight = 0;
     let userInputPending = false;
     let inputTimeout: ReturnType<typeof setTimeout> | null = null;
-    let stickyUserMessage = $state('');
-    let showHeader = $state(false);
     let inputValue = $state('');
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
@@ -554,21 +552,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     function doCheckScroll() {
         scrollRafPending = false;
         if (!scrollEl) return;
-        // Find the latest user message whose top has scrolled into/above the header zone.
-        const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
-        let latestScrolled: HTMLElement | null = null;
-        const containerRect = scrollEl.getBoundingClientRect();
-        for (const el of userMsgEls) {
-            const firstLine = el.getAttribute('data-user-msg-first-line');
-            if (!firstLine) continue;
-            const rect = el.getBoundingClientRect();
-            const elTop = rect.top - containerRect.top;
-            if (elTop <= 0) {
-                latestScrolled = el;
-            }
-        }
-        stickyUserMessage = latestScrolled?.getAttribute('data-user-msg-first-line') || '';
-        showHeader = !!stickyUserMessage;
+        // Sticky header is now computed inside ChatEntries from entry data.
+        // This handler only manages atBottom detection and input tracking.
         if (!userInputPending) return;
         // Don't clear flag here — keep it active during inertial scrolling.
         // Reset a timeout instead; flag clears when scrolling settles.
@@ -586,19 +571,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
 
     function markUserInput() {
         userInputPending = true;
-    }
-
-    /** Scroll to the user message that is currently shown in the sticky header. */
-    function handleStickyClick() {
-        if (!scrollEl || !stickyUserMessage) return;
-        const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
-        for (let i = userMsgEls.length - 1; i >= 0; i--) {
-            const firstLine = userMsgEls[i].getAttribute('data-user-msg-first-line');
-            if (firstLine === stickyUserMessage) {
-                userMsgEls[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
-                return;
-            }
-        }
     }
 
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
@@ -1260,8 +1232,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         {queueEstimatedWait}
         {promptProgress}
         {isAgentSelected}
-        {showHeader}
-        {stickyUserMessage}
         {taskStatus}
         {projectId}
         {taskId}
@@ -1281,7 +1251,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         {onViewChanges}
         {scrollEl}
         onScrollElChange={(el) => scrollEl = el}
-        onStickyClick={handleStickyClick}
     />
     {#if showStartButton}
         <StartPanel
