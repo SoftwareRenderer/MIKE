@@ -41,7 +41,8 @@ export class StreamState {
         const id = genId();
         this.state.currentAssistantId = id;
         const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString() };
-        this.state.entries = [...this.state.entries, entry];
+        // In-place push — Svelte 5 deep reactivity tracks array mutations
+        this.state.entries.push(entry);
         return entry;
     }
 
