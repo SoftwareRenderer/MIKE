@@ -297,19 +297,21 @@ export function useVirtualScroll(
      * Measure an item's actual height and trigger recomputation.
      * Call this from a ResizeObserver on each rendered item.
      *
-     * Measurements are batched into a single rAF tick to avoid cascading
-     * re-layouts from multiple items being measured in the same frame.
+     * Uses queueMicrotask (not requestAnimationFrame) to batch measurements
+     * within the same frame. Microtasks run before the next paint, so offset
+     * recomputation happens before the browser renders — eliminating visible
+     * overlap when entries grow during streaming (e.g., tool results arriving).
      */
-    let measureRafPending = false;
+    let measureTaskPending = false;
     function measureItem(index: number, height: number) {
         const prev = measuredHeights[index];
         if (prev === height) return; // no change
         measuredHeights = { ...measuredHeights, [index]: height };
         dirty = true;
-        if (!measureRafPending) {
-            measureRafPending = true;
-            requestAnimationFrame(() => {
-                measureRafPending = false;
+        if (!measureTaskPending) {
+            measureTaskPending = true;
+            queueMicrotask(() => {
+                measureTaskPending = false;
                 computeVisibleRange();
             });
         }
