@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
-    import { commitDialog, type CommitDialogOptions } from '$lib/stores/dialogs';
+    import { onDestroy } from 'svelte';
+    import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
 
     let open = $state(false);
@@ -29,7 +29,7 @@
             resolveFn(value);
             resolveFn = null;
         }
-        commitDialog.set(null);
+        dialogStore.commitDialog = null;
     }
 
     function handleConfirm() {
@@ -163,43 +163,41 @@
         }
     }
 
-    let unsub: (() => void) | null = null;
+    $effect(() => {
+        const value = dialogStore.commitDialog;
+        if (value) {
+            message = value.message || '';
+            editedMessage = value.message || '';
+            confirmText = value.confirmText ?? 'Commit and move to Done';
+            cancelText = value.cancelText ?? 'Cancel';
+            authorName = value.authorName || '';
+            authorEmail = value.authorEmail || '';
+            mergeTarget = value.mergeTarget || '';
+            promptProgress = value.promptProgress || 0;
+            streaming = value.streaming ?? false;
+            resolveFn = value._resolve ?? null;
+            open = true;
 
-    onMount(() => {
-        unsub = commitDialog.subscribe((value) => {
-            if (value) {
-                message = value.message || '';
-                editedMessage = value.message || '';
-                confirmText = value.confirmText ?? 'Commit and move to Done';
-                cancelText = value.cancelText ?? 'Cancel';
-                authorName = value.authorName || '';
-                authorEmail = value.authorEmail || '';
-                mergeTarget = value.mergeTarget || '';
-                promptProgress = value.promptProgress || 0;
-                streaming = value.streaming ?? false;
-                resolveFn = (value as CommitDialogOptions & { _resolve?: (value: string | null) => void })._resolve ?? null;
-                open = true;
-
-                // Start streaming if projectId and taskId are provided
-                if (value.projectId && value.taskId && !value.message) {
-                    streamCommitPreview(value.projectId, value.taskId);
-                }
-
-                // Focus textarea when dialog opens (after streaming starts).
-                if (!streaming) {
-                    setTimeout(() => {
-                        textareaRef?.focus();
-                    }, 100);
-                }
+            // Start streaming if projectId and taskId are provided
+            if (value.projectId && value.taskId && !value.message) {
+                streamCommitPreview(value.projectId, value.taskId);
             }
-        });
 
+            // Focus textarea when dialog opens (after streaming starts).
+            if (!streaming) {
+                setTimeout(() => {
+                    textareaRef?.focus();
+                }, 100);
+            }
+        }
+    });
+
+    $effect(() => {
         window.addEventListener('keydown', handleKeydown);
+        return () => window.removeEventListener('keydown', handleKeydown);
     });
 
     onDestroy(() => {
-        unsub?.();
-        window.removeEventListener('keydown', handleKeydown);
         if (abortController) {
             abortController.abort();
         }

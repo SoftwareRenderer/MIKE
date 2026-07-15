@@ -3,7 +3,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { getGitStatus, getProjectDiff, stageProjectFile, commitProject } from '$lib/api/git';
-    import { showCommitDialog, showConfirm, showToast } from '$lib/stores/dialogs';
+    import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import DiffViewer from './DiffViewer.svelte';
     import BranchEditor from './BranchEditor.svelte';
@@ -235,7 +235,7 @@
             try {
                 const { head: currentHead } = await getGitStatus(projectId);
                 if (currentHead !== headHash) {
-                    const proceed = await showConfirm({
+                    const proceed = await dialogStore.showConfirm({
                         title: 'Repository has changed',
                         message: 'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
                         confirmText: 'Refresh and commit',
@@ -249,7 +249,7 @@
                 // If status check fails, proceed with commit anyway
             }
         }
-        const message = await showCommitDialog({
+        const message = await dialogStore.showCommitDialog({
             message: '',
             confirmText: 'Commit',
             cancelText: 'Cancel',
@@ -261,7 +261,7 @@
             await commitProject(projectId, message.trim());
             onClose();
         } catch (e: any) {
-            showToast(e.message || 'Commit failed', 'error');
+            dialogStore.showToast(e.message || 'Commit failed', 'error');
         }
     }
 

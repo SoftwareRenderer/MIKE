@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, unmount } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { showToast } from '$lib/stores/dialogs';
+    import { dialogStore } from '$lib/stores';
 
     // CodeMirror
     import { EditorView } from 'codemirror';
@@ -384,7 +384,7 @@
                 }
             }
         } catch (e) {
-            showToast('Failed to save: ' + String(e), 'error');
+            dialogStore.showToast('Failed to save: ' + String(e), 'error');
         } finally {
             saving = false;
         }

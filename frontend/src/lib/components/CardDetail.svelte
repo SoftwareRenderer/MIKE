@@ -1,11 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { get } from 'svelte/store';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
-    import { board as boardStore } from '$lib/stores/app';
-import { showTerminal, showCreateTask, creatingChildOf } from '$lib/stores/ui';
-import { showConfirm, showToast } from '$lib/stores/dialogs';
+    import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
@@ -37,7 +34,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
     let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
 
-    let allTasks = $derived($boardStore?.tasks || []);
+    let allTasks = $derived(appStore.board?.tasks || []);
 
     const overviewSections = [
         { id: 'backlog', title: 'Backlog' },
@@ -68,7 +65,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
 
     async function handleClearDone(count: number) {
         if (!task.project_id) return;
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Clear Done Tasks',
             message: `Permanently delete ${count} done task${count > 1 ? 's' : ''}? This cannot be undone.`,
             confirmText: 'Delete',
@@ -79,7 +76,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             await clearDoneTasks(task.project_id);
             // Board stream WebSocket will push the update
         } catch (e) {
-            showToast('Failed to clear done tasks: ' + String(e), 'error');
+            dialogStore.showToast('Failed to clear done tasks: ' + String(e), 'error');
         }
     }
 
@@ -167,7 +164,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         try {
             await diffCache.stageFile(path, stage, () => { diffCache.revertStageFile(path, stage); });
         } catch (e) {
-            showToast(String(e), 'error');
+            dialogStore.showToast(String(e), 'error');
         }
     }
 
@@ -290,7 +287,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
     // Status badge
     let badge = $derived.by(() => {
         const streaming = get(streamingIds).has(task.id);
-        const state = $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
+        const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
@@ -440,20 +437,15 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
         try {
             const updated = await moveTask(task.project_id, task.id, status);
             task = updated;
-            boardStore.update(b => {
-                if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === task!.id);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b };
-            });
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task!.id ? updated : t) };
         } catch (e) {
-            showToast('Failed to move: ' + String(e), 'error');
+            dialogStore.showToast('Failed to move: ' + String(e), 'error');
         }
     }
 
     async function handleDelete() {
         if (!task) return;
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Delete Task',
             message: 'Delete this task? This cannot be undone.',
             confirmText: 'Delete',
@@ -468,7 +460,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             onRefreshBoard?.();
             onClose(task.status);
         } catch (e) {
-            showToast('Failed to delete task: ' + String(e), 'error');
+            dialogStore.showToast('Failed to delete task: ' + String(e), 'error');
         }
     }
 
@@ -597,7 +589,7 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
             {worktreeExists}
             {task}
             {onClose}
-            onOpenTerminal={() => showTerminal.set(true)}
+            onOpenTerminal={() => uiStore.showTerminal = true}
             onDelete={handleDelete}
         />
 
@@ -626,8 +618,8 @@ import { showConfirm, showToast } from '$lib/stores/dialogs';
                     onSectionDrop={dnd.handleSectionDrop}
                     onClearDone={handleClearDone}
                     onToggleExpanded={hierarchy.toggleTaskExpanded}
-                    onCreateChildTask={(parentId: string) => { creatingChildOf.set(parentId); showCreateTask.set(true); }}
-                    onShowCreateTask={() => showCreateTask.set(true)}
+                    onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
+                    onShowCreateTask={() => uiStore.showCreateTask = true}
                     getColumnColor={getSectionColor}
                 />
             </div>

@@ -2,18 +2,13 @@
     import type { Task, Provider } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { get } from 'svelte/store';
-    import { selectedTask, board as boardStore, config as configStore, selectedProject } from '$lib/stores/app';
-import { showCardDetail } from '$lib/stores/ui';
-import { showConfirm, showToast } from '$lib/stores/dialogs';
-import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
+    import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
-    import { showEditTask, editTaskData } from '$lib/stores/app';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
     import { fade, slide } from 'svelte/transition';
@@ -136,15 +131,15 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         const target = e.target as HTMLElement;
         if (target.closest('button, input, a, select, .card-edit-panel')) return;
         if (inline && task.parent_task_id) e.stopPropagation();
-        if (onSelect) { onSelect(task); } else { selectedTask.set(task); showCardDetail.set(true); }
+        if (onSelect) { onSelect(task); } else { appStore.selectedTask = task; uiStore.showCardDetail = true; }
     }
 
     const isMobileCtx = useIsMobile();
 
     let statusBadge = $derived.by(() => {
         const streaming = get(streamingIdsContext).has(task.id);
-        const state = $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
-        const hasConflict = ($boardStore?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
+        const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
+        const hasConflict = (appStore.board?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
@@ -169,7 +164,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
     let modelBadge = $derived.by(() => {
-        const cfg = $configStore;
+        const cfg = appStore.config;
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
         // Check if task uses Pi agent
@@ -193,8 +188,8 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     let modelPickerOpen = $state(false);
     let modelBadgeRef: HTMLButtonElement | null = $state(null);
     let pickerRect = $state<{ top: number; left: number } | null>(null);
-    let providers = $derived($configStore?.providers || []);
-    let targetBranch = $derived($selectedProject?.origin_branch || 'main');
+    let providers = $derived(appStore.config?.providers || []);
+    let targetBranch = $derived(appStore.selectedProject?.origin_branch || 'main');
     let isConfigurable = $derived(columnId === 'backlog');
 
     // Context stores (must be retrieved at top level, not inside derived/effects)
@@ -229,12 +224,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
-            boardStore.update(b => {
-                if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === task.id);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b };
-            });
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? updated : t) };
         } catch (err) {
             console.error('Failed to update model:', err);
         }
@@ -247,12 +237,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
-            boardStore.update(b => {
-                if (!b) return b;
-                const idx = b.tasks.findIndex(t => t.id === task.id);
-                if (idx !== -1) b.tasks[idx] = updated;
-                return { ...b };
-            });
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? updated : t) };
         } catch (err) {
             console.error('Failed to select agent:', err);
         }
@@ -311,7 +296,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     // Don't show selected highlight on parent when any descendant is selected
     let showSelected = $derived.by(() => {
         if (!isSelected) return false;
-        const sel = $selectedTask;
+        const sel = appStore.selectedTask;
         if (!sel || !sel.parent_task_id) return true;
         // Walk up the ancestor chain to see if this task is an ancestor of the selected task
         let ancestor: Task | null = sel;
@@ -322,25 +307,22 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                 break;
             }
             const nextId: string | undefined = ancestor.parent_task_id;
-            ancestor = nextId ? ($boardStore?.tasks.find(t => t.id === nextId) ?? null) : null;
+            ancestor = nextId ? (appStore.board?.tasks.find(t => t.id === nextId) ?? null) : null;
         }
         if (found) return false;
         return true;
     });
 
     $effect(() => {
-        const unsub = selectedTask.subscribe(t => {
-            isSelected = t?.id === task.id;
-        });
-        return unsub;
+        isSelected = appStore.selectedTask?.id === task.id;
     });
 
     function startEdit(e: MouseEvent) {
         e.stopPropagation();
-        const cfg = $configStore;
+        const cfg = appStore.config;
         const providers = cfg?.providers || [];
-        const selProject = get(selectedProject);
-        editTaskData.set({
+        const selProject = appStore.selectedProject;
+        appStore.editTaskData = {
             taskId: task.id,
             projectId: projectId!,
             taskTitle: task.title,
@@ -361,15 +343,15 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                 const p = providers.find(p => p.url === url);
                 return p ? isAgentProvider(p) : false;
             },
-        });
-        showEditTask.set(true);
+        };
+        appStore.showEditTask = true;
     }
 
     function handleEditSaved(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) {
         const trimmed = title.trim();
         if (!trimmed || !projectId) {
-            showEditTask.set(false);
-            editTaskData.set(null);
+            appStore.showEditTask = false;
+            appStore.editTaskData = null;
             return;
         }
         const updates: Record<string, unknown> = { title: trimmed };
@@ -388,20 +370,17 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         if (model) task.model_name = model;
         if (url) task.llama_server_url = url;
         if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-        boardStore.update(b => {
-            if (!b) return b;
-            return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
-        });
+        appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
         updateTask(projectId, task.id, updates).catch(err => {
             console.error('Failed to update task:', err);
         });
-        showEditTask.set(false);
-        editTaskData.set(null);
+        appStore.showEditTask = false;
+        appStore.editTaskData = null;
     }
 
     function handleEditCancelled() {
-        showEditTask.set(false);
-        editTaskData.set(null);
+        appStore.showEditTask = false;
+        appStore.editTaskData = null;
     }
 
     function truncate(s: string, max: number): string {
@@ -427,8 +406,8 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     function handleCardKeydown(e: KeyboardEvent) {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            selectedTask.set(task);
-            showCardDetail.set(true);
+            appStore.selectedTask = task;
+            uiStore.showCardDetail = true;
         }
         // Alt+ArrowLeft/ArrowRight: move task to previous/next column
         if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -445,7 +424,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                     const { moveTask: apiMoveTask } = await import('$lib/api');
                     const updated = await apiMoveTask(projectId, task.id, targetStatus);
                     Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-                    boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
+                    appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
                 } catch (err) {
                     console.error('Failed to move task:', err);
                 }
@@ -454,11 +433,11 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     }
 
     // Pause/Resume for In Progress column
-    // Derive liveExecutionState from boardStore so it updates reactively
+    // Derive liveExecutionState from appStore so it updates reactively
     // when WebSocket broadcasts a board refresh. Falls back to task prop.
     const STOPPED_STATES = ['stopped', 'failed'];
     let liveExecutionState = $derived(
-        $boardStore?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state
+        appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state
     );
 
     // Pause/Resume: for parent tasks, show based on descendant state
@@ -473,7 +452,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             const updated = await stopTask(projectId, task.id);
             // Apply optimistic update to task object
             Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
         } catch (err) {
             console.error('Failed to pause task:', err);
         }
@@ -485,7 +464,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
         try {
             const updated = await resumeTask(projectId, task.id);
             Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
         } catch (err) {
             console.error('Failed to resume task:', err);
         }
@@ -502,7 +481,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             if (nextStatus === 'done' && hasChanges) {
                 // Open dialog — it will stream the commit message from the backend
                 const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    commitDialogStore.set({
+                    dialogStore.commitDialog = {
                         streaming: true,
                         message: '',
                         confirmText: 'Commit and move to Done',
@@ -510,7 +489,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                         projectId: projectId!,
                         taskId: task.id,
                         _resolve: resolve,
-                    });
+                    };
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled
@@ -522,7 +501,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
                 updated = await moveTask(projectId, task.id, nextStatus);
             }
             Object.assign(task, (updated as any).queued ? { ...task, ...updated } : updated);
-            boardStore.update(b => b ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) } : b);
+            appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
         } catch (err) {
             console.error('Failed to move task:', err);
         }
@@ -531,7 +510,7 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
     async function handleDelete(e: MouseEvent) {
         e.stopPropagation();
         if (!projectId) return;
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Delete Task',
             message: 'Delete this task? This cannot be undone.',
             confirmText: 'Delete',
@@ -546,13 +525,10 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             // If task has queued actions (optimistic ID), server may not know about it.
             // Remove from UI anyway and let the queue handle cleanup.
             if (getQueuedTaskIds().has(task.id)) {
-                boardStore.update(b => {
-                    if (!b) return b;
-                    return { ...b, tasks: b.tasks.filter(t => t.id !== task.id) };
-                });
+                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.filter(t => t.id !== task.id) };
                 onRefreshBoard?.();
             } else {
-                showToast('Failed to delete task: ' + String(err), 'error');
+                dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
             }
         }
     }
@@ -572,21 +548,15 @@ import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
             if (task.parent_task_id) {
                 const { startSubtask } = await import('$lib/api');
                 const updated = await startSubtask(projectId, task.id);
-                boardStore.update(b => {
-                    if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === updated.id ? updated : t) };
-                });
+                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === updated.id ? updated : t) };
             } else {
                 // Parent task or root task — use normal start (backend handles LLM subtask selection)
                 const updated = await startTask(projectId, task.id);
-                boardStore.update(b => {
-                    if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === updated.id ? updated : t) };
-                });
+                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === updated.id ? updated : t) };
             }
         } catch (err) {
             console.error('Failed to start task:', err);
-            showToast('Failed to start task: ' + String(err), 'error');
+            dialogStore.showToast('Failed to start task: ' + String(err), 'error');
         }
     }
 

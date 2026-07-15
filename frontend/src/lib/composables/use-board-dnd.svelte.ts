@@ -1,6 +1,5 @@
 import type { Task } from '$lib/types';
-import { board as boardStore } from '$lib/stores/app';
-import { showToast } from '$lib/stores/dialogs';
+import { appStore, dialogStore } from '$lib/stores';
 import { moveTask } from '$lib/api';
 
 /** Reactive state for board section drag-and-drop. */
@@ -60,7 +59,7 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
         const task = getAllTasks().find(t => t.id === taskId);
         if (!task || task.status === targetStatus) return;
         if (!canDrop(taskId, targetStatus)) {
-            showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+            dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
             return;
         }
         try {
@@ -68,14 +67,11 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
             const willConsolidate = task.parent_task_id &&
                 getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
             if (!willConsolidate) {
-                boardStore.update(b => {
-                    if (!b) return b;
-                    return { ...b, tasks: b.tasks.map(t => t.id === taskId ? updated : t) };
-                });
+                appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === taskId ? updated : t) };
             }
         } catch (err) {
             console.error('Failed to move task:', err);
-            showToast('Failed to move task: ' + String(err), 'error');
+            dialogStore.showToast('Failed to move task: ' + String(err), 'error');
         }
     }
 
