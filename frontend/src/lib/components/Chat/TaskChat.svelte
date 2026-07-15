@@ -1,110 +1,41 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
-    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
+    import type { Provider, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
-import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
-import { showToast, showConfirm } from '$lib/stores/dialogs';
-import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
-import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
-import { StreamState } from '$lib/services/stream-state.svelte';
-import { createStreamHandler } from '$lib/services/stream-handler';
+    import { updateTask, moveTask, deleteTaskMessage, getTaskThreads, getTask, onQueueChanged } from '$lib/api';
+    import { board as boardStore, config as configStore } from '$lib/stores/app';
+    import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
+    import { StreamState } from '$lib/services/stream-state.svelte';
     import { useCheckpointTracker } from '$lib/composables/use-checkpoint-tracker.svelte';
-    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
-    import { getAppStreamRef } from '$lib/stream-ref';
+    import { useChatConnection } from '$lib/composables/use-chat-connection.svelte';
+    import { useChatHistory } from '$lib/composables/use-chat-history.svelte';
+    import { useChatActions } from '$lib/composables/use-chat-actions.svelte';
+    import { computeLastUserMessageIds, type EntryMeta } from '$lib/utils/chat-entries';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff }: {
+        projectId: string;
+        taskId: string;
+        taskPrompt?: string;
+        taskStatus?: string;
+        taskExecutionState?: string;
+        disabled?: boolean;
+        taskTitle?: string;
+        hasStagedChanges?: boolean;
+        onRefreshDiff?: (data: DiffData) => void;
+        onMoveTask?: (status: string) => void;
+        onThreadSwitch?: () => void;
+        onViewChanges?: (commitHash: string) => void;
+        onInvalidateDiff?: () => void;
+    } = $props();
 
-    let connected = $state(false);
-    let connecting = $state(true);
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let scrollEl: HTMLElement | null = null;
-
-    let atBottom = $state(true);
-    let prevScrollHeight = 0;
-    let userInputPending = false;
-    let inputTimeout: ReturnType<typeof setTimeout> | null = null;
-    let stickyUserMessage = $state('');
-    let showHeader = $state(false);
-    let inputValue = $state('');
-    let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
-
-    // Load draft text from IndexedDB on init
-    $effect(() => {
-        getDraftText(taskId).then(savedDraft => {
-            if (savedDraft !== null) {
-                inputValue = savedDraft;
-            }
-        }).catch(() => {});
-    });
-
-    // Load draft attachments from IndexedDB on init
-    $effect(() => {
-        loadDraftAttachments(taskId).then(atts => {
-            if (atts.length > 0) {
-                draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
-                    file: new File([], '', { type: a.mimeType }),
-                    preview: `data:${a.mimeType};base64,${a.data}`,
-                    mimeType: a.mimeType,
-                    base64: a.data,
-                }));
-            }
-        }).catch(() => {});
-    });
-
-    // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
-    let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-    const DRAFT_SAVE_DEBOUNCE = 100; // ms
-    function handleInputSave(val: string) {
-        if (draftSaveTimer) clearTimeout(draftSaveTimer);
-        if (val) {
-            draftSaveTimer = setTimeout(() => {
-                setDraftText(taskId, val).catch(() => {});
-                draftSaveTimer = null;
-            }, DRAFT_SAVE_DEBOUNCE);
-        }
-    }
-
-    // Clear draft on send (called synchronously from ChatForm)
-    function handleClearDraft() {
-        clearDraftText(taskId).catch(() => {});
-        clearDraftAttachments(taskId).catch(() => {});
-        draftAttachments = [];
-    }
-
-    // Save draft attachments; skip empty to avoid racing with load effect on mount
-    $effect(() => {
-        const atts = draftAttachments;
-        if (atts.length > 0) {
-            saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
-        }
-    });
-
-    // Model selection state
-    let providers: Provider[] = $state([]);
-    let selectedModel = $state('');
-    let selectedUrl = $state('');
-    let selectedReasoningEffort = $state('');
-    let operatingMode = $state('act');
-    // Tracks when handleModelSelect's updateTask is in-flight, so the board store
-    // $effect doesn't overwrite the user's selection with stale DB values.
-    let modelUpdatePending = $state(false);
-    let isAgentSelected = $derived(() => {
-        if (!selectedUrl) return false;
-        if (selectedUrl === PI_SENTINEL_URL) return true;
-        const p = providers.find(p => p.url === selectedUrl);
-        return p ? isAgentProvider(p) : false;
-    });
-
-    // Stream state — managed by StreamState service (reactive via $state())
+    // ── Stream state ──
     let stream = new StreamState();
-    // Shorthand accessors for template use
     let entries = $derived(stream.state.entries);
     let currentAssistantId = $derived(stream.state.currentAssistantId);
     let activeToolCalls = $derived(stream.state.activeToolCalls);
@@ -121,39 +52,48 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let streamTokenCount = $derived(stream.state.streamTokenCount);
     let lastPromptTokens = $derived(stream.state.lastPromptTokens);
 
-    let lastSentMessage: string | null = $state(null);
-    let lastSentEntryId: string | null = $state(null); // temp ID of last optimistic entry
-    let isStarting = $state(false);
-    let isRegenerating = $state(false); // true between regenerate delete and echo arrival
-    let firstConnectDone = $state(false); // track if initial onopen has fired
-    let isCommitting = $state(false);
+    // ── Scroll state ──
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let scrollEl: HTMLElement | null = null;
+    let atBottom = $state(true);
+    let prevScrollHeight = 0;
+    let userInputPending = false;
+    let inputTimeout: ReturnType<typeof setTimeout> | null = null;
+    let stickyUserMessage = $state('');
+    let showHeader = $state(false);
+    let scrollRafPending = false;
 
-    let threadSwitching = $state(false); // true while a thread switch is in-flight
-    // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
-    // For in_progress tasks, buffer events are legitimate and must be replayed.
-    let suppressEvents = $state(true);
-    $effect(() => { suppressEvents = taskStatus !== 'in_progress'; });
+    // ── Input / draft state ──
+    let inputValue = $state('');
+    let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
+    let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    const DRAFT_SAVE_DEBOUNCE = 100;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let chatFormComp: { focus: () => void } | null = null;
+
+    // ── Model selection state ──
+    let providers: Provider[] = $state([]);
+    let selectedModel = $state('');
+    let selectedUrl = $state('');
+    let selectedReasoningEffort = $state('');
+    let operatingMode = $state('act');
+
+    // ── Context stores (must be retrieved at top level) ──
+    let streamingIdsContext = getStreamingContext();
     let commitQueueStatus = getCommitQueueContext();
     let taskEventContext = getTaskEventContext();
+    let taskDiffStatsStore = getTaskDiffStatsContext();
+
+    // ── Derived state ──
+    let isLoading = $derived($streamingIdsContext.has(taskId));
+    let lastEntryIdx = $derived(entries.length - 1);
+    let diffStats = $derived($taskDiffStatsStore[taskId] || null);
+    let hasStagedChanges = $derived(
+        hasStagedChangesProp ?? (diffStats?.staged_paths || []).length > 0
+    );
     let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
 
-    // Thread state
-    let threads: Thread[] = $state([]);
-    let activeThreadId = $state('');
-
-    // isLoading: only true when LLM is actively streaming tokens.
-    // Shows stop button only during token generation, not during tool execution.
-    let streamingIds = getStreamingContext();
-    let isLoading = $derived($streamingIds.has(taskId));
-
-    // Last entry index for regenerate button gating
-    let lastEntryIdx = $derived(entries.length - 1);
-
-    // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
-
-    // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
-    // and the last message is from the user (agent hasn't responded yet).
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
@@ -161,385 +101,97 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         entries.length > 0 &&
         entries[entries.length - 1].role === 'user'
     );
-
-    // Show "Resume" button in review bar when the last message is from the user
-    // (agent hasn't responded yet — user sent a follow-up before moving to review).
     let showResumeButton = $derived(
         taskStatus === 'review' &&
         !isLoading &&
         entries.length > 0 &&
         entries[entries.length - 1].role === 'user'
     );
-
-    // Set of user message IDs with no assistant response after them.
     let lastUserMessageIds = $derived(computeLastUserMessageIds(entries));
 
-    // Precomputed per-entry metadata — O(n) single-pass via buildCheckpointStateMap.
+    // ── Composables ──
+    // History must be created first (provides loadHistory, threads, etc.)
+    let history = useChatHistory({ projectId, taskId, stream, taskStatus, onThreadSwitch });
+
+    // Connection uses history's loadHistory and thread state
+    let conn = useChatConnection({
+        projectId,
+        taskId,
+        stream,
+        taskStatus,
+        loadHistory: history.loadHistory,
+        updateActiveThread: history.updateActiveThread,
+        updateThreadUrl: history.updateThreadUrl,
+        scroll,
+        markUserInput,
+        threads: history.threads,
+        activeThreadId: history.activeThreadId,
+        switchTaskThread: (pid, tid, threadId) => import('$lib/api').then(m => m.switchTaskThread(pid, tid, threadId)),
+        getTask: (pid, tid) => getTask(pid, tid),
+        taskEventContext,
+    });
+
+    // Actions uses both history and connection state
+    let actions = useChatActions({
+        projectId,
+        taskId,
+        stream,
+        taskStatus,
+        taskPrompt,
+        disabled,
+        selectedModel,
+        selectedUrl,
+        selectedReasoningEffort,
+        operatingMode,
+        providers,
+        modelUpdatePending: false,
+        threads: history.threads,
+        activeThreadId: history.activeThreadId,
+        isLoading,
+        genId: conn.genId,
+        scroll,
+        markStreaming: conn.markStreaming,
+        markNotStreaming: conn.markNotStreaming,
+        loadHistory: history.loadHistory,
+        loadThreads: history.loadThreads,
+        updateActiveThread: history.updateActiveThread,
+        updateThreadUrl: history.updateThreadUrl,
+        resetStreamState: history.resetStreamState,
+        mergeTaskIntoBoard: history.mergeTaskIntoBoard,
+        onRefreshDiff,
+        onThreadSwitch,
+        onInvalidateDiff,
+        onMoveTask,
+        commitQueueStatus,
+    });
+
+    let isAgentSelected = $derived(() => {
+        if (!selectedUrl) return false;
+        if (selectedUrl === PI_SENTINEL_URL) return true;
+        const p = providers.find(p => p.url === selectedUrl);
+        return p ? isAgentProvider(p) : false;
+    });
+
     let entryMetas = $derived(((() => {
         const metas: EntryMeta[] = new Array(entries.length);
         const streaming = isLoading;
-        const cpStateMap = buildCheckpointStateMap(entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes);
-        const activeThread = threads.find(t => t.is_active);
+        const cpStateMap = history.computeEntryMetas(
+            entries, isLoading, pendingCheckpoints, checkpointLabels, checkpointCommitHashes
+        );
         for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            metas[i] = entry.role === 'user'
-                ? {
-                    cpState: cpStateMap.get(i) ?? null,
-                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0) : null,
-                    isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
-                }
-                : { cpState: null, cpThread: null, isLastUserMessage: false };
+            metas[i] = cpStateMap[i];
         }
-        // Force tracking of checkpointHashesVersion so meta rebuilds on checkpoint changes
         void checkpointHashesVersion;
         return metas;
     })()));
 
-    function genId(): string {
-        return Math.random().toString(36).slice(2, 10);
-    }
-
-    // Stable callback handlers — prevents unnecessary ChatMessage re-renders.
-    function handleMsgDelete(entry: ChatEntry) {
-        const idx = entries.findIndex(e => e.id === entry.id);
-        if (idx === 0) return; // first message cannot be deleted
-        handleDeleteRequest(entry.id, entries.length - idx);
-    }
-    async function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
-        await handleEditFork(msgId, origContent, newContent, atts);
-    }
-    async function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
-        await handleEditSend(msgId, origContent, newContent, atts);
-    }
-    async function handleMsgEdit(msgId: string, newContent: string) {
-        await updateTaskMessage(projectId, taskId, msgId, newContent);
-        const entry = entries.find(e => e.id === msgId);
-        if (entry) entry.content = newContent;
-    }
-    function handleMsgNavigateTask(targetTaskId: string) {
-        const task = $boardStore?.tasks.find(t => t.id === targetTaskId);
-        if (task) {
-            const url = new URL(location.href);
-            url.searchParams.set('task', targetTaskId);
-            history.pushState(null, '', url);
-            selectedTask.set(task);
-        }
-    }
-
-    // Watch for task config changes from the board store (e.g., inline edit)
-    // Updates model selection when the task's model/provider is changed externally.
-    // Skips model fields when a local updateTask is in-flight to avoid overwriting
-    // the user's selection with stale DB values.
-    $effect(() => {
-        const boardTask = $boardStore?.tasks.find(t => t.id === taskId);
-        if (boardTask) {
-            if (!modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
-            if (!modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
-            if (!modelUpdatePending && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
-            operatingMode = boardTask.operating_mode ?? 'act';
-        }
-    });
-
-    /** Read the `thread` URL param from the current URL. */
-    function readThreadFromUrl(): string | null {
-        return new URLSearchParams(location.search).get('thread');
-    }
-
-    /** Update the URL to include `&thread=<threadId>`, pushing to browser history. */
-    function updateThreadUrl(threadId: string) {
-        const url = new URL(location.href);
-        url.searchParams.set('thread', threadId);
-        history.pushState({ task: taskId, thread: threadId }, '', url.toString());
-    }
-
-    /** Remove the `thread` param from the URL. */
-    function clearThreadUrl() {
-        const url = new URL(location.href);
-        url.searchParams.delete('thread');
-        history.pushState({ task: taskId }, '', url.toString());
-    }
-
-    /** Reset stream state before loading a new thread's messages. */
-    function resetStreamState() {
-        stream.closeCurrentAssistant();
-        stream.state.activeToolCalls.clear();
-        stream.state.processedToolIds.clear();
-        stream.state.entries = [];
-        stream.state.currentAssistantId = null;
-        stream.state.streamTokenCount = 0;
-        stream.state.awaitingResponse = false;
-    }
-
-    /** Merge an updated task into the board store. */
-    function mergeTaskIntoBoard(updated: any) {
-        boardStore.update(b => {
-            if (!b) return b;
-            const existing = b.tasks.find(t => t.id === taskId);
-            const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
-            return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-        });
-    }
-
-    /** Send a message via the API with tracking state. Returns false on failure. */
-    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false, entryId?: string): Promise<boolean> {
-        lastSentMessage = msg;
-        lastSentEntryId = entryId ?? null;
-        stream.state.awaitingResponse = true;
-        try {
-            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
-            return true;
-        } catch (e) {
-            const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
-            stream.state.awaitingResponse = false;
-            return false;
-        }
-    }
-
-    function markStreaming() {
-        streamingIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
-    }
-
-    function markNotStreaming() {
-        streamingIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
-        stream.state.queuePosition = 0;
-        stream.state.queueEstimatedWait = 0;
-        stream.state.streamTokenCount = 0;
-        stream.state.contextState.used = stream.state.lastPromptTokens;
-        stream.state.promptProgress = 0;
-    }
-
-    // Stream event handler — delegated to service
-    const _handleStreamEvent = createStreamHandler(stream, {
-        genId,
-        scroll,
-        markStreaming,
-        markNotStreaming,
-        onRefreshDiff: (data) => onRefreshDiff?.(data),
-        onThreadSwitch: () => onThreadSwitch?.(),
-        loadHistory,
-        updateActiveThread,
-        updateThreadUrl,
-        createTaskMessage,
-    });
-
-    /** Wrapper around stream handler with component-specific echo logic. */
-    function handleEvent(event: StreamEvent) {
-        // Handle user_message echo before delegating to stream handler
-        if (event.type === 'user_message') {
-            const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
-            if (lastSentMessage === data.content) {
-                lastSentMessage = null;
-                lastSentEntryId = null;
-                isRegenerating = false;
-                if (data.id) {
-                    // Match by optimistic entry ID when available (reliable),
-                    // fall back to content match for backward compat (e.g. regenerate).
-                    if (lastSentEntryId) {
-                        const entry = stream.state.entries.find(e => e.id === lastSentEntryId);
-                        if (entry) {
-                            entry.id = data.id;
-                            if (data.thread_id) entry.threadId = data.thread_id;
-                            if (data.attachments) entry.attachments = data.attachments;
-                        }
-                    } else {
-                        for (let i = stream.state.entries.length - 1; i >= 0; i--) {
-                            if (stream.state.entries[i].role === 'user' && stream.state.entries[i].content === data.content) {
-                                stream.state.entries[i].id = data.id;
-                                if (data.thread_id) stream.state.entries[i].threadId = data.thread_id;
-                                if (data.attachments) stream.state.entries[i].attachments = data.attachments;
-                                break;
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-        }
-        // Handle error event side effects (isRegenerating, connected)
-        if (event.type === 'error') {
-            isRegenerating = false;
-            connected = false;
-        }
-        _handleStreamEvent(event, suppressEvents, projectId, taskId);
-    }
-
-    /** Update providers from the config store (reacts to settings changes). */
-    function updateProvidersFromStore() {
-        const cfg = get(configStore);
-        if (cfg && cfg.providers) {
-            providers = cfg.providers;
-            // Initialize model selection from highest-priority provider's default model
-            if (providers.length > 0 && (!selectedModel || !providers.some(p => p.url === selectedUrl))) {
-                const firstProvider = providers[0];
-                const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
-                if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
-                    selectedUrl = firstProvider.url;
-                    selectedModel = firstProvider.default_model;
-                } else if (firstProvider.models.length > 0) {
-                    selectedUrl = firstProvider.url;
-                    selectedModel = _getModelName(firstProvider.models[0]);
-                }
-            }
-            updateContextLimit();
-        }
-    }
-
-    /** Look up the context window for the currently selected model. */
-    function updateContextLimit() {
-        let provider = providers.find(p => p.url === selectedUrl);
-        // Pi agent: selectedUrl is PI_SENTINEL_URL, look up the Pi agent provider
-        if (!provider && selectedUrl === PI_SENTINEL_URL) {
-            provider = providers.find(p => isAgentProvider(p));
-        }
-        if (!provider) {
-            stream.state.contextState.limit = 0;
-            return;
-        }
-        const model = provider.models.find((m: { name: string }) => m.name === selectedModel);
-        stream.state.contextState.limit = (model as { context_window?: number })?.context_window || 0;
-    }
-
-    async function loadHistory(scrollAfter = false) {
-        try {
-            const messages = await getTaskMessages(projectId, taskId);
-            // Build entries from DB messages using shared utility
-            const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(messages);
-            stream.state.checkpointCommitHashes = checkpointHashes;
-
-            // Merge with existing entries (e.g., from buffer replay).
-            // DB entries have backend UUIDs; buffer entries have random genId() IDs.
-            // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
-            const dbIds = new Set(messages.map(m => m.id));
-            const existingNonDb = stream.state.entries.filter(e => !dbIds.has(e.id));
-            // Collect tool_ids from DB entries to deduplicate buffer entries.
-            const dbToolIds = new Set<string>();
-            for (const e of mergedDbEntries) {
-                if (e.toolCalls) {
-                    for (const tc of e.toolCalls) {
-                        dbToolIds.add(tc.toolId);
-                    }
-                }
-            }
-            // Remove buffer entries whose tool calls are already in the DB.
-            const dedupedNonDb = existingNonDb.filter(e => {
-                if (e.toolCalls) {
-                    return !e.toolCalls.some(tc => dbToolIds.has(tc.toolId));
-                }
-                return true;
-            });
-            stream.state.entries = [...mergedDbEntries, ...dedupedNonDb];
-            // Deduplicate by ID — keeps first occurrence (DB entries come first and are authoritative).
-            // Catches edge cases where a streaming entry's temp ID was swapped to a backend ID
-            // that already exists in the DB (e.g., complete event arrives after loadHistory).
-            const seenIds = new Set<string>();
-            stream.state.entries = stream.state.entries.filter(e => {
-                if (seenIds.has(e.id)) return false;
-                seenIds.add(e.id);
-                return true;
-            });
-            // Remove entries with pending tool calls from non-running tasks.
-            // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
-            // For stopped/completed tasks, pending calls are stale leftovers.
-            if (taskStatus !== 'in_progress') {
-                stream.state.entries = stream.state.entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
-            }
-            // Restore context usage from the last assistant message.
-            // Use total context (prompt + predicted) to reflect full window consumed.
-            const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
-            if (lastAssistant?.stats) {
-                stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-                stream.state.contextState.used = stream.state.lastPromptTokens;
-            }
-            // After replacing entries, the DOM re-renders and scroll state may be lost.
-            // Scroll to bottom on the next frame.
-            if (scrollAfter) {
-                await new Promise(resolve => requestAnimationFrame(resolve));
-                scroll();
-            }
-        } catch (e) {
-            // Task may have been deleted — clear stale draft
-            if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
-                clearDraftText(taskId).catch(() => {});
-                draftAttachments = [];
-            }
-            // Otherwise: no history yet, ignore
-        }
-    }
-
-    async function loadThreads() {
-        try {
-            threads = await getTaskThreads(projectId, taskId);
-            const active = threads.find(t => t.is_active);
-            if (active) {
-                activeThreadId = active.id;
-            }
-        } catch {
-            threads = [];
-        }
-    }
-
-    /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
-    function updateActiveThread(threadId: string) {
-        activeThreadId = threadId;
-        threads = threads.map(t => ({ ...t, is_active: t.id === threadId }));
-    }
-
-    async function handleThreadSwitch(threadId: string) {
-        if (threadId === activeThreadId) return;
-        // Prevent concurrent thread switches — wait for the in-flight one to settle.
-        if (threadSwitching) return;
-        threadSwitching = true;
-        try {
-            const switched = await switchTaskThread(projectId, taskId, threadId);
-            // Refresh threads list from server to pick up any changes (deletions, etc.)
-            threads = await getTaskThreads(projectId, taskId);
-            activeThreadId = switched.id;
-            // Clear streaming state before loading new thread's messages.
-            resetStreamState();
-            // Load messages for the new thread immediately (don't wait for WS event)
-            await loadHistory(true);
-            // Notify parent to refresh the diff panel for the new thread
-            onThreadSwitch?.();
-            // Update URL with new thread param
-            updateThreadUrl(threadId);
-            // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
-            // Server sends thread_switch + diff_changed events over existing connection.
-        } catch (e) {
-            showToast(String(e));
-        } finally {
-            threadSwitching = false;
-        }
-    }
-
-    async function handleThreadFork(messageId: string, fromThreadId: string) {
-        if (isLoading || disabled) return;
-        try {
-            const forked = await forkTaskThread(projectId, taskId, fromThreadId, messageId);
-            // Refresh threads list from server to ensure consistency
-            threads = await getTaskThreads(projectId, taskId);
-            activeThreadId = forked.id;
-            // Clear streaming state before loading new thread's messages.
-            resetStreamState();
-            // Load messages for the new thread immediately
-            await loadHistory(true);
-            // Notify parent to refresh the diff panel for the new forked thread
-            onThreadSwitch?.();
-            // Update URL with the new fork's thread ID
-            updateThreadUrl(forked.id);
-            // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
-        } catch (e) {
-            showToast(String(e));
-        }
-    }
-
+    // ── Scroll functions ──
     function scroll(force = false) {
         if (!scrollEl) return;
         if (!force && !atBottom) return;
         requestAnimationFrame(() => {
             if (!scrollEl) return;
             scrollEl.scrollTop = scrollEl.scrollHeight;
-            // Second frame to correct for DOM shrink (e.g., streaming cursor disappearing)
-            // that happens after the first frame sets scrollTop.
             requestAnimationFrame(() => {
                 if (scrollEl) {
                     scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -548,8 +200,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         });
     }
 
-    // rAF-throttled scroll handler — at most once per frame.
-    let scrollRafPending = false;
     function onScroll() {
         markUserInput();
         if (scrollRafPending) return;
@@ -559,7 +209,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     function doCheckScroll() {
         scrollRafPending = false;
         if (!scrollEl) return;
-        // Find the latest user message whose top has scrolled into/above the header zone.
         const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
         let latestScrolled: HTMLElement | null = null;
         const containerRect = scrollEl.getBoundingClientRect();
@@ -575,8 +224,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         stickyUserMessage = latestScrolled?.getAttribute('data-user-msg-first-line') || '';
         showHeader = !!stickyUserMessage;
         if (!userInputPending) return;
-        // Don't clear flag here — keep it active during inertial scrolling.
-        // Reset a timeout instead; flag clears when scrolling settles.
         if (inputTimeout) clearTimeout(inputTimeout);
         inputTimeout = setTimeout(() => { userInputPending = false; inputTimeout = null; }, 150);
         const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
@@ -593,7 +240,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         userInputPending = true;
     }
 
-    /** Scroll to the user message that is currently shown in the sticky header. */
     function handleStickyClick() {
         if (!scrollEl || !stickyUserMessage) return;
         const userMsgEls = scrollEl.querySelectorAll<HTMLElement>('.sticky-user-message');
@@ -606,43 +252,80 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     }
 
-    async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
-        if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
-        // If LLM is streaming, cancel the current response by clearing partial assistant entry.
-        if (isLoading) {
-            stream.state.entries = stream.state.entries.filter(e => !e.isStreaming);
-            if (currentAssistantId) {
-                stream.state.currentAssistantId = null;
+    // ── Draft persistence ──
+    $effect(() => {
+        getDraftText(taskId).then(savedDraft => {
+            if (savedDraft !== null) inputValue = savedDraft;
+        }).catch(() => {});
+    });
+
+    $effect(() => {
+        loadDraftAttachments(taskId).then(atts => {
+            if (atts.length > 0) {
+                draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
+                    file: new File([], '', { type: a.mimeType }),
+                    preview: `data:${a.mimeType};base64,${a.data}`,
+                    mimeType: a.mimeType,
+                    base64: a.data,
+                }));
             }
-            stream.state.activeToolCalls.clear();
-                    stream.state.processedToolIds.clear();
-            markNotStreaming();
+        }).catch(() => {});
+    });
+
+    function handleInputSave(val: string) {
+        if (draftSaveTimer) clearTimeout(draftSaveTimer);
+        if (val) {
+            draftSaveTimer = setTimeout(() => {
+                setDraftText(taskId, val).catch(() => {});
+                draftSaveTimer = null;
+            }, DRAFT_SAVE_DEBOUNCE);
         }
-        // If task is in Done, move it back to In Progress before sending
-        if (taskStatus === 'done') {
-            try {
-                const updated = await moveTask(projectId, taskId, 'in_progress');
-                mergeTaskIntoBoard(updated);
-            } catch (e) {
-                showToast(String(e));
-                return;
+    }
+
+    function handleClearDraft() {
+        clearDraftText(taskId).catch(() => {});
+        clearDraftAttachments(taskId).catch(() => {});
+        draftAttachments = [];
+    }
+
+    $effect(() => {
+        const atts = draftAttachments;
+        if (atts.length > 0) {
+            saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+        }
+    });
+
+    // ── Model / provider management ──
+    function updateProvidersFromStore() {
+        const cfg = get(configStore);
+        if (cfg && cfg.providers) {
+            providers = cfg.providers;
+            if (providers.length > 0 && (!selectedModel || !providers.some(p => p.url === selectedUrl))) {
+                const firstProvider = providers[0];
+                const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
+                if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
+                    selectedUrl = firstProvider.url;
+                    selectedModel = firstProvider.default_model;
+                } else if (firstProvider.models.length > 0) {
+                    selectedUrl = firstProvider.url;
+                    selectedModel = _getModelName(firstProvider.models[0]);
+                }
             }
+            updateContextLimit();
         }
-        // Remove all error entries (cleared by next user action)
-        stream.state.entries = stream.state.entries.filter(e => e.role !== 'error');
-        // Add message optimistically with current thread context
-        const entryId = genId();
-        const isOfflineNow = getOfflineStatus();
-        stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
-        // Send with model info for lazy-start
-        if (!await sendWithTracking(msg, attachments, false, entryId)) {
-            const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
-            stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
-            stream.state.entries = [...stream.state.entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
+    }
+
+    function updateContextLimit() {
+        let provider = providers.find(p => p.url === selectedUrl);
+        if (!provider && selectedUrl === PI_SENTINEL_URL) {
+            provider = providers.find(p => isAgentProvider(p));
+        }
+        if (!provider) {
+            stream.state.contextState.limit = 0;
             return;
         }
-        scroll();
-        chatFormComp?.focus();
+        const model = provider.models.find((m: { name: string }) => m.name === selectedModel);
+        stream.state.contextState.limit = (model as { context_window?: number })?.context_window || 0;
     }
 
     async function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
@@ -650,409 +333,68 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
         updateContextLimit();
-        // Recalculate context usage from conversation history when switching providers.
-        // This ensures the context bar reflects the correct usage for the new provider.
         const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
         if (lastAssistant?.stats) {
             stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
             stream.state.contextState.used = stream.state.lastPromptTokens;
         }
-        // Update task with new model/provider
-        modelUpdatePending = true;
-        try {
-            await updateTask(projectId, taskId, {
-                model_name: modelName,
-                llama_server_url: providerUrl,
-                reasoning_effort: reasoningEffort || undefined,
-            });
-        } catch (e) {
-            console.error('Failed to update task model:', e);
-        } finally {
-            modelUpdatePending = false;
-        }
+        await actions.handleModelSelect(providerName, modelName, providerUrl, reasoningEffort);
     }
 
     function handleOperatingModeToggle() {
-        const modes = ['act', 'plan', 'ideate'];
-        const prevMode = operatingMode;
-        const nextIdx = (modes.indexOf(operatingMode) + 1) % modes.length;
-        const newMode = modes[nextIdx];
-        operatingMode = newMode;
-        updateTask(projectId, taskId, { operating_mode: newMode }).catch((e) => {
-            console.error('Failed to update operating mode:', e);
-            operatingMode = prevMode;
-        });
+        actions.handleOperatingModeToggle((mode: string) => { operatingMode = mode; });
     }
 
-    let isSummarizing = $state(false);
-    let summarizeController: AbortController | null = null;
+    // ── Watch for task config changes from the board store ──
+    $effect(() => {
+        const boardTask = $boardStore?.tasks.find(t => t.id === taskId);
+        if (boardTask) {
+            if (!actions.modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
+            if (!actions.modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
+            if (!actions.modelUpdatePending && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
+            operatingMode = boardTask.operating_mode ?? 'act';
+        }
+    });
 
-    async function handleSummarize() {
-        const confirmed = await showConfirm({
-            title: 'Compress Context',
-            message: 'This will create a summary of the conversation to reduce token usage. All messages are preserved — delete the summary entry to restore the full context.',
-            confirmText: 'Compress',
-            cancelText: 'Cancel',
-            variant: 'default',
-        });
-        if (!confirmed) return;
-        isSummarizing = true;
-        try {
-            if (isAgentSelected()) {
-                // Pi mode: trigger compaction via RPC (only works while task is running)
-                const result = await compactTask(projectId, taskId);
-                // Add the compaction summary as a chat entry
-                stream.state.entries = [...stream.state.entries, {
-                    id: genId(),
-                    role: 'summarization',
-                    content: result.summary || 'Context was summarized to free space',
-                    isStreaming: false,
-                    createdAt: new Date().toISOString(),
-                    stats: { model_name: selectedModel || 'Pi', prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
-                }];
-            } else {
-                // LLM mode: summarize via backend
-                summarizeController = new AbortController();
-                const result = await summarizeTask(projectId, taskId, summarizeController.signal);
-                console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
-            }
-        } catch (e: any) {
-            if (e?.name === 'AbortError') return;
-            console.error('Failed to compress context:', e);
-            showToast(e?.message || 'Failed to compress context', 'error');
-        } finally {
-            isSummarizing = false;
-            summarizeController = null;
+    // ── Stable callback handlers ──
+    function handleMsgDelete(entry: any) {
+        const idx = entries.findIndex(e => e.id === entry.id);
+        if (idx === 0) return;
+        actions.handleDeleteRequest(entry.id, entries.length - idx);
+    }
+    async function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        await actions.handleEditFork(msgId, origContent, newContent, atts);
+    }
+    async function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
+        await actions.handleEditSend(msgId, origContent, newContent, atts);
+    }
+    async function handleMsgEdit(msgId: string, newContent: string) {
+        await updateTaskMessage(projectId, taskId, msgId, newContent);
+        const entry = entries.find(e => e.id === msgId);
+        if (entry) entry.content = newContent;
+    }
+    function handleMsgNavigateTask(targetTaskId: string) {
+        const task = $boardStore?.tasks.find(t => t.id === targetTaskId);
+        if (task) {
+            const url = new URL(location.href);
+            url.searchParams.set('task', targetTaskId);
+            history.pushState(null, '', url);
+            import('$lib/stores/app').then(({ selectedTask }) => selectedTask.set(task));
         }
     }
 
-    async function handleSummarizeCancel() {
-        const confirmed = await showConfirm({
-            title: 'Cancel Summarization',
-            message: 'Summarization is in progress. Cancel it?',
-            confirmText: 'Cancel',
-            cancelText: 'Keep Running',
-            variant: 'default',
-        });
-        if (!confirmed) return;
-        summarizeController?.abort();
-    }
-
-    async function handleRegenerate(entryId: string) {
-        if (isLoading || disabled) return;
-        const idx = entries.findIndex(e => e.id === entryId);
-        if (idx === -1) return;
-        // Find the last user message before this assistant message
-        const lastUserIdx = findLastUserMessageBefore(entries, idx);
-        if (lastUserIdx === -1) return;
-        const lastUser = entries[lastUserIdx];
-        // Regenerate from backend starting after the last user message
-        try {
-            await regenerateTaskMessages(projectId, taskId, lastUser.id, true);
-        } catch (e) {
-            console.error('Failed to regenerate messages:', e);
-        }
-        // Trim local entries: keep everything up to and including the last user message
-        stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
-        isRegenerating = true;
-        if (!await sendWithTracking(lastUser.content, undefined, true)) {
-            showToast('Failed to regenerate');
-            isRegenerating = false;
-            return;
-        }
-        scroll();
-    }
-
-    async function handleStartTask() {
-        if (isStarting || disabled) return;
-        // Ensure model is set on the task before starting
-        if (selectedModel || selectedUrl) {
-            try {
-                await updateTask(projectId, taskId, {
-                    model_name: selectedModel,
-                    llama_server_url: selectedUrl,
-                });
-            } catch (e) {
-                console.error('Failed to update task model before start:', e);
-            }
-        }
-        // If the last message is already from the LLM, just update status without re-triggering
-        const lastEntry = entries[entries.length - 1];
-        if (lastEntry && lastEntry.role === 'assistant') {
-            try {
-                const updated = await startTask(projectId, taskId);
-                mergeTaskIntoBoard(updated);
-            } catch (e) {
-                showToast(String(e), 'error');
-            }
-            return;
-        }
-        isStarting = true;
-        // Prompt is already in entries (loaded from DB at task creation)
-        // Don't pre-create assistant entry — let the first token/tool_call event create it
-        lastSentMessage = taskPrompt;
-        stream.state.awaitingResponse = true;
-        scroll();
-        try {
-            const updated = await startTask(projectId, taskId);
-            mergeTaskIntoBoard(updated);
-        } catch (e) {
-            showToast(String(e), 'error');
-            isStarting = false;
-            stream.state.awaitingResponse = false;
-            return;
-        }
-        isStarting = false;
-    }
-
-    async function handleStop() {
-        markNotStreaming();
-        stream.state.awaitingResponse = false;
-        // Save the streaming assistant ID before clearing
-        const streamingId = currentAssistantId;
-        stream.closeCurrentAssistant();
-        // Remove the streaming assistant entry and entries with pending tool calls.
-        stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
-        // Clear active tool calls (immediate UI update)
-        stream.state.activeToolCalls.clear();
-        stream.state.processedToolIds.clear();
-        try {
-            await stopTask(projectId, taskId);
-        } catch (e) {
-            console.error('Failed to stop task:', e);
-        }
-        // Reload history from DB to discard any unpersisted (streaming) entries
-        // so they don't appear as duplicates when the task is restarted
-        await loadHistory();
-    }
-
-    let taskDiffStatsStore = getTaskDiffStatsContext();
-    let diffStats = $derived($taskDiffStatsStore[taskId] || null);
-    // Prefer the prop from CardDetail (computed from DiffCache, the source of truth).
-    // Falls back to WebSocket store for backward compat (e.g., Card.svelte usage).
-    let hasStagedChanges = $derived(
-        hasStagedChangesProp ?? (diffStats?.staged_paths || []).length > 0
-    );
-
-    async function handleCommitAndDone() {
-        if (isCommitting || disabled) return;
-        isCommitting = true;
-        try {
-            // Open dialog — it will stream the commit message from the backend
-            const confirmedMessage = await new Promise<string | null>((resolve) => {
-                commitDialogStore.set({
-                    streaming: true,
-                    message: '',
-                    confirmText: 'Commit and move to Done',
-                    cancelText: 'Cancel',
-                    projectId,
-                    taskId,
-                    _resolve: resolve,
-                });
-            });
-            if (!confirmedMessage) {
-                return; // User cancelled
-            }
-            const updated = await commitAndDone(projectId, taskId, confirmedMessage);
-            mergeTaskIntoBoard(updated);
-            // Reload history to show any system messages from merge conflict resolution
-            await loadHistory();
-        } catch (e) {
-            showToast(String(e));
-        } finally {
-            isCommitting = false;
-            // Clear queue status for this project
-            commitQueueStatus.update(map => {
-                const copy = { ...map };
-                delete copy[projectId];
-                return copy;
-            });
-        }
-    }
-
-    async function handleMoveToDone() {
-        if (isCommitting || disabled) return;
-        isCommitting = true;
-        try {
-            const updated = await moveTask(projectId, taskId, 'done');
-            mergeTaskIntoBoard(updated);
-            await loadHistory();
-        } catch (e) {
-            showToast(String(e));
-        } finally {
-            isCommitting = false;
-        }
-    }
-
-
-    /** Called when the user clicks the delete button on a message.
-     * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
-    async function handleDeleteRequest(entryId: string, count: number) {
-        let willDeleteBranch = false;
-        let branchName = '';
-        try {
-            const info = await checkMessageDelete(projectId, taskId, entryId);
-            willDeleteBranch = info.will_delete_branch;
-            branchName = info.branch_name || '';
-        } catch {
-            // If check fails, proceed without branch warning
-        }
-
-        let message = `This will delete ${count} message${count > 1 ? 's' : ''}. This action cannot be undone.`;
-        if (willDeleteBranch && branchName) {
-            message += `\n\nThis will also delete the git branch "${branchName}".`;
-        }
-
-        const confirmed = await showConfirm({
-            title: 'Delete Message',
-            message,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
-        });
-        if (!confirmed) return;
-
-        const idx = entries.findIndex(e => e.id === entryId);
-        if (idx === -1) return;
-        try {
-            await deleteTaskMessagesAfter(projectId, taskId, entryId);
-
-            // Discard deleted entries so loadHistory doesn't merge them back as non-DB entries.
-            stream.state.entries = stream.state.entries.filter((_, i) => i < idx);
-
-            // Reload from DB — restores pre-summary messages if summary was deleted.
-            await loadHistory(true);
-
-            // Refresh threads.
-            threads = await getTaskThreads(projectId, taskId);
-            const active = threads.find(t => t.is_active);
-            if (active && active.id !== activeThreadId) {
-                activeThreadId = active.id;
-                // Update URL to reflect the new active thread
-                updateThreadUrl(active.id);
-            }
-            // Invalidate diff cache — the backend reset worktree to a different commit,
-            // changing the diff baseline. The worktree watcher doesn't detect soft resets
-            // (working tree/index unchanged), so staged status in cache becomes stale.
-            // Force a full HTTP reload to get fresh staged status.
-            onInvalidateDiff?.();
-        } catch (e) {
-            showToast(String(e));
-        }
-    }
-
-    async function handleEditFork(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
-        const entry = entries.find(e => e.id === entryId);
-        if (!entry) return;
-        // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
-        if (taskStatus === 'backlog') {
-            const idx = entries.findIndex(e => e.id === entryId);
-            if (idx !== -1) { entries[idx].content = newContent; entries[idx].createdAt = new Date().toISOString(); }
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
-            return;
-        }
-        if (isLoading || disabled) return;
-        try {
-            const fromThreadId = entry.threadId || activeThreadId;
-            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
-            threads = await getTaskThreads(projectId, taskId);
-            activeThreadId = forked.id;
-            // Clear streaming state before loading new thread's messages.
-            resetStreamState();
-            // Load messages for the new thread
-            await loadHistory(true);
-            updateThreadUrl(forked.id);
-            onThreadSwitch?.();
-            await sendWithTracking(newContent, attachments);
-        } catch (e) {
-            showToast(String(e));
-        }
-    }
-
-    async function handleEditSend(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
-        const idx = entries.findIndex(e => e.id === entryId);
-        if (idx === -1) return;
-        if (!newContent.trim() && (!attachments || attachments.length === 0)) return;
-
-        // Backlog: persist edit only (soft edit, no LLM trigger)
-        if (taskStatus === 'backlog') {
-            stream.state.entries = stream.state.entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
-            return;
-        }
-
-        if (isLoading || disabled) return;
-        stream.state.entries = stream.state.entries.slice(0, idx);
-        stream.closeCurrentAssistant();
-        try {
-            await deleteTaskMessagesAfter(projectId, taskId, entryId);
-            threads = await getTaskThreads(projectId, taskId);
-            const active = threads.find(t => t.is_active);
-            if (active) {
-                activeThreadId = active.id;
-                updateThreadUrl(active.id);
-            }
-            // Invalidate diff cache (same reason as handleDeleteRequest)
-            onInvalidateDiff?.();
-        } catch (e) {
-            showToast(String(e));
-            return;
-        }
-        const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
-        stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        await sendWithTracking(newContent, attachments);
-        scroll();
-    }
-
-    function connect(skipSync = false) {
-        if (connected) return;
-        connecting = true;
-        connected = true;
-        connecting = false;
-        if (!firstConnectDone) {
-            firstConnectDone = true;
-            stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-        }
-    }
-
-    /** Dismiss a single error message without affecting other messages. */
-    async function handleDismissError(messageId: string) {
-        try {
-            await deleteTaskMessage(projectId, taskId, messageId);
-            stream.state.entries = entries.filter(e => e.id !== messageId);
-        } catch (e) {
-            console.error('Failed to dismiss error:', e);
-        }
-    }
-
-    /** Force immediate reconnection. */
-    function handleRetryConnect() {
-        connected = false;
-        // Remove existing connection lost errors
-        stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-        connect();
-    }
-
-    let destroyed = $state(false);
-
-    // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
+    // ── Mobile keyboard ──
     let keyboardOffset = $state(0);
     let chatFormRef: HTMLElement | null = $state(null);
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let chatFormComp: { focus: () => void } | null = null;
 
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
     function setupViewportListener() {
         const vv = window.visualViewport;
         if (!vv) return;
-        const vp = vv;
         function onResize() {
-            const diff = Math.max(0, window.innerHeight - vp.height);
+            const diff = Math.max(0, window.innerHeight - vv.height);
             keyboardOffset = diff;
         }
         vv.addEventListener('resize', onResize);
-        // Also listen for orientation changes
         window.addEventListener('orientationchange', onResize);
         return () => {
             vv.removeEventListener('resize', onResize);
@@ -1060,157 +402,84 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         };
     }
 
-    /** Re-read thread param from URL and switch if needed (for popstate/Back navigation). */
+    // ── Thread URL sync ──
     async function syncThreadFromUrl() {
-        const urlThread = readThreadFromUrl();
+        const urlThread = history.readThreadFromUrl();
         if (!urlThread) return;
-        // If URL specifies a thread and it differs from current active thread, switch to it
-        if (urlThread !== activeThreadId && threads.some(t => t.id === urlThread)) {
-            await handleThreadSwitch(urlThread);
+        if (urlThread !== history.activeThreadId && history.threads.some(t => t.id === urlThread)) {
+            await actions.handleThreadSwitch(urlThread);
         }
     }
 
+    // ── Lifecycle ──
+    let unsubQueue: (() => void) | null = null;
+
     onMount(() => {
-        // Run async init in a promise chain; cleanup is returned synchronously.
-        let unsubTaskEvent: (() => void) | null = null;
         let unsubConfig: (() => void) | null = null;
         let unsubViewport: (() => void) | null | undefined = null;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);
         unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
         unsubViewport = setupViewportListener();
-        const handleKeydown = (e: KeyboardEvent) => {
-            if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
-                markUserInput();
-            }
-        };
-        window.addEventListener('keydown', handleKeydown);
 
         (async () => {
-            // Providers loaded via configStore subscription (no separate fetch needed)
             updateProvidersFromStore();
-            await loadThreads();
+            await history.loadThreads();
             // If URL has a thread param, switch to that thread before loading history
-            const urlThread = readThreadFromUrl();
-            if (urlThread && threads.some(t => t.id === urlThread)) {
+            const urlThread = history.readThreadFromUrl();
+            if (urlThread && history.threads.some(t => t.id === urlThread)) {
                 try {
+                    const { switchTaskThread } = await import('$lib/api');
                     const switched = await switchTaskThread(projectId, taskId, urlThread);
-                    updateActiveThread(switched.id);
+                    history.updateActiveThread(switched.id);
                 } catch (e) {
-                    showToast(String(e));
+                    import('$lib/stores/dialogs').then(({ showToast }) => showToast(String(e)));
                 }
             } else if (!urlThread) {
-                // No thread param — use the last active thread (is_active flag).
-                // Only default to "Main" if no thread is marked active (first open).
-                if (!activeThreadId) {
-                    const mainThread = threads.find(t => t.name === 'Main');
+                if (!history.activeThreadId) {
+                    const mainThread = history.threads.find(t => t.name === 'Main');
                     if (mainThread) {
                         try {
+                            const { switchTaskThread } = await import('$lib/api');
                             const switched = await switchTaskThread(projectId, taskId, mainThread.id);
-                            updateActiveThread(switched.id);
+                            history.updateActiveThread(switched.id);
                         } catch (e) {
-                            showToast(String(e));
+                            import('$lib/stores/dialogs').then(({ showToast }) => showToast(String(e)));
                         }
                     }
                 }
             }
-            // 1. Set up task event handler FIRST (before subscribing to task).
-            unsubTaskEvent = taskEventContext.subscribe((event) => {
-                if (event && event.task_id === taskId) {
-                    handleEvent({ type: event.type as StreamEventType, data: event.data });
-                }
-            });
-
-            // 2. Clear stale streaming state for non-running tasks.
-            // The global streamingTaskIds store may have a leftover entry from a previous
-            // visit if the user navigated away while the task was streaming.
-            if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
-                markNotStreaming();
-            }
-
-            // 3. Subscribe to this task directly (triggers buffer replay from server).
-            // Handler is already set up above, so buffer events won't be missed.
-            // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
-            const stream = getAppStreamRef();
-            if (stream) {
-                stream.subscribeTask(projectId, taskId);
-            }
-
-            // 4. Load history from DB (merges with buffer entries via ID-based dedup).
-            await loadHistory();
-
-            // 5. Allow live events — buffer replay is done, DB state is loaded.
-            suppressEvents = false;
-
+            // Load history from DB before connection setup
+            await history.loadHistory(false);
             // Override model selection with task-specific values if set
             try {
-                const task = await (await import('$lib/api')).getTask(projectId, taskId);
-                if (task.llama_server_url) {
-                    selectedUrl = task.llama_server_url;
-                }
-                if (task.model_name) {
-                    selectedModel = task.model_name;
-                }
-                if (task.reasoning_effort) {
-                    selectedReasoningEffort = task.reasoning_effort;
-                }
-            } catch {
-                // Task may not exist yet
-            }
-            connect();
-            // Scroll to bottom after history is loaded and DOM has rendered.
-            // scroll() uses requestAnimationFrame internally so the DOM update is ready.
+                const task = await getTask(projectId, taskId);
+                if (task.llama_server_url) selectedUrl = task.llama_server_url;
+                if (task.model_name) selectedModel = task.model_name;
+                if (task.reasoning_effort) selectedReasoningEffort = task.reasoning_effort;
+            } catch { /* Task may not exist yet */ }
+            // Initialize connection (subscribes to task events, connects)
+            conn.setup();
+            // Scroll to bottom after history is loaded and DOM has rendered
             scroll();
-            // If task was started externally (e.g., from board) and is running with no
-            // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
-            // Only for in_progress — review tasks have no active executor.
-            if (taskStatus === 'in_progress') {
-                const lastEntry = entries[entries.length - 1];
-                if (lastEntry?.role === 'user') {
-                    stream.state.awaitingResponse = true;
-                }
-            }
         })();
 
-        // Reconcile stale streaming state on tab return.
-        // Mobile browsers suspend JS while hidden; the 'complete' event may be missed
-        // (per-task buffer is cleared on the server when the turn ends).
-        const handleTabVisibility = async () => {
-            if (!document.hidden && isLoading) {
-                try {
-                    const task = await getTask(projectId, taskId);
-                    if (task.status !== 'in_progress') {
-                        // Drop stale streaming entries (temp IDs would duplicate DB entries)
-                        stream.state.entries = stream.state.entries.filter(
-                            e => !e.isStreaming && !(e.toolCalls?.some(tc => tc.isPending))
-                        );
-                        stream.resetStreaming();
-                        markNotStreaming();
-                        await loadHistory();
-                    }
-                } catch {
-                    // task deleted — ignore
-                }
+        unsubQueue = onQueueChanged(() => {
+            for (const entry of entries) {
+                if (entry.queued) entry.queued = false;
             }
-        };
-        window.addEventListener('visibilitychange', handleTabVisibility);
+        });
 
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubConfig?.();
             unsubViewport?.();
-            window.removeEventListener('keydown', handleKeydown);
-            unsubTaskEvent?.();
-            window.removeEventListener('visibilitychange', handleTabVisibility);
         };
     });
 
     onDestroy(() => {
-        destroyed = true;
         if (inputTimeout) clearTimeout(inputTimeout);
         unsubQueue?.();
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        // Flush pending draft save on navigation/component destroy
         if (draftSaveTimer) {
             clearTimeout(draftSaveTimer);
             draftSaveTimer = null;
@@ -1220,48 +489,38 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         }
     });
 
-    // Save draft on page unload (navigation, reload) as a safety net for onDestroy
+    // Save draft on page unload
     function handleBeforeUnload() {
         if (draftSaveTimer) {
             clearTimeout(draftSaveTimer);
             draftSaveTimer = null;
         }
         if (inputValue) {
-            // Sync write for beforeunload — use navigator.sendBeacon-style approach
-            // Since IndexedDB is async, best-effort only
             setDraftText(taskId, inputValue).catch(() => {});
         }
     }
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    // Clear queued flags when queue changes (actions flushed)
-    let unsubQueue: (() => void) | null = null;
-    onMount(() => {
-        unsubQueue = onQueueChanged(() => {
-            // When queue changes, check if any queued messages have been flushed
-            // Clear queued flag for messages that are no longer in the queue
-            for (const entry of entries) {
-                if (entry.queued) {
-                    entry.queued = false;
-                }
-            }
-        });
-    });
+    // Import used in handleMsgEdit
+    async function updateTaskMessage(projectId: string, taskId: string, msgId: string, content: string) {
+        const { updateTaskMessage: apiUpdate } = await import('$lib/api');
+        await apiUpdate(projectId, taskId, msgId, content);
+    }
 </script>
 
 <div class="task-chat">
     <!-- Live region for screen reader announcements -->
     <div class="sr-only" aria-live="polite" aria-atomic="true">
-        {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
+        {#if isLoading && !conn.connected}Connecting...{:else if isLoading}Agent is responding...{:else if conn.connected}Connected, waiting for messages{/if}
     </div>
     <ChatEntries
         {entries}
         {entryMetas}
         {lastEntryIdx}
-        {activeThreadId}
-        {threads}
+        activeThreadId={history.activeThreadId}
+        threads={history.threads}
         {awaitingResponse}
-        {connected}
+        connected={conn.connected}
         {queuePosition}
         {queueEstimatedWait}
         {promptProgress}
@@ -1274,15 +533,15 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         onScroll={onScroll}
         onWheel={markUserInput}
         onTouchStart={markUserInput}
-        onDismissError={handleDismissError}
-        onRetryConnect={handleRetryConnect}
-        onThreadSwitch={handleThreadSwitch}
-        isSwitching={threadSwitching}
+        onDismissError={(msgId) => conn.handleDismissError(msgId, deleteTaskMessage)}
+        onRetryConnect={conn.handleRetryConnect}
+        onThreadSwitch={actions.handleThreadSwitch}
+        isSwitching={false}
         onMsgDelete={handleMsgDelete}
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}
         onMsgEdit={handleMsgEdit}
-        onRegenerate={handleRegenerate}
+        onRegenerate={actions.handleRegenerate}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
         {scrollEl}
@@ -1296,12 +555,12 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {selectedUrl}
             {selectedReasoningEffort}
             {operatingMode}
-            {isStarting}
+            isStarting={actions.isStarting}
             {disabled}
             {isAgentSelected}
             onModelSelect={handleModelSelect}
             onOperatingModeToggle={handleOperatingModeToggle}
-            onStartTask={handleStartTask}
+            onStartTask={actions.handleStartTask}
         />
     {:else}
         <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
@@ -1309,8 +568,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {taskStatus}
             {showResumeButton}
             {showRestartButton}
-            {isStarting}
-            {isCommitting}
+            isStarting={actions.isStarting}
+            isCommitting={actions.isCommitting}
             {disabled}
             hasStagedChanges={hasStagedChanges}
             {queueStatus}
@@ -1319,9 +578,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             {selectedUrl}
             {selectedReasoningEffort}
             {onMoveTask}
-            onStartTask={handleStartTask}
-            onCommitAndDone={handleCommitAndDone}
-            onMoveToDone={handleMoveToDone}
+            onStartTask={actions.handleStartTask}
+            onCommitAndDone={actions.handleCommitAndDone}
+            onMoveToDone={actions.handleMoveToDone}
             onModelSelect={handleModelSelect}
         />
         {#if !showRestartButton}
@@ -1329,27 +588,27 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             bind:this={chatFormComp}
             bind:value={inputValue}
             bind:attachments={draftAttachments}
-            disabled={disabled}
-            isLoading={isLoading}
+            {disabled}
+            {isLoading}
             placeholder="Send a message to the agent..."
-            providers={providers}
-            selectedModel={selectedModel}
-            selectedUrl={selectedUrl}
-            selectedReasoningEffort={selectedReasoningEffort}
+            {providers}
+            {selectedModel}
+            {selectedUrl}
+            {selectedReasoningEffort}
             contextUsed={stream.state.contextState.used}
             contextLimit={stream.state.contextState.limit}
-            operatingMode={operatingMode}
-            projectId={projectId}
-            taskId={taskId}
+            {operatingMode}
+            {projectId}
+            {taskId}
             onInput={handleInputSave}
             onClearDraft={handleClearDraft}
-            onSubmit={handleSend}
-            onStop={handleStop}
+            onSubmit={actions.handleSend}
+            onStop={actions.handleStop}
             onModelSelect={handleModelSelect}
             onOperatingModeToggle={handleOperatingModeToggle}
-            onSummarize={handleSummarize}
-            onSummarizeCancel={handleSummarizeCancel}
-            isSummarizing={isSummarizing}
+            onSummarize={actions.handleSummarize}
+            onSummarizeCancel={actions.handleSummarizeCancel}
+            isSummarizing={actions.isSummarizing}
         />
         {/if}
         </div>
