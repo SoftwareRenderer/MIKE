@@ -6,6 +6,7 @@ export class DialogStore {
     public confirmation = $state<{
         title: string;
         message: string;
+        items?: string[];
         confirmText?: string;
         cancelText?: string;
         variant?: 'default' | 'destructive';
@@ -37,6 +38,7 @@ export class DialogStore {
     public showConfirm(options: {
         title: string;
         message: string;
+        items?: string[];
         confirmText?: string;
         cancelText?: string;
         variant?: 'default' | 'destructive';
@@ -45,6 +47,7 @@ export class DialogStore {
             this.confirmation = {
                 title: options.title,
                 message: options.message,
+                items: options.items,
                 confirmText: options.confirmText ?? 'Confirm',
                 cancelText: options.cancelText ?? 'Cancel',
                 variant: options.variant ?? 'destructive',

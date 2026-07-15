@@ -1,9 +1,10 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
+    import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import Card from './Card.svelte';
     import { fade } from 'svelte/transition';
 
-    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard }: {
+    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
         title: string;
         color: string;
@@ -21,6 +22,7 @@
         onSelect?: (task: Task) => void;
         canDrop?: (taskId: string, columnId: string) => boolean;
         onRefreshBoard?: () => void;
+        multiSelect?: MultiSelect | null;
     } = $props();
 
     let isOver = $state(false);
@@ -99,7 +101,7 @@
         {/if}
         {#each tasks as task (task.id)}
             <div class="task-wrapper" transition:fade={{ duration: 200 }}>
-                <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} inline={false} showSubtaskBorder={true} onSelect={onSelect} onRefreshBoard={onRefreshBoard} />
+                <Card {task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={color} inline={false} showSubtaskBorder={true} onSelect={onSelect} {multiSelect} onRefreshBoard={onRefreshBoard} />
             </div>
         {/each}
     </div>
