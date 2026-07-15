@@ -3,7 +3,7 @@
     import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
-    import { showConfirm } from '$lib/stores/dialogs';
+    import { dialogStore } from '$lib/stores';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
@@ -351,7 +351,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         }
 
         if (needsConfirmation) {
-            const confirmed = await showConfirm({
+            const confirmed = await dialogStore.showConfirm({
                 title: 'Disable Sandbox',
                 message: `Disable sandbox isolation for "${project.name}"?\n\nTasks will run without gVisor sandboxing, executing commands directly on the host.`,
                 confirmText: 'Disable',

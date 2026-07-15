@@ -1,9 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { projects as projectsStore, selectedProject, board as boardStore, config as configStore, sidebarCollapsed, selectedTask, showEditTask, editTaskData as editTaskDataStore, projectTerminalPorts } from '$lib/stores/app';
-import { showCreateTask, creatingChildOf as creatingChildOfStore, showConfig, showTerminal, showStats, showCardDetail, showSandboxConfig } from '$lib/stores/ui';
-import { showConfirm, showToast } from '$lib/stores/dialogs';
+    import { appStore, uiStore, dialogStore } from '$lib/stores';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
@@ -191,27 +189,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     const isMobileCtx = useIsMobile();
 
-    // Sync Svelte 4 stores → local $state (single subscription, no onMount needed)
+    // Sync reactive stores → local $state
+    $effect(() => { collapsed = appStore.sidebarCollapsed; });
+    $effect(() => { const v = appStore.config; if (v) cfg = v; });
     $effect(() => {
-        const unsub = [
-            sidebarCollapsed.subscribe(v => collapsed = v),
-            configStore.subscribe(v => { if (v) cfg = v; }),
-            selectedTask.subscribe(t => {
-                selectedTaskVal = t;
-                if (t && currentProject) {
-                    // Skip URL update if task is already in the URL (set by pushState from user action)
-                    const urlTask = new URLSearchParams(location.search).get('task');
-                    if (urlTask !== t.id) {
-                        updateUrl({ project: currentProject.id, task: t.id });
-                    }
-                    // On mobile, auto-switch to Agent tab when opening a task
-                    if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
-                }
-            }),
-            taskDiffStatsContext.subscribe(v => taskDiffStats = v),
-        ].map(unsub => unsub);
-        return () => unsub.forEach(u => u());
+        const t = appStore.selectedTask;
+        selectedTaskVal = t;
+        if (t && currentProject) {
+            const urlTask = new URLSearchParams(location.search).get('task');
+            if (urlTask !== t.id) {
+                updateUrl({ project: currentProject.id, task: t.id });
+            }
+            if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
+        }
     });
+    $effect(() => { taskDiffStats = taskDiffStatsContext.get(); });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
     // Subscribes when a task is selected, unsubscribes only when switching to a
@@ -246,12 +238,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // If URL has no project param, go back to project list
         if (!projectId && currentProject) {
             currentProject = null;
-            selectedProject.set(null);
+            appStore.selectedProject = null;
             tasks = [];
-            boardStore.set(null);
+            appStore.board = null;
             disconnectBoardStream();
-            selectedTask.set(null);
-            showCardDetail.set(false);
+            appStore.selectedTask = null;
+            uiStore.showCardDetail = false;
             window.dispatchEvent(new CustomEvent('urlchanged'));
             return;
         }
@@ -270,15 +262,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (taskId) {
             const task = tasks.find(t => t.id === taskId);
             if (task) {
-                selectedTask.set(task);
-                showCardDetail.set(true);
+                appStore.selectedTask = task;
+                uiStore.showCardDetail = true;
             }
         } else {
             // Scroll to the task's column when going back via browser back button
             const prevTask = selectedTaskVal;
             if (prevTask) scrollToColumn = prevTask.status;
-            selectedTask.set(null);
-            showCardDetail.set(false);
+            appStore.selectedTask = null;
+            uiStore.showCardDetail = false;
         }
         // Restore explorer view from URL
         const viewParam = params.get('view');
@@ -314,13 +306,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     const latest = resolvedTasks.get(created.id);
                     return latest || created;
                 });
-                boardStore.update(b => b ? { ...b, tasks } : b);
+                appStore.board = { ...appStore.board!, tasks };
                 // Clear cache indicator after flush succeeds
                 servingFromCache = false;
             });
             const projs = await getProjects();
             projects = projs || [];
-            projectsStore.set(projects);
+            appStore.projects = projects;
             portConflict = null; // Clear stale port conflict on reload
             if (projects.length > 0) {
                 // Check URL for project param to restore previous project
@@ -332,7 +324,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 await selectProject(targetProject || projects[0]);
                 // Replay queued actions onto cached board so UI reflects user's last actions
                 tasks = applyQueuedActionsToBoard(tasks);
-                boardStore.update(b => b ? { ...b, tasks } : b);
+                appStore.board = { ...appStore.board!, tasks };
                 // Check if data was served from cache
                 servingFromCache = isFromCache(projs);
             }
@@ -340,7 +332,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             try {
                 const c = await getConfig();
                 cfg = c;
-                configStore.set(c);
+                appStore.config = c;
             } catch {
                 // No cached config — proceed without it
             }
@@ -441,14 +433,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         } else {
                             tasks = [...tasks, updatedTask];
                         }
-                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        appStore.board = { ...appStore.board!, tasks };
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
-                            selectedTask.set(updatedTask);
+                            appStore.selectedTask = updatedTask;
                         }
                     },
                     onTaskDeleted: (task_id: string) => {
                         tasks = tasks.filter(t => t.id !== task_id);
-                        boardStore.update(b => b ? { ...b, tasks } : b);
+                        appStore.board = { ...appStore.board!, tasks };
                         if (selectedTaskVal && selectedTaskVal.id === task_id) {
                             clearTaskDetail();
                         }
@@ -493,7 +485,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         portConflict = { project_id, ports: conflicted_ports };
                     },
                     onProjectPorts: (ports) => {
-                        projectTerminalPorts.set(ports);
+                        appStore.projectTerminalPorts = ports;
                     },
                 });
                 // Expose appStream so TaskChat can subscribe after handler setup
@@ -648,7 +640,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // Refresh board to pick up tasks created via API
                 const b = await getBoard(currentProject.id);
                 tasks = b.tasks || [];
-                boardStore.set(b);
+                appStore.board = b;
                 task = tasks.find(t => t.id === taskId);
                 if (!task) {
                     // Task truly doesn't exist — clear task param
@@ -662,8 +654,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
         selectedTaskVal = task;
-        showCardDetail.set(true);
-        selectedTask.set(task);
+        uiStore.showCardDetail = true;
+        appStore.selectedTask = task;
     }
 
     function disconnectBoardStream() {
@@ -681,22 +673,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             await waitForFlush();
             const b = await getBoard(currentProject.id);
             tasks = b.tasks || [];
-            boardStore.set(b);
+            appStore.board = b;
             // Update selected task reference to point to fresh object from API
             const task = selectedTaskVal;
             if (task) {
                 const fresh = tasks.find(t => t.id === task.id);
                 if (fresh) {
                     selectedTaskVal = fresh;
-                    selectedTask.set(fresh);
+                    appStore.selectedTask = fresh;
                 }
             }
             // Live data received — clear cache indicator
             servingFromCache = false;
             if (wsConnected) lastSyncedAt = Date.now();
         } catch (e) {
-            // When offline, sync tasks from boardStore (has optimistic updates)
-            const b = (boardStore as any).get();
+            // When offline, sync tasks from appStore (has optimistic updates)
+            const b = appStore.board;
             if (b?.tasks) {
                 tasks = b.tasks;
             }
@@ -712,23 +704,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             await waitForFlush();
             const projs = await getProjects();
             projects = projs || [];
-            projectsStore.set(projects);
+            appStore.projects = projects;
             if (currentProject) {
                 const b = await getBoard(currentProject.id);
                 tasks = b.tasks || [];
-                boardStore.set(b);
+                appStore.board = b;
                 // Update selected task reference
                 if (selectedTaskVal) {
                     const fresh = tasks.find(t => t.id === selectedTaskVal.id);
                     if (fresh) {
                         selectedTaskVal = fresh;
-                        selectedTask.set(fresh);
+                        appStore.selectedTask = fresh;
                     }
                 }
             }
             const c = await getConfig();
             cfg = c;
-            configStore.set(c);
+            appStore.config = c;
             servingFromCache = false;
             if (wsConnected) lastSyncedAt = Date.now();
         } catch {
@@ -740,8 +732,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Push URL first so the subscription sees updated URL
         updateUrl({ project: currentProject?.id }, true, true);
         selectedTaskVal = null;
-        selectedTask.set(null);
-        showCardDetail.set(false);
+        appStore.selectedTask = null;
+        uiStore.showCardDetail = false;
     }
 
     async function selectProject(p: Project) {
@@ -750,7 +742,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const wasProjectSwitch = !!currentProject;
         currentProject = p;
         currentBranch = '';
-        selectedProject.set(p);
+        appStore.selectedProject = p;
         // Re-mount explorer view for the new project (only on project switch, not initial load)
         if (wasProjectSwitch && wasExplorerViewOpen) {
             showExplorerViewVal = false;
@@ -766,7 +758,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         try {
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
-            boardStore.set(b);
+            appStore.board = b;
             lastSyncedAt = Date.now();
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
@@ -781,7 +773,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const cachedBoard = await getBoardCache<{ tasks: Task[] }>(boardCacheKey(p.id));
                 if (cachedBoard) {
                     tasks = cachedBoard.tasks || [];
-                    boardStore.set(cachedBoard);
+                    appStore.board = cachedBoard;
                     await restoreTaskFromUrl();
                 }
             } catch {
@@ -812,7 +804,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         try {
             const proj = await createProject(path, sandboxEnabled);
             projects.push(proj);
-            projectsStore.set(projects);
+            appStore.projects = projects;
             clearTaskDetail();
             selectProject(proj);
         } catch (e) {
@@ -822,7 +814,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     function toggleSidebar() {
         collapsed = !collapsed;
-        sidebarCollapsed.set(collapsed);
+        // sidebarCollapsed persisted via AppStore;
         // Manage focus: when collapsing, focus the toggle button; when expanding, focus the first project
         queueMicrotask(() => {
             if (collapsed) {
@@ -851,7 +843,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
-                sidebarCollapsed.set(true);
+                // sidebarCollapsed persisted via AppStore;
                 sidebarAutoCollapsed = true;
             }
         } else {
@@ -859,7 +851,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
-                sidebarCollapsed.set(false);
+                // sidebarCollapsed persisted via AppStore;
                 sidebarAutoCollapsed = false;
             }
         }
@@ -869,13 +861,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function restoreExplorerSidebar() {
         if (sidebarAutoCollapsed) {
             collapsed = false;
-            sidebarCollapsed.set(false);
+            // sidebarCollapsed persisted via AppStore;
             sidebarAutoCollapsed = false;
         }
     }
 
     async function removeProject(p: Project) {
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Remove Project',
             message: `Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`,
             confirmText: 'Remove',
@@ -886,7 +878,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             await deleteProject(p.id);
             const index = projects.indexOf(p);
             projects.splice(index, 1);
-            projectsStore.set(projects);
+            appStore.projects = projects;
             // Auto-select next project (or previous if it was the last)
             if (projects.length > 0) {
                 const nextIndex = Math.min(index, projects.length - 1);
@@ -895,9 +887,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             } else {
                 clearTaskDetail();
                 currentProject = null;
-                selectedProject.set(null);
+                appStore.selectedProject = null;
                 tasks = [];
-                boardStore.set(null);
+                appStore.board = null;
             }
         } catch (e) {
             addProjectError = String(e);
@@ -906,30 +898,30 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     function openSandboxConfig(p: Project) {
         if ((projectCounts[p.id]?.in_progress ?? 0) > 0) {
-            showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
+            dialogStore.showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
             return;
         }
         // Clear port conflict when opening modal (user will see/fix it in modal)
         portConflict = null;
-        showSandboxConfig.set(true);
+        uiStore.showSandboxConfig = true;
     }
 
     async function handleSandboxSaved() {
-        showSandboxConfig.set(false);
+        uiStore.showSandboxConfig = false;
         portConflict = null; // Clear port conflict on successful save
         // Refresh projects list to pick up changes
         try {
             const projs = await getProjects();
             projects = projs || [];
-            projectsStore.set(projects);
+            appStore.projects = projects;
             const proj = currentProject;
             if (proj) {
                 const updated = projects.find(p => p.id === proj.id);
                 if (updated) {
                     currentProject = updated;
-                    selectedProject.set(updated);
+                    appStore.selectedProject = updated;
                     // Close terminal so it restarts with updated sandbox mode
-                    showTerminal.set(false);
+                    uiStore.showTerminal = false;
                 }
             }
         } catch (e) {
@@ -974,7 +966,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         Viewing cached data
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={$showCardDetail && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -995,8 +987,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onRemoveProject={removeProject}
         onToggleSidebar={toggleSidebar}
-        onShowStats={() => { showStats.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-        onShowConfig={() => { showConfig.set(true); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onShowStats={() => { uiStore.showStats = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        onShowConfig={() => { uiStore.showConfig = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
         onToggleFullScreen={() => {
             if (document.fullscreenElement) {
                 document.exitFullscreen().catch(() => {});
@@ -1011,7 +1003,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !($showCardDetail && selectedTaskVal) && !showExplorerViewVal}
+            {#if !(uiStore.showCardDetail && selectedTaskVal) && !showExplorerViewVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -1020,9 +1012,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
                 onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
-                onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
-                onShowStats={() => showStats.set(true)}
-                onShowConfig={() => showConfig.set(true)}
+                onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                onShowStats={() => uiStore.showStats = true}
+                onShowConfig={() => uiStore.showConfig = true}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
@@ -1034,22 +1026,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         initialFile={urlFileId || ''}
                         sandboxEnabled={currentProject.sandbox_enabled}
                         fsEventQueue={fsEventQueue}
-                        onOpenTerminal={() => { loadTerminalPanel(); showTerminal.set(true); }}
+                        onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
                         onUpdateFile={handleExplorerFileChange}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
-                {:else if $showCardDetail && selectedTaskVal}
+                {:else if uiStore.showCardDetail && selectedTaskVal}
                     <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
-                        showCardDetail.set(false);
-                        selectedTask.set(null);
+                        uiStore.showCardDetail = false;
+                        appStore.selectedTask = null;
                         updateUrl({ project: currentProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         selectedTaskVal = t;
-                        selectedTask.set(t);
+                        appStore.selectedTask = t;
                     }} onRefreshBoard={() => refreshBoard()} />
                 {:else}
                     <Board
@@ -1057,15 +1049,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         scrollToColumn={scrollToColumn}
-                        onAddTask={() => { creatingChildOfStore.set(null); showCreateTask.set(true); }}
-                        onCreateChildTask={(parentId: string) => { creatingChildOfStore.set(parentId); showCreateTask.set(true); }}
+                        onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
+                        onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
                         onRefreshBoard={() => refreshBoard()}
                     />
                 {/if}
             </section>
         {:else}
             <div class="empty-state">
-                <button class="icon-btn" onclick={() => showConfig.set(true)} aria-label="Settings" title="Settings">
+                <button class="icon-btn" onclick={() => uiStore.showConfig = true} aria-label="Settings" title="Settings">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -1074,7 +1066,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {#if !hasProviders}
                     <h2>Welcome to Kanban</h2>
                     <p>Configure an LLM provider to get started. Supports any OpenAI-compatible API.</p>
-                    <button class="btn-primary" onclick={() => showConfig.set(true)} title="Configure an LLM provider">Configure Provider</button>
+                    <button class="btn-primary" onclick={() => uiStore.showConfig = true} title="Configure an LLM provider">Configure Provider</button>
                 {:else}
                     <h2>No Projects</h2>
                     <p>Add a project to get started. Projects must be git repositories.</p>
@@ -1085,33 +1077,33 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     </main>
 
     <!-- Modals -->
-    {#if $showCreateTask}
+    {#if uiStore.showCreateTask}
         <CreateTaskModal
             projectId={currentProject?.id}
-            parentId={$creatingChildOfStore ?? undefined}
-            onClose={() => { showCreateTask.set(false); creatingChildOfStore.set(null); }}
-            onTaskCreated={() => { creatingChildOfStore.set(null); }} // board stream pushes update
+            parentId={uiStore.creatingChildOf ?? undefined}
+            onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; }}
+            onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
         />
     {/if}
-    {#if $showEditTask && $editTaskDataStore}
+    {#if appStore.showEditTask && appStore.editTaskData}
         <EditTaskModal
-            taskTitle={$editTaskDataStore.taskTitle}
-            taskPrompt={$editTaskDataStore.taskPrompt}
-            editProviders={$editTaskDataStore.editProviders}
-            editModel={$editTaskDataStore.editModel}
-            editUrl={$editTaskDataStore.editUrl}
-            editReasoningEffort={$editTaskDataStore.editReasoningEffort}
-            editPlanMode={$editTaskDataStore.editPlanMode}
-            editAutoMerge={$editTaskDataStore.editAutoMerge}
-            editSubtasksAutoMerge={$editTaskDataStore.editSubtasksAutoMerge}
-            taskHasParent={$editTaskDataStore.taskHasParent}
-            targetBranch={$editTaskDataStore.targetBranch}
-            isAgentSelected={$editTaskDataStore.isAgentSelected}
+            taskTitle={appStore.editTaskData.taskTitle}
+            taskPrompt={appStore.editTaskData.taskPrompt}
+            editProviders={appStore.editTaskData.editProviders}
+            editModel={appStore.editTaskData.editModel}
+            editUrl={appStore.editTaskData.editUrl}
+            editReasoningEffort={appStore.editTaskData.editReasoningEffort}
+            editPlanMode={appStore.editTaskData.editPlanMode}
+            editAutoMerge={appStore.editTaskData.editAutoMerge}
+            editSubtasksAutoMerge={appStore.editTaskData.editSubtasksAutoMerge}
+            taskHasParent={appStore.editTaskData.taskHasParent}
+            targetBranch={appStore.editTaskData.targetBranch}
+            isAgentSelected={appStore.editTaskData.isAgentSelected}
             onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => {
-                const taskId = $editTaskDataStore!.taskId;
-                const projectId = $editTaskDataStore!.projectId;
+                const taskId = appStore.editTaskData!.taskId;
+                const projectId = appStore.editTaskData!.projectId;
                 // Find the task in the board and update it
                 const task = tasks.find(t => t.id === taskId);
                 if (task) {
@@ -1132,32 +1124,29 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     if (model) task.model_name = model;
                     if (url) task.llama_server_url = url;
                     if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-                    boardStore.update(b => {
-                        if (!b) return b;
-                        return { ...b, tasks: b.tasks.map(t => t.id === task.id ? task : t) };
-                    });
+                    appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === task.id ? task : t) };
                     import('$lib/api').then(({ updateTask }) => updateTask(projectId, taskId, updates)).catch(err => {
                         console.error('Failed to update task:', err);
                     });
                 }
-                showEditTask.set(false);
-                editTaskDataStore.set(null);
+                appStore.showEditTask = false;
+                appStore.editTaskData = null;
             }}
             onCancel={() => {
-                showEditTask.set(false);
-                editTaskDataStore.set(null);
+                appStore.showEditTask = false;
+                appStore.editTaskData = null;
             }}
         />
     {/if}
-    {#if $showConfig}
+    {#if uiStore.showConfig}
         <ConfigModal
             config={cfg}
-            onClose={() => showConfig.set(false)}
-            onSaved={() => showConfig.set(false)}
+            onClose={() => uiStore.showConfig = false}
+            onSaved={() => uiStore.showConfig = false}
             onSignOut={handleLogout}
         />
     {/if}
-    {#if $showTerminal && TerminalPanelComponent}
+    {#if uiStore.showTerminal && TerminalPanelComponent}
         {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
             {@const Terminal = TerminalPanelComponent}
             {#if Terminal}
@@ -1165,10 +1154,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             {/if}
         {/key}
     {/if}
-    {#if $showStats && currentProject}
+    {#if uiStore.showStats && currentProject}
         <StatsModal
             projectId={currentProject.id}
-            onClose={() => showStats.set(false)}
+            onClose={() => uiStore.showStats = false}
         />
     {/if}
     {#if showFileBrowserVal}
@@ -1177,11 +1166,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onSelect={handleSelectProjectPath}
         />
     {/if}
-    {#if $showSandboxConfig && currentProject}
+    {#if uiStore.showSandboxConfig && currentProject}
         <SandboxConfigModal
             project={currentProject}
             inProgressCount={projectCounts[currentProject.id]?.in_progress ?? 0}
-            onClose={() => showSandboxConfig.set(false)}
+            onClose={() => uiStore.showSandboxConfig = false}
             onSaved={handleSandboxSaved}
         />
     {/if}

@@ -2,7 +2,7 @@
     
     import type { ProjectStats, ModelStats } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
-    import { showStats } from '$lib/stores/ui';
+    import { uiStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
@@ -26,7 +26,7 @@
     });
 
     function handleClose() {
-        showStats.set(false);
+        uiStore.showStats = false;
         onClose();
     }
 

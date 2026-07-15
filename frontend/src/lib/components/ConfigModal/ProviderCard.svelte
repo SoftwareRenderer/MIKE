@@ -1,6 +1,6 @@
 <script lang="ts">
     import { slide } from 'svelte/transition';
-    import { showConfirm } from '$lib/stores/dialogs';
+    import { dialogStore } from '$lib/stores';
     import AgentSection from './AgentSection.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
@@ -43,7 +43,7 @@
 
     async function handleRemove(e: MouseEvent) {
         e.stopPropagation();
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Remove Provider',
             message: 'Remove this provider? This cannot be undone.',
             confirmText: 'Remove',

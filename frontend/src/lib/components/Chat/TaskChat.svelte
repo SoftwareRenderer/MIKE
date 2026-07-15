@@ -1,12 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { get } from 'svelte/store';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
-import { board as boardStore, config as configStore, selectedTask } from '$lib/stores/app';
-import { showToast, showConfirm } from '$lib/stores/dialogs';
-import { commitDialog as commitDialogStore } from '$lib/stores/dialogs';
+import { appStore, uiStore, dialogStore } from '$lib/stores';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
@@ -144,6 +141,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     // isLoading: only true when LLM is actively streaming tokens.
     // Shows stop button only during token generation, not during tool execution.
     let streamingIds = getStreamingContext();
+    // streamingIds is from context (not appStore), accessed via $derived with context auto-subscription
     let isLoading = $derived($streamingIds.has(taskId));
 
     // Last entry index for regenerate button gating
@@ -217,21 +215,21 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         if (entry) entry.content = newContent;
     }
     function handleMsgNavigateTask(targetTaskId: string) {
-        const task = $boardStore?.tasks.find(t => t.id === targetTaskId);
+        const task = appStore.board?.tasks.find(t => t.id === targetTaskId);
         if (task) {
             const url = new URL(location.href);
             url.searchParams.set('task', targetTaskId);
             history.pushState(null, '', url);
-            selectedTask.set(task);
+            appStore.selectedTask = task;
         }
     }
 
-    // Watch for task config changes from the board store (e.g., inline edit)
+    // Watch for task config changes from the app store (e.g., inline edit)
     // Updates model selection when the task's model/provider is changed externally.
     // Skips model fields when a local updateTask is in-flight to avoid overwriting
     // the user's selection with stale DB values.
     $effect(() => {
-        const boardTask = $boardStore?.tasks.find(t => t.id === taskId);
+        const boardTask = appStore.board?.tasks.find(t => t.id === taskId);
         if (boardTask) {
             if (!modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
             if (!modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
@@ -270,14 +268,11 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         stream.state.awaitingResponse = false;
     }
 
-    /** Merge an updated task into the board store. */
+    /** Merge an updated task into the app store. */
     function mergeTaskIntoBoard(updated: any) {
-        boardStore.update(b => {
-            if (!b) return b;
-            const existing = b.tasks.find(t => t.id === taskId);
-            const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
-            return { ...b, tasks: b.tasks.map(t => t.id === taskId ? merged : t) };
-        });
+        const existing = appStore.board?.tasks.find(t => t.id === taskId);
+        const merged = (updated as any).queued ? { ...existing, ...updated } : updated;
+        appStore.board = { ...appStore.board!, tasks: appStore.board!.tasks.map(t => t.id === taskId ? merged : t) };
     }
 
     /** Send a message via the API with tracking state. Returns false on failure. */
@@ -363,9 +358,9 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         _handleStreamEvent(event, suppressEvents, projectId, taskId);
     }
 
-    /** Update providers from the config store (reacts to settings changes). */
+    /** Update providers from the app store (reacts to settings changes). */
     function updateProvidersFromStore() {
-        const cfg = get(configStore);
+        const cfg = appStore.config;
         if (cfg && cfg.providers) {
             providers = cfg.providers;
             // Initialize model selection from highest-priority provider's default model
@@ -505,7 +500,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
             // Server sends thread_switch + diff_changed events over existing connection.
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         } finally {
             threadSwitching = false;
         }
@@ -528,7 +523,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             updateThreadUrl(forked.id);
             // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         }
     }
 
@@ -624,7 +619,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                 const updated = await moveTask(projectId, taskId, 'in_progress');
                 mergeTaskIntoBoard(updated);
             } catch (e) {
-                showToast(String(e));
+                dialogStore.showToast(String(e));
                 return;
             }
         }
@@ -688,7 +683,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     let summarizeController: AbortController | null = null;
 
     async function handleSummarize() {
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Compress Context',
             message: 'This will create a summary of the conversation to reduce token usage. All messages are preserved — delete the summary entry to restore the full context.',
             confirmText: 'Compress',
@@ -719,7 +714,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         } catch (e: any) {
             if (e?.name === 'AbortError') return;
             console.error('Failed to compress context:', e);
-            showToast(e?.message || 'Failed to compress context', 'error');
+            dialogStore.showToast(e?.message || 'Failed to compress context', 'error');
         } finally {
             isSummarizing = false;
             summarizeController = null;
@@ -727,7 +722,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     }
 
     async function handleSummarizeCancel() {
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Cancel Summarization',
             message: 'Summarization is in progress. Cancel it?',
             confirmText: 'Cancel',
@@ -756,7 +751,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
         isRegenerating = true;
         if (!await sendWithTracking(lastUser.content, undefined, true)) {
-            showToast('Failed to regenerate');
+            dialogStore.showToast('Failed to regenerate');
             isRegenerating = false;
             return;
         }
@@ -783,7 +778,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                 const updated = await startTask(projectId, taskId);
                 mergeTaskIntoBoard(updated);
             } catch (e) {
-                showToast(String(e), 'error');
+                dialogStore.showToast(String(e), 'error');
             }
             return;
         }
@@ -797,7 +792,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             const updated = await startTask(projectId, taskId);
             mergeTaskIntoBoard(updated);
         } catch (e) {
-            showToast(String(e), 'error');
+            dialogStore.showToast(String(e), 'error');
             isStarting = false;
             stream.state.awaitingResponse = false;
             return;
@@ -840,7 +835,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         try {
             // Open dialog — it will stream the commit message from the backend
             const confirmedMessage = await new Promise<string | null>((resolve) => {
-                commitDialogStore.set({
+                dialogStore.commitDialog = {
                     streaming: true,
                     message: '',
                     confirmText: 'Commit and move to Done',
@@ -848,7 +843,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                     projectId,
                     taskId,
                     _resolve: resolve,
-                });
+                };
             });
             if (!confirmedMessage) {
                 return; // User cancelled
@@ -858,7 +853,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         } finally {
             isCommitting = false;
             // Clear queue status for this project
@@ -878,7 +873,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             mergeTaskIntoBoard(updated);
             await loadHistory();
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         } finally {
             isCommitting = false;
         }
@@ -903,7 +898,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             message += `\n\nThis will also delete the git branch "${branchName}".`;
         }
 
-        const confirmed = await showConfirm({
+        const confirmed = await dialogStore.showConfirm({
             title: 'Delete Message',
             message,
             confirmText: 'Delete',
@@ -936,7 +931,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // Force a full HTTP reload to get fresh staged status.
             onInvalidateDiff?.();
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         }
     }
 
@@ -947,8 +942,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         if (taskStatus === 'backlog') {
             const idx = entries.findIndex(e => e.id === entryId);
             if (idx !== -1) { entries[idx].content = newContent; entries[idx].createdAt = new Date().toISOString(); }
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
+            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => dialogStore.showToast(String(e)));
+            updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
             return;
         }
         if (isLoading || disabled) return;
@@ -965,7 +960,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             onThreadSwitch?.();
             await sendWithTracking(newContent, attachments);
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
         }
     }
 
@@ -977,8 +972,8 @@ import { createStreamHandler } from '$lib/services/stream-handler';
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {
             stream.state.entries = stream.state.entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => showToast(String(e)));
+            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => dialogStore.showToast(String(e)));
+            updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
             return;
         }
 
@@ -996,7 +991,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
             // Invalidate diff cache (same reason as handleDeleteRequest)
             onInvalidateDiff?.();
         } catch (e) {
-            showToast(String(e));
+            dialogStore.showToast(String(e));
             return;
         }
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
@@ -1073,11 +1068,11 @@ import { createStreamHandler } from '$lib/services/stream-handler';
     onMount(() => {
         // Run async init in a promise chain; cleanup is returned synchronously.
         let unsubTaskEvent: (() => void) | null = null;
-        let unsubConfig: (() => void) | null = null;
         let unsubViewport: (() => void) | null | undefined = null;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);
-        unsubConfig = configStore.subscribe(() => updateProvidersFromStore());
+        // Config changes are now tracked via $effect on appStore.config
+        updateProvidersFromStore();
         unsubViewport = setupViewportListener();
         const handleKeydown = (e: KeyboardEvent) => {
             if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
@@ -1097,7 +1092,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                     const switched = await switchTaskThread(projectId, taskId, urlThread);
                     updateActiveThread(switched.id);
                 } catch (e) {
-                    showToast(String(e));
+                    dialogStore.showToast(String(e));
                 }
             } else if (!urlThread) {
                 // No thread param — use the last active thread (is_active flag).
@@ -1109,7 +1104,7 @@ import { createStreamHandler } from '$lib/services/stream-handler';
                             const switched = await switchTaskThread(projectId, taskId, mainThread.id);
                             updateActiveThread(switched.id);
                         } catch (e) {
-                            showToast(String(e));
+                            dialogStore.showToast(String(e));
                         }
                     }
                 }
@@ -1197,7 +1192,6 @@ import { createStreamHandler } from '$lib/services/stream-handler';
 
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
-            unsubConfig?.();
             unsubViewport?.();
             window.removeEventListener('keydown', handleKeydown);
             unsubTaskEvent?.();
