@@ -128,7 +128,7 @@ export class DiffCache {
     applyStagedPaths(paths: string[] | null | undefined) {
         if (Object.keys(this.state.files).length === 0) return;
         const stagedSet = paths ? new Set(paths) : new Set();
-        const updated = {};
+        const updated: Record<string, DiffFile> = {};
         for (const [path, file] of Object.entries(this.state.files)) {
             updated[path] = { ...file, staged: stagedSet.has(path) };
         }
@@ -196,7 +196,7 @@ export class DiffCache {
             } else if (fileHashes && !diffLoading) {
                 const oldHashes = { ...this.fileHashes };
                 this.fileHashes = { ...this.fileHashes, ...fileHashes };
-                const stagedSet = stagedPaths ? new Set(stagedPaths) : null;
+                const stagedSet = stagedPaths ? new Set(stagedPaths) : undefined;
                 this.fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
             }
         } else if (stagedChanged) {
@@ -306,7 +306,7 @@ export class DiffCache {
 
     /** Fetch individual files from the manifest. */
     private async fetchChangedFiles(
-        manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean }>,
+        manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean; truncated?: boolean; origAdded?: number; origRemoved?: number }>,
         oldHashes?: Record<string, string>,
     ) {
         const updatedDiff: Record<string, DiffFile> = {};
