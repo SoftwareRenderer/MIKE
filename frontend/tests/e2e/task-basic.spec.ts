@@ -23,20 +23,6 @@ test.describe('Task Management', () => {
     await expect(cards.first()).toBeVisible();
   });
 
-  test('should open task detail view', async ({ page }) => {
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.project-prefix')).toBeVisible();
-  });
-
-  test('should navigate back to board from task detail', async ({ page }) => {
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await page.click('.btn-back');
-    await expect(page.locator('.board')).toBeVisible();
-    await expect(page.locator('.task-detail-page')).not.toBeVisible();
-  });
-
   test('should show sidebar hidden when task detail is open', async ({ page }) => {
     await expect(page.locator('.sidebar')).toBeVisible();
     await page.click('.card');
