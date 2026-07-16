@@ -114,7 +114,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
                         args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
                         linesAdded: data.lines_added, linesRemoved: data.lines_removed,
-                        isPending: true, contentIndex: ci, reasoningIndex: ri,
+                        isPending: true, startedAt: Date.now(), contentIndex: ci, reasoningIndex: ri,
                     };
                     entry.toolCalls = [...(entry.toolCalls || []), newTc];
                     entry.isStreaming = true;

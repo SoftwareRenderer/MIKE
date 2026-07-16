@@ -4,6 +4,18 @@
  */
 
 /**
+ * Format elapsed milliseconds into a human-readable string (e.g. "6s", "1m 30s").
+ * Used by ToolCall for pending tool duration display.
+ */
+export function formatElapsed(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    if (totalSec < 60) return `${totalSec}s`;
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}m ${sec}s`;
+}
+
+/**
  * Format a relative time string (e.g. "2m ago", "3h ago", "2d ago").
  * Used by CardDetail for commit timestamps.
  */

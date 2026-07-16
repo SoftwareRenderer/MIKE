@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, formatTimestamp } from '$lib/utils/format-time';
+import { formatRelativeTime, formatTimestamp, formatElapsed } from '$lib/utils/format-time';
 
 describe('formatRelativeTime', () => {
     it('returns empty string for empty input', () => {
@@ -74,6 +74,31 @@ describe('formatTimestamp', () => {
         const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
         const result = formatTimestamp(tenDaysAgo);
         expect(result.display).toMatch(/\w+ \d+, \d{4} at \d+:\d+ (AM|PM)/);
+    });
+});
+
+describe('formatElapsed', () => {
+    it('formats seconds less than 60', () => {
+        expect(formatElapsed(0)).toBe('0s');
+        expect(formatElapsed(1000)).toBe('1s');
+        expect(formatElapsed(55000)).toBe('55s');
+    });
+
+    it('formats seconds with minutes and seconds', () => {
+        expect(formatElapsed(60000)).toBe('1m 0s');
+        expect(formatElapsed(65000)).toBe('1m 5s');
+        expect(formatElapsed(90000)).toBe('1m 30s');
+    });
+
+    it('formats minutes correctly', () => {
+        expect(formatElapsed(120000)).toBe('2m 0s');
+        expect(formatElapsed(180000)).toBe('3m 0s');
+    });
+
+    it('rounds down partial seconds', () => {
+        expect(formatElapsed(1500)).toBe('1s');
+        expect(formatElapsed(1999)).toBe('1s');
+        expect(formatElapsed(61500)).toBe('1m 1s');
     });
 });
 

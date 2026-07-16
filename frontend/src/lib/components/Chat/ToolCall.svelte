@@ -11,6 +11,7 @@
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
     import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
+    import { formatElapsed } from '$lib/utils/format-time';
     import { getTaskMessageFull } from '$lib/api';
 
     interface Props {
@@ -33,6 +34,7 @@
             originalLines?: number; // original line count before truncation
             originalBytes?: number; // original byte count before truncation
             messageId?: string; // tool_call message ID for fetching full result
+            startedAt?: number; // timestamp when tool call started (ms)
         };
         expandedArgs: Set<string>;
         projectId?: string;
@@ -50,6 +52,41 @@
             !!tc.args.command ||
             (tc.raw_args && (() => { try { JSON.parse(tc.raw_args); return true; } catch { return false; } })())
         )
+    );
+
+    // Elapsed time for pending tool calls — updates every second via timer.
+    let elapsedMs = $state(0);
+    let timerRef = $state<ReturnType<typeof setInterval> | null>(null);
+
+    $effect(() => {
+        const pending = tc.isPending;
+        if (pending && tc.startedAt) {
+            const startedAt = tc.startedAt;
+            elapsedMs = Date.now() - startedAt;
+            if (timerRef === null) {
+                timerRef = setInterval(() => {
+                    elapsedMs = Date.now() - startedAt;
+                }, 1000);
+            }
+        } else {
+            if (timerRef !== null) {
+                clearInterval(timerRef);
+                timerRef = null;
+            }
+            elapsedMs = 0;
+        }
+        return () => {
+            if (timerRef !== null) {
+                clearInterval(timerRef);
+                timerRef = null;
+            }
+        };
+    });
+
+    let elapsedText = $derived(
+        tc.isPending && tc.startedAt && elapsedMs > 5000
+            ? `Running for ${formatElapsed(elapsedMs)}`
+            : ''
     );
 
     function truncateArgs(display: string): { text: string; truncated: boolean } {
@@ -337,7 +374,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Writing Question{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if elapsedText}{elapsedText}{:else}{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Writing Question{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing{#if tc.path}: {tc.path}{/if}{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}{/if}</span></span>
             {:else if !tc.success}
                 <span class="tool-status error">Failed</span>
             {:else}

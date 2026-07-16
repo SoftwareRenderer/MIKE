@@ -125,6 +125,7 @@ export interface ChatEntry {
         bytesWritten?: number;
         linesAdded?: number;
         linesRemoved?: number;
+        startedAt?: number;
     }>;
     toolCall?: {
         toolName: string;
@@ -135,6 +136,7 @@ export interface ChatEntry {
         success?: boolean;
         duration?: number;
         isPending?: boolean;
+        startedAt?: number;
     };
     error?: {
         code: string;
