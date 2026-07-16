@@ -5,11 +5,12 @@
     import { tick, onMount, onDestroy } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks, deleteTask, startTask } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
-    import { appStore, uiStore, dialogStore, persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
+    import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
@@ -80,111 +81,24 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
         };
     });
 
-    // Build a lookup map for children of each task
-    const childrenMap = $derived.by(() => {
-        const map = new Map<string, Task[]>();
-        for (const t of tasks) {
-            if (t.parent_task_id) {
-                if (!map.has(t.parent_task_id)) {
-                    map.set(t.parent_task_id, []);
-                }
-                map.get(t.parent_task_id)!.push(t);
-            }
-        }
-        // Sort children chronologically by last activity
-        for (const [, children] of map) {
-            children.sort((a, b) => {
-                if (a.updated_at < b.updated_at) return -1;
-                if (a.updated_at > b.updated_at) return 1;
-                return a.column_order - b.column_order;
-            });
-        }
-        return map;
-    });
-
-    // All task IDs that are subtasks (have a parent)
-    const subtaskIds = $derived(new Set(tasks.filter(t => t.parent_task_id).map(t => t.id)));
-
-    // Subtask IDs that should be consolidated (hidden) because any ancestor is in the same column
-    const consolidatedSubtaskIds = $derived.by(() => {
-        const consolidated = new Set<string>();
-        const taskMap = new Map<string, Task>();
-        for (const t of tasks) taskMap.set(t.id, t);
-
-        for (const t of tasks) {
-            if (!t.parent_task_id) continue;
-            // Walk up the ancestor chain
-            let parentId: string | undefined = t.parent_task_id;
-            while (parentId) {
-                const ancestor = taskMap.get(parentId);
-                if (!ancestor) break;
-                if (ancestor.status === t.status) {
-                    consolidated.add(t.id);
-                    break;
-                }
-                parentId = ancestor.parent_task_id ?? undefined;
-            }
-        }
-        return consolidated;
-    });
+    // Subtask hierarchy management (expanded state, consolidation, auto-expand)
+    let hierarchy = useSubtaskHierarchy(() => tasks, expandedTasksContext, () => undefined);
 
     let draggedTaskId: string | null = $state(null);
 
-    // IDs of tasks that have children (potential parents)
-    const parentTaskIds = $derived(new Set(tasks.filter(t => childrenMap.has(t.id)).map(t => t.id)));
-
-    // Initialize expanded tasks from IndexedDB (default: all expanded) — run once
-    let expandedInitialized = $state(false);
+    // Garbage-collect stale IndexedDB entries for deleted tasks (Board-specific)
+    let gcInitialized = $state(false);
     $effect(() => {
-        if (expandedInitialized) return;
-        if (parentTaskIds.size > 0) {
-            expandedInitialized = true;
+        if (gcInitialized) return;
+        if (hierarchy.parentTaskIds.size > 0) {
+            gcInitialized = true;
             (async () => {
                 const allIds = new Set(tasks.map(t => t.id));
-                await cleanupCollapsedTasks(allIds);
-                expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
-                // Garbage-collect stale IndexedDB entries for deleted tasks
                 const projectPaths = projectPath ? new Set([projectPath]) : undefined;
                 await gc(allIds, projectPaths);
             })().catch(() => {});
         }
     });
-
-    // Auto-expand parent cards when new subtasks appear
-    let lastExpandedParents = $state<Set<string>>(new Set());
-    let expandedTasks = $state<Set<string>>(new Set());
-    $effect(() => {
-        expandedTasksContext.subscribe(v => expandedTasks = v);
-    });
-    $effect(() => {
-        const currentParents = new Set(childrenMap.keys());
-        for (const parentId of currentParents) {
-            if (!lastExpandedParents.has(parentId)) {
-                const current = expandedTasks;
-                if (!current.has(parentId)) {
-                    const next = new Set(current);
-                    next.add(parentId);
-                    expandedTasksContext.set(next);
-                }
-                lastExpandedParents = new Set([...lastExpandedParents, parentId]);
-            }
-        }
-    });
-
-    // Track which task cards are expanded (shared store for Board + CardDetail sync)
-    function toggleTaskExpanded(taskId: string) {
-        const next = new Set(expandedTasks);
-        if (next.has(taskId)) {
-            next.delete(taskId);
-        } else {
-            next.add(taskId);
-        }
-        expandedTasksContext.set(next);
-        // Persist collapsed state and clean stale entries
-        const allIds = new Set(tasks.map(t => t.id));
-        persistCollapsedTasks(next, parentTaskIds).catch(() => {});
-        cleanupCollapsedTasks(allIds).catch(() => {});
-    }
 
     function handleSelectTask(t: Task) {
         // Push state first so the URL is updated before the subscription fires
@@ -211,7 +125,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     const columnTasks = $derived.by(() => {
         const cols: Record<string, Task[]> = { backlog: [], in_progress: [], review: [], done: [] };
         for (const t of tasks) {
-            if (consolidatedSubtaskIds.has(t.id)) continue;
+            if (hierarchy.consolidatedSubtaskIds.has(t.id)) continue;
             if (!cols[t.status]) cols[t.status] = [];
             cols[t.status].push(t);
         }
@@ -343,9 +257,9 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
             color={col.color}
             columnColor={col.color}
             tasks={getTasksForColumn(col.id)}
-            childrenMap={childrenMap}
-            expandedTasks={expandedTasks}
-            onToggleExpanded={toggleTaskExpanded}
+            childrenMap={hierarchy.childrenMap}
+            expandedTasks={hierarchy.expandedTasks}
+            onToggleExpanded={hierarchy.toggleTaskExpanded}
             onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             canDrop={(taskId: string, colId: string) => {
