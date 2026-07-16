@@ -319,6 +319,7 @@ export type StreamEventType =
     | 'tool_call'
     | 'tool_result'
     | 'tool_progress'
+    | 'tool_output'
     | 'status'
     | 'queue'
     | 'complete'
@@ -333,7 +334,8 @@ export type StreamEventType =
     | 'diff_changed'
     | 'build_progress'
     | 'port_conflict'
-    | 'prompt_progress';
+    | 'prompt_progress'
+    | 'hint';
 
 export interface StreamEvent {
     type: StreamEventType;
