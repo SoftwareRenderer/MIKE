@@ -60,20 +60,64 @@ test.describe('Virtual scroll in chat', () => {
   });
 
   test('sticky header appears when user scrolls up past a user message', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `sticky-header-${Date.now()}`);
     await navigateToTask(page, taskId, projectId);
     await ensureTaskStarted(page, projectId, taskId);
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible();
-    await waitForIdle(page);
+    // Wait for initial LLM response to finish
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 60000 });
 
-    // The sticky header should not be visible at the bottom
+    // Send additional messages to build up scrollable content
+    const textarea = page.locator('textarea[placeholder*="message"]');
+    for (let i = 0; i < 5; i++) {
+      await textarea.click();
+      await textarea.pressSequentially(`follow up message number ${i + 1} with enough text to make the conversation scrollable past the viewport height`);
+      await page.locator('.btn-send').click();
+      // Wait for LLM response to finish (send button reappears)
+      await expect(page.locator('.btn-send')).toBeVisible({ timeout: 60000 });
+    }
+
     const stickyHeader = page.locator('.chat-sticky-header');
-    // At bottom of a short conversation, header should not show
-    // (depends on conversation length; for a single message, no header)
-    // Just verify the component is present in the DOM
-    await expect(page.locator('.chat-messages-wrapper')).toBeVisible();
+    const stickyBubble = page.locator('.chat-sticky-bubble');
+    const scrollContainer = page.locator('.virtual-list');
+    await expect(scrollContainer).toBeVisible();
+
+    // Scroll to top first to ensure header is hidden
+    await scrollContainer.evaluate(el => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.waitForTimeout(300);
+    await expect(stickyHeader).not.toBeVisible();
+
+    // Scroll to bottom to get past the first user message
+    await scrollContainer.evaluate(el => {
+      el.scrollTop = el.scrollHeight;
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.waitForTimeout(500);
+
+    // Verify scroll position changed
+    const scrollTop = await scrollContainer.evaluate(el => el.scrollTop);
+    expect(scrollTop).toBeGreaterThan(60);
+
+    // Sticky header should now be visible with the first user message text
+    await expect(stickyHeader).toBeVisible();
+    await expect(stickyBubble).toBeVisible();
+
+    // Scroll back to top
+    await scrollContainer.evaluate(el => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.waitForTimeout(300);
+
+    // Header should be hidden again
+    await expect(stickyHeader).not.toBeVisible();
   });
 
   test('virtual list items have correct positioning', async ({ page }) => {
