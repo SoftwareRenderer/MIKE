@@ -1,7 +1,7 @@
 // TypeScript interfaces matching backend Go types
 
 /** Maps raw tool names to their UI display names (fallback for old persisted messages). */
-export const TOOL_DISPLAY_NAMES: Record<string, string> = {
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
     read_file: 'Read',
     write_file: 'Write',
     edit_file: 'Edit',
