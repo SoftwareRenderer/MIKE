@@ -15,6 +15,6 @@ export function isFromCache(obj: unknown): boolean {
 }
 
 /** Mark data as served from cache. Mutates and returns the object. */
-export function markCached<T>(data: T): T {
-    return Object.assign(data, { [CACHE_MARKER]: true });
+export function markCached<T extends object>(data: T): T {
+    return Object.assign(data, { [CACHE_MARKER]: true }) as T;
 }
