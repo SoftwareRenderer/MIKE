@@ -464,8 +464,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         wsConnected = connected;
                         setOfflineStatus(!connected);
                         if (!connected) {
-                            // Mark data as potentially stale so visibility refresh picks it up
-                            lastSyncedAt = 0;
+                            // Record the disconnect time so the stale banner counts from now
+                            lastSyncedAt = Date.now();
                             startStaleTick();
                         } else {
                             stopCountdown();
@@ -573,7 +573,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 wsConnected = connected;
                 setOfflineStatus(!connected);
                 if (!connected) {
-                    lastSyncedAt = 0;
+                    // Record the disconnect time so the stale banner counts from now
+                    lastSyncedAt = Date.now();
                     startStaleTick();
                 } else {
                     stopCountdown();
