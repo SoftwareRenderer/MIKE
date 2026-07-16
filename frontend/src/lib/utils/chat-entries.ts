@@ -178,6 +178,9 @@ export function buildEntriesFromMessages(
         if (m.role === 'tool_call' && m.tool_calls) {
             const tc = JSON.parse(m.tool_calls);
             const result = m.tool_result ? JSON.parse(m.tool_result) : null;
+            const isPending = !result;
+            // Set startedAt for pending tool calls so the elapsed timer works on page return.
+            const startedAt = isPending && m.created_at ? new Date(m.created_at).getTime() : undefined;
             return {
                 ...base, id: m.id, role: 'assistant' as const, content: '', isStreaming: false, createdAt: m.created_at,
                 toolCalls: [{
@@ -194,7 +197,8 @@ export function buildEntriesFromMessages(
                     messageId: m.id,
                     success: result?.success ?? true,
                     duration: result?.duration,
-                    isPending: !result,
+                    isPending,
+                    startedAt,
                 }],
             };
         }

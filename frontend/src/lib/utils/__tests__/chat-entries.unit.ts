@@ -506,4 +506,28 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].mergeLabel).toBe('Merge failed');
         expect(entries[0].isError).toBe(true);
     });
+
+    it('sets startedAt on pending tool calls from created_at', () => {
+        const messages = [
+            { id: 'a1', role: 'assistant', content: 'thinking', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'tc1', role: 'tool_call', content: '', created_at: '2025-01-01T00:05:00Z', tool_calls: JSON.stringify({ tool_id: 't1', tool_name: 'bash', args: { command: 'sleep 30' } }) },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].toolCalls).toHaveLength(1);
+        expect(entries[0].toolCalls![0].isPending).toBe(true);
+        expect(entries[0].toolCalls![0].startedAt).toBe(new Date('2025-01-01T00:05:00Z').getTime());
+    });
+
+    it('does not set startedAt on completed tool calls', () => {
+        const messages = [
+            { id: 'a1', role: 'assistant', content: 'thinking', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'tc1', role: 'tool_call', content: '', created_at: '2025-01-01T00:05:00Z', tool_calls: JSON.stringify({ tool_id: 't1', tool_name: 'read_file', args: { path: 'foo.ts' } }), tool_result: JSON.stringify({ output: 'content', success: true, duration: 50 }) },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].toolCalls).toHaveLength(1);
+        expect(entries[0].toolCalls![0].isPending).toBe(false);
+        expect(entries[0].toolCalls![0].startedAt).toBeUndefined();
+    });
 });
