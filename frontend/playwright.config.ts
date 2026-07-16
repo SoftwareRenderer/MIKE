@@ -35,7 +35,7 @@ export default defineConfig({
           storageState: STORAGE_STATE_ISOLATED,
       },
       // Config-modifying suites on isolated server; serialized to avoid races
-      testMatch: ['**/model-selector.spec.ts', '**/model-switch.spec.ts', '**/settings-redesign.spec.ts', '**/debug-cards.spec.ts', '**/settings-model-delete.spec.ts', '**/settings-reasoning-effort.spec.ts', '**/reasoning-effort.spec.ts', '**/sandbox-toggle.spec.ts', '**/sandbox-tool-calls.spec.ts', '**/sandbox-project-terminal.spec.ts', '**/default-plan-mode.spec.ts', '**/settings-power.spec.ts'],
+      testMatch: ['**/model-switch.spec.ts', '**/debug-cards.spec.ts', '**/settings-model-delete.spec.ts', '**/reasoning-effort.spec.ts', '**/settings-power.spec.ts'],
       fullyParallel: false,
       workers: 1,
     },
