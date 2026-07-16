@@ -23,6 +23,8 @@ export class StreamState {
         queuePosition: 0,
         queueEstimatedWait: 0,
         promptProgress: 0,
+        retryCount: 0,
+        retryError: '',
         contextState: { used: 0, limit: 0 },
         streamTokenCount: 0,
         lastPromptTokens: 0,
@@ -54,13 +56,14 @@ export class StreamState {
         }
     }
 
-    /** Clear awaiting response spinner. */
+    /** Clear awaiting spinner and retry state. */
     clearAwaiting() {
         if (this.state.awaitingResponse) this.state.awaitingResponse = false;
         this.state.promptProgress = 0;
+        this.clearRetry();
     }
 
-    /** Reset all streaming state (thread switch, task change). */
+    /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();
         this.state.activeToolCalls = new Map();
@@ -69,13 +72,20 @@ export class StreamState {
         this.state.awaitingResponse = false;
     }
 
-    /** Full reset — clear entries and all state. */
+    /** Clear retry state. */
+    clearRetry() {
+        this.state.retryCount = 0;
+        this.state.retryError = '';
+    }
+
+    /** Full reset. */
     reset() {
         this.state.entries = [];
         this.resetStreaming();
         this.state.queuePosition = 0;
         this.state.queueEstimatedWait = 0;
         this.state.promptProgress = 0;
+        this.clearRetry();
         this.state.contextState = { used: 0, limit: 0 };
         this.state.lastPromptTokens = 0;
         this.state.pendingCheckpoints = new Set();

@@ -111,6 +111,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let queuePosition = $derived(stream.state.queuePosition);
     let queueEstimatedWait = $derived(stream.state.queueEstimatedWait);
     let promptProgress = $derived(stream.state.promptProgress);
+    let retryCount = $derived(stream.state.retryCount);
+    let retryError = $derived(stream.state.retryError);
     let contextState = $derived(stream.state.contextState);
     let streamTokenCount = $derived(stream.state.streamTokenCount);
     let lastPromptTokens = $derived(stream.state.lastPromptTokens);
@@ -1224,6 +1226,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         {queuePosition}
         {queueEstimatedWait}
         {promptProgress}
+        {retryCount}
+        {retryError}
         {isAgentSelected}
         {taskStatus}
         {projectId}

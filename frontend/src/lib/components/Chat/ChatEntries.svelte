@@ -18,6 +18,8 @@
         queuePosition,
         queueEstimatedWait,
         promptProgress,
+        retryCount,
+        retryError,
         isAgentSelected,
         taskStatus,
         projectId,
@@ -48,6 +50,8 @@
         queuePosition: number;
         queueEstimatedWait: number;
         promptProgress: number;
+        retryCount: number;
+        retryError: string;
         isAgentSelected: () => boolean;
         taskStatus: string;
         projectId: string;
@@ -315,6 +319,8 @@
                 {queuePosition}
                 {queueEstimatedWait}
                 {promptProgress}
+                {retryCount}
+                {retryError}
                 {isAgentSelected}
             />
         {/if}

@@ -96,10 +96,32 @@ describe('StreamState', () => {
         expect(s.state.promptProgress).toBe(0);
     });
 
+    it('clearAwaiting also resets retry state', () => {
+        const s = new StreamState();
+        s.state.retryCount = 3;
+        s.state.retryError = 'connection refused';
+        s.clearAwaiting();
+        expect(s.state.retryCount).toBe(0);
+        expect(s.state.retryError).toBe('');
+    });
+
     it('clearAwaiting is safe when already cleared', () => {
         const s = new StreamState();
         expect(() => s.clearAwaiting()).not.toThrow();
         expect(s.state.awaitingResponse).toBe(false);
+    });
+
+    it('clearRetry resets retry count and error', () => {
+        const s = new StreamState();
+        s.state.retryCount = 5;
+        s.state.retryError = 'timeout';
+        s.clearRetry();
+        expect(s.state.retryCount).toBe(0);
+        expect(s.state.retryError).toBe('');
+        // Other state unaffected
+        s.state.awaitingResponse = true;
+        s.clearRetry();
+        expect(s.state.awaitingResponse).toBe(true);
     });
 
     it('resetStreaming closes assistant and clears tool-related state', () => {
@@ -128,6 +150,8 @@ describe('StreamState', () => {
         s.state.queuePosition = 5;
         s.state.queueEstimatedWait = 30;
         s.state.promptProgress = 50;
+        s.state.retryCount = 3;
+        s.state.retryError = 'connection refused';
         s.state.contextState = { used: 1000, limit: 4096 };
         s.state.lastPromptTokens = 500;
         s.state.streamTokenCount = 42;
@@ -143,6 +167,8 @@ describe('StreamState', () => {
         expect(s.state.queuePosition).toBe(0);
         expect(s.state.queueEstimatedWait).toBe(0);
         expect(s.state.promptProgress).toBe(0);
+        expect(s.state.retryCount).toBe(0);
+        expect(s.state.retryError).toBe('');
         expect(s.state.contextState).toEqual({ used: 0, limit: 0 });
         expect(s.state.lastPromptTokens).toBe(0);
         expect(s.state.streamTokenCount).toBe(0);

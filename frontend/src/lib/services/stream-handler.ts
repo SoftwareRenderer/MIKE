@@ -256,9 +256,29 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     }
                     s.activeToolCalls = new Map();
                     s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some((tc: ToolCallInfo) => tc.isPending) && !e.content && !e.reasoningContent));
-                    markStreaming();
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;
+                    // Detect LLM crash retries from activity text — skip markStreaming()
+                    // so the stop button is hidden while nothing is actually streaming.
+                    const activity = data.activity || '';
+                    const retryMatch = activity.match(/retrying\.\.\. \(attempt (\d+)\/3\)/);
+                    let isRetry = false;
+                    if (retryMatch) {
+                        isRetry = true;
+                        s.retryCount = parseInt(retryMatch[1], 10);
+                        const errMatch = activity.match(/Connection interrupted \((.+?)\),/);
+                        s.retryError = errMatch ? errMatch[1] : '';
+                        s.promptProgress = 0;
+                    } else if (activity.includes('Connection failed') && activity.includes('retrying')) {
+                        isRetry = true;
+                        s.retryCount++;
+                        const errMatch = activity.match(/Connection failed: (.+?), retrying/);
+                        s.retryError = errMatch ? errMatch[1] : '';
+                        s.promptProgress = 0;
+                    }
+                    if (!isRetry) {
+                        markStreaming();
+                    }
                 } else if (data.state === 'cancelled') {
                     stream.closeCurrentAssistant();
                     s.activeToolCalls = new Map();
@@ -266,9 +286,11 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     s.entries = s.entries.filter(e => !e.isStreaming);
                     markNotStreaming();
                     s.awaitingResponse = false;
+                    stream.clearRetry();
                 } else if (['stopped', 'failed', 'idle', 'completed', 'awaiting_review'].includes(data.state)) {
                     markNotStreaming();
                     s.awaitingResponse = false;
+                    stream.clearRetry();
                 }
                 break;
             }
