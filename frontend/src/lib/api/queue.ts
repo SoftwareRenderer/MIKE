@@ -302,6 +302,7 @@ export function applyQueuedActionsToBoard(
                     parent_task_id: taskData.parent_task_id || undefined,
                     title_generating: taskData.title_generating ?? false,
                     current_thread_id: taskData.current_thread_id || undefined,
+                    has_merge_conflict: false,
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString(),
                 };
@@ -475,7 +476,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await reloadPromptsRaw();
             break;
         default: {
-            const _exhaustive: never = action.type;
+            const _exhaustive: never = action.type as never;
             console.warn('[Queue] Unknown action type:', _exhaustive);
         }
     }
