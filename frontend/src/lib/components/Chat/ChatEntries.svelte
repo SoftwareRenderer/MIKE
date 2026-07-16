@@ -244,6 +244,12 @@
         computeStickyFromScroll();
         handleBannerScrollCheck();
     }
+
+    // Recompute sticky header when entries change (e.g. new messages arrive).
+    $effect(() => {
+        entries.length;
+        computeStickyFromScroll();
+    });
 </script>
 
 <div class="chat-messages-wrapper">
