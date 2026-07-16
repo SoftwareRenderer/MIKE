@@ -493,10 +493,6 @@
      * Used after thread switch or task change to ensure a clean slate. */
     async function loadDiff() {
         if (!task || task.status === 'backlog' || diffLoading) return;
-        // Clear stale diff stats so the $effect processes the next WS event as fresh.
-        const newStats = { ...diffStatsMap };
-        delete newStats[task.id];
-        taskDiffStats.set(newStats);
         // Reset overlay and comparison state
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
