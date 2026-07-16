@@ -245,10 +245,13 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 
 ### Frontend
 1. Edit Svelte components in `frontend/src/lib/components/`
-2. Build: `cd frontend && npm run build`
-3. Server serves from `frontend/dist/` — no dev server needed
-4. Browser hard refresh to pick up changes
-5. **No server restart needed** — frontend-only changes are picked up immediately after build
+2. Check types: `cd frontend && npm run check` (svelte-check, catches errors Vite ignores)
+3. Build: `cd frontend && npm run build`
+4. Server serves from `frontend/dist/` — no dev server needed
+5. Browser hard refresh to pick up changes
+6. **No server restart needed** — frontend-only changes are picked up immediately after build
+
+**TypeScript errors**: Keep the codebase TS-clean. Fix all errors from `npm run check` before finishing a task.
 
 ### Backend
 1. Edit Go files in `backend/`
