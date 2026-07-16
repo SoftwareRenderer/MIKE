@@ -25,7 +25,7 @@ export default defineConfig({
           storageState: STORAGE_STATE,
       },
       // Exclude config-modifying suites (run on isolated server)
-      testMatch: /\/tests\/e2e\/(?!model-selector|model-switch|settings-redesign|debug-cards|settings-model-delete|settings-reasoning-effort|reasoning-effort|sandbox-toggle|sandbox-tool-calls|sandbox-project-terminal|settings-power).*\.spec\.ts$/,
+      testMatch: /\/tests\/e2e\/(?!model-switch|debug-cards|settings-model-delete|reasoning-effort|settings-power).*\.spec\.ts$/,
     },
     {
       name: 'isolated',
