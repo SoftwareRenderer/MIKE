@@ -156,15 +156,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
     return ids;
 }
 
-/** Get current queue length. */
-export function getQueueLength(): number {
-    return queueLength();
-}
 
-/** Debug: expose offline status for testing. */
-export function __debugOfflineStatus(): boolean {
-    return isOffline;
-}
 
 /** Check if an error is a transient network failure (retryable). */
 function isTransientError(e: unknown): boolean {

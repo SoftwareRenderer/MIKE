@@ -278,7 +278,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 All client-side storage goes through `frontend/src/lib/storage.ts`. Never access IndexedDB directly in components.
 All functions are **async** (return `Promise`).
 
-**Single IndexedDB database:** `kanban-storage` (v1) with these object stores:
+**Single IndexedDB database:** `kanban-storage` (v2) with these object stores:
 - `drafts` — draft chat text per task (key: taskId)
 - `editor-drafts` — draft file content per file path (key: path)
 - `editor-history` — undo/redo history per file (key: path)
@@ -290,20 +290,22 @@ All functions are **async** (return `Promise`).
 - `explorer-layout` — explorer column widths (single key)
 - `app-settings` — generic key-value for component settings (terminal height, panel ratios, sidebar)
 - `attachments` — draft image attachments per task (key: taskId)
+- `board-cache` — offline mirror of server state (projects, board, config)
 
 **Key functions:**
 - `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
 - `getEditorDraft(path)` / `setEditorDraft(path, text)` / `clearEditorDraft(path)` — per-file editor drafts
 - `loadEditorHistory(path)` / `saveEditorHistory(path, base, deltas)` / `clearEditorHistory(path)` — editor undo/redo
-- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` / `clearCollapsedTask(taskId)` — collapsed parent task IDs
+- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` — collapsed parent task IDs
 - `loadCollapsedSections()` / `saveCollapsedSections(ids)` — collapsed board sections
 - `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids)` — collapsed diff file paths
-- `loadUnsavedFiles(projectId)` / `saveUnsavedFiles(projectId, paths)` / `clearUnsavedFiles(projectId)` — unsaved file paths
+- `loadUnsavedFiles(projectId)` / `saveUnsavedFiles(projectId, paths)` — unsaved file paths
 - `loadQueue()` / `saveQueue(actions)` — offline action queue
 - `loadExplorerLayout()` / `saveExplorerLayout(layout)` — explorer column widths
-- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` / `clearAppSetting(key)` — generic key-value settings
+- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` — generic key-value settings
 - `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts
-- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>)` — garbage-collect ALL stale entries
+- `setBoardCache(key, value)` / `getBoardCache<T>(key)` / `boardCacheKey(projectId)` — offline board state cache
+- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>)` — garbage-collect ALL stale entries
 
 **GC trigger:** Called in `Board.svelte` after the board is loaded. Components should NOT call `gc()` themselves.
 

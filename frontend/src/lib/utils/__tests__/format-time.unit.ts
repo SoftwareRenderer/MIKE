@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, formatTimestamp, formatTime } from '$lib/utils/format-time';
+import { formatRelativeTime, formatTimestamp } from '$lib/utils/format-time';
 
 describe('formatRelativeTime', () => {
     it('returns empty string for empty input', () => {
@@ -77,18 +77,3 @@ describe('formatTimestamp', () => {
     });
 });
 
-describe('formatTime', () => {
-    it('returns empty for empty input', () => {
-        expect(formatTime('')).toBe('');
-    });
-
-    it('returns empty for invalid date', () => {
-        expect(formatTime('not-a-date')).toBe('');
-    });
-
-    it('returns time string for valid date', () => {
-        const now = new Date().toISOString();
-        const result = formatTime(now);
-        expect(result).toMatch(/\d+:\d+ (AM|PM)/);
-    });
-});

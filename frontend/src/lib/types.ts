@@ -1,7 +1,7 @@
 // TypeScript interfaces matching backend Go types
 
 /** Maps raw tool names to their UI display names (fallback for old persisted messages). */
-export const TOOL_DISPLAY_NAMES: Record<string, string> = {
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
     read_file: 'Read',
     write_file: 'Write',
     edit_file: 'Edit',
@@ -273,10 +273,6 @@ export interface TaskCommit {
     date: string;
 }
 
-export interface MoveTaskRequest {
-    status: string;
-}
-
 export interface ReorderRequest {
     id: string;
     column_order: number;
@@ -342,27 +338,6 @@ export type StreamEventType =
 export interface StreamEvent {
     type: StreamEventType;
     data: unknown;
-}
-
-export type StreamSectionType = 'text' | 'reasoning' | 'tool_call';
-
-export interface StreamSection {
-    id: string;
-    type: StreamSectionType;
-    content: string;
-    isStreaming: boolean;
-    toolCall?: {
-        toolId: string;
-        toolName: string;
-        displayName?: string;
-        args: Record<string, unknown>;
-        sandbox?: boolean;
-        result?: string;
-        success?: boolean;
-        duration?: number;
-    };
-    reasoningSummary?: string;
-    tokenCount?: number;
 }
 
 // ─── Diff / Commit / Task Event types ───

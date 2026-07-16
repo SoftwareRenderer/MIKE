@@ -123,7 +123,7 @@ function selectResponse(parsed) {
     // Plan mode: LLM creates subtasks via create_task tool, then calls request_review.
     // First call (no tool results yet): return create_task tool call.
     // After create_task result: return request_review to end planning.
-    const isPlanMode = messages.some(m => m.role === 'system' && /PLAN MODE/i.test(m.content || ''));
+    const isPlanMode = messages.some(m => m.role === 'system' && /plan[- ]?(mode|only|first)/i.test(m.content || ''));
     if (isPlanMode && hasTools) {
         if (hasToolResults) {
             // After create_task tool result, signal plan complete
