@@ -1365,7 +1365,7 @@ func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID s
 	branchName := fmt.Sprintf("task/%s", task.ID)
 	if !task.AutoMerge && task.Title != "" {
 		slug := slugifyBranchName(task.Title)
-		if len(slug) <= 50 {
+		if slug != "" && len(slug) <= 50 {
 			branchName = "task/" + slug
 		}
 	}

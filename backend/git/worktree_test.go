@@ -208,6 +208,36 @@ func TestCreateWorktree_EarlyReturn_ReturnsBranchNameNotSHA(t *testing.T) {
 	t.Logf("fresh baseRef=%q (SHA), early return baseRef=%q (branch name)", baseRefFresh, baseRefEarly)
 }
 
+func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	currentBranch, _ := wm.gitRunOutput(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch = strings.TrimSpace(currentBranch)
+	if currentBranch != "task/"+taskID {
+		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
+	}
+}
+
+func TestCreateWorktree_GeneratesBranchNameWhen40Hex(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "abcdef1234567890abcdef1234567890abcdef12", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	currentBranch, _ := wm.gitRunOutput(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch = strings.TrimSpace(currentBranch)
+	if currentBranch != "task/"+taskID {
+		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
+	}
+}
+
 func TestTruncateDiffLines_NoTruncationNeeded(t *testing.T) {
 	diff := `diff --git a/file.txt b/file.txt
 index 1234567..abcdef 100644

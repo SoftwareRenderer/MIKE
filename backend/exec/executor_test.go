@@ -429,3 +429,42 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 		t.Errorf("expected commit-b in branch log, got:\n%s", logOutput)
 	}
 }
+
+func TestSlugifyBranchName_NormalTitle(t *testing.T) {
+	slug := slugifyBranchName("Fix login bug #123")
+	if slug != "fix-login-bug-123" {
+		t.Errorf("expected 'fix-login-bug-123', got %q", slug)
+	}
+}
+
+func TestSlugifyBranchName_AllSpecialChars(t *testing.T) {
+	if slug := slugifyBranchName("###"); slug != "" {
+		t.Errorf("expected empty string, got %q", slug)
+	}
+}
+
+func TestSlugifyBranchName_AllHyphens(t *testing.T) {
+	if slug := slugifyBranchName("---"); slug != "" {
+		t.Errorf("expected empty string, got %q", slug)
+	}
+}
+
+func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###"}
+	branchName := te.generateBranchName(task, taskID, projectID)
+	if branchName != "task/"+taskID {
+		t.Errorf("expected 'task/%s', got %q", taskID, branchName)
+	}
+}
+
+func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
+	branchName := te.generateBranchName(task, taskID, projectID)
+	if branchName != "task/fix-login" {
+		t.Errorf("expected 'task/fix-login', got %q", branchName)
+	}
+}

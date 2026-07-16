@@ -21,6 +21,9 @@ import (
 // It's a git internal constant (SHA-1 of "tree 0\0").
 const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 
+// hexRe matches a string of exactly 40 hex characters (a git SHA-1).
+var hexRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
 // Git author identity, configurable via environment variables.
 // When unset, Git uses its configured defaults (from .gitconfig / system config).
 var (
@@ -160,6 +163,11 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 // If sourceBranch is non-empty, the worktree is created from that branch instead of HEAD.
 // Returns (worktreePath, originalBranch, error).
 func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceBranch string) (string, string, error) {
+	// Guard against empty or 40-hex branch names (ambiguous with commit SHAs).
+	if branchName == "" || (len(branchName) == 40 && branchName == hexRe.FindString(branchName)) {
+		branchName = "task/" + taskID
+	}
+
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
 		return "", "", fmt.Errorf("get project: %w", err)
