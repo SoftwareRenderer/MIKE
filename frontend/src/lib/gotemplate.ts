@@ -98,7 +98,7 @@ const goTemplateParser: StreamParser<GoTemplateState> = {
             // Strings inside actions
             if (stream.peek() === '"' || stream.peek() === "'" || stream.peek() === '`') {
                 const quote = stream.next();
-                state.inString = quote;
+                state.inString = quote ?? null;
                 // Continue reading the string
                 while (!stream.eol()) {
                     const ch = stream.next();
