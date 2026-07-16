@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DiffCache, type DiffCacheApis, type DiffStats } from '$lib/services/diff-cache.svelte';
+import { DiffCache, type DiffCacheApis, type DiffApiResponse, type DiffStats } from '$lib/services/diff-cache.svelte';
 
 function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
     return {
@@ -248,11 +248,11 @@ describe('DiffCache', () => {
     });
 
     it('getters reflect changes mid-flight for subsequent calls', async () => {
-        let resolveDiff: (value: unknown) => void;
+        let resolveDiff: (value: DiffApiResponse) => void;
         let currentProject = 'proj-1';
         let currentTask = 'task-1';
         const apis = makeApis({
-            getTaskDiff: vi.fn(async () => new Promise(resolve => { resolveDiff = resolve; })),
+            getTaskDiff: vi.fn<() => Promise<DiffApiResponse>>(async () => new Promise(resolve => { resolveDiff = resolve; })),
         });
         const cache = new DiffCache(apis, () => currentProject, () => currentTask);
         const loadPromise = cache.loadDiff(() => {});
