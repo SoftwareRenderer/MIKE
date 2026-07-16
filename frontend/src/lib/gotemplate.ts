@@ -261,6 +261,7 @@ const goTemplateParser: StreamParser<GoTemplateState> = {
             state.inTag = false;
             state.tagDepth = 0;
         }
+        return null;
     },
 };
 
