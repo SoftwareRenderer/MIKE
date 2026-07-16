@@ -1,9 +1,10 @@
 import type { StreamEvent, DiffData } from '$lib/types';
-import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
-import type { StreamState } from './stream-state.svelte';
+import type { ChatEntry } from '$lib/types';
+import type { ToolCallInfo } from './stream-state.svelte';
+import { StreamState } from './stream-state.svelte';
 
 /** Update context usage from accumulated token counts. */
-function updateContextUsed(s: typeof import('./stream-state.svelte').StreamState['state']) {
+function updateContextUsed(s: typeof StreamState.prototype.state) {
     s.contextState = { ...s.contextState, used: s.lastPromptTokens + s.streamTokenCount };
 }
 
@@ -90,7 +91,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (entry.content.trim() === data.tool_name && !entry.reasoningContent) entry.content = '';
                 if (!entry.toolCalls) entry.toolCalls = [];
 
-                const existing = entry.toolCalls.find(tc => tc.toolId === data.tool_id);
+                const existing = entry.toolCalls.find((tc: ToolCallInfo) => tc.toolId === data.tool_id);
                 if (existing) {
                     if (!existing.isPending && existing.result !== undefined) break;
                     // Mutate in-place so activeToolCalls map reference stays valid
@@ -133,7 +134,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (ref) {
                     // Access tc through current s.entries proxy so mutations trigger reactivity.
                     const entry = s.entries.find(e => e.id === ref.entryId);
-                    const tc = entry?.toolCalls?.find(t => t.toolId === data.tool_id);
+                    const tc = entry?.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
                     if (tc) {
                         tc.result = data.output;
                         tc.success = data.success;
@@ -254,7 +255,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
                     }
                     s.activeToolCalls = new Map();
-                    s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some(tc => tc.isPending) && !e.content && !e.reasoningContent));
+                    s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some((tc: ToolCallInfo) => tc.isPending) && !e.content && !e.reasoningContent));
                     markStreaming();
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;

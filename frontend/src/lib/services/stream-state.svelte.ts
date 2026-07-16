@@ -1,7 +1,7 @@
-import type { ChatEntry } from '$lib/components/Chat/TaskChat.svelte';
+import type { ChatEntry } from '$lib/types';
 
 /** Tool call info — matches ChatEntry['toolCalls'][number]. */
-type ToolCallInfo = NonNullable<ChatEntry['toolCalls']>[number];
+export type ToolCallInfo = NonNullable<ChatEntry['toolCalls']>[number];
 
 /**
  * Reactive class holding all stream-processing state.
