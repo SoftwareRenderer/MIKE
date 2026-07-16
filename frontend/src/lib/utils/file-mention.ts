@@ -7,7 +7,7 @@
 /**
  * Result of detecting an @ mention trigger at the cursor position.
  */
-export interface MentionTrigger {
+interface MentionTrigger {
 	/** The index in the textarea value where the @ appears */
 	atIndex: number;
 	/** The search query typed after the @ (may be empty) */

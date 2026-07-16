@@ -464,16 +464,18 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         wsConnected = connected;
                         setOfflineStatus(!connected);
                         if (!connected) {
+                            // Mark data as potentially stale so visibility refresh picks it up
+                            lastSyncedAt = 0;
                             startStaleTick();
                         } else {
                             stopCountdown();
                             stopStaleTick();
                             nextReconnectAt = 0;
                             countdownSeconds = 0;
-                            // Auto-refresh cached data on reconnect
-                            if (servingFromCache) {
-                                silentRefresh().catch(() => {});
-                            }
+                            // Always refresh on reconnect — per-connection event buffer
+                            // is lost when the WebSocket drops, so we may have missed
+                            // task_updated/project_counts events during the gap.
+                            silentRefresh().catch(() => {});
                         }
                     },
                     onReconnectScheduled: (nextAttemptAt) => {
@@ -522,27 +524,26 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     // Detect when the tab becomes visible again (e.g. phone wakes from sleep).
     // Check the WebSocket for zombie connections, force reconnect if stale,
-    // try immediate reconnect if disconnected, and refresh stale data.
+    // try immediate reconnect if disconnected, and always refresh board data.
+    // Always refresh on wake because the per-connection event buffer is lost
+    // when the WebSocket drops — any task_updated/project_counts events during
+    // the disconnect window are missed and must be recovered via HTTP fetch.
     function handleVisibilityChange() {
         if (!document.hidden && appStream) {
             appStream.checkStale();
             if (!wsConnected) {
                 appStream.reconnectNow();
             }
-            // Refresh board data if it's stale (>30s since last sync)
-            if (Date.now() - lastSyncedAt > 30_000) {
-                refreshBoard().catch(() => {});
-            }
+            // Always refresh on tab-visible — WebSocket events may have been lost
+            // during sleep/disconnect (per-connection buffer is evicted on reconnect).
+            refreshBoard().catch(() => {});
         }
     }
     window.addEventListener('visibilitychange', handleVisibilityChange);
-    // Backup: some browsers (Safari iOS) don't fire visibilitychange reliably.
-    window.addEventListener('focus', handleVisibilityChange);
 
     onDestroy(() => {
         stopCountdown();
         window.removeEventListener('visibilitychange', handleVisibilityChange);
-        window.removeEventListener('focus', handleVisibilityChange);
         disconnectBoardStream();
         if (appStream) {
             appStream.close();
@@ -572,15 +573,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 wsConnected = connected;
                 setOfflineStatus(!connected);
                 if (!connected) {
+                    lastSyncedAt = 0;
                     startStaleTick();
                 } else {
                     stopCountdown();
                     stopStaleTick();
                     nextReconnectAt = 0;
                     countdownSeconds = 0;
-                    if (servingFromCache) {
-                        silentRefresh().catch(() => {});
-                    }
+                    silentRefresh().catch(() => {});
                 }
             },
             onReconnectScheduled: (nextAttemptAt) => {

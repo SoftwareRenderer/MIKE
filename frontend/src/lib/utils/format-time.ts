@@ -54,13 +54,4 @@ export function formatTimestamp(isoStr: string): { display: string; tooltip: str
     }
 }
 
-/**
- * Format a simple time string (e.g. "3:45 PM").
- * Used by CheckpointDivider for thread timestamps.
- */
-export function formatTime(isoStr: string): string {
-    if (!isoStr) return '';
-    const date = new Date(isoStr);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
+
