@@ -11,7 +11,7 @@
     import ModeSelect from './ModeSelect.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
 
-    let { projectId, onClose, onTaskCreated, parentId, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
+    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
     let prompt = $state('');
     let autoCommit = $state(false);
@@ -24,6 +24,58 @@
     let parentTitle = $state('');
     let attachments = $state<Array<{ mimeType: string; data: string }>>([]);
     let fileInput: HTMLInputElement | null = $state(null);
+
+    // Branch selection
+    let branchDraft = $state('');
+    let branches = $state<string[]>([]);
+    let branchInput: HTMLInputElement | null = null;
+    let branchDropdownOpen = $state(false);
+    let branchActiveIndex = $state(0);
+    let branchDropdownRef: HTMLUListElement | null = null;
+    let branchWrapperRef: HTMLDivElement | null = null;
+
+    // Filtered branches matching the current input text
+    let filteredBranches = $derived.by(() => {
+        const query = branchDraft.trim().toLowerCase();
+        if (!query) return branches;
+        return branches.filter(b => b.toLowerCase().includes(query));
+    });
+
+    function openBranchDropdown() {
+        branchDropdownOpen = true;
+        branchActiveIndex = 0;
+    }
+
+    function closeBranchDropdown() {
+        branchDropdownOpen = false;
+        branchActiveIndex = 0;
+    }
+
+    function handleBranchInput() {
+        openBranchDropdown();
+    }
+
+    function handleBranchKeydown(e: KeyboardEvent) {
+        if (!branchDropdownOpen || filteredBranches.length === 0) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            branchActiveIndex = (branchActiveIndex + 1) % filteredBranches.length;
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            branchActiveIndex = (branchActiveIndex - 1 + filteredBranches.length) % filteredBranches.length;
+        } else if (e.key === 'Enter' && branchActiveIndex >= 0 && branchActiveIndex < filteredBranches.length) {
+            e.preventDefault();
+            branchDraft = filteredBranches[branchActiveIndex];
+            closeBranchDropdown();
+        } else if (e.key === 'Escape') {
+            closeBranchDropdown();
+        }
+    }
+
+    function selectBranch(branch: string) {
+        branchDraft = branch;
+        closeBranchDropdown();
+    }
 
     // @ file mention state
     let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
@@ -160,7 +212,7 @@
     // Config is now reactive via appStore
     let cfg: Config | null = $state(null);
     $effect(() => { cfg = appStore.config; });
-    let targetBranch = $derived(appStore.selectedProject?.origin_branch || 'main');
+    let targetBranch = $derived(currentBranch || appStore.selectedProject?.origin_branch || 'main');
     let configLoaded = $state(false);
     $effect(() => {
         if (cfg?.providers) {
@@ -201,6 +253,19 @@
                 parentTitle = 'Parent task';
             }
         }
+        // Fetch available branches for root tasks
+        if (!parentId && projectId) {
+            branchDraft = targetBranch;
+            try {
+                const res = await fetch(`/api/projects/${projectId}/git/branches`);
+                if (res.ok) {
+                    const data: string[] = await res.json();
+                    branches = data.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
+                }
+            } catch {
+                // Ignore errors
+            }
+        }
     });
 
 
@@ -222,6 +287,9 @@
             auto_merge: autoMerge,
             subtasks_auto_merge: subtasksAutoMerge,
         };
+        if (!parentId && branchDraft.trim()) {
+            taskData.base_ref = branchDraft.trim();
+        }
         if (attachments.length > 0) {
             taskData.attachments = JSON.stringify(attachments);
         }
@@ -343,6 +411,41 @@
     </div>
     <div class="options-section">
         <div class="section-label">Repository</div>
+        {#if !parentId}
+        <div class="config-row">
+            <div class="config-info">
+                <div class="config-text">
+                    <span class="config-label">Branch</span>
+                    <span class="config-desc">Base branch for this task's changes</span>
+                </div>
+            </div>
+            <div class="branch-input-wrapper">
+                <input
+                    bind:this={branchInput}
+                    type="text"
+                    bind:value={branchDraft}
+                    placeholder={targetBranch}
+                    class="branch-input"
+                    oninput={handleBranchInput}
+                    onkeydown={handleBranchKeydown}
+                    onfocus={openBranchDropdown}
+                    onblur={() => setTimeout(() => closeBranchDropdown(), 150)}
+                />
+                {#if branchDropdownOpen && filteredBranches.length > 0}
+                    <ul bind:this={branchDropdownRef} class="branch-dropdown" role="listbox">
+                        {#each filteredBranches as branch, i (branch)}
+                            <li
+                                class="branch-option {i === branchActiveIndex ? 'active' : ''}"
+                                role="option"
+                                aria-selected={i === branchActiveIndex}
+                                onmousedown={(e) => { e.preventDefault(); selectBranch(branch); }}
+                            >{branch}</li>
+                        {/each}
+                    </ul>
+                {/if}
+            </div>
+        </div>
+        {/if}
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
@@ -351,7 +454,7 @@
                         {#if parentId}
                         Merge changes into parent task when complete
                         {:else}
-                        Merge changes into <span class="branch-badge" title={`Branch: ${targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{targetBranch}</span> when complete
+                        Merge changes into <span class="branch-badge" title={`Branch: ${branchDraft || targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{branchDraft || targetBranch}</span> when complete
                         {/if}
                     </span>
                 </div>
@@ -537,6 +640,53 @@
         font-family: var(--font-mono);
         vertical-align: baseline;
         line-height: 1.2;
+    }
+    .branch-input-wrapper {
+        position: relative;
+    }
+    .branch-input {
+        width: 160px;
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 5px 8px;
+        font-family: var(--font-mono, monospace);
+        outline: none;
+        text-align: right;
+    }
+    .branch-input:focus {
+        border-color: var(--color-accent);
+    }
+    .branch-dropdown {
+        position: absolute;
+        z-index: 100;
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        min-width: 160px;
+    }
+    .branch-option {
+        padding: 6px 10px;
+        font-size: 0.8125rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .branch-option:hover,
+    .branch-option.active {
+        background: var(--color-surface-3);
+        color: var(--color-accent);
     }
     .config-desc {
         font-size: 0.75rem;

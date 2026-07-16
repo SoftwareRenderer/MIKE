@@ -779,7 +779,9 @@ type diffManifest struct {
 }
 
 // getStagedPaths returns a set of file paths that are staged in the index.
-// Uses "git diff --staged target --name-only" to list staged files.
+// Always compares against HEAD (current commit), NOT baseRef.
+// baseRef may be a different branch and comparing index vs that branch
+// would show ALL branch divergence as "staged".
 func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]struct{} {
 	if wm == nil {
 		return nil
@@ -788,11 +790,7 @@ func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]
 	if err != nil {
 		return nil
 	}
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-	cmd := exec.Command("git", "-C", worktreePath, "diff", "--staged", "--name-only", target)
+	cmd := exec.Command("git", "-C", worktreePath, "diff", "--staged", "--name-only", "HEAD")
 	out, err := cmd.CombinedOutput()
 	// git diff exits 0 = no changes, 1 = changes found (output is valid).
 	// Only treat non-1 exit codes as real errors.

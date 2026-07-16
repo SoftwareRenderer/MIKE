@@ -398,6 +398,7 @@
             editSubtasksAutoMerge: task.subtasks_auto_merge ?? true,
             taskHasParent: !!task.parent_task_id,
             targetBranch: selProject?.origin_branch || 'main',
+            baseRef: task.base_ref || '',
             isAgentSelected: () => {
                 const url = task.llama_server_url;
                 if (!url) return false;

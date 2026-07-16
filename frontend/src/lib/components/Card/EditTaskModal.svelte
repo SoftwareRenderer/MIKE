@@ -1,5 +1,5 @@
 <script lang="ts">
-    
+    import { onMount } from 'svelte';
     import type { Provider } from '$lib/types';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
@@ -7,6 +7,7 @@
     import BaseModal from '../BaseModal.svelte';
 
     let {
+        projectId,
         taskTitle,
         taskPrompt,
         editProviders,
@@ -18,10 +19,12 @@
         editSubtasksAutoMerge,
         taskHasParent,
         targetBranch,
+        baseRef,
         isAgentSelected,
         onSave,
         onCancel,
     }: {
+        projectId: string;
         taskTitle: string;
         taskPrompt: string;
         editProviders: Provider[];
@@ -33,8 +36,9 @@
         editSubtasksAutoMerge: boolean;
         taskHasParent: boolean;
         targetBranch: string;
+        baseRef: string;
         isAgentSelected: () => boolean;
-        onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => void;
+        onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => void;
         onCancel: () => void;
     } = $props();
 
@@ -45,6 +49,57 @@
     let operatingModeDraft = $state('act');
     let autoMergeDraft = $state(true);
     let subtasksAutoMergeDraft = $state(true);
+    let branchDraft = $state('');
+
+    // Branch list for selector
+    let branches = $state<string[]>([]);
+    let branchInput: HTMLInputElement | null = null;
+    let branchDropdownOpen = $state(false);
+    let branchActiveIndex = $state(0);
+    let branchDropdownRef: HTMLUListElement | null = null;
+
+    // Filtered branches matching the current input text
+    let filteredBranches = $derived.by(() => {
+        const query = branchDraft.trim().toLowerCase();
+        if (!query) return branches;
+        return branches.filter(b => b.toLowerCase().includes(query));
+    });
+
+    function openBranchDropdown() {
+        branchDropdownOpen = true;
+        branchActiveIndex = 0;
+    }
+
+    function closeBranchDropdown() {
+        branchDropdownOpen = false;
+        branchActiveIndex = 0;
+    }
+
+    function handleBranchInput() {
+        openBranchDropdown();
+    }
+
+    function handleBranchKeydown(e: KeyboardEvent) {
+        if (!branchDropdownOpen || filteredBranches.length === 0) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            branchActiveIndex = (branchActiveIndex + 1) % filteredBranches.length;
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            branchActiveIndex = (branchActiveIndex - 1 + filteredBranches.length) % filteredBranches.length;
+        } else if (e.key === 'Enter' && branchActiveIndex >= 0 && branchActiveIndex < filteredBranches.length) {
+            e.preventDefault();
+            branchDraft = filteredBranches[branchActiveIndex];
+            closeBranchDropdown();
+        } else if (e.key === 'Escape') {
+            closeBranchDropdown();
+        }
+    }
+
+    function selectBranch(branch: string) {
+        branchDraft = branch;
+        closeBranchDropdown();
+    }
 
     $effect(() => { titleDraft = taskTitle; });
     $effect(() => { modelDraft = editModel; });
@@ -53,6 +108,7 @@
     $effect(() => { operatingModeDraft = editOperatingMode; });
     $effect(() => { autoMergeDraft = editAutoMerge; });
     $effect(() => { subtasksAutoMergeDraft = editSubtasksAutoMerge; });
+    $effect(() => { branchDraft = baseRef || targetBranch; });
 
     let titleInput: HTMLInputElement | null = null;
 
@@ -61,6 +117,20 @@
             titleInput?.focus();
             titleInput?.select();
         }, 50);
+    });
+
+    onMount(async () => {
+        if (taskHasParent || !projectId) return;
+        try {
+            const res = await fetch(`/api/projects/${projectId}/git/branches`);
+            if (res.ok) {
+                const data: string[] = await res.json();
+                // Filter to local branches only (no origin/ prefix)
+                branches = data.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
+            }
+        } catch {
+            // Ignore errors
+        }
     });
 
     function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
@@ -72,7 +142,7 @@
     function handleSave() {
         const trimmed = titleDraft.trim();
         if (!trimmed) return;
-        onSave(trimmed, modelDraft, urlDraft, effortDraft, operatingModeDraft, autoMergeDraft, subtasksAutoMergeDraft);
+        onSave(trimmed, modelDraft, urlDraft, effortDraft, operatingModeDraft, autoMergeDraft, subtasksAutoMergeDraft, branchDraft.trim() || targetBranch);
     }
 
     function handleClose() {
@@ -128,10 +198,43 @@
             {/if}
             <div class="options-section">
                 <div class="section-label">Repository</div>
+                {#if !taskHasParent}
+                <div class="config-row">
+                    <div class="config-info">
+                        <span class="config-label">Branch</span>
+                        <span class="config-desc">Base branch for this task's changes</span>
+                    </div>
+                    <div class="branch-input-wrapper">
+                        <input
+                            bind:this={branchInput}
+                            type="text"
+                            bind:value={branchDraft}
+                            placeholder={targetBranch}
+                            class="branch-input"
+                            oninput={handleBranchInput}
+                            onkeydown={handleBranchKeydown}
+                            onfocus={openBranchDropdown}
+                            onblur={() => setTimeout(() => closeBranchDropdown(), 150)}
+                        />
+                        {#if branchDropdownOpen && filteredBranches.length > 0}
+                            <ul bind:this={branchDropdownRef} class="branch-dropdown" role="listbox">
+                                {#each filteredBranches as branch, i (branch)}
+                                    <li
+                                        class="branch-option {i === branchActiveIndex ? 'active' : ''}"
+                                        role="option"
+                                        aria-selected={i === branchActiveIndex}
+                                        onmousedown={(e) => { e.preventDefault(); selectBranch(branch); }}
+                                    >{branch}</li>
+                                {/each}
+                            </ul>
+                        {/if}
+                    </div>
+                </div>
+                {/if}
                 <div class="config-row">
                     <div class="config-info">
                         <span class="config-label">Auto-merge</span>
-                        <span class="config-desc">{taskHasParent ? 'Merge changes into parent task when complete' : `Merge changes into ${targetBranch} when complete`}</span>
+                        <span class="config-desc">{taskHasParent ? 'Merge changes into parent task when complete' : `Merge changes into ${branchDraft || targetBranch} when complete`}</span>
                     </div>
                     <ToggleSwitch bind:checked={autoMergeDraft} ariaLabel="Auto-merge on completion" />
                 </div>
@@ -183,6 +286,53 @@
     }
     input[type="text"]:focus {
         border-color: var(--color-accent);
+    }
+    .branch-input-wrapper {
+        position: relative;
+    }
+    .branch-input {
+        width: 160px;
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 5px 8px;
+        font-family: var(--font-mono, monospace);
+        outline: none;
+        text-align: right;
+    }
+    .branch-input:focus {
+        border-color: var(--color-accent);
+    }
+    .branch-dropdown {
+        position: absolute;
+        z-index: 100;
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        min-width: 160px;
+    }
+    .branch-option {
+        padding: 6px 10px;
+        font-size: 0.8125rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .branch-option:hover,
+    .branch-option.active {
+        background: var(--color-surface-3);
+        color: var(--color-accent);
     }
     .model-select-row {
         display: flex;

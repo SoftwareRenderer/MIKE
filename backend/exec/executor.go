@@ -1083,8 +1083,11 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			}
 		}
 	} else {
-		// Root task — merge into origin.
-		targetBranch = project.OriginBranch
+		// Root task — merge into task's base_ref if set, otherwise origin branch.
+		targetBranch = task.BaseRef
+		if targetBranch == "" {
+			targetBranch = project.OriginBranch
+		}
 		if targetBranch == "" {
 			var err error
 			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
@@ -1095,6 +1098,26 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		}
 	}
 	targetBranch = strings.TrimSpace(targetBranch)
+	// Create target branch if it doesn't exist (user-specified base_ref).
+	if task.ParentTaskID == "" && task.BaseRef != "" && targetBranch == task.BaseRef {
+		cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
+		cmd.Dir = project.Path
+		if cmd.Run() != nil {
+			// Branch doesn't exist — create it from origin branch
+			startPoint := project.OriginBranch
+			if startPoint == "" {
+				startPoint = "HEAD"
+			}
+			createCmd := osexec.Command("git", "-C", project.Path, "branch", targetBranch, startPoint)
+			if out, err := createCmd.CombinedOutput(); err != nil {
+				log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
+				te.logSystemMessage(taskID, task.CurrentThreadID,
+					fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
+				return fmt.Errorf("create branch %q: %w", targetBranch, err)
+			}
+			log.Printf("[merge] task=%s created branch %q from %q", taskID, targetBranch, startPoint)
+		}
+	}
 	if targetBranch == "" || targetBranch == "HEAD" {
 		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
 		return nil

@@ -1522,15 +1522,14 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}
 
 	// Compute staged hash so the diff hash changes on git add/reset.
+	// Always compare against HEAD (current commit), NOT baseRef.
+	// baseRef may be a different branch (e.g. "develop") and comparing
+	// index vs develop would show ALL branch divergence as "staged".
 	var stagedHash string
 	var stagedPaths map[string]struct{}
 	if headRef == "" {
-		target := "HEAD"
-		if baseRef != "" {
-			target = baseRef
-		}
 		// git diff exits 1 when changes exist — output is still valid.
-		stagedOut, stagedErr := wm.gitRunOutput(worktreePath, "diff", "--cached", target)
+		stagedOut, stagedErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "HEAD")
 		if stagedErr != nil {
 			if exitErr, ok := stagedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
@@ -1539,7 +1538,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
 		}
 		// Get set of staged file paths to mark Staged on tracked entries.
-		stagedNames, namesErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", target)
+		stagedNames, namesErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", "HEAD")
 		if namesErr != nil {
 			if exitErr, ok := namesErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				// Changes exist, output is valid

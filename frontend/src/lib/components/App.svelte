@@ -1086,6 +1086,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         <CreateTaskModal
             projectId={currentProject?.id}
             parentId={uiStore.creatingChildOf ?? undefined}
+            currentBranch={currentBranch}
             onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; }}
             onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
@@ -1094,19 +1095,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
     {#if appStore.showEditTask && appStore.editTaskData}
         <EditTaskModal
+            projectId={appStore.editTaskData.projectId}
             taskTitle={appStore.editTaskData.taskTitle}
             taskPrompt={appStore.editTaskData.taskPrompt}
             editProviders={appStore.editTaskData.editProviders}
             editModel={appStore.editTaskData.editModel}
             editUrl={appStore.editTaskData.editUrl}
             editReasoningEffort={appStore.editTaskData.editReasoningEffort}
-            editPlanMode={appStore.editTaskData.editPlanMode}
+            editOperatingMode={appStore.editTaskData.editOperatingMode}
             editAutoMerge={appStore.editTaskData.editAutoMerge}
             editSubtasksAutoMerge={appStore.editTaskData.editSubtasksAutoMerge}
             taskHasParent={appStore.editTaskData.taskHasParent}
             targetBranch={appStore.editTaskData.targetBranch}
+            baseRef={appStore.editTaskData.baseRef}
             isAgentSelected={appStore.editTaskData.isAgentSelected}
-            onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) => {
+            onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => {
                 const taskId = appStore.editTaskData!.taskId;
                 const projectId = appStore.editTaskData!.projectId;
                 // Find the task in the board and update it
@@ -1118,6 +1121,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     updates.auto_commit = autoMerge;
                     updates.auto_merge = autoMerge;
                     updates.subtasks_auto_merge = subtasksAutoMerge;
+                    if (baseRef) updates.base_ref = baseRef;
                     if (model) updates.model_name = model;
                     if (url) updates.llama_server_url = url;
                     if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
@@ -1126,6 +1130,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     task.auto_commit = autoMerge;
                     task.auto_merge = autoMerge;
                     task.subtasks_auto_merge = subtasksAutoMerge;
+                    if (baseRef) task.base_ref = baseRef;
                     if (model) task.model_name = model;
                     if (url) task.llama_server_url = url;
                     if (reasoningEffort) task.reasoning_effort = reasoningEffort;

@@ -32,11 +32,12 @@ export interface EditTaskData {
     editModel: string;
     editUrl: string;
     editReasoningEffort: string;
-    editPlanMode: boolean;
+    editOperatingMode: string;
     editAutoMerge: boolean;
     editSubtasksAutoMerge: boolean;
     taskHasParent: boolean;
     targetBranch: string;
+    baseRef: string;
     isAgentSelected: () => boolean;
 }
 

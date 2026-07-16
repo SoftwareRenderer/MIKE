@@ -670,13 +670,17 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 
 // resolveMergeTarget determines the branch that changes will be merged into.
 // For child tasks, the target is the parent's branch.
-// For root tasks, the target is the project's origin branch (or current HEAD).
+// For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
 func (h *TaskHandler) resolveMergeTarget(projectID string, task *types.Task) string {
 	if task.ParentTaskID != "" {
 		parent, err := h.store.GetTaskByTaskID(task.ParentTaskID)
 		if err == nil && parent.Branch != "" {
 			return parent.Branch
 		}
+	}
+	// Use task's custom base_ref if set (will be created at merge time if needed)
+	if task.BaseRef != "" {
+		return task.BaseRef
 	}
 	project, err := h.store.GetProject(projectID)
 	if err != nil || project.OriginBranch == "" {
@@ -757,6 +761,14 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// Merge task branch
 	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
+		// Reload to check for merge conflict flag set by MergeBranch
+		task, _ = h.store.GetTask(projectID, taskID)
+		if !task.HasMergeConflict {
+			// Non-conflict merge failure (e.g., branch creation failed) — return error
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			httputil.JSONError(w, http.StatusInternalServerError, mergeErr.Error())
+			return
+		}
 	}
 
 	// Reload task — MergeBranch may have set merge conflict flag
