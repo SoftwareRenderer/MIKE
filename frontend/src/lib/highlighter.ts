@@ -567,7 +567,7 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
 
     // Sort: by kind group, then alphabetically
     unique.sort((a, b) => {
-        const kindOrder = { class: 0, variable: 1, property: 2 };
+        const kindOrder: Record<string, number> = { class: 0, variable: 1, property: 2 };
         const aOrder = kindOrder[a.kind] ?? 9;
         const bOrder = kindOrder[b.kind] ?? 9;
         if (aOrder !== bOrder) return aOrder - bOrder;
@@ -699,7 +699,7 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
 
     // Sort: by kind group, then alphabetically
     symbols.sort((a, b) => {
-        const kindOrder = { property: 0, function: 1, class: 2, variable: 3, constant: 4 };
+        const kindOrder: Record<string, number> = { property: 0, function: 1, class: 2, variable: 3, constant: 4 };
         const aOrder = kindOrder[a.kind] ?? 9;
         const bOrder = kindOrder[b.kind] ?? 9;
         if (aOrder !== bOrder) return aOrder - bOrder;
@@ -837,7 +837,7 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
 
         // Sort: functions first, then classes, each group alphabetically
         symbols.sort((a, b) => {
-            const kindOrder = { function: 0, class: 1, constant: 2, variable: 3 };
+            const kindOrder: Record<string, number> = { function: 0, class: 1, constant: 2, variable: 3 };
             const aOrder = kindOrder[a.kind] ?? 9;
             const bOrder = kindOrder[b.kind] ?? 9;
             if (aOrder !== bOrder) return aOrder - bOrder;
