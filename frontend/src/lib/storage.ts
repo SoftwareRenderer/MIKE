@@ -300,7 +300,8 @@ export async function clearEditorHistory(path: string): Promise<void> {
 
 /** Load unsaved file paths for a project. */
 export async function loadUnsavedFiles(projectId: string): Promise<string[]> {
-    return dbGet<string[]>(STORE_UNSAVED_FILES, projectId, isArray) ?? [];
+    const result = await dbGet<string[]>(STORE_UNSAVED_FILES, projectId, isArray);
+    return result ?? [];
 }
 
 /** Save unsaved file paths for a project. */
@@ -377,7 +378,8 @@ export interface QueuedAction {
 
 /** Load offline queue. */
 export async function loadQueue(): Promise<QueuedAction[]> {
-    return dbGet<QueuedAction[]>(STORE_OFFLINE_QUEUE, KEY_ACTIONS, isArray) ?? [];
+    const result = await dbGet<QueuedAction[]>(STORE_OFFLINE_QUEUE, KEY_ACTIONS, isArray);
+    return result ?? [];
 }
 
 /** Save offline queue. */
@@ -403,7 +405,8 @@ export async function saveDraftAttachments(taskId: string, attachments: DraftAtt
 
 /** Load draft attachments for a task. Returns empty array if none exist. */
 export async function loadDraftAttachments(taskId: string): Promise<DraftAttachment[]> {
-    return dbGet<DraftAttachment[]>(STORE_ATTACHMENTS, taskId, isArray) ?? [];
+    const result = await dbGet<DraftAttachment[]>(STORE_ATTACHMENTS, taskId, isArray);
+    return result ?? [];
 }
 
 /** Remove draft attachments for a task. */
