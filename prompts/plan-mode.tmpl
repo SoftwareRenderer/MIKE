@@ -65,11 +65,11 @@ List of constraints, decisions, or known risks.
 - Each task must contain all the context the individual developer needs.
 - No vague items like "fix things" or "improve code".
 
-After preparing the plan, present it to the user and ask:
+After preparing the plan, present it to the user and request approval:
 
 ```
 I've created a plan. Does this look correct?
-Reply YES to create tasks, or tell me what to change.
+Reply Approve to create tasks, or tell me what to change.
 ```
 
 ## Phase 4: Revision Loop (if needed)
@@ -84,7 +84,7 @@ Repeat until the user approves.
 
 
 ## Phase 5: Create Tasks
-Use the `create_task` tool to create the approved tasks.
+Ensure that you have explicit approval before using the `create_task` tool.
 
 ### Only 1 Proposed Task
 If there is only one task, do not create it. Instead, ask the user to toggle to Act mode and tell you to proceed, so you can implement directly.
