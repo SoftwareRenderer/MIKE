@@ -7,7 +7,7 @@ export default defineConfig({
     plugins: [
         svelte(),
         VitePWA({
-            registerType: 'autoUpdate',
+            injectRegister: null,
             // Icons are in public/ — Vite auto-copies them to dist root
             includeAssets: [],
             manifest: {

@@ -27,6 +27,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import ExplorerView from './ExplorerView.svelte';
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
+    import SWUpdateBanner from './SWUpdateBanner.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -1184,6 +1185,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <Toast />
     <ConfirmationDialog />
     <CommitDialog />
+    <SWUpdateBanner />
 </div>
 {/if}
 
