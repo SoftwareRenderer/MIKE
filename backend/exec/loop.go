@@ -815,6 +815,29 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": path}})
 					}
 				}
+				// Persist tool_call message BEFORE execution so it survives page refresh.
+				// ToolResult is empty until execution completes.
+				tcJSON, _ := json.Marshal(map[string]any{
+					"tool_id":           tc.ID,
+					"tool_name":         tc.Function.Name,
+					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
+					"args":              args,
+					"raw_args":          tc.Function.Arguments,
+					"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
+				})
+				toolCallMsgID := uuid.New().String()
+				if err := te.store.CreateTaskMessage(&types.TaskMessage{
+					ID:        toolCallMsgID,
+					TaskID:    setup.task.ID,
+					ThreadID:  setup.task.CurrentThreadID,
+					Role:      "tool_call",
+					Content:   "",
+					ToolCalls: string(tcJSON),
+					CreatedAt: time.Now().UTC(),
+				}); err != nil {
+					log.Printf("[tool] FAILED to persist tool_call message for setup.task=%s tool=%s: %v", setup.task.ID, tc.Function.Name, err)
+				}
+
 				// tool_call event already sent during streaming, just execute and send result
 				log.Printf("[tool] executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
 				toolStart := time.Now()
@@ -829,29 +852,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
-				tcJSON, _ := json.Marshal(map[string]any{
-					"tool_id":           tc.ID,
-					"tool_name":         tc.Function.Name,
-					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
-					"args":              args,
-					"raw_args":          tc.Function.Arguments,
-					"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
-				})
+				// Update tool_call message with result after execution completes.
 				resultJSON, _ := json.Marshal(map[string]any{
 					"output":   result,
 					"success":  success,
 					"duration": toolDuration,
 				})
-				_ = te.store.CreateTaskMessage(&types.TaskMessage{
-					ID:         uuid.New().String(),
-					TaskID:     setup.task.ID,
-					ThreadID:   setup.task.CurrentThreadID,
-					Role:       "tool_call",
-					Content:    "",
-					ToolCalls:  string(tcJSON),
-					ToolResult: string(resultJSON),
-					CreatedAt:  time.Now().UTC(),
-				})
+				_ = te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON))
 
 				turnFailures = append(turnFailures, turnResult{
 					signature: tc.Function.Name + ":" + tc.Function.Arguments,

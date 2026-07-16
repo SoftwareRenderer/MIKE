@@ -127,7 +127,8 @@
     let newVisibleItems = $derived.by(() => {
         if (!vs || isLegacyApi) return [];
         const result: Array<{ item: any; index: number; offset: number }> = [];
-        for (let i = vs.startIdx; i < vs.endIdx; i++) {
+        const end = Math.min(vs.endIdx, items.length);
+        for (let i = vs.startIdx; i < end; i++) {
             result.push({
                 item: items[i],
                 index: i,

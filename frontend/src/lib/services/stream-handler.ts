@@ -145,6 +145,23 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
                         if (data.path !== undefined) tc.path = data.path;
                     }
+                } else {
+                    // Tool call loaded from DB after page refresh — not in activeToolCalls.
+                    // Search entries directly for a pending tool call with matching tool_id.
+                    for (const entry of s.entries) {
+                        const tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id && t.isPending);
+                        if (tc) {
+                            tc.result = data.output;
+                            tc.success = data.success;
+                            tc.duration = data.duration;
+                            tc.isPending = false;
+                            if (data.args) tc.args = data.args;
+                            if (data.raw_args) tc.raw_args = data.raw_args;
+                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                            if (data.path !== undefined) tc.path = data.path;
+                            break;
+                        }
+                    }
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();

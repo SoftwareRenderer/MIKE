@@ -273,6 +273,31 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries[0].toolCalls).toBeUndefined();
     });
 
+    it('tool_result resolves DB-loaded pending tool call not in activeToolCalls', () => {
+        // Simulates page refresh: entry loaded from DB with isPending=true,
+        // but activeToolCalls is empty (fresh StreamState).
+        const { stream, handleEvent } = setup();
+        stream.state.entries = [{
+            id: 'db-assistant', role: 'assistant', content: '', isStreaming: false,
+            createdAt: new Date().toISOString(),
+            toolCalls: [{
+                toolId: 'db-tc1', toolName: 'bash', displayName: 'Execute',
+                args: { command: 'sleep 30s', timeout: 30 }, raw_args: '{"command":"sleep 30s","timeout":30}',
+                isPending: true, startedAt: Date.now() - 5000,
+            }],
+        }];
+        // activeToolCalls is empty — simulates post-refresh state
+        stream.state.activeToolCalls = new Map();
+        // tool_result arrives from WebSocket
+        handleEvent({ type: 'tool_result', data: { tool_id: 'db-tc1', success: true, output: 'done', duration: 5000 } }, false, 'p1', 't1');
+        // Fallback search should find and resolve the pending tool call
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.isPending).toBe(false);
+        expect(tc.result).toBe('done');
+        expect(tc.success).toBe(true);
+        expect(tc.duration).toBe(5000);
+    });
+
     it('tool_output ignores unknown tool_id not in activeToolCalls', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');

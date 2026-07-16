@@ -137,11 +137,11 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
 
-    // isLoading: only true when LLM is actively streaming tokens.
-    // Shows stop button only during token generation, not during tool execution.
+    // isLoading: true when LLM is actively streaming tokens OR task is in running state.
+    // After page refresh, streamingIds is empty but execution_state preserves running state.
     let streamingIds = getStreamingContext();
     // streamingIds is from context (not appStore), accessed via $derived with context auto-subscription
-    let isLoading = $derived($streamingIds.has(taskId));
+    let isLoading = $derived($streamingIds.has(taskId) || taskExecutionState === 'running');
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
@@ -415,9 +415,20 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
                 }
             }
             // Remove buffer entries whose tool calls are already in the DB.
+            // Also remove buffer assistant entries that are duplicates of DB entries:
+            // - Buffer entry has tool calls with IDs matching DB → removed by tool_id check
+            // - Buffer entry has reasoning but no tool calls (tool_call events evicted from buffer)
+            //   and DB has assistant with tool calls → removed as reasoning-only duplicate
+            // - Buffer entry has both reasoning AND tool calls but same tool IDs as DB → removed
+            const dbHasToolCalls = dbToolIds.size > 0;
             const dedupedNonDb = existingNonDb.filter(e => {
-                if (e.toolCalls) {
+                if (e.toolCalls && e.toolCalls.length > 0) {
                     return !e.toolCalls.some(tc => dbToolIds.has(tc.toolId));
+                }
+                // Remove buffer assistant with reasoning (and optionally empty toolCalls)
+                // if DB has assistant entries with tool calls for the same turn.
+                if (dbHasToolCalls && e.role === 'assistant' && e.reasoningContent) {
+                    return false;
                 }
                 return true;
             });

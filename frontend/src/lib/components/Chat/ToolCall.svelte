@@ -332,6 +332,16 @@
             ? (marked.parse(tc.args.question as string, { async: false }) as string)
             : ''
     );
+
+    // Bash timeout (in seconds, from args or raw_args fallback)
+    // Computed inline to avoid Svelte 5 $derived function-call TypeScript issues.
+    let bashTimeout = $derived<number | undefined>(
+        tc.toolName !== 'bash' ? undefined :
+        tc.args && 'timeout' in tc.args ? tc.args.timeout as number :
+        tc.raw_args ? (() => { const m = tc.raw_args!.match(/"timeout"\s*:\s*(\d+)/); return m ? parseInt(m[1], 10) : undefined; })() :
+        undefined
+    );
+    let timeoutBadge = $derived(bashTimeout !== undefined ? `Timeout ${bashTimeout}s` : '');
 </script>
 
 <div class="tool-call-entry">
@@ -381,6 +391,9 @@
                 <span class="tool-status success">Completed</span>
             {/if}
         </div>
+        {#if timeoutBadge && tc.isPending}
+            <div class="tool-timeout-badge">{timeoutBadge}</div>
+        {/if}
         {#if hasEditDiff}
             <button class="edit-diff-toggle" onclick={() => editDiffExpanded = !editDiffExpanded} aria-expanded={editDiffExpanded}>
                 <span class="lines-added">+{editLinesAdded()}</span>
@@ -464,7 +477,13 @@
             {/if}
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question'}
-            <span class="tool-duration">{tc.duration}ms</span>
+            <span class="tool-duration">
+                {tc.duration}ms
+                {#if bashTimeout !== undefined}
+                    <span class="tool-duration-sep">·</span>
+                    <span class="tool-timeout">Timeout {bashTimeout}s</span>
+                {/if}
+            </span>
         {/if}
     </div>
 </div>
@@ -528,6 +547,11 @@
     }
     .tool-status.pending { color: var(--color-accent); }
     .progress-text { font-size: 0.8125rem; font-weight: 600; }
+    .tool-timeout-badge {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+        padding: 2px 0;
+    }
     .lines-added { color: var(--color-status-green); }
     .lines-removed { color: var(--color-status-red); }
     .tool-status.error { color: var(--color-status-red); }
@@ -778,10 +802,20 @@
         background: var(--color-surface-3);
     }
     .tool-duration {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         font-size: 0.6875rem;
         color: var(--color-text-tertiary);
         margin-top: 4px;
-        display: block;
+    }
+    .tool-duration-sep {
+        color: var(--color-text-tertiary);
+        opacity: 0.6;
+    }
+    .tool-timeout {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
     }
     .edit-diff {
         font-family: var(--font-mono);

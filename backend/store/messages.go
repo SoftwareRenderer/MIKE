@@ -219,6 +219,14 @@ func (s *Store) UpdateTaskMessageCommitHash(messageID, hash string) error {
 	return err
 }
 
+// UpdateTaskMessageToolResult updates the tool_result of a tool_call message.
+func (s *Store) UpdateTaskMessageToolResult(messageID, toolResult string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE task_messages SET tool_result = ? WHERE id = ?`, toolResult, messageID)
+	return err
+}
+
 // GetLastCommitHashBeforeMessage walks backward from the given message to find
 // the last message (in any role) with a non-empty git_commit_hash.
 // Returns empty string if no commit hash is found.

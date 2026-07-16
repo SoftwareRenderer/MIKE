@@ -67,10 +67,9 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			s.executor.NotifyContextChanged(projectID, taskID)
 		}
 		// Clear buffered task events so reconnecting clients don't replay
-		// stale events (e.g., summarization for a deleted message).
-		if !req.Regenerate {
-			s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
-		}
+		// stale events (e.g., summarization for a deleted message, or old
+		// turn deltas/tool_calls on regenerate).
+		s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
 		if !req.Regenerate && msgRole != "summarization" {
 			s.cleanupDeletedMessageForks(projectID, taskID, task, msgThreadID, req.MessageID, msgCreatedAt, msgTimeErr, msgRole)
 		} else {

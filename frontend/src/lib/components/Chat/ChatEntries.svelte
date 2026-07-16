@@ -6,7 +6,6 @@
     import QueueIndicator from './QueueIndicator.svelte';
     import VirtualList from '$lib/components/VirtualList.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
-    import { formatElapsed } from '$lib/utils/format-time';
 
     let {
         entries,
@@ -124,66 +123,6 @@
         };
     } | null = $state(null);
 
-    // ── Task Running Banner ──
-    /** Find the first pending tool call across all entries. */
-    function findPendingTool(entries: ChatEntry[]) {
-        for (const e of entries) {
-            if (e.toolCalls) {
-                for (const tc of e.toolCalls) {
-                    if (tc.isPending) return tc as { toolName: string; startedAt?: number };
-                }
-            }
-        }
-        return null;
-    }
-
-    let pendingTool = $state<ReturnType<typeof findPendingTool>>(null);
-    let elapsedMs = $state(0);
-    let elapsedTimer: ReturnType<typeof setInterval> | null = null;
-
-    $effect(() => {
-        const tool = findPendingTool(entries);
-        pendingTool = tool;
-        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-        if (tool?.startedAt) {
-            elapsedMs = Date.now() - tool.startedAt;
-            elapsedTimer = setInterval(() => {
-                elapsedMs = Date.now() - tool.startedAt;
-            }, 1000);
-        } else {
-            elapsedMs = 0;
-        }
-        return () => {
-            if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-        };
-    });
-
-    let elapsedText = $derived(pendingTool ? formatElapsed(elapsedMs) : '');
-
-    // Auto-scroll to bottom when new entries arrive while user is at bottom.
-    let userScrolledUp = $state(false);
-    let prevEntryCount = $state(0);
-
-    function handleBannerScrollCheck() {
-        if (!chatScrollEl) return;
-        userScrolledUp = (chatScrollEl.scrollHeight - chatScrollEl.scrollTop - chatScrollEl.clientHeight) > 60;
-    }
-
-    $effect(() => {
-        if (!pendingTool) return;
-        const count = entries.length;
-        if (count > prevEntryCount && !userScrolledUp && virtualListComp) {
-            virtualListComp.scrollToItem(count - 1);
-        }
-        prevEntryCount = count;
-    });
-
-    function handleBannerClick() {
-        if (virtualListComp && entries.length > 0) {
-            virtualListComp.scrollToItem(entries.length - 1, 'smooth');
-        }
-    }
-
     function handleScrollElChange(el: HTMLElement | null) {
         chatScrollEl = el;
         if (onScrollElChange) {
@@ -242,7 +181,6 @@
     function handleCombinedScroll() {
         onScroll?.();
         computeStickyFromScroll();
-        handleBannerScrollCheck();
     }
 
     // Recompute sticky header when entries change (e.g. new messages arrive).
@@ -256,20 +194,6 @@
     {#if entries.length > 0 && computedShowHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
-        </div>
-    {/if}
-
-    {#if pendingTool}
-        <div class="task-running-banner" role="status" aria-live="polite">
-            <span class="running-dot"></span>
-            <span class="running-label">Task running</span>
-            <span class="running-tool">{pendingTool.toolName}</span>
-            <span class="running-elapsed">{elapsedText}</span>
-            <button class="running-scroll-btn" onclick={handleBannerClick} title="Scroll to latest" aria-label="Scroll to latest">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <polyline points="6 9 12 15 18 9"/>
-                </svg>
-            </button>
         </div>
     {/if}
 
@@ -620,66 +544,4 @@
         white-space: pre-wrap;
     }
 
-    /* ── Task Running Banner ── */
-    .task-running-banner {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 14px;
-        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-        border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-        border-radius: var(--radius-md);
-        margin: 6px 12px;
-        font-size: 0.8125rem;
-        animation: banner-fade-in 0.3s ease;
-    }
-    @keyframes banner-fade-in {
-        from { opacity: 0; transform: translateY(-4px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    .running-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--color-accent);
-        flex-shrink: 0;
-        animation: running-pulse 1.5s ease-in-out infinite;
-    }
-    @keyframes running-pulse {
-        0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent); }
-        50% { opacity: 0.7; box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 0%, transparent); }
-    }
-    .running-label {
-        color: var(--color-accent);
-        font-weight: 600;
-    }
-    .running-tool {
-        color: var(--color-text-secondary);
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-    }
-    .running-elapsed {
-        color: var(--color-text-tertiary);
-        font-size: 0.75rem;
-        font-variant-numeric: tabular-nums;
-        margin-left: auto;
-    }
-    .running-scroll-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-        border: none;
-        border-radius: 4px;
-        color: var(--color-accent);
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: background 0.15s ease;
-    }
-    .running-scroll-btn:hover {
-        background: color-mix(in srgb, var(--color-accent) 25%, transparent);
-    }
 </style>

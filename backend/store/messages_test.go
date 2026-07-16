@@ -215,6 +215,54 @@ func TestUpdateTaskMessage(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskMessageToolResult(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Create a tool_call message with empty tool_result (pending)
+	msg := &types.TaskMessage{
+		ID:        "tc-1",
+		TaskID:    "task-1",
+		Role:      "tool_call",
+		Content:   "",
+		ToolCalls: `{"tool_id":"abc","tool_name":"bash","args":{"command":"sleep 10"}}`,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	// Verify tool_result is empty
+	got, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(got) != 1 || got[0].ToolResult != "" {
+		t.Fatalf("expected empty tool_result, got: %s", got[0].ToolResult)
+	}
+
+	// Update with result
+	resultJSON := `{"output":"done","success":true,"duration":10000}`
+	if err := s.UpdateTaskMessageToolResult("tc-1", resultJSON); err != nil {
+		t.Fatalf("update tool result: %v", err)
+	}
+
+	// Verify tool_result is set
+	got, err = s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(got) != 1 || got[0].ToolResult != resultJSON {
+		t.Fatalf("unexpected tool_result: %s", got[0].ToolResult)
+	}
+}
+
 func TestGetLastUserMessageInThread(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
