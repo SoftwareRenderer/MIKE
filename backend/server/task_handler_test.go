@@ -1991,3 +1991,157 @@ func getAllTasks(t *testing.T, s *Server, projectID string) []map[string]any {
 	}
 	return mustJSON[[]map[string]any](t, rr.Body)
 }
+
+// Helper: get a task's auto_merge value
+func getTaskAutoMerge(t *testing.T, s *Server, projectID string, taskID string) bool {
+	t.Helper()
+	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if v, ok := result["auto_merge"]; ok {
+		return v.(bool)
+	}
+	return false
+}
+
+// Test: enabling subtasks_auto_merge recursively enables auto_merge on all descendants
+func TestSubtasksAutoMergePropagatesToDescendants(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Create a parent task with subtasks_auto_merge=false
+	parentID := createTestTask(t, s, projID, "parent-auto-merge")
+
+	// Create two direct children
+	subA := createTestSubtask(t, s, projID, parentID, "sub-a")
+	subB := createTestSubtask(t, s, projID, parentID, "sub-b")
+
+	// Create a grandchild under subA
+	grandchildA := createTestSubtask(t, s, projID, subA, "grandchild-a")
+
+	// Verify initial state: auto_merge should be false (default)
+	if getTaskAutoMerge(t, s, projID, subA) {
+		t.Fatal("subA auto_merge should be false initially")
+	}
+	if getTaskAutoMerge(t, s, projID, subB) {
+		t.Fatal("subB auto_merge should be false initially")
+	}
+	if getTaskAutoMerge(t, s, projID, grandchildA) {
+		t.Fatal("grandchildA auto_merge should be false initially")
+	}
+
+	// Enable subtasks_auto_merge on parent via PUT
+	updateTask(t, s, projID, parentID, map[string]any{
+		"subtasks_auto_merge": true,
+	})
+
+	// Verify parent has subtasks_auto_merge=true
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+parentID, nil)
+	rr := testResponseAuth(t, s, req)
+	parent := mustJSON[map[string]any](t, rr.Body)
+	if parent["subtasks_auto_merge"] != true {
+		t.Fatal("parent subtasks_auto_merge should be true")
+	}
+
+	// Verify ALL descendants have auto_merge=true (recursive)
+	if !getTaskAutoMerge(t, s, projID, subA) {
+		t.Fatal("subA auto_merge should be true after parent enables subtasks_auto_merge")
+	}
+	if !getTaskAutoMerge(t, s, projID, subB) {
+		t.Fatal("subB auto_merge should be true after parent enables subtasks_auto_merge")
+	}
+	if !getTaskAutoMerge(t, s, projID, grandchildA) {
+		t.Fatal("grandchildA auto_merge should be true (recursive propagation)")
+	}
+}
+
+// Test: disabling subtasks_auto_merge cascades auto_merge=false to descendants
+func TestSubtasksAutoMergeDisablePropagates(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	parentID := createTestTask(t, s, projID, "parent-disable-propagate")
+	subA := createTestSubtask(t, s, projID, parentID, "sub-a")
+
+	// First enable subtasks_auto_merge (which sets auto_merge on subA)
+	updateTask(t, s, projID, parentID, map[string]any{
+		"subtasks_auto_merge": true,
+	})
+
+	// Verify subA got auto_merge=true
+	if !getTaskAutoMerge(t, s, projID, subA) {
+		t.Fatal("subA auto_merge should be true after enable")
+	}
+
+	// Now disable subtasks_auto_merge on parent
+	updateTask(t, s, projID, parentID, map[string]any{
+		"subtasks_auto_merge": false,
+	})
+
+	// Verify subA's auto_merge is now false (disable propagates)
+	if getTaskAutoMerge(t, s, projID, subA) {
+		t.Fatal("subA auto_merge should be false after parent disables subtasks_auto_merge")
+	}
+}
+
+// Test: enabling subtasks_auto_merge on a task with no subtasks is a no-op
+func TestSubtasksAutoMergeNoSubtasks(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	taskID := createTestTask(t, s, projID, "no-subtasks")
+
+	// Enable subtasks_auto_merge on a task with no children
+	updateTask(t, s, projID, taskID, map[string]any{
+		"subtasks_auto_merge": true,
+	})
+
+	// Should succeed without error
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["subtasks_auto_merge"] != true {
+		t.Fatal("subtasks_auto_merge should be true")
+	}
+}
+
+// Test: enabling subtasks_auto_merge also sets auto_commit=true on descendants
+// (since auto_merge requires auto_commit)
+func TestSubtasksAutoMergeSetsAutoCommitOnDescendants(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	parentID := createTestTask(t, s, projID, "parent-auto-commit")
+	subA := createTestSubtask(t, s, projID, parentID, "sub-a-commit")
+
+	// Verify initial state
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+subA, nil)
+	rr := testResponseAuth(t, s, req)
+	subTask := mustJSON[map[string]any](t, rr.Body)
+	if subTask["auto_commit"] == true {
+		t.Fatal("subA auto_commit should be false initially")
+	}
+
+	// Enable subtasks_auto_merge on parent
+	updateTask(t, s, projID, parentID, map[string]any{
+		"subtasks_auto_merge": true,
+	})
+
+	// Verify subA has both auto_merge=true AND auto_commit=true
+	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+subA, nil)
+	rr = testResponseAuth(t, s, req)
+	subTask = mustJSON[map[string]any](t, rr.Body)
+	if subTask["auto_merge"] != true {
+		t.Fatal("subA auto_merge should be true")
+	}
+	if subTask["auto_commit"] != true {
+		t.Fatal("subA auto_commit should be true (prerequisite for auto_merge)")
+	}
+}

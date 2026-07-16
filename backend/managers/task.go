@@ -269,6 +269,8 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusNotFound, "task not found")
 			return
 		}
+		// Capture original value before unmarshal overwrites it
+		originalSubtasksAutoMerge := task.SubtasksAutoMerge
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, task)
 		task.ID = taskID
@@ -281,6 +283,10 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if err := h.store.UpdateTask(task); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		// Propagate subtasks_auto_merge change to all descendants
+		if task.SubtasksAutoMerge != originalSubtasksAutoMerge {
+			h.propagateSubtasksAutoMerge(projectID, taskID, task.SubtasksAutoMerge)
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
@@ -519,6 +525,32 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 		currentID = ancestor.ParentTaskID
 	}
 	return nil
+}
+
+// propagateSubtasksAutoMerge recursively sets auto_merge on all descendant tasks
+// to match the parent's subtasks_auto_merge setting (enable or disable).
+func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabled bool) {
+	descendants, err := h.store.GetAllDescendants(taskID)
+	if err != nil {
+		log.Printf("[propagate-subtasks-auto-merge] failed to get descendants of %s: %v", taskID, err)
+		return
+	}
+	for i := range descendants {
+		d := &descendants[i]
+		if d.AutoMerge == enabled {
+			continue // already matches
+		}
+		d.AutoMerge = enabled
+		if enabled {
+			d.AutoCommit = true // prerequisite for auto_merge
+		}
+		d.UpdatedAt = time.Now().UTC()
+		if err := h.store.UpdateTask(d); err != nil {
+			log.Printf("[propagate-subtasks-auto-merge] failed to update descendant %s: %v", d.ID, err)
+		} else {
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
+		}
+	}
 }
 
 // generateCommitMessage builds a commit message from task title, summary, and model.
