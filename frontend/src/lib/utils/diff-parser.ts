@@ -385,10 +385,10 @@ export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
             // Context line appears in both columns
             result.push({
                 leftLineNum: row.lineNumber,
-                leftText: row.text,
+                leftText: row.text ?? '',
                 leftVariant: 'context',
                 rightLineNum: row.lineNumber,
-                rightText: row.text,
+                rightText: row.text ?? '',
                 rightVariant: 'context',
             });
             i++;
@@ -410,10 +410,10 @@ export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
                 const a = addedBlock[p]!;
                 result.push({
                     leftLineNum: r.lineNumber,
-                    leftText: r.text,
+                    leftText: r.text ?? '',
                     leftVariant: 'removed',
                     rightLineNum: a.lineNumber,
-                    rightText: a.text,
+                    rightText: a.text ?? '',
                     rightVariant: 'added',
                 });
             }
@@ -422,7 +422,7 @@ export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
                 const r = removedBlock[p]!;
                 result.push({
                     leftLineNum: r.lineNumber,
-                    leftText: r.text,
+                    leftText: r.text ?? '',
                     leftVariant: 'removed',
                     rightLineNum: null,
                     rightText: '',
@@ -437,7 +437,7 @@ export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
                     leftText: '',
                     leftVariant: '',
                     rightLineNum: a.lineNumber,
-                    rightText: a.text,
+                    rightText: a.text ?? '',
                     rightVariant: 'added',
                 });
             }
@@ -448,7 +448,7 @@ export function buildSideBySideRows(rows: DiffRow[]): SideBySideRow[] {
                 leftText: '',
                 leftVariant: '',
                 rightLineNum: row.lineNumber,
-                rightText: row.text,
+                rightText: row.text ?? '',
                 rightVariant: 'added',
             });
             i++;
