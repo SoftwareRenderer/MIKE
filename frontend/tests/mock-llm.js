@@ -42,6 +42,7 @@ const textLoop = loadFixture('text_loop');
 const phraseRepeat = loadFixture('phrase_repeat');
 const toolCallCreateTask = loadFixture('tool_call_create_task');
 const toolCallEditFile = loadFixture('tool_call_edit_file');
+const textResponseReasoning = loadFixture('text_response_reasoning');
 
 let requestCount = 0;
 let loopToolCount = 0;  // per-scenario counter for tool loop test
@@ -212,6 +213,11 @@ function selectResponse(parsed) {
     // Long response scenario: message asks for detailed/long output
     if (/long|detailed|write a|explain|describe/i.test(lastUserMsg)) {
         return { chunks: textResponseLong, chunkDelay: 1 };
+    }
+
+    // Reasoning response: message mentions "reasoning" to test the reasoning block UI
+    if (/reasoning test|show reasoning|reasoning-block/i.test(lastUserMsg)) {
+        return { chunks: textResponseReasoning, chunkDelay: 1 };
     }
 
     // Default: simple text response

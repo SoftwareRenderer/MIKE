@@ -1,0 +1,78 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "reasoning_content": "Let me think through this step by step. "
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "reasoning_content": "The user is asking about reasoning capabilities. "
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "reasoning_content": "I should provide a clear, structured response."
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "Here's my response after reasoning through the request. "
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "The reasoning block above shows my thought process."
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": ""
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 50,
+      "completion_tokens": 18,
+      "total_tokens": 68,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 400,
+      "predicted_ms": 200,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]
