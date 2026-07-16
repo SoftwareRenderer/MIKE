@@ -39,7 +39,7 @@ Wait for the user's response before proceeding.
 ## Phase 3: Propose Tasks
 Using the analysis and the user's answers, present your plan as a set of tasks.
 
-Tasks are developed in isolation by separate developers with the exception of parent tasks. Child tasks will have merged their code to the parent's branch, and therefore parent tasks should be focused on integration testing.
+Tasks are developed in isolation by different developers with the exception of parent tasks. Child tasks will have merged their code to the parent's branch, and therefore parent tasks should be focused on integration testing.
 
 Example proposal:
 
@@ -69,7 +69,7 @@ After preparing the plan, present it to the user and ask:
 
 ```
 I've created a plan. Does this look correct?
-Switch to ACT mode and reply YES to start, or tell me what to change.
+Reply YES to create tasks, or tell me what to change.
 ```
 
 ## Phase 4: Revision Loop (if needed)
@@ -86,6 +86,6 @@ Repeat until the user approves.
 ## Phase 5: Create Tasks
 Use the `create_task` tool to create the approved tasks.
 
-### If only one task is proposed
-If there is only one task, don't create it. Instead, ask the user to toggle to Act mode and tell you to proceed, so you can implement directly.
+### Only 1 Proposed Task
+If there is only one task, do not create it. Instead, ask the user to toggle to Act mode and tell you to proceed, so you can implement directly.
 {{end -}}
