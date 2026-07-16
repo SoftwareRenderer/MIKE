@@ -233,7 +233,7 @@ export function buildEntriesFromMessages(
         };
     });
 
-    const validDbEntries = dbEntries.filter((e: ChatEntry | null): e is ChatEntry => e !== null);
+    const validDbEntries = dbEntries.filter(e => e !== null) as ChatEntry[];
     const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries);
 
     return { entries: mergedDbEntries, checkpointHashes };
