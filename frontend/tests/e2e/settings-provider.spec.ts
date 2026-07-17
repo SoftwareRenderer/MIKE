@@ -57,11 +57,8 @@ test.describe.serial('Model switcher in task view', () => {
         let taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-a1');
 
-        // Stop any running LLM response, then wait for send button
-        if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-            await page.click('.btn-stop');
-        }
-        await waitForSendButton(page);
+        // Wait for streaming to complete (send button visible means idle)
+        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Open the provider dropdown
         await page.click('.provider-trigger');
@@ -97,11 +94,8 @@ test.describe.serial('Model switcher in task view', () => {
         let taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-a1');
 
-        // Stop any running LLM response
-        if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-            await page.click('.btn-stop');
-        }
-        await waitForSendButton(page);
+        // Wait for streaming to complete (send button visible means idle)
+        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Open the model dropdown
         await page.click('.model-trigger');
@@ -132,11 +126,8 @@ test.describe.serial('Model switcher in task view', () => {
             return params.get('project') || '';
         });
 
-        // Stop any running LLM response
-        if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-            await page.click('.btn-stop');
-        }
-        await waitForSendButton(page);
+        // Wait for streaming to complete (send button visible means idle)
+        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Switch to model-a2 which has reasoning_effort: high
         await page.click('.model-trigger');
