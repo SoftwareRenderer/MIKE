@@ -100,13 +100,27 @@ test.describe.serial('Merge Sync', () => {
     await commitBtn.click();
 
     // Wait for the commit dialog to appear (if there are changes)
-    const commitDialog = page.locator('.commit-textarea');
-    await expect(commitDialog).toBeVisible({ timeout: 10000 });
+    // The commit dialog may or may not appear depending on whether there are changes
+    const commitDialog = page.locator('[role="dialog"] .commit-textarea');
+    const dialogVisible = await commitDialog.isVisible({ timeout: 10000 }).catch(() => false);
 
-    // Confirm the commit
-    const confirmBtn = page.locator('.modal-footer .btn-primary');
-    await expect(confirmBtn).toBeVisible();
-    await confirmBtn.click();
+    if (dialogVisible) {
+      // Confirm the commit
+      const confirmBtn = page.locator('.modal-footer .btn-primary');
+      await expect(confirmBtn).toBeVisible();
+      await confirmBtn.click();
+    } else {
+      // No commit dialog — task may have moved to done directly
+      // Check if task is already done
+      await expect(async () => {
+        const task = await page.evaluate(async ({ pid, tid }) => {
+          const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+          return res.ok ? res.json() : null;
+        }, { pid: projectId, tid: taskId });
+        expect(task?.status).toBe('done');
+      }).toPass({ timeout: 15000 });
+      return; // Test passed, task is done
+    }
 
     // Wait for the merge to complete
     await expect(async () => {

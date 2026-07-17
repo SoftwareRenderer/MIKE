@@ -362,10 +362,10 @@ test.describe('Clear Done Tasks', () => {
     expect(doneCountBefore).toBeGreaterThan(0);
 
     await page.click('.clear-btn');
-    await expect(page.locator('.confirm-dialog')).toBeVisible();
-    expect(await page.locator('.confirm-dialog p').textContent()).toContain('Permanently delete');
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    expect(await page.locator('[role="dialog"] .confirm-message').textContent()).toContain('Permanently delete');
 
-    await page.click('.confirm-dialog .btn-cancel');
+    await page.click('[role="dialog"] .btn-secondary');
 
     const doneCountAfter = await page.evaluate(async ({ pid }) => {
       const res = await fetch(`/api/projects/${pid}/board`);
@@ -404,11 +404,12 @@ test.describe('Clear Done Tasks', () => {
       const board = await res.json();
       return board.tasks.filter((t: any) => t.status === 'done').length;
     }, { pid: projectId });
-    expect(doneCountBefore).toBe(doneCountBase + 2);
+    // Use >= because parallel tests may have added more done tasks
+    expect(doneCountBefore).toBeGreaterThanOrEqual(doneCountBase + 2);
 
     await page.click('.clear-btn');
-    await expect(page.locator('.confirm-dialog')).toBeVisible();
-    await page.click('.confirm-dialog .btn-confirm');
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await page.click('[role="dialog"] .btn-confirm');
 
     await page.goto('/');
     await page.waitForSelector('.card');
@@ -448,8 +449,8 @@ test.describe('Clear Done Tasks', () => {
     }).toPass({ timeout: 10000 });
 
     await page.click('.clear-btn');
-    await expect(page.locator('.confirm-dialog')).toBeVisible();
-    await page.click('.confirm-dialog .btn-confirm');
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await page.click('[role="dialog"] .btn-confirm');
 
     await expect(page.locator(`.card[data-task-id="${taskId}"]`)).not.toBeVisible({ timeout: 10000 });
 

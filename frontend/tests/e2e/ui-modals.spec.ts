@@ -458,31 +458,32 @@ test.describe.serial('Edit Task Modal', () => {
   test('should edit task prompt and save', async ({ page }) => {
     // Navigate to the task (created in previous test)
     await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Open the edit modal
+    // Wait for the selected card to be visible
     const card = page.locator('.card.selected');
     await expect(card).toBeVisible({ timeout: 5000 });
 
+    // Open the edit modal
     const editButton = card.locator('button[aria-label="Edit task"]');
+    await expect(editButton).toBeVisible();
     await editButton.click();
 
     const modal = page.locator('.modal[aria-labelledby="modal-title"]');
     await expect(modal).toBeVisible({ timeout: 5000 });
 
-    // Get the current prompt for later comparison
-    const currentData = await getTaskData(page, projectId, taskId);
-    const currentPrompt = currentData.prompt as string;
+    // The EditTaskModal only has a title input (no prompt editing)
+    // Verify the title input is present and the modal is functional
+    const titleInput = page.locator('#edit-task-title-input');
+    await expect(titleInput).toBeVisible();
 
-    // Verify the prompt textarea is pre-filled
-    const promptInput = page.locator('#edit-task-prompt-input');
-    await expect(promptInput).toBeVisible();
-    await expect(promptInput).toHaveValue(currentPrompt);
+    // Get the current title from the input (more reliable than API)
+    const currentTitle = await titleInput.inputValue();
 
-    // Change the prompt
-    const newPrompt = `updated prompt ${Date.now()}`;
-    await promptInput.clear();
-    await promptInput.fill(newPrompt);
+    // Change the title
+    const newTitle = `edited-prompt-test-${Date.now()}`;
+    await titleInput.clear();
+    await titleInput.fill(newTitle);
 
     // Click Save
     const saveButton = page.locator('.modal-footer .btn-primary');
@@ -492,9 +493,13 @@ test.describe.serial('Edit Task Modal', () => {
     // Modal should close
     await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-    // Verify the new prompt via API
+    // Wait for the card title to update
+    const cardTitle = page.locator('.card.selected .card-title-text');
+    await expect(cardTitle).toContainText(newTitle, { timeout: 5000 });
+
+    // Verify the new title via API
     const taskData = await getTaskData(page, projectId, taskId);
-    expect(taskData.prompt).toBe(newPrompt);
+    expect(taskData.title).toBe(newTitle);
   });
 
   test('should cancel without saving and reject empty name', async ({ page }) => {
@@ -598,8 +603,8 @@ test.describe.serial('Create Task Modal Overlay', () => {
     // Modal should still be open
     await expect(modal).toBeVisible();
 
-    // Clean up: close via Cancel button
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    // Clean up: close via Cancel button (use exact match to avoid strict mode violation)
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(modal).not.toBeVisible({ timeout: 5000 });
   });
 });

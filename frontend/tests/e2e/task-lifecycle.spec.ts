@@ -32,11 +32,16 @@ test.describe('Create New Task', () => {
   });
 
   test('should create a new task via UI modal', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    await page.goto(`/?project=${projectId}`);
+    await page.waitForSelector('.card', { timeout: 10000 });
+
     await page.click('.add-task-btn');
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-    await page.fill('textarea', 'Test task from e2e test');
-    await page.click('button[type="submit"]');
-    await expect(page.locator('.modal')).not.toBeVisible();
+    await expect(page.locator('[role="dialog"]:has-text("Create Task")')).toBeVisible({ timeout: 5000 });
+    await page.fill('textarea', `Test task from e2e test ${Date.now()}`);
+    // The CreateTaskModal uses type="button" not type="submit"
+    await page.click('.btn-primary:has-text("Create Task")');
+    await expect(page.locator('[role="dialog"]:has-text("Create Task")')).not.toBeVisible({ timeout: 5000 });
     await page.waitForSelector('.card', { timeout: 5000 });
     const cards = page.locator('.card');
     await expect(cards.first()).toBeVisible();
@@ -68,8 +73,8 @@ test.describe('Delete Task with Confirmation', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-    await page.click('.confirm-dialog .btn-confirm');
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await page.click('[role="dialog"] .btn-confirm');
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
   });
 
@@ -80,8 +85,8 @@ test.describe('Delete Task with Confirmation', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-    await page.click('.confirm-dialog .btn-cancel');
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await page.click('[role="dialog"] .btn-secondary');
     await expect(page.locator('.task-detail-page')).toBeVisible();
   });
 });

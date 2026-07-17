@@ -31,9 +31,9 @@ test.describe('File Browser Actions', () => {
   test('should initialize git in a non-git directory and select it as project', async ({ page }) => {
     const initialCount = await page.locator('.project-item').count();
 
-    // Open the file browser
+    // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
-    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
 
     // Navigate to the non-git directory
     const pathInput = page.locator('.path-input');
@@ -50,10 +50,10 @@ test.describe('File Browser Actions', () => {
     await expect(page.locator('.git-indicator')).not.toBeVisible();
 
     // Footer button should say "Initialize Git"
-    await expect(page.locator('.btn-select')).toContainText('Initialize Git');
+    await expect(page.locator('.btn-primary')).toContainText('Initialize Git');
 
     // Click "Initialize Git"
-    await page.click('.btn-select');
+    await page.click('.btn-primary');
 
     // Wait for init to complete by polling the API (via page.evaluate for auth)
     await expect(async () => {
@@ -65,7 +65,7 @@ test.describe('File Browser Actions', () => {
     }).toPass({ timeout: 15000 });
 
     // Browser should close automatically after init (auto-select)
-    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).not.toBeVisible({ timeout: 5000 });
 
     // New project should be added
     await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
@@ -76,7 +76,7 @@ test.describe('File Browser Actions', () => {
 
   test('should show error when creating a folder that already exists', async ({ page }) => {
     await page.click('.add-project-btn');
-    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
 
     const pathInput = page.locator('.path-input');
     await pathInput.fill(TEST_NEW_FOLDER_PARENT);
@@ -113,9 +113,9 @@ test.describe('File Browser Actions', () => {
   test('should create project with sandbox disabled when checkbox is unchecked', async ({ page }) => {
     const initialCount = await page.locator('.project-item').count();
 
-    // Open the file browser
+    // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
-    await expect(page.locator('.browser')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
 
     // Uncheck "Use Sandbox"
     const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
@@ -136,11 +136,11 @@ test.describe('File Browser Actions', () => {
     // Wait for git indicator
     await expect(page.locator('.git-indicator')).toBeVisible({ timeout: 5000 });
 
-    // Click Select
-    await page.click('.btn-select');
+    // Click Select (uses .btn-primary class)
+    await page.click('.btn-primary:has-text("Select")');
 
     // Browser should close
-    await expect(page.locator('.browser')).toBeHidden({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).not.toBeVisible({ timeout: 5000 });
 
     // New project should be added
     await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
