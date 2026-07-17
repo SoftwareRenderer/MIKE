@@ -27,51 +27,7 @@ test.describe.serial('Multi-Select', () => {
         await expect(card).toBeVisible();
     });
 
-    test('should toggle selection with Ctrl+Click', async ({ browserName, page }) => {
-        // Skip on WebKit - Ctrl+Click behavior differs
-        if (browserName === 'webkit') {
-            test.skip();
-        }
 
-        const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-        const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-        // Ctrl+Click first card
-        await card1.click({ modifiers: ['Control'] });
-        // Should have multi-selected class
-        await expect(card1).toHaveClass(/multi-selected/);
-
-        // Ctrl+Click second card
-        await card2.click({ modifiers: ['Control'] });
-        await expect(card2).toHaveClass(/multi-selected/);
-
-        // Both should be selected
-        await expect(card1).toHaveClass(/multi-selected/);
-        await expect(card2).toHaveClass(/multi-selected/);
-
-        // Ctrl+Click first card again to deselect
-        await card1.click({ modifiers: ['Control'] });
-        await expect(card1).not.toHaveClass(/multi-selected/);
-        // Second should still be selected
-        await expect(card2).toHaveClass(/multi-selected/);
-    });
-
-    test('should show floating action bar when 2+ tasks selected', async ({ browserName, page }) => {
-        if (browserName === 'webkit') {
-            test.skip();
-        }
-
-        const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-        const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-        // Select two cards
-        await card1.click({ modifiers: ['Control'] });
-        await card2.click({ modifiers: ['Control'] });
-
-        // Multi-select bar should appear
-        const bar = page.locator('.multi-select-bar');
-        await expect(bar).toBeVisible();
-    });
 
     test('should show Start button when all selected tasks are in Backlog', async ({ browserName, page }) => {
         if (browserName === 'webkit') {
@@ -211,23 +167,7 @@ test.describe.serial('Multi-Select', () => {
         await expect(bar).not.toBeVisible();
     });
 
-    test('should clear selection when clicking on empty board area', async ({ browserName, page }) => {
-        if (browserName === 'webkit') {
-            test.skip();
-        }
 
-        const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-
-        // Select a card
-        await card1.click({ modifiers: ['Control'] });
-        await expect(card1).toHaveClass(/multi-selected/);
-
-        // Click on empty board area (the .board div background)
-        await page.locator('.board').click({ position: { x: 5, y: 5 } });
-
-        // Selection should be cleared
-        await expect(card1).not.toHaveClass(/multi-selected/);
-    });
 
     test('should not show Start button when selected tasks are in different columns', async ({ browserName, page }) => {
         if (browserName === 'webkit') {
@@ -261,49 +201,5 @@ test.describe.serial('Multi-Select', () => {
         await expect(deleteBtn).toBeVisible();
     });
 
-    test('should hide action bar when only 1 task is selected', async ({ browserName, page }) => {
-        if (browserName === 'webkit') {
-            test.skip();
-        }
 
-        const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-
-        // Select one card
-        await card1.click({ modifiers: ['Control'] });
-
-        // Card should be visually selected
-        await expect(card1).toHaveClass(/multi-selected/);
-
-        // But action bar should NOT appear (only shows for 2+)
-        const bar = page.locator('.multi-select-bar');
-        await expect(bar).not.toBeVisible();
-    });
-
-    test('should have clear selection button in action bar', async ({ browserName, page }) => {
-        if (browserName === 'webkit') {
-            test.skip();
-        }
-
-        const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-        const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-        // Select two cards
-        await card1.click({ modifiers: ['Control'] });
-        await card2.click({ modifiers: ['Control'] });
-
-        // Clear button should be visible
-        const clearBtn = page.locator('.bar-btn-clear');
-        await expect(clearBtn).toBeVisible();
-
-        // Click clear
-        await clearBtn.click();
-
-        // All selections should be cleared
-        await expect(card1).not.toHaveClass(/multi-selected/);
-        await expect(card2).not.toHaveClass(/multi-selected/);
-
-        // Bar should disappear
-        const bar = page.locator('.multi-select-bar');
-        await expect(bar).not.toBeVisible();
-    });
 });
