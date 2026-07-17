@@ -4,7 +4,6 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { get } from 'svelte/store';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -198,7 +197,7 @@
     const isMobileCtx = useIsMobile();
 
     let statusBadge = $derived.by(() => {
-        const streaming = get(streamingIdsContext).has(task.id);
+        const streaming = streamingIds.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         const hasConflict = (appStore.board?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
@@ -256,6 +255,13 @@
     // Context stores (must be retrieved at top level, not inside derived/effects)
     let streamingIdsContext = getStreamingContext();
     let taskDiffStatsStore = getTaskDiffStatsContext();
+    // Sync streamingIds store to $state for reactive tracking in $derived.by
+    // (get() on a Svelte store inside $derived.by does NOT establish a dependency)
+    let streamingIds = $state<Set<string>>(new Set());
+    $effect(() => {
+        const unsub = streamingIdsContext.subscribe(v => { streamingIds = v; });
+        return unsub;
+    });
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
     let hasChanges = $derived(!!diffStats?.hash && (diffStats.files || 0) > 0);
 
