@@ -21,10 +21,10 @@ The sandbox bridge (`sandbox-bridge`) is a lightweight binary that runs inside e
 CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
 ```
 
-**Runtime discovery:** The server finds `sandbox-bridge` via:
+**Runtime discovery:** The server finds `sandbox-bridge` via (in order):
 1. `KANBAN_AGENT_PATH` environment variable
-2. Next to the `kanban` binary (`<kanban-dir>/sandbox/sandbox-bridge`)
-3. Current directory (`./sandbox/sandbox-bridge`)
+2. Next to the running executable — `sandbox-bridge` and `sandbox/sandbox-bridge`
+3. Current directory — `sandbox-bridge` and `sandbox/sandbox-bridge`
 
 **Required:** The sandbox-bridge binary is required for sandbox mode. Container creation fails if the binary is not found.
 
@@ -112,7 +112,7 @@ CLI flags take priority over environment variables.
 - **Test the UX** — Verify UI elements, not just API responses
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real LLM endpoint
 - **Wait for selectors** for async operations; Do not use arbitrary timeouts or fixed delays
-- **Config-modifying tests** (sandbox toggle, model selector, settings) run in the `isolated` project on port 3001
+- **Config-modifying tests** (model switch, settings, reasoning effort, mode select) run in the `isolated` project on port 3001
 
 ### Test Structure
 ```typescript
@@ -154,7 +154,7 @@ go test ./backend/... -count=1 -parallel 8
 **Playwright config**: `frontend/playwright.config.ts` (parallel, 2 workers, 120s timeout).
 **Two Playwright projects**:
 - `chromium` (port 3000) — all tests except config-modifying suites
-- `isolated` (port 3001, serialized) — config-modifying tests: `sandbox-toggle`, `sandbox-tool-calls`, `model-selector`, `settings-*`, `reasoning-effort`, `debug-cards`
+- `isolated` (port 3001, serialized) — config-modifying tests: `model-switch`, `debug-cards`, `settings-model-delete`, `reasoning-effort`, `settings-power`, `mode-select`
 
 **Before running e2e tests**: If a prior run was interrupted, clean stale state:
 ```bash
@@ -180,32 +180,41 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
 ```
 
 ### Frontend Unit Tests
-- Run: `cd frontend && npm test` (vitest, jsdom, ~1s, ~49 tests)
-- Test files: `src/**/*.unit.ts` — colocated in `__tests__/` directories under `src/lib/`
+- Run: `cd frontend && npm test` (vitest, jsdom, ~1s, ~235 tests)
+- Test files: `src/**/*.unit.ts`, `src/**/*.unit.svelte.ts`, `src/**/*.unit.spec.ts` — colocated in `__tests__/` directories under `src/lib/`
 - Framework: `vitest` + `@testing-library/svelte`
 - Config: `frontend/vitest.config.ts` (jsdom environment, `$lib` alias)
 - Test modules:
+  - `src/lib/api/__tests__/` — API cache utilities
+  - `src/lib/composables/__tests__/` — reactive composables (multi-select, sw-update, virtual-scroll)
   - `src/lib/services/__tests__/` — reactive services (`DiffCache`, `StreamState`, `StreamHandler`)
-  - `src/lib/utils/__tests__/` — pure utility functions (`format-time.ts`)
+  - `src/lib/stores/__tests__/` — app store tests
+  - `src/lib/utils/__tests__/` — pure utility functions (`format-time.ts`, `diff-parser.ts`, `sort-tasks.ts`, `chat-entries.ts`)
+  - `src/lib/__tests__/` — setup/alias verification
 - Use `.svelte.ts` extension for any test file importing modules that use Svelte 5 compiler macros (`$state`, `$derived`, `$effect`)
 - Tests are deterministic — no external dependencies (LLM, network, server)
 
 ### Go Unit Tests
-- Run: `go test ./backend/... -count=1 -parallel 8` (~60s, ~560 tests)
+- Run: `go test ./backend/... ./pkg/... -count=1 -parallel 8` (~60s, ~790 tests)
 - Test packages:
-  - `backend/server/` — API handlers (149 tests)
-  - `backend/store/` — database operations (89 tests)
-  - `backend/exec/` — tool execution (184 tests)
-  - `backend/git/` — git operations (46 tests)
-  - `backend/sandbox/` — gVisor sandboxing (22 tests)
-  - `backend/stream/` — git polling (15 tests)
-  - `backend/crypto/` — encryption (17 tests)
-  - `backend/pi/` — pi agent integration (13 tests)
-  - `backend/auth/` — auth/session (9 tests)
-  - `backend/tls/` — TLS config (9 tests)
-  - `backend/config/` — config loading (2 tests)
-  - `backend/llama/` — LLM client (2 tests)
-  - `backend/term/` — terminal (2 tests)
+  - `backend/server/` — API handlers (~175 tests)
+  - `backend/store/` — database operations (~90 tests)
+  - `backend/exec/` — tool execution (~315 tests)
+  - `backend/git/` — git operations (~55 tests)
+  - `backend/sandbox/` — gVisor sandboxing (~30 tests)
+  - `backend/stream/` — git polling (~25 tests)
+  - `backend/managers/` — board/task/git/project managers (~5 tests)
+  - `backend/types/` — domain types and ID generation (~5 tests)
+  - `backend/prompts/` — prompt templates (~5 tests)
+  - `backend/crypto/` — encryption (~10 tests)
+  - `backend/config/` — config loading and LLM helpers (~5 tests)
+  - `backend/llama/` — LLM client (~10 tests)
+  - `backend/auth/` — auth/session (~10 tests)
+  - `backend/tls/` — TLS config (~10 tests)
+  - `backend/pi/` — pi agent integration (~5 tests)
+  - `backend/term/` — terminal (~2 tests)
+  - `pkg/bridge/` — sandbox bridge protocol and client (~30 tests)
+  - `backend/httputil/` — HTTP utilities (no tests)
 - Use `testServer(t)` helper for isolated test server with temp DB
 - Use `t.TempDir()` for temporary files/directories (auto-cleaned)
 - Tests are deterministic — no external dependencies (LLM, network)
@@ -261,9 +270,8 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 
 ### Default Config
 - Partial updates via PUT `/api/config` (only sends changed fields)
-- Required fields: `llama_server_url`, `model_name`, `workspace_dir`
-- LLM endpoint: `http://neptune:8010/v1`
-- Model: `Qwen3.6-35B-A3B` (NOT `-Q8_0.gguf`)
+- Provider-based config model loaded from SQLite — no hardcoded defaults
+- Test fixtures use `http://neptune:8010/v1` as example endpoint
 - Workspace: `<project-root>/worktrees` (absolute path)
 
 ## Architecture
@@ -299,9 +307,9 @@ All functions are **async** (return `Promise`).
 - `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
 - `getEditorDraft(path)` / `setEditorDraft(path, text)` / `clearEditorDraft(path)` — per-file editor drafts
 - `loadEditorHistory(path)` / `saveEditorHistory(path, base, deltas)` / `clearEditorHistory(path)` — editor undo/redo
-- `loadCollapsedTasks()` / `saveCollapsedTasks(ids)` — collapsed parent task IDs
-- `loadCollapsedSections()` / `saveCollapsedSections(ids)` — collapsed board sections
-- `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids)` — collapsed diff file paths
+- `loadCollapsedTasks()` / `saveCollapsedTasks(ids: Set<string>)` — collapsed parent task IDs (returns `Set<string>`)
+- `loadCollapsedSections()` / `saveCollapsedSections(ids: Set<string>)` — collapsed board sections (returns `Set<string>`)
+- `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids: Set<string>)` — collapsed diff file paths (returns `Set<string>`)
 - `loadUnsavedFiles(projectId)` / `saveUnsavedFiles(projectId, paths)` — unsaved file paths
 - `loadQueue()` / `saveQueue(actions)` — offline action queue
 - `loadExplorerLayout()` / `saveExplorerLayout(layout)` — explorer column widths
@@ -314,7 +322,8 @@ All functions are **async** (return `Promise`).
 
 ### Svelte 5 Reactivity
 - Use `$state()` for reactive variables
-- Use `$derived()` for computed values (NOT `by()`)
+- Use `$derived()` for simple computed expressions
+- Use `$derived.by(() => { ... })` for complex multi-line computations (used extensively in Card.svelte, Board.svelte, etc.)
 - Use `$props()` for component props
 - Svelte 4 stores: import `get` from `svelte/store` for `.get()` calls
 
@@ -344,13 +353,14 @@ class MyCache {
 
 ### WebSocket Protocol
 - Client sends: `{"type": "user_message", "data": {"content": "..."}}`
-- Server echoes: `{"type": "user_message", "data": {"role": "user", "content": "..."}}`
-- `json.RawMessage` in Go = already-parsed object in JS (check `typeof` before parsing)
+- Server processes via `stream.UserMessage` → broadcasts echo as `WSTypeUserMessage` event
+- `WSMessage.Data` is `json.RawMessage` in Go — arrives as a parsed JS value (object or string) in the browser
 - Use optimistic UI for user messages (add immediately, skip echo)
 
 ### Task IDs
 - Format: `word-word-word` (e.g., `frost-amber-quartz`)
-- Generated from 128-word dictionary in `backend/types/idgen.go`
+- Generated from 263-word dictionary in `backend/types/idgen.go`
+- Thread IDs use 2-word format (e.g., `voice-ash`) via `GenerateThreadID()`
 - URL: `/?task=frost-amber-quartz`
 
 ### Chat UI Rules
@@ -367,14 +377,15 @@ class MyCache {
 - Row types: `file-header` (`diff --git`, `---`, `+++`), `index`, `hunk-header` (`@@`), `added` (`+`), `removed` (`-`), `context` (` `)
 - Each code row renders as CSS grid: `2rem` line number gutter + content
 - Color coding: `rgba(63,185,80,0.15)` for additions, `rgba(248,81,73,0.15)` for deletions
-- Reference design: `examples/kanban/web-ui/src/components/shared/diff-renderer.tsx`
+- Diff rendering lives in `CardDetail.svelte` (parsed rows) and `DiffViewer.svelte` (staged/unstaged file browser)
 
 ### Reactive Status Badge
-- Use `$derived(getStatusBadge(task))` instead of `$state()` + manual `onMount` assignment
-- This ensures the badge updates automatically when `task.status_state` changes (e.g., idle → running → completed)
+- Use `$derived.by(() => { ... })` for task status badges (see `Card.svelte` for the pattern)
+- `getStatusBadge()` is a component-local function (defined in `DiffViewer.svelte` for diff files, `GitStatusPanel.svelte` for git entries) — not a shared utility
+- This ensures the badge updates automatically when `task.execution_state` changes (e.g., idle → running → completed)
 
 ### Sticky Section Headers
-- Use `position: sticky; top: 0; z-index: 5;` on section headers within scrollable containers
+- Use `position: sticky; top: 0; z-index: 10;` on section headers within scrollable containers (diff file headers use z-index: 10)
 - Add matching `background` color so scrolling content doesn't show through
 - Add `border-bottom` for visual separation from content below
 
