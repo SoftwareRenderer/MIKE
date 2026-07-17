@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cardPath = resolve(__dirname, '../Card.svelte');
+const cardDetailPath = resolve(__dirname, '../CardDetail.svelte');
 const source = readFileSync(cardPath, 'utf-8');
+const cardDetailSource = readFileSync(cardDetailPath, 'utf-8');
 
 describe('Card status rendering', () => {
     it('shows status badge for task', () => {
@@ -45,6 +47,21 @@ describe('Card status rendering', () => {
 
     it('updates status badge reactively when execution state changes', () => {
         expect(source).toContain('execution_state');
+    });
+
+    it('uses $state + $effect to track streamingIds for reactive status badge (Card.svelte)', () => {
+        // get() on a Svelte store inside $derived.by does NOT establish a dependency.
+        // The fix syncs the store to a $state variable via $effect.
+        expect(source).toContain('streamingIds = $state');
+        expect(source).toContain('streamingIdsContext.subscribe');
+        // Status badge should read from the $state variable, not get()
+        expect(source).toContain('streamingIds.has(task.id)');
+    });
+
+    it('uses $state + $effect to track streamingIds for reactive status badge (CardDetail.svelte)', () => {
+        expect(cardDetailSource).toContain('streamingIds = $state');
+        expect(cardDetailSource).toContain('streamingIdsContext.subscribe');
+        expect(cardDetailSource).toContain('streamingIds.has(task.id)');
     });
 
     it('shows task as draggable', () => {
