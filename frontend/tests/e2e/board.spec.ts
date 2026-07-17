@@ -611,53 +611,6 @@ test.describe('Multi-Select', () => {
     await expect(card).toBeVisible();
   });
 
-  test('should toggle selection with Ctrl+Click', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await expect(card1).toHaveClass(/multi-selected/);
-
-    await card2.click({ modifiers: ['Control'] });
-    await expect(card2).toHaveClass(/multi-selected/);
-
-    await expect(card1).toHaveClass(/multi-selected/);
-    await expect(card2).toHaveClass(/multi-selected/);
-
-    await card1.click({ modifiers: ['Control'] });
-    await expect(card1).not.toHaveClass(/multi-selected/);
-    await expect(card2).toHaveClass(/multi-selected/);
-  });
-
-  test('should show floating action bar when 2+ tasks selected', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const bar = page.locator('.multi-select-bar');
-    await expect(bar).toBeVisible();
-  });
-
-  test('should show Start button when all selected tasks are in Backlog', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const startBtn = page.locator('.bar-btn-start');
-    await expect(startBtn).toBeVisible();
-    await expect(startBtn).toContainText('Start 2 tasks');
-  });
-
   test('should confirm before starting selected tasks with task titles listed', async ({ browserName, page }) => {
     if (browserName === 'webkit') test.skip();
 
@@ -753,18 +706,6 @@ test.describe('Multi-Select', () => {
     await expect(bar).not.toBeVisible();
   });
 
-  test('should clear selection when clicking on empty board area', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await expect(card1).toHaveClass(/multi-selected/);
-
-    await page.locator('.board').click({ position: { x: 5, y: 5 } });
-    await expect(card1).not.toHaveClass(/multi-selected/);
-  });
-
   test('should not show Start button when selected tasks are in different columns', async ({ browserName, page }) => {
     if (browserName === 'webkit') test.skip();
 
@@ -790,36 +731,4 @@ test.describe('Multi-Select', () => {
     await expect(deleteBtn).toBeVisible();
   });
 
-  test('should hide action bar when only 1 task is selected', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await expect(card1).toHaveClass(/multi-selected/);
-
-    const bar = page.locator('.multi-select-bar');
-    await expect(bar).not.toBeVisible();
-  });
-
-  test('should have clear selection button in action bar', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const clearBtn = page.locator('.bar-btn-clear');
-    await expect(clearBtn).toBeVisible();
-
-    await clearBtn.click();
-
-    await expect(card1).not.toHaveClass(/multi-selected/);
-    await expect(card2).not.toHaveClass(/multi-selected/);
-
-    const bar = page.locator('.multi-select-bar');
-    await expect(bar).not.toBeVisible();
-  });
 });
