@@ -1308,3 +1308,222 @@ func getGitRevParse(t *testing.T, dir, ref string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TestSubtaskManualStart_MergeDiagnostic reproduces the scenario where
+// a parent is in backlog and a subtask is started manually.
+// It inspects every intermediate state to diagnose why the merge might fail.
+func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent in backlog (never started, no branch)
+	parentID := "parent-diag"
+	parent := &types.Task{
+		ID:             parentID,
+		ProjectID:      projectID,
+		Title:          "Parent Task",
+		Prompt:         "Parent prompt",
+		Status:         "backlog",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+		AutoMerge:      true,
+	}
+	te.store.CreateTask(parent)
+
+	// Create subtask
+	subtaskID := "subtask-diag"
+	subtask := &types.Task{
+		ID:             subtaskID,
+		ProjectID:      projectID,
+		Title:          "Subtask",
+		Prompt:         "Subtask prompt",
+		Status:         "backlog",
+		ParentTaskID:   parentID,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+		AutoMerge:      true,
+	}
+	te.store.CreateTask(subtask)
+
+	// Verify initial state
+	parentBefore, _ := te.store.GetTaskByTaskID(parentID)
+	if parentBefore.Branch != "" {
+		t.Fatalf("parent should have no branch initially, got %q", parentBefore.Branch)
+	}
+
+	// Step 1: Prepare subtask execution (simulates manual start)
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	if err != nil {
+		t.Fatalf("prepareTaskExecution failed: %v", err)
+	}
+	defer func() {
+		setup.cancel()
+		te.StopTask(subtaskID)
+	}()
+
+	// Step 2: Verify parent branch was created
+	parentAfter, _ := te.store.GetTaskByTaskID(parentID)
+	if parentAfter.Branch == "" {
+		t.Fatal("parent branch should be created after subtask preparation")
+	}
+	t.Logf("Parent branch: %q", parentAfter.Branch)
+
+	// Verify parent branch exists in git
+	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", parentAfter.Branch).Run(); err != nil {
+		t.Fatalf("parent branch %q does not exist in git", parentAfter.Branch)
+	}
+
+	// Step 3: Verify parent worktree exists
+	parentWtPath, err := te.worktreeMgr.WorktreePath(parentID)
+	if err != nil {
+		t.Fatalf("WorktreePath for parent failed: %v", err)
+	}
+	if _, err := os.Stat(parentWtPath); err != nil {
+		t.Fatalf("parent worktree does not exist at %s: %v", parentWtPath, err)
+	}
+	t.Logf("Parent worktree: %s", parentWtPath)
+
+	// Step 4: Verify subtask worktree and branch
+	subtaskAfter, _ := te.store.GetTaskByTaskID(subtaskID)
+	if subtaskAfter.Branch == "" {
+		t.Fatal("subtask should have a branch")
+	}
+	t.Logf("Subtask branch: %q, BaseRef: %q", subtaskAfter.Branch, subtaskAfter.BaseRef)
+
+	subtaskWtPath, err := te.worktreeMgr.WorktreePath(subtaskID)
+	if err != nil {
+		t.Fatalf("WorktreePath for subtask failed: %v", err)
+	}
+	if _, err := os.Stat(subtaskWtPath); err != nil {
+		t.Fatalf("subtask worktree does not exist at %s: %v", subtaskWtPath, err)
+	}
+
+	// Verify subtask branch is descendant of parent branch
+	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", parentAfter.Branch, subtaskAfter.Branch)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("subtask branch should be descendant of parent branch: %v", err)
+	}
+
+	// Step 5: Simulate subtask work (make a commit)
+	subtaskFile := filepath.Join(subtaskWtPath, "subtask_file.txt")
+	os.WriteFile(subtaskFile, []byte("subtask work\n"), 0o644)
+	runGitInDir(t, subtaskWtPath, "add", "-A")
+	runGitInDir(t, subtaskWtPath, "commit", "-m", "subtask work")
+
+	// Get parent branch tip before merge
+	parentTipBefore := getGitRevParse(t, repoDir, parentAfter.Branch)
+
+	// Step 6: Merge subtask into parent
+	subtaskForMerge, _ := te.store.GetTaskByTaskID(subtaskID)
+	err = te.MergeBranch(projectID, subtaskID, subtaskForMerge)
+	if err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// Step 7: Verify merge result
+	parentTipAfter := getGitRevParse(t, repoDir, parentAfter.Branch)
+	if parentTipBefore == parentTipAfter {
+		t.Fatal("parent branch tip should have changed after merge")
+	}
+
+	// Verify subtask's commit is on parent branch
+	cmd = exec.Command("git", "-C", repoDir, "show", parentAfter.Branch+":subtask_file.txt")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("subtask file should be on parent branch: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "subtask work" {
+		t.Errorf("unexpected content on parent branch: %q", string(out))
+	}
+
+	// Verify NOT on master
+	cmd = exec.Command("git", "-C", repoDir, "show", "master:subtask_file.txt")
+	if _, err := cmd.CombinedOutput(); err == nil {
+		t.Error("subtask file should NOT be on master")
+	}
+}
+
+// TestPrepareTaskExecution_BranchPersists verifies that prepareTaskExecution
+// persists the branch to the DB and that a subsequent full-row UpdateTask
+// with a stale task object (branch="") does NOT overwrite it.
+// This reproduces the bug where the move handler loaded the task, called
+// StartSubtaskWithParent (which set the branch), then called UpdateTask
+// with the stale object, overwriting the branch back to "".
+func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent in backlog
+	parentID := "parent-persist"
+	parent := &types.Task{
+		ID:             parentID,
+		ProjectID:      projectID,
+		Title:          "Parent Task",
+		Status:         "backlog",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(parent)
+
+	// Create subtask
+	subtaskID := "subtask-persist"
+	subtask := &types.Task{
+		ID:             subtaskID,
+		ProjectID:      projectID,
+		Title:          "Subtask",
+		Status:         "backlog",
+		ParentTaskID:   parentID,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+		AutoMerge:      true,
+	}
+	te.store.CreateTask(subtask)
+
+	// Simulate the move handler pattern:
+	// 1. Load task (branch="")
+	staleTask, _ := te.store.GetTaskByTaskID(subtaskID)
+	if staleTask.Branch != "" {
+		t.Fatalf("subtask should have no branch initially, got %q", staleTask.Branch)
+	}
+
+	// 2. UpdateTask with stale data (status change, branch still "")
+	// This simulates the handler setting status="in_progress" before StartTask
+	staleTask.Status = "in_progress"
+	if err := te.store.UpdateTask(staleTask); err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
+	}
+
+	// 3. prepareTaskExecution (sets branch, calls UpdateTask)
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	if err != nil {
+		t.Fatalf("prepareTaskExecution failed: %v", err)
+	}
+	defer func() {
+		setup.cancel()
+		te.StopTask(subtaskID)
+	}()
+
+	// 4. Verify branch is set in DB (not just in memory)
+	taskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	if taskFromDB.Branch == "" {
+		t.Fatal("branch should be set in DB after prepareTaskExecution")
+	}
+	branch := taskFromDB.Branch
+
+	// 5. Simulate the buggy handler: UpdateTask with stale object (branch="")
+	// This is what the move handler used to do.
+	staleTask.Status = "in_progress" // handler's status
+	staleTask.Branch = ""            // stale, never updated
+	if err := te.store.UpdateTask(staleTask); err != nil {
+		t.Fatalf("stale UpdateTask failed: %v", err)
+	}
+
+	// 6. Verify branch is STILL set in DB
+	// With the fix, the handler reloads the task before UpdateTask,
+	// so the stale object is not used. Without the fix, this would fail.
+	taskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	if taskFromDB.Branch == "" {
+		t.Fatal("branch should NOT be overwritten by stale UpdateTask")
+	}
+	if taskFromDB.Branch != branch {
+		t.Errorf("branch changed: was %q, now %q", branch, taskFromDB.Branch)
+	}
+}

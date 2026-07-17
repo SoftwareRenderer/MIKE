@@ -936,7 +936,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 						// No merge conflict — normal auto-commit path
 						commitMsg := te.GenerateCommitMessageForTask(setup.ctx, setup.task.ID, setup.task)
-						te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
+						mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
 						setup.task, _ = te.store.GetTaskByTaskID(setup.task.ID)
 						if setup.task.HasMergeConflict {
 							// Merge conflict on first attempt — inject resolution prompt
@@ -966,10 +966,21 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							lc.finishReason = ""
 							continue
 						}
-						setup.task.ExecutionState = "completed"
-						setup.task.Status = "done"
-						if te.sandboxMgr != nil {
-							_ = te.sandboxMgr.Stop(setup.task.ID)
+						if mergeErr != nil {
+							// Merge failed (non-conflict) — don't mark done
+							log.Printf("[merge] task=%s merge failed, moving to review: %v", setup.task.ID, mergeErr)
+							setup.task.ExecutionState = "idle"
+							setup.task.Status = "review"
+							setup.task.Output = "Merge failed: " + mergeErr.Error()
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(setup.task.ID)
+							}
+						} else {
+							setup.task.ExecutionState = "completed"
+							setup.task.Status = "done"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(setup.task.ID)
+							}
 						}
 					} else if setup.task.HasMergeConflict {
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).

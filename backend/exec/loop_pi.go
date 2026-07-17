@@ -317,7 +317,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 						}
 						commitMsg := te.GenerateCommitMessageForTask(ctx, task.ID, task)
-						te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
+						mergeErr := te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
 						// Reload task — CommitAndMerge may have set merge conflict flag
 						task, _ = te.store.GetTaskByTaskID(task.ID)
 						if task.HasMergeConflict {
@@ -343,14 +343,27 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							// Don't set agentEnded — continue the event loop for Pi to resolve
 							break
 						}
-						task.ExecutionState = "completed"
-						task.Status = "done"
-						if te.sandboxMgr != nil {
-							_ = te.sandboxMgr.Stop(task.ID)
+						if mergeErr != nil {
+							// Merge failed (non-conflict) — don't mark done
+							log.Printf("[pi] task=%s merge failed, moving to review: %v", task.ID, mergeErr)
+							task.ExecutionState = "idle"
+							task.Status = "review"
+							task.Output = "Merge failed: " + mergeErr.Error()
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(task.ID)
+							}
+							te.store.UpdateTask(task)
+							agentEnded = true
+						} else {
+							task.ExecutionState = "completed"
+							task.Status = "done"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(task.ID)
+							}
+							task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
+							te.store.UpdateTask(task)
+							agentEnded = true
 						}
-						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
-						te.store.UpdateTask(task)
-						agentEnded = true
 					} else if task.HasMergeConflict {
 						// Task has a merge conflict (e.g., from HandleCommitAndDone).
 						// Pi resolved conflicts — commit resolution, finish sync merge,
