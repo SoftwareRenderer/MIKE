@@ -48,26 +48,31 @@ test.describe('Column Chronological Ordering', () => {
     }).toPass({ timeout: 10000 });
 
     // Move each task to review, waiting for distinct updated_at after each
-    let lastUpdated = '';
+    let lastUpdated: string | null = null;
     for (const tid of [task1, task2, task3]) {
+      // Delay to ensure distinct timestamps (timestamps are in seconds precision)
+      await page.waitForFunction(() => false, {}, { timeout: 1100, polling: 1100 }).catch(() => {});
       await csrfFetch(page, `/api/projects/${projectId}/tasks/${tid}/move`, {
         method: 'POST',
         body: { status: 'review' },
       });
-      // Wait until the task's updated_at has changed (distinct timestamp)
-      await expect(async () => {
-        const task = await page.evaluate(async ({ pid, tid }) => {
-          const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-          return res.json();
-        }, { pid: projectId, tid });
-        expect(task.updated_at).not.toBe(lastUpdated);
-      }).toPass({ timeout: 5000 });
-      // Record the new timestamp for the next iteration's comparison
-      lastUpdated = await page.evaluate(async ({ pid, tid }) => {
+      // Fetch the new timestamp
+      const newUpdated = await page.evaluate(async ({ pid, tid }) => {
         const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
         const data = await res.json();
         return data.updated_at;
       }, { pid: projectId, tid });
+      // For iterations after the first, verify timestamp changed
+      if (lastUpdated !== null) {
+        await expect(async () => {
+          const task = await page.evaluate(async ({ pid, tid }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+            return res.json();
+          }, { pid: projectId, tid });
+          expect(task.updated_at).not.toBe(lastUpdated);
+        }).toPass({ timeout: 5000 });
+      }
+      lastUpdated = newUpdated;
     }
 
     await page.goto('/');
