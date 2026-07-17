@@ -1,6 +1,7 @@
 <script lang="ts">
     import { marked } from 'marked';
     import { getToolDisplayName } from '$lib/types';
+    import { buildModifiedSegments } from '$lib/utils/diff-parser';
     import { slide } from 'svelte/transition';
     import Icon from '$lib/components/Icon.svelte';
     import shieldGreenIcon from '$lib/assets/icons/shield-green.svg?raw';
@@ -275,7 +276,9 @@
         null
     );
 
-    interface EditDiffLine { type: 'removed' | 'added'; text: string; }
+    import type { InlineDiffSegment } from '$lib/types/diff';
+
+    interface EditDiffLine { type: 'context' | 'removed' | 'added'; text: string; segments?: InlineDiffSegment[]; }
     interface EditDiffBlock { edits: EditDiffLine[]; separator?: boolean; }
 
     function formatEditDiff(edits: Array<{ oldText: string; newText: string }> | undefined): EditDiffBlock[] {
@@ -286,36 +289,80 @@
             const oldLines = edit.oldText.split('\n');
             const newLines = edit.newText.split('\n');
             const maxLines = EDIT_DIFF_MAX_LINES;
-            for (const line of oldLines.slice(0, maxLines)) {
-                lines.push({ type: 'removed', text: line });
+            const oldSlice = oldLines.slice(0, maxLines);
+            const newSlice = newLines.slice(0, maxLines);
+            const pairCount = Math.min(oldSlice.length, newSlice.length);
+
+            // Pair positionally
+            for (let p = 0; p < pairCount; p++) {
+                const oldLine = oldSlice[p]!;
+                const newLine = newSlice[p]!;
+                if (oldLine === newLine) {
+                    // Identical — show as single context line
+                    lines.push({ type: 'context', text: oldLine });
+                } else {
+                    // Different — show removed+added with inline segments
+                    const { oldSegments, newSegments } = buildModifiedSegments(oldLine, newLine);
+                    lines.push({ type: 'removed', text: oldLine, segments: oldSegments });
+                    lines.push({ type: 'added', text: newLine, segments: newSegments });
+                }
             }
-            for (const line of newLines.slice(0, maxLines)) {
-                lines.push({ type: 'added', text: line });
+
+            // Unpaired removed lines (more old lines than new)
+            for (let p = pairCount; p < oldSlice.length; p++) {
+                lines.push({ type: 'removed', text: oldSlice[p] ?? '' });
             }
+
+            // Unpaired added lines (more new lines than old)
+            for (let p = pairCount; p < newSlice.length; p++) {
+                lines.push({ type: 'added', text: newSlice[p] ?? '' });
+            }
+
             blocks.push({ edits: lines, separator: true });
         }
         return blocks;
     }
 
-    // Edit diff expand/collapse
+    // Edit diff expand/collapse — auto-expand for tiny changes (≤2 lines)
     let editDiffExpanded = $state(false);
+    let isEditDiffTrivial = $derived(
+        (editLinesAdded() + editLinesRemoved()) <= 2
+    );
+
+    $effect(() => {
+        if (isEditDiffTrivial) editDiffExpanded = true;
+    });
     let editLinesAdded = $derived(() => {
         const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
         if (!edits) return 0;
-        let count = 0;
+        let added = 0;
         for (const edit of edits) {
-            count += (edit.newText || '').split('\n').length;
+            const oldLines = (edit.oldText || '').split('\n');
+            const newLines = (edit.newText || '').split('\n');
+            const pairCount = Math.min(oldLines.length, newLines.length);
+            for (let p = 0; p < pairCount; p++) {
+                if (oldLines[p] !== newLines[p]) added++;
+            }
+            // Unpaired new lines are pure additions
+            added += Math.max(0, newLines.length - pairCount);
         }
-        return count;
+        return added;
     });
     let editLinesRemoved = $derived(() => {
         const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
         if (!edits) return 0;
-        let count = 0;
+        let removed = 0;
         for (const edit of edits) {
-            count += (edit.oldText || '').split('\n').length;
+            const oldLines = (edit.oldText || '').split('\n');
+            const newLines = (edit.newText || '').split('\n');
+            const pairCount = Math.min(oldLines.length, newLines.length);
+            for (let p = 0; p < pairCount; p++) {
+                if (oldLines[p] !== newLines[p]) removed++;
+            }
+            // Unpaired old lines are pure removals
+            removed += Math.max(0, oldLines.length - pairCount);
         }
-        return count;
+        return removed;
     });
     let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
 
@@ -404,9 +451,17 @@
                 <div class="edit-diff" transition:slide={{ duration: 200 }}>
                     {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
                         {#each block.edits as line}
-                            <div class="edit-diff-line {line.type === 'removed' ? 'edit-removed' : 'edit-added'}">
-                                <span class="edit-diff-sign">{line.type === 'removed' ? '-' : '+'}</span>
-                                <span class="edit-diff-text">{line.text}</span>
+                            <div class="edit-diff-line edit-{line.type}">
+                                <span class="edit-diff-sign">{line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' '}</span>
+                                {#if line.segments}
+                                    <span class="edit-diff-text">
+                                        {#each line.segments as seg}
+                                            <span class="edit-segment edit-segment-{seg.tone}">{seg.text}</span>
+                                        {/each}
+                                    </span>
+                                {:else}
+                                    <span class="edit-diff-text">{line.text}</span>
+                                {/if}
                             </div>
                         {/each}
                         {#if block.separator}
@@ -417,6 +472,11 @@
             {/if}
             {#if !tc.success && tc.result && tc.result.trim()}
                 <pre class="tool-result tool-result-error">{tc.result}</pre>
+            {/if}
+            {#if tc.duration !== undefined}
+                <span class="tool-duration">
+                    {tc.duration}ms
+                </span>
             {/if}
         {:else if tc.toolName === 'write_file' && !tc.isPending}
             <div class="tool-result tool-write-result">
@@ -476,7 +536,7 @@
                 <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
-        {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question'}
+        {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question' && tc.toolName !== 'edit_file'}
             <span class="tool-duration">
                 {tc.duration}ms
                 {#if bashTimeout !== undefined}
@@ -839,6 +899,9 @@
         background: rgba(63,185,80,0.12);
         color: var(--color-text-secondary);
     }
+    .edit-context {
+        color: var(--color-text-tertiary);
+    }
     .edit-diff-sign {
         flex-shrink: 0;
         width: 1em;
@@ -850,6 +913,20 @@
     .edit-diff-text {
         flex: 1;
         min-width: 0;
+    }
+    /* Inline word-level diff segments */
+    .edit-segment {
+        font-family: inherit;
+        font-size: inherit;
+        white-space: inherit;
+    }
+    .edit-segment-added {
+        background: rgba(63,185,80,0.4);
+        border-radius: 2px;
+    }
+    .edit-segment-removed {
+        background: rgba(248,81,73,0.4);
+        border-radius: 2px;
     }
     .edit-separator {
         border-top: 1px dashed var(--color-border);

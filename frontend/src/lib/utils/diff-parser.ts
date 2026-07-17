@@ -184,7 +184,7 @@ export function parseUnifiedDiff(patch: string): DiffFile[] {
  * Build inline word-level diff segments for a pair of removed/added lines.
  * Uses diffWordsWithSpace to find the exact changed portions within the line.
  */
-function buildModifiedSegments(oldText: string, newText: string): {
+export function buildModifiedSegments(oldText: string, newText: string): {
     oldSegments: InlineDiffSegment[];
     newSegments: InlineDiffSegment[];
 } {

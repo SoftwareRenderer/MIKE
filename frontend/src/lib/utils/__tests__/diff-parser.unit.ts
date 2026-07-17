@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseUnifiedDiff, enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows } from '$lib/utils/diff-parser';
+import { parseUnifiedDiff, enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments } from '$lib/utils/diff-parser';
 
 describe('parseUnifiedDiff', () => {
     it('returns empty array for empty input', () => {
@@ -226,6 +226,85 @@ describe('enrichRowsWithInlineSegments', () => {
         const result = enrichRowsWithInlineSegments(rows);
         // Should not overwrite existing segments
         expect(result[0].segments).toBe(rows[0].segments);
+    });
+});
+
+describe('buildModifiedSegments', () => {
+    it('identifies unchanged prefix, removed word, and added word', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('hello world', 'hello there');
+        // Old: "hello " (context) + "world" (removed)
+        expect(oldSegments).toHaveLength(2);
+        expect(oldSegments[0].tone).toBe('context');
+        expect(oldSegments[0].text).toBe('hello ');
+        expect(oldSegments[1].tone).toBe('removed');
+        expect(oldSegments[1].text).toBe('world');
+        // New: "hello " (context) + "there" (added)
+        expect(newSegments).toHaveLength(2);
+        expect(newSegments[0].tone).toBe('context');
+        expect(newSegments[0].text).toBe('hello ');
+        expect(newSegments[1].tone).toBe('added');
+        expect(newSegments[1].text).toBe('there');
+    });
+
+    it('handles completely different lines', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('abc', 'xyz');
+        expect(oldSegments).toHaveLength(1);
+        expect(oldSegments[0].tone).toBe('removed');
+        expect(oldSegments[0].text).toBe('abc');
+        expect(newSegments).toHaveLength(1);
+        expect(newSegments[0].tone).toBe('added');
+        expect(newSegments[0].text).toBe('xyz');
+    });
+
+    it('handles identical lines as all context', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('same line', 'same line');
+        expect(oldSegments).toHaveLength(1);
+        expect(oldSegments[0].tone).toBe('context');
+        expect(oldSegments[0].text).toBe('same line');
+        expect(newSegments).toHaveLength(1);
+        expect(newSegments[0].tone).toBe('context');
+        expect(newSegments[0].text).toBe('same line');
+    });
+
+    it('identical lines produce all-context segments (used to detect unchanged paired lines)', () => {
+        // When ToolCall.svelte pairs old/new lines positionally, identical lines
+        // should be detected as unchanged and rendered as a single context line.
+        // buildModifiedSegments returns all-context segments for identical input,
+        // but the caller (formatEditDiff) should check oldLine === newLine first.
+        const { oldSegments } = buildModifiedSegments('### 3. Verification', '### 3. Verification');
+        const allContext = oldSegments.every(s => s.tone === 'context');
+        expect(allContext).toBe(true);
+    });
+
+    it('handles empty strings', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('', '');
+        expect(oldSegments).toHaveLength(0);
+        expect(newSegments).toHaveLength(0);
+    });
+
+    it('handles change in middle of line', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('const x = 1', 'const x = 2');
+        // "const x = " (context) + "1" (removed/added) + "" (context)
+        const oldTones = oldSegments.map(s => s.tone);
+        const newTones = newSegments.map(s => s.tone);
+        expect(oldTones).toContain('context');
+        expect(oldTones).toContain('removed');
+        expect(newTones).toContain('context');
+        expect(newTones).toContain('added');
+    });
+
+    it('handles multi-word changes', () => {
+        const { oldSegments, newSegments } = buildModifiedSegments('foo bar baz', 'foo qux baz');
+        const oldTones = oldSegments.map(s => s.tone);
+        const newTones = newSegments.map(s => s.tone);
+        // foo (context) + bar (removed) + baz (context)
+        expect(oldTones[0]).toBe('context');
+        expect(oldTones[oldTones.length - 1]).toBe('context');
+        expect(oldTones).toContain('removed');
+        // foo (context) + qux (added) + baz (context)
+        expect(newTones[0]).toBe('context');
+        expect(newTones[newTones.length - 1]).toBe('context');
+        expect(newTones).toContain('added');
     });
 });
 
