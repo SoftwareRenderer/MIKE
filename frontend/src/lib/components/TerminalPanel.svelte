@@ -105,7 +105,7 @@
         if (!kbContainer) return;
         const handler = (e: PointerEvent) => e.preventDefault();
         kbContainer.addEventListener('pointerdown', handler, { capture: true });
-        return () => kbContainer.removeEventListener('pointerdown', handler, { capture: true });
+        return () => { if (kbContainer) kbContainer.removeEventListener('pointerdown', handler, { capture: true }); };
     });
 
     /** Load saved height from IndexedDB. */
@@ -232,14 +232,18 @@
             },
         });
 
+        // Local non-null references for closures (term is Terminal | null at module level).
+        const terminal = term!;
+        const element = terminal.element!;
+
         let webglRef: WebglAddon | null = new WebglAddon();
         webglRef.onContextLoss(() => { webglRef = null; });
-        term.loadAddon(webglRef);
+        terminal.loadAddon(webglRef);
         const fit = new FitAddon();
-        term.loadAddon(fit);
-        term.open(container);
+        terminal.loadAddon(fit);
+        terminal.open(container);
         fit.fit();
-        term.focus();
+        terminal.focus();
 
         const proj = appStore.selectedProject;
         const task = appStore.selectedTask;
@@ -248,7 +252,7 @@
         // Detect stale terminal WebSocket on visibility change (e.g. phone wakes from sleep).
         function handleTerminalVisibility() {
             if (!document.hidden && ws && isTerminalStale(ws)) {
-                term?.write('\r\n\x1b[2mReconnecting...\x1b[0m\r\n');
+                terminal.write('\r\n\x1b[2mReconnecting...\x1b[0m\r\n');
                 ws.close();
                 const p = appStore.selectedProject;
                 const t = appStore.selectedTask;
@@ -303,7 +307,7 @@
             if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; }
         };
 
-        const getTermBounds = () => term.element.getBoundingClientRect();
+        const getTermBounds = () => element.getBoundingClientRect();
 
         /** Measure actual text area offset and cell dimensions. */
         let _cellW: number | null = null;
@@ -313,19 +317,19 @@
 
         const measureCells = () => {
             if (_cellW && _cellH) return;
-            const termB = term.element.getBoundingClientRect();
-            const canvas = term.element.querySelector('canvas') as HTMLCanvasElement | null;
+            const termB = element.getBoundingClientRect();
+            const canvas = element.querySelector('canvas') as HTMLCanvasElement | null;
             if (canvas) {
                 const cB = canvas.getBoundingClientRect();
                 _textOffX = cB.left - termB.left;
                 _textOffY = cB.top - termB.top;
-                _cellW = cB.width / term.cols;
-                _cellH = cB.height / term.rows;
+                _cellW = cB.width / terminal.cols;
+                _cellH = cB.height / terminal.rows;
             } else {
                 _textOffX = 0;
                 _textOffY = 0;
-                _cellW = termB.width / term.cols;
-                _cellH = termB.height / term.rows;
+                _cellW = termB.width / terminal.cols;
+                _cellH = termB.height / terminal.rows;
             }
         };
 
@@ -336,18 +340,18 @@
             const relX = pageX - b.left - _textOffX;
             const relY = pageY - b.top - _textOffY;
             return {
-                col: Math.max(0, Math.min(term.cols - 1, Math.floor(relX / _cellW!))),
-                row: Math.max(0, Math.min(term.rows - 1, Math.floor(relY / _cellH!))),
+                col: Math.max(0, Math.min(terminal.cols - 1, Math.floor(relX / _cellW!))),
+                row: Math.max(0, Math.min(terminal.rows - 1, Math.floor(relY / _cellH!))),
             };
         };
 
         /** Find word boundaries on a buffer row. Returns { start, end } inclusive, or null. */
         const getScrollOffset = (): number => {
-            return (term.buffer.active as any).ydisp ?? term.buffer.active.baseY ?? 0;
+            return (terminal.buffer.active as any).ydisp ?? terminal.buffer.active.baseY ?? 0;
         };
 
         const findWordAt = (viewportRow: number, col: number): { start: number; end: number } | null => {
-            const buffer = term.buffer.active;
+            const buffer = terminal.buffer.active;
             const absRow = getScrollOffset() + viewportRow;
             const line = buffer.getLine(absRow);
             if (!line) return null;
@@ -385,10 +389,10 @@
             const absEnd = ydisp + er;
             if (absStart === absEnd) {
                 const len = ec - sc + 1;
-                try { term.select(sc, absStart, len); } catch {}
+                try { terminal.select(sc, absStart, len); } catch {}
             } else {
-                const total = (term.cols - sc) + (absEnd - absStart - 1) * term.cols + (ec + 1);
-                try { term.select(sc, absStart, total); } catch {}
+                const total = (terminal.cols - sc) + (absEnd - absStart - 1) * terminal.cols + (ec + 1);
+                try { terminal.select(sc, absStart, total); } catch {}
             }
             positionHandles();
         };
@@ -396,7 +400,7 @@
         const removeSelectionOverlay = () => {
             selMode = false;
             draggingHandle = null;
-            try { term.clearSelection(); } catch {}
+            try { terminal.clearSelection(); } catch {}
             if (overlayEl) { overlayEl.remove(); overlayEl = null; }
             if (startHandleEl) { startHandleEl.remove(); startHandleEl = null; }
             if (endHandleEl) { endHandleEl.remove(); endHandleEl = null; }
@@ -521,21 +525,21 @@
                     setTimeout(() => {
                         const text = ta.value;
                         ta.remove();
-                        try { term.clearSelection(); } catch {}
+                        try { terminal.clearSelection(); } catch {}
                         if (text) {
-                            term.focus();
-                            term.paste(text);
+                            terminal.focus();
+                            terminal.paste(text);
                         }
                         removeSelectionOverlay();
                     }, 50);
                 } catch {
                     ta.remove();
-                    term.focus();
+                    terminal.focus();
                     removeSelectionOverlay();
                 }
             });
             const doCopy = () => {
-                const text = term.getSelection();
+                const text = terminal.getSelection();
                 if (!text) { removeSelectionOverlay(); return; }
                 // execCommand for mobile.
                 const ta = document.createElement('textarea');
@@ -595,8 +599,8 @@
                 e.stopPropagation();
                 draggingHandle = which;
             };
-            startHandleEl.addEventListener('touchstart', handleTouchStart('start'));
-            endHandleEl.addEventListener('touchstart', handleTouchStart('end'));
+            if (startHandleEl) startHandleEl.addEventListener('touchstart', handleTouchStart('start'));
+            if (endHandleEl) endHandleEl.addEventListener('touchstart', handleTouchStart('end'));
 
             docTouchMoveHandler = (e: TouchEvent) => {
                 if (!draggingHandle) return;
@@ -689,7 +693,7 @@
             if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
                 const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
                 pixelBufferY -= lines * LINE_HEIGHT;
-                try { term.scrollLines(lines); } catch {}
+                try { terminal.scrollLines(lines); } catch {}
             }
         };
 
@@ -723,27 +727,27 @@
                 if (Math.abs(pixelBufferY) >= LINE_HEIGHT) {
                     const lines = Math.trunc(pixelBufferY / LINE_HEIGHT);
                     pixelBufferY -= lines * LINE_HEIGHT;
-                    try { term.scrollLines(lines); } catch {}
+                    try { terminal.scrollLines(lines); } catch {}
                 }
                 inertiaRaf = requestAnimationFrame(tick);
             };
             inertiaRaf = requestAnimationFrame(tick);
         };
 
-        term.element.addEventListener('touchstart', onTouchStart, { passive: true });
-        term.element.addEventListener('touchmove', onTouchMove, { passive: true });
-        term.element.addEventListener('touchend', onTouchEnd, { passive: true });
+        element.addEventListener('touchstart', onTouchStart, { passive: true });
+        element.addEventListener('touchmove', onTouchMove, { passive: true });
+        element.addEventListener('touchend', onTouchEnd, { passive: true });
 
         // Handle paste: send clipboard text to terminal.
         const handlePaste = (e: ClipboardEvent) => {
             const text = e.clipboardData?.getData('text');
-            if (text && term) {
+            if (text) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                term.paste(text);
+                terminal.paste(text);
             }
         };
-        term.element.addEventListener('paste', handlePaste, { capture: true });
+        element.addEventListener('paste', handlePaste, { capture: true });
 
         function handleKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') close();
@@ -759,12 +763,12 @@
             if (ws) ws.close();
             ws = null;
             observer.disconnect();
-            term.element.removeEventListener('paste', handlePaste, { capture: true });
+            element.removeEventListener('paste', handlePaste, { capture: true });
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('visibilitychange', handleTerminalVisibility);
             webglRef = null;
 
-            try { term?.dispose(); } catch {}
+            try { terminal.dispose(); } catch {}
             term = null;
         };
     });
