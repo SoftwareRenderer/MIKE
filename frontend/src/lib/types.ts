@@ -352,6 +352,7 @@ export type DiffStatsEntry = {
     files: number;
     additions: number;
     deletions: number;
+    untracked_n?: number;
     file_hashes?: Record<string, string>;
     removed_files?: string[];
     staged_paths?: string[];

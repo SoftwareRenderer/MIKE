@@ -1,6 +1,6 @@
 <script lang="ts">
     /** Provider draft with pricing fields (mutated in place via Svelte 5 deep reactivity). */
-    let { provider, currencySymbol, fieldIndex }: {
+    let { provider, currencySymbol, index }: {
         provider: {
             input_price: number;
             output_price: number;
@@ -10,7 +10,7 @@
             electricity_cost_per_kwh: number;
         };
         currencySymbol: string;
-        fieldIndex: number;
+        index: number;
     } = $props();
 
     function parsePrice(e: Event): number {
@@ -31,31 +31,31 @@
     </div>
     <div class="currency-grid" style="grid-template-columns: repeat(4, 1fr)">
         <div class="currency-field">
-            <label for={`input-price-{fieldIndex}`}>Input</label>
+            <label for={`input-price-{index}`}>Input</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
-                <input id={`input-price-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.input_price > 0 ? provider.input_price : ''} oninput={(e) => { provider.input_price = parsePrice(e); }} class="currency-input" />
+                <input id={`input-price-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.input_price > 0 ? provider.input_price : ''} oninput={(e) => { provider.input_price = parsePrice(e); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`output-price-{fieldIndex}`}>Output</label>
+            <label for={`output-price-{index}`}>Output</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
-                <input id={`output-price-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.output_price > 0 ? provider.output_price : ''} oninput={(e) => { provider.output_price = parsePrice(e); }} class="currency-input" />
+                <input id={`output-price-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.output_price > 0 ? provider.output_price : ''} oninput={(e) => { provider.output_price = parsePrice(e); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`cache-read-price-{fieldIndex}`}>Cache Read</label>
+            <label for={`cache-read-price-{index}`}>Cache Read</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
-                <input id={`cache-read-price-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_read_price > 0 ? provider.cache_read_price : ''} oninput={(e) => { provider.cache_read_price = parsePrice(e); }} class="currency-input" />
+                <input id={`cache-read-price-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_read_price > 0 ? provider.cache_read_price : ''} oninput={(e) => { provider.cache_read_price = parsePrice(e); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`cache-write-price-{fieldIndex}`}>Cache Write</label>
+            <label for={`cache-write-price-{index}`}>Cache Write</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
-                <input id={`cache-write-price-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_write_price > 0 ? provider.cache_write_price : ''} oninput={(e) => { provider.cache_write_price = parsePrice(e); }} class="currency-input" />
+                <input id={`cache-write-price-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_write_price > 0 ? provider.cache_write_price : ''} oninput={(e) => { provider.cache_write_price = parsePrice(e); }} class="currency-input" />
             </div>
         </div>
     </div>
@@ -74,14 +74,14 @@
     </div>
     <div class="currency-grid">
         <div class="currency-field">
-            <label for={`power-w-{fieldIndex}`}>Power Consumption (W)</label>
-            <input id={`power-w-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.power_consumption_w > 0 ? provider.power_consumption_w : ''} oninput={(e) => { provider.power_consumption_w = parsePrice(e); }} class="field-input" />
+            <label for={`power-w-{index}`}>Power Consumption (W)</label>
+            <input id={`power-w-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.power_consumption_w > 0 ? provider.power_consumption_w : ''} oninput={(e) => { provider.power_consumption_w = parsePrice(e); }} class="field-input" />
         </div>
         <div class="currency-field">
-            <label for={`elec-cost-{fieldIndex}`}>Electricity ({currencySymbol}/kWh)</label>
+            <label for={`elec-cost-{index}`}>Electricity ({currencySymbol}/kWh)</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
-                <input id={`elec-cost-{fieldIndex}`} type="number" inputmode="decimal" min="0" step="any" value={provider.electricity_cost_per_kwh > 0 ? provider.electricity_cost_per_kwh : ''} oninput={(e) => { provider.electricity_cost_per_kwh = parsePrice(e); }} class="currency-input" />
+                <input id={`elec-cost-{index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.electricity_cost_per_kwh > 0 ? provider.electricity_cost_per_kwh : ''} oninput={(e) => { provider.electricity_cost_per_kwh = parsePrice(e); }} class="currency-input" />
             </div>
         </div>
     </div>
