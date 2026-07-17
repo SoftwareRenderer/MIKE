@@ -3,7 +3,7 @@
     import { SwUpdateDetector } from '$lib/composables/use-sw-update.svelte';
 
     let { detector: detectorProp }: { detector?: SwUpdateDetector } = $props();
-    const detector = detectorProp ?? new SwUpdateDetector();
+    let detector = $derived(detectorProp ?? new SwUpdateDetector());
 </script>
 
 {#if detector.needsReload}

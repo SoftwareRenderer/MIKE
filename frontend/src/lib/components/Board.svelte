@@ -247,8 +247,8 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     });
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-<div class="board" bind:this={boardEl} role="region" aria-label="Task board" onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="board" bind:this={boardEl} role="region" aria-label="Task board" onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }} onkeydown={() => {}}>
     <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     {#each columns as col}
         <Column

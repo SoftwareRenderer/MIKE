@@ -53,9 +53,11 @@
 
     // Branch list for selector
     let branches = $state<string[]>([]);
+    // svelte-ignore non_reactive_update
     let branchInput: HTMLInputElement | null = null;
     let branchDropdownOpen = $state(false);
     let branchActiveIndex = $state(0);
+    // svelte-ignore non_reactive_update
     let branchDropdownRef: HTMLUListElement | null = null;
 
     // Filtered branches matching the current input text

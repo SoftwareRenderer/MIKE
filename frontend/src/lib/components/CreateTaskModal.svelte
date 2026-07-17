@@ -28,9 +28,11 @@
     // Branch selection
     let branchDraft = $state('');
     let branches = $state<string[]>([]);
+    // svelte-ignore non_reactive_update
     let branchInput: HTMLInputElement | null = null;
     let branchDropdownOpen = $state(false);
     let branchActiveIndex = $state(0);
+    // svelte-ignore non_reactive_update
     let branchDropdownRef: HTMLUListElement | null = null;
     let branchWrapperRef: HTMLDivElement | null = null;
 
