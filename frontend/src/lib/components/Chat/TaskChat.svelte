@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, startTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
 import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
 import { StreamState } from '$lib/services/stream-state.svelte';
@@ -753,7 +753,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         const lastEntry = entries[entries.length - 1];
         if (lastEntry && lastEntry.role === 'assistant') {
             try {
-                const updated = await startTask(projectId, taskId);
+                const updated = await moveTask(projectId, taskId, 'in_progress');
                 mergeTaskIntoBoard(updated);
             } catch (e) {
                 dialogStore.showToast(String(e), 'error');
@@ -767,7 +767,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         stream.state.awaitingResponse = true;
         scroll();
         try {
-            const updated = await startTask(projectId, taskId);
+            const updated = await moveTask(projectId, taskId, 'in_progress');
             mergeTaskIntoBoard(updated);
         } catch (e) {
             dialogStore.showToast(String(e), 'error');
