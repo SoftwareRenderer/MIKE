@@ -25,7 +25,17 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             return p.startsWith('./') ? p : `./${p}`;
         }
         case 'write_file': {
-            const p = args.path as string;
+            let p = args.path as string;
+            // During streaming, args may be empty but rawArgs has the JSON.
+            if (!p && rawArgs) {
+                try {
+                    const parsed = JSON.parse(rawArgs);
+                    p = parsed.path as string;
+                } catch {
+                    const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                    if (m) p = m[1].replace(/\\"/g, '"');
+                }
+            }
             if (!p) return '';
             return p.startsWith('./') ? p : `./${p}`;
         }
