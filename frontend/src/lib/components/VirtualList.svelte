@@ -17,7 +17,7 @@
      *     {/snippet}
      *   </VirtualList>
      *
-     * Legacy API (for fixed-height items, backward compatible):
+     * Fixed-height mode:
      *   <VirtualList {items} itemHeight={28} minThreshold={50}>
      *     {#snippet children({ item, index })}
      *       <div>{item.name}</div>
@@ -56,9 +56,9 @@
         ontouchstart?: () => void;
     } = $props();
 
-    // Determine if we're using the legacy (fixed-height) or new (variable-height) API
-    let isLegacyApi = $derived(!getKey && typeof itemHeight === 'number');
-    let effectiveOverscan = $derived(isLegacyApi ? buffer : overscan);
+    // Determine if we're using fixed-height or variable-height mode
+    let isFixedHeight = $derived(!getKey && typeof itemHeight === 'number');
+    let effectiveOverscan = $derived(isFixedHeight ? buffer : overscan);
 
     // Scroll container ref
     // svelte-ignore non_reactive_update
@@ -84,7 +84,7 @@
         }
     }
 
-    // Legacy: track internal scroll position and container height
+    // Fixed-height: track internal scroll position and container height
     let internalScrollTop = $state(0);
     let containerHeight = $state(0);
     let scrollTop = $derived(scrollTopProp ?? internalScrollTop);
@@ -96,7 +96,7 @@
         }
     });
 
-    // ── Legacy mode (fixed-height, minThreshold) ──
+    // ── Fixed-height mode (minThreshold) ──
 
     let virtualized = $derived(items.length >= minThreshold);
     let totalHeight = $derived(items.length * (typeof itemHeight === 'number' ? itemHeight : 28));
@@ -112,31 +112,29 @@
         if (scrollEl) containerHeight = scrollEl.clientHeight;
     }
 
-    // ── New mode (variable-height, useVirtualScroll) ──
+    // ── Variable-height mode (useVirtualScroll) ──
 
-    // Virtual scroll controller (only used in non-legacy mode)
-    // svelte-ignore non_reactive_update
+    // Virtual scroll controller (only used in variable-height mode)
     let vs: ReturnType<typeof useVirtualScroll> | null = null;
 
-    $effect(() => {
-        if (!isLegacyApi) {
-            vs = useVirtualScroll(
-                () => scrollEl,
-                () => items.length,
-                (index) => {
-                    if (index < 0 || index >= items.length) return 60;
-                    return typeof itemHeight === 'function'
-                        ? itemHeight(items[index], index)
-                        : itemHeight;
-                },
-                effectiveOverscan,
-            );
-        }
-    });
+    // svelte-ignore state_referenced_locally — useVirtualScroll creates $state that is read by $derived consumers below
+    if (!isFixedHeight) {
+        vs = useVirtualScroll(
+            () => scrollEl,
+            () => items.length,
+            (index) => {
+                if (index < 0 || index >= items.length) return 60;
+                return typeof itemHeight === 'function'
+                    ? itemHeight(items[index], index)
+                    : itemHeight;
+            },
+            effectiveOverscan,
+        );
+    }
 
-    // Initialize container height for legacy mode
+    // Initialize container height for fixed-height mode
     $effect(() => {
-        if (scrollEl && isLegacyApi) {
+        if (scrollEl && isFixedHeight) {
             containerHeight = scrollEl.clientHeight;
             scrollEl.addEventListener('scroll', handleScroll, { passive: true });
             window.addEventListener('resize', handleResize, { passive: true });
@@ -147,9 +145,9 @@
         }
     });
 
-    // New mode: visible items with offsets
+    // Variable-height: visible items with offsets
     let newVisibleItems = $derived.by(() => {
-        if (!vs || isLegacyApi) return [];
+        if (!vs || isFixedHeight) return [];
         const result: Array<{ item: any; index: number; offset: number }> = [];
         const end = Math.min(vs.endIdx, items.length);
         for (let i = vs.startIdx; i < end; i++) {
@@ -162,12 +160,12 @@
         return result;
     });
 
-    // New mode: ResizeObserver for measuring items
+    // Variable-height: ResizeObserver for measuring items
     let itemObserver: ResizeObserver | null = null;
     let observedIndices = new Set<number>();
 
     $effect(() => {
-        if (!scrollEl || isLegacyApi || !vs) return;
+        if (!scrollEl || isFixedHeight || !vs) return;
 
         // ResizeObserver: measures item heights when they render/change.
         itemObserver = new ResizeObserver((entries) => {
@@ -254,7 +252,7 @@
     /** Scroll to the bottom of the list. */
     function scrollToBottom() {
         if (scrollEl) {
-            scrollEl.scrollTop = isLegacyApi ? totalHeight : (vs?.totalHeight ?? 0);
+            scrollEl.scrollTop = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
         }
     }
 
@@ -268,7 +266,7 @@
     /** Check if the scroll container is near the bottom. */
     function isNearBottom(threshold = 32): boolean {
         if (!scrollEl) return true;
-        const h = isLegacyApi ? totalHeight : (vs?.totalHeight ?? 0);
+        const h = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
         const gap = h - scrollEl.scrollTop - scrollEl.clientHeight;
         return gap < threshold;
     }
@@ -276,7 +274,7 @@
     /** Scroll to a specific item index. */
     function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
         if (index < 0 || index >= items.length) return;
-        if (isLegacyApi) {
+        if (isFixedHeight) {
             const h = typeof itemHeight === 'number' ? itemHeight : 28;
             scrollToOffset(index * h, behavior);
         } else if (vs) {
@@ -289,7 +287,7 @@
     export { vs };
 </script>
 
-{#if isLegacyApi}
+{#if isFixedHeight}
     {#if virtualized}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
