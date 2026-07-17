@@ -699,15 +699,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         }
     }
 
-    async function handleSummarizeCancel() {
-        const confirmed = await dialogStore.showConfirm({
-            title: 'Cancel Summarization',
-            message: 'Summarization is in progress. Cancel it?',
-            confirmText: 'Cancel',
-            cancelText: 'Keep Running',
-            variant: 'default',
-        });
-        if (!confirmed) return;
+    function handleSummarizeCancel() {
         summarizeController?.abort();
     }
 

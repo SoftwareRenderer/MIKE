@@ -214,18 +214,38 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	te.taskMu.Unlock()
 
 	if state != nil {
+		// Create a cancellable context for this summarize request.
+		// Cancelled when: user clicks ✕ (HTTP abort), new summarize request arrives, or timeout.
+		reqCtx, reqCancel := context.WithTimeout(r.Context(), 60*time.Second)
 		resultCh := make(chan error, 1)
+		req := &summarizeRequest{ctx: reqCtx, resultCh: resultCh, cancel: reqCancel}
+
+		// Cancel any previous active summarize request (user clicked ✕ or re-clicked summarize).
+		state.activeSummarize.mu.Lock()
+		if old := state.activeSummarize.request; old != nil {
+			old.cancel()
+		}
+		state.activeSummarize.request = req
+		state.activeSummarize.mu.Unlock()
+
 		select {
-		case state.summarizeCh <- resultCh:
-			// Request sent, wait for result
+		case state.summarizeCh <- req:
+			// Request sent, wait for result (respects HTTP abort via r.Context)
 			select {
 			case err := <-resultCh:
 				if err != nil {
 					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 					return
 				}
-			case <-time.After(60 * time.Second):
-				httputil.JSONError(w, http.StatusInternalServerError, "summarization timed out")
+			case <-r.Context().Done():
+				// User clicked ✕ or disconnected — handler exits, loop sees ctx.Done
+				return
+			case <-reqCtx.Done():
+				if reqCtx.Err() == context.DeadlineExceeded {
+					httputil.JSONError(w, http.StatusInternalServerError, "summarization timed out")
+					return
+				}
+				// Cancelled by new request or HTTP abort
 				return
 			}
 			// Result is sent via WebSocket, return minimal response
@@ -233,6 +253,12 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 			return
 		default:
 			// Channel full, fall through to DB-based approach
+			reqCancel()
+			state.activeSummarize.mu.Lock()
+			if state.activeSummarize.request == req {
+				state.activeSummarize.request = nil
+			}
+			state.activeSummarize.mu.Unlock()
 		}
 	}
 

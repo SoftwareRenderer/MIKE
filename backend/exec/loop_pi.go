@@ -23,7 +23,7 @@ import (
 // executeTaskWithPi runs the task using Pi agent via RPC mode.
 // Pi handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, summarizeCh chan chan error, sandboxEnabled bool, initialContent string) {
+func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task, projectID, projectName, worktreePath string, userMsgChan chan stream.UserMessage, summarizeCh chan *summarizeRequest, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[pi-panic] task=%s recovered from panic: %v", task.ID, r)

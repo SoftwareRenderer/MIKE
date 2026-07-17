@@ -2153,7 +2153,7 @@ func TestNotifyContextChanged_SendsToChannel(t *testing.T) {
 		ctx:         ctx,
 		cancel:      cancel,
 		userMsgChan: userMsgChan,
-		summarizeCh: make(chan chan error, 16),
+		summarizeCh: make(chan *summarizeRequest, 16),
 	}
 	te.taskMu.Unlock()
 

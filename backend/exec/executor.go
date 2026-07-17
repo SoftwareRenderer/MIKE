@@ -43,11 +43,21 @@ type TaskExecutor struct {
 	worktreeMu sync.Map // taskID -> *sync.Mutex
 }
 
+type summarizeRequest struct {
+	ctx      context.Context // HTTP request context — cancelled when user clicks ✕ or new request arrives
+	resultCh chan error      // receives ok/err from the loop
+	cancel   context.CancelFunc
+}
+
 type executionState struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	userMsgChan  chan stream.UserMessage
-	summarizeCh  chan chan error // send a channel, receives result (ok/err) from the loop
+	summarizeCh  chan *summarizeRequest // send a request, receives result via resultCh
+	activeSummarize struct {
+		mu      sync.Mutex
+		request *summarizeRequest // currently active summarize request (nil = none)
+	}
 	compactCh    chan chan *pi.CompactResult // send a channel, receives result from the Pi compaction
 	piClient     *pi.Client                  // Pi RPC client — kept alive after completion for on-demand compaction
 	clientClosed bool                        // true when piClient has been closed (prevents double-close)
@@ -549,7 +559,7 @@ type taskExecSetup struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 	userMsgChan           chan stream.UserMessage
-	summarizeCh           chan chan error // channel for manual summarization requests
+	summarizeCh           chan *summarizeRequest // channel for manual summarization requests
 	initialContent        string          // user message content for lazy-start (empty for normal start)
 	regenerate            bool
 	sandboxEnabled        bool
@@ -658,7 +668,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
-	summarizeCh := make(chan chan error, 16)
+	summarizeCh := make(chan *summarizeRequest, 16)
 
 	project, err := te.store.GetProject(projectID)
 	if err != nil {

@@ -37,6 +37,16 @@
         }
         await onSummarize();
     }
+
+    function handleKeyDown(e: KeyboardEvent) {
+        if (isSummarizing && onSummarizeCancel && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            onSummarizeCancel();
+        } else if (!isSummarizing && !disabled && onSummarize && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            onSummarize();
+        }
+    }
 </script>
 
 {#if show}
@@ -45,9 +55,10 @@
         class="context-usage"
         class:clickable={!!onSummarize && !disabled}
         class:summarizing={isSummarizing}
-        disabled={disabled || isSummarizing}
+        disabled={disabled}
         title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize && !disabled ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
         onclick={handleClick}
+        onkeydown={handleKeyDown}
     >
         {#if isSummarizing}
             <span class="spinner"></span>
@@ -94,6 +105,7 @@
     }
     .context-usage.summarizing {
         opacity: 0.7;
+        cursor: pointer;
     }
     .usage-bar {
         width: 48px;
