@@ -35,17 +35,17 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Custom Mounts subsection header should be visible
-    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
     await expect(mountsHeader).toBeVisible({ timeout: 5000 });
 
     // Section starts collapsed — click to expand
     await mountsHeader.click();
     await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
     // Description explains purpose
-    await expect(page.locator('.config-row-subsection .config-desc')).toContainText('Bind mount');
+    await expect(page.locator('.config-row-expandable .config-desc')).toContainText('Bind mount');
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -79,7 +79,7 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('.mount-item')).toHaveCount(0);
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -106,7 +106,7 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('.mount-error')).toContainText('Container path is required');
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
   });
 
   test('should toggle rw/ro mode', async ({ page }) => {
@@ -135,7 +135,7 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('.mount-mode.mode-ro')).toContainText('ro');
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 

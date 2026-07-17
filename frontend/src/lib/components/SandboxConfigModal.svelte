@@ -13,12 +13,15 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     import DockerfilePicker from './DockerfilePicker.svelte';
     import DirectoryPicker from './DirectoryPicker.svelte';
 
-    let { project, inProgressCount, onClose, onSaved }: {
+    let { project, inProgressCount: initialInProgressCount, onClose, onSaved }: {
         project: Project;
         inProgressCount: number;
         onClose: () => void;
         onSaved: () => void;
     } = $props();
+
+    // Local count refreshed on mount to avoid stale projectCounts
+    let inProgressCount = $state(initialInProgressCount);
 
     let sandboxEnabled = $state(false);
     let networkIsolation = $state(false);
@@ -139,6 +142,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 }
             }
             activeHostPorts = map;
+            // Refresh in-progress count from actual board data
+            inProgressCount = board.tasks.filter((t: Task) => t.status === 'in_progress').length;
         } catch {
             // Ignore fetch errors
         }
@@ -381,19 +386,114 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 </script>
 
-<BaseModal title="Sandbox Configuration" width="560px" footer={footer} onClose={onClose}>
-
-        {#if isLocked}
+<BaseModal title="Sandbox Configuration" width={isLocked ? '480px' : '560px'} footer={isLocked ? undefined : footer} onClose={onClose}>
+    {#if isLocked}
+        <!-- Read-only view shown when tasks are in progress -->
+        <div class="locked-view">
             <div class="locked-notice">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                     <path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                 </svg>
-                <p>Cannot change sandbox settings while tasks are In Progress.</p>
+                <p>Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.</p>
             </div>
-        {/if}
 
-        <div class="config-options" class:locked={isLocked}>
+            <div class="settings-list">
+                <!-- Sandbox enabled -->
+                <div class="setting-row">
+                    <div class="setting-label-group">
+                        <span class="setting-label">Sandbox Isolation</span>
+                    </div>
+                    <span class="setting-value">{sandboxEnabled ? 'Enabled' : 'Disabled'}</span>
+                </div>
+
+                {#if sandboxEnabled}
+                <!-- Network isolation -->
+                <div class="setting-row">
+                    <span class="setting-label">Network Isolation</span>
+                    <span class="setting-value">{networkIsolation ? 'Enabled' : 'Disabled'}</span>
+                </div>
+
+                <!-- Memory limit -->
+                <div class="setting-row">
+                    <span class="setting-label">Memory Limit</span>
+                    <span class="setting-value">{sandboxMemoryLimit} MB</span>
+                </div>
+
+                <!-- Image -->
+                <div class="setting-row">
+                    <span class="setting-label">Image</span>
+                    <span class="setting-value setting-value-mono">{sandboxDockerfilePath || sandboxImage || 'Default'}</span>
+                </div>
+
+                <!-- Forward ports -->
+                {#if forwardPorts.length > 0}
+                <div class="setting-row">
+                    <span class="setting-label">Forwarded Ports</span>
+                    <span class="setting-value">{forwardPorts.map(p => p.container_port).join(', ')}</span>
+                </div>
+
+                <!-- Active port mappings -->
+                {#if hasActivePorts}
+                <div class="active-ports-section">
+                    <span class="section-label">Active Port Mappings</span>
+                    <div class="active-ports-list">
+                        {#each forwardPorts as port}
+                        {#if activeHostPorts.has(port.container_port)}
+                        <div class="active-port-item">
+                            <span class="active-port-host" title="Host port">{activeHostPorts.get(port.container_port)}</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="active-port-container" title="Container port">{port.container_port}</span>
+                        </div>
+                        {/if}
+                        {/each}
+                    </div>
+                </div>
+                {/if}
+                {/if}
+
+                <!-- Custom mounts -->
+                {#if sandboxMounts.length > 0}
+                <div class="locked-mounts-section">
+                    <span class="section-label">Custom Mounts</span>
+                    <div class="locked-mounts-list">
+                        {#each sandboxMounts as mount}
+                        <div class="locked-mount-item">
+                            <span class="locked-mount-host" title={mount.host_path}>{mount.host_path}</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span class="locked-mount-container" title={mount.container_path}>{mount.container_path}</span>
+                            <span class="locked-mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Read/Write' : 'Read-only'}>{mount.mode}</span>
+                        </div>
+                        {/each}
+                    </div>
+                </div>
+                {/if}
+
+                <!-- Environment variables -->
+                {#if sandboxEnvs.length > 0}
+                <div class="locked-envs-section">
+                    <span class="section-label">Environment Variables</span>
+                    <div class="locked-envs-list">
+                        {#each sandboxEnvs as env}
+                        <div class="locked-env-item">
+                            <span class="locked-env-key" title={env.key}>{env.key}</span>
+                            <span class="locked-env-equals">=</span>
+                            <span class="locked-env-value" title={env.value}>{env.value || '(empty)'}</span>
+                        </div>
+                        {/each}
+                    </div>
+                </div>
+                {/if}
+                {/if}
+            </div>
+        </div>
+    {:else}
+        <!-- Editable form (unchanged) -->
+        <div class="config-options">
             <!-- Sandbox enabled toggle -->
             <div class="config-row">
                 <div class="config-info">
@@ -815,6 +915,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         {#if error}
             <div class="error-message">{error}</div>
         {/if}
+    {/if}
 </BaseModal>
 
 {#snippet footer()}
@@ -843,22 +944,226 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         font-size: 1rem;
     }
 
+    .locked-view {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
     .locked-notice {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 10px;
         padding: 10px 14px;
         background: rgba(210, 153, 34, 0.1);
         border: 1px solid rgba(210, 153, 34, 0.3);
         border-radius: var(--radius-md);
-        margin-bottom: 16px;
         color: var(--color-status-yellow, #d29922);
         font-size: 0.8125rem;
+    }
+
+    .locked-notice svg {
+        flex-shrink: 0;
+        margin-top: 1px;
     }
 
     .locked-notice p {
         margin: 0;
         line-height: 1.4;
+    }
+
+    /* Read-only settings list */
+    .settings-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .setting-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .setting-row:last-child {
+        border-bottom: none;
+    }
+
+    .setting-label-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .setting-label {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+    }
+
+    .setting-value {
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        text-align: right;
+    }
+
+    .setting-value-mono {
+        font-family: var(--font-mono, monospace);
+    }
+
+    .section-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    /* Active port mappings in locked view */
+    .active-ports-section {
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .active-ports-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .active-port-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .active-port-host {
+        font-weight: 600;
+        color: var(--color-accent-light);
+    }
+
+    .active-port-container {
+        color: var(--color-text-primary);
+    }
+
+    /* Custom mounts in locked view */
+    .locked-mounts-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+
+    .locked-mounts-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .locked-mount-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .locked-mount-host {
+        font-weight: 600;
+        color: var(--color-accent-light);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .locked-mount-container {
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .locked-mount-mode {
+        margin-left: auto;
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        font-weight: 600;
+    }
+
+    .locked-mount-mode.mode-rw {
+        background: rgba(248, 81, 73, 0.15);
+        color: #FF7575;
+    }
+
+    .locked-mount-mode.mode-ro {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-yellow, #d29922);
+    }
+
+    /* Environment variables in locked view */
+    .locked-envs-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+
+    .locked-envs-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .locked-env-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .locked-env-key {
+        font-weight: 600;
+        color: var(--color-accent-light);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .locked-env-equals {
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .locked-env-value {
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .config-options {
@@ -869,12 +1174,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
         margin-bottom: 16px;
-        transition: opacity 0.15s;
-    }
-
-    .config-options.locked {
-        opacity: 0.5;
-        pointer-events: none;
     }
 
     .config-row {

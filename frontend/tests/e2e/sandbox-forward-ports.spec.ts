@@ -43,7 +43,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.config-row-subsection .config-desc')).toContainText('auto-assigned');
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -66,7 +66,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
 
     // Close modal and reset
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     // Reset network isolation to off
@@ -95,7 +95,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
 
     // Close modal and reset
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     // Reset sandbox to enabled
@@ -130,7 +130,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.port-item')).toHaveCount(0);
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -157,7 +157,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await expect(page.locator('.port-error')).toContainText('between 1 and 65535');
 
     // Close modal
-    await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
   });
 
   test('should save port forwards via API', async ({ page }) => {

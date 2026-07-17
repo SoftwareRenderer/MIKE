@@ -904,10 +904,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     function openSandboxConfig(p: Project) {
-        if ((projectCounts[p.id]?.in_progress ?? 0) > 0) {
-            dialogStore.showToast('Cannot change sandbox settings while tasks are In Progress.', 'error');
-            return;
-        }
         // Clear port conflict when opening modal (user will see/fix it in modal)
         portConflict = null;
         uiStore.showSandboxConfig = true;
