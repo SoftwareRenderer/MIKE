@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, formatTimestamp, formatElapsed } from '$lib/utils/format-time';
+import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration } from '$lib/utils/format-time';
 
 describe('formatRelativeTime', () => {
     it('returns empty string for empty input', () => {
@@ -77,6 +77,34 @@ describe('formatTimestamp', () => {
     });
 });
 
+describe('formatDuration', () => {
+    it('shows ms for values under 1000', () => {
+        expect(formatDuration(0)).toBe('0ms');
+        expect(formatDuration(500)).toBe('500ms');
+        expect(formatDuration(999)).toBe('999ms');
+    });
+
+    it('shows 1 decimal place for values 1s-9.99s', () => {
+        expect(formatDuration(1000)).toBe('1.0s');
+        expect(formatDuration(1200)).toBe('1.2s');
+        expect(formatDuration(5500)).toBe('5.5s');
+        expect(formatDuration(9999)).toBe('10.0s');
+    });
+
+    it('shows rounded integer for values >= 10s', () => {
+        expect(formatDuration(10000)).toBe('10s');
+        expect(formatDuration(15300)).toBe('15s');
+        expect(formatDuration(59999)).toBe('60s');
+    });
+
+    it('shows minutes for values >= 60s', () => {
+        expect(formatDuration(60000)).toBe('1m');
+        expect(formatDuration(65000)).toBe('1m 5s');
+        expect(formatDuration(120000)).toBe('2m');
+        expect(formatDuration(150000)).toBe('2m 30s');
+    });
+});
+
 describe('formatElapsed', () => {
     it('formats seconds less than 60', () => {
         expect(formatElapsed(0)).toBe('0s');
@@ -85,14 +113,14 @@ describe('formatElapsed', () => {
     });
 
     it('formats seconds with minutes and seconds', () => {
-        expect(formatElapsed(60000)).toBe('1m 0s');
+        expect(formatElapsed(60000)).toBe('1m');
         expect(formatElapsed(65000)).toBe('1m 5s');
         expect(formatElapsed(90000)).toBe('1m 30s');
     });
 
     it('formats minutes correctly', () => {
-        expect(formatElapsed(120000)).toBe('2m 0s');
-        expect(formatElapsed(180000)).toBe('3m 0s');
+        expect(formatElapsed(120000)).toBe('2m');
+        expect(formatElapsed(180000)).toBe('3m');
     });
 
     it('rounds down partial seconds', () => {

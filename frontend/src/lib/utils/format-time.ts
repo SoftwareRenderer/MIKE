@@ -12,7 +12,26 @@ export function formatElapsed(ms: number): string {
     if (totalSec < 60) return `${totalSec}s`;
     const min = Math.floor(totalSec / 60);
     const sec = totalSec % 60;
-    return `${min}m ${sec}s`;
+    return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
+}
+
+/**
+ * Format a tool call duration in ms, using seconds when >= 1000ms.
+ * Returns e.g. "342ms", "1.2s", "15s".
+ */
+export function formatDuration(ms: number): string {
+    if (ms >= 1000) {
+        const totalSec = Math.floor(ms / 1000);
+        if (totalSec >= 60) {
+            const min = Math.floor(totalSec / 60);
+            const sec = totalSec % 60;
+            return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
+        }
+        const sec = ms / 1000;
+        if (sec >= 10) return `${Math.round(sec)}s`;
+        return `${sec.toFixed(1)}s`;
+    }
+    return `${ms}ms`;
 }
 
 /**

@@ -12,7 +12,7 @@
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
     import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
-    import { formatElapsed } from '$lib/utils/format-time';
+    import { formatElapsed, formatDuration } from '$lib/utils/format-time';
     import { getTaskMessageFull } from '$lib/api';
 
     interface Props {
@@ -377,7 +377,7 @@
         tc.raw_args ? (() => { const m = tc.raw_args!.match(/"timeout"\s*:\s*(\d+)/); return m ? parseInt(m[1], 10) : undefined; })() :
         undefined
     );
-    let timeoutBadge = $derived(bashTimeout !== undefined ? `Timeout ${bashTimeout}s` : '');
+    let timeoutBadge = $derived(bashTimeout !== undefined ? `Timeout ${formatElapsed(bashTimeout * 1000)}` : '');
 </script>
 
 <div class="tool-call-entry">
@@ -464,7 +464,7 @@
             {/if}
             {#if tc.duration !== undefined}
                 <span class="tool-duration">
-                    {tc.duration}ms
+                    {formatDuration(tc.duration)}
                 </span>
             {/if}
         {:else if tc.toolName === 'write_file' && !tc.isPending}
@@ -527,10 +527,10 @@
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question' && tc.toolName !== 'edit_file'}
             <span class="tool-duration">
-                {tc.duration}ms
+                {formatDuration(tc.duration)}
                 {#if bashTimeout !== undefined}
                     <span class="tool-duration-sep">·</span>
-                    <span class="tool-timeout">Timeout {bashTimeout}s</span>
+                    <span class="tool-timeout">Timeout {formatElapsed(bashTimeout * 1000)}</span>
                 {/if}
             </span>
         {/if}
