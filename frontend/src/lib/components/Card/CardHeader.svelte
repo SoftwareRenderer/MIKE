@@ -194,8 +194,7 @@
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }
-    .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
-    .card.selected > .card-title > .card-title-text {
+    .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text {
         padding-right: calc(var(--actions) * 28px + 6px);
     }
 
@@ -210,8 +209,7 @@
         pointer-events: none;
         transition: opacity 0.15s ease;
     }
-    .card:hover:not(:has(.card:hover)) > .card-title > .card-actions,
-    .card.selected > .card-title > .card-actions {
+    .card:hover:not(:has(.card:hover)) > .card-title > .card-actions {
         opacity: 1;
         pointer-events: auto;
     }

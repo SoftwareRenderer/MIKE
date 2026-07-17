@@ -345,6 +345,7 @@
     // Start expanded when trivial so no transition fires on mount (avoids scroll jump in virtual list).
     let _editChanges = $derived(countEditChanges(tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined));
     let isEditDiffTrivial = $derived((_editChanges.added + _editChanges.removed) <= 2);
+    // svelte-ignore state_referenced_locally — tc.args.edits is static per tool call, so initial capture is intentional
     let editDiffExpanded = $state(isEditDiffTrivial);
     let editLinesAdded = $derived(() => _editChanges.added);
     let editLinesRemoved = $derived(() => _editChanges.removed);

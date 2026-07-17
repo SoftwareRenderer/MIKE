@@ -61,6 +61,7 @@
     let effectiveOverscan = $derived(isLegacyApi ? buffer : overscan);
 
     // Scroll container ref
+    // svelte-ignore non_reactive_update
     let scrollEl: HTMLElement | null = null;
 
     // Keyboard navigation: Page Up/Down, Arrow Up/Down, Home, End
@@ -114,21 +115,24 @@
     // ── New mode (variable-height, useVirtualScroll) ──
 
     // Virtual scroll controller (only used in non-legacy mode)
+    // svelte-ignore non_reactive_update
     let vs: ReturnType<typeof useVirtualScroll> | null = null;
 
-    if (!isLegacyApi) {
-        vs = useVirtualScroll(
-            () => scrollEl,
-            () => items.length,
-            (index) => {
-                if (index < 0 || index >= items.length) return 60;
-                return typeof itemHeight === 'function'
-                    ? itemHeight(items[index], index)
-                    : itemHeight;
-            },
-            effectiveOverscan,
-        );
-    }
+    $effect(() => {
+        if (!isLegacyApi) {
+            vs = useVirtualScroll(
+                () => scrollEl,
+                () => items.length,
+                (index) => {
+                    if (index < 0 || index >= items.length) return 60;
+                    return typeof itemHeight === 'function'
+                        ? itemHeight(items[index], index)
+                        : itemHeight;
+                },
+                effectiveOverscan,
+            );
+        }
+    });
 
     // Initialize container height for legacy mode
     $effect(() => {
@@ -173,7 +177,7 @@
                 if (isNaN(index)) continue;
                 const h = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
                 if (h > 0) {
-                    vs.measureItem(index, Math.ceil(h));
+                    vs?.measureItem(index, Math.ceil(h));
                 }
             }
         });
@@ -287,6 +291,7 @@
 
 {#if isLegacyApi}
     {#if virtualized}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
             class="virtual-scroll"
             bind:this={scrollEl}
@@ -309,6 +314,7 @@
             </div>
         </div>
     {:else}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
             class="virtual-scroll"
             bind:this={scrollEl}
@@ -326,6 +332,7 @@
         </div>
     {/if}
 {:else}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
         class="virtual-list"
         bind:this={scrollEl}
