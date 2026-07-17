@@ -1264,10 +1264,18 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		case <-setup.ctx.Done():
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
 			return
-		case resultCh := <-setup.summarizeCh:
-			// Manual summarization request from HandleSummarize
+		case req := <-setup.summarizeCh:
+			// Manual summarization request from HandleSummarize.
+			// Check if it was cancelled (user clicked ✕ or new request arrived).
+			if req.ctx.Err() != nil {
+				if req.ctx.Err() == context.Canceled {
+					log.Printf("[summarize] setup.task=%s summarization cancelled", setup.task.ID)
+				}
+				req.resultCh <- req.ctx.Err()
+				continue
+			}
 			log.Printf("[summarize] setup.task=%s manual summarization requested", setup.task.ID)
-			lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, resultCh)
+			lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, req.resultCh)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
 			continue
