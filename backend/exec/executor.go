@@ -227,12 +227,13 @@ func (te *TaskExecutor) FindDeepestIncompleteSubtasks(tasks []types.Task) []type
 }
 
 // isIncompleteForStart returns true if a task is a candidate for auto-start.
-// Only backlog or in_progress+idle tasks qualify.
+// Tasks in backlog qualify regardless of execution_state.
+// Tasks in in_progress qualify when not actively running or failed.
 func isIncompleteForStart(t types.Task) bool {
 	if t.Status == "backlog" {
 		return true
 	}
-	if t.Status == "in_progress" && t.ExecutionState == "idle" {
+	if t.Status == "in_progress" && t.ExecutionState != "running" && t.ExecutionState != "failed" {
 		return true
 	}
 	return false
@@ -326,6 +327,20 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 	parent, err := te.store.GetTaskByTaskID(subtask.ParentTaskID)
 	if err != nil {
 		return fmt.Errorf("get parent: %w", err)
+	}
+
+	// Inherit LLM config from parent if the subtask doesn't have its own.
+	// Subtasks created by plan-mode decomposition may not have model settings.
+	if subtask.LlamaServerURL == "" && parent.LlamaServerURL != "" {
+		subtask.LlamaServerURL = parent.LlamaServerURL
+	}
+	if subtask.ModelName == "" && parent.ModelName != "" {
+		subtask.ModelName = parent.ModelName
+	}
+	if subtask.LlamaServerURL != "" || subtask.ModelName != "" {
+		if err := te.store.UpdateTask(subtask); err != nil {
+			return fmt.Errorf("update subtask model config: %w", err)
+		}
 	}
 
 	// Ensure the parent has a branch (needed for subtask merge target).
@@ -465,6 +480,13 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		} else {
 			log.Printf("[auto-start] task=%s all children done, parent %s in backlog — waiting for user to start", finishedTaskID, parent.ID)
 		}
+		return nil
+	}
+
+	// If the parent is still in backlog, do NOT auto-start siblings.
+	// The user needs to explicitly move the parent to In Progress first.
+	if parent.Status == "backlog" {
+		log.Printf("[auto-start] parent %s is in backlog, skipping sibling auto-start (%d incomplete siblings)", parentTaskID, len(incomplete))
 		return nil
 	}
 

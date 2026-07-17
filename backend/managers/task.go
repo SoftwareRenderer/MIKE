@@ -440,7 +440,7 @@ func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTask
 }
 
 // moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
-// to in_progress/idle. Only tasks in backlog or in_progress+idle are moved.
+// to in_progress/idle. Tasks in backlog or in_progress (not running/failed) are moved.
 func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
@@ -448,14 +448,15 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 		return
 	}
 	for i := range descendants {
-		if descendants[i].Status == "backlog" || (descendants[i].Status == "in_progress" && descendants[i].ExecutionState == "idle") {
-			descendants[i].Status = "in_progress"
-			descendants[i].ExecutionState = "idle"
-			descendants[i].UpdatedAt = time.Now().UTC()
-			if err := h.store.UpdateTask(&descendants[i]); err != nil {
-				log.Printf("[move-descendants] failed to update descendant %s: %v", descendants[i].ID, err)
+		d := &descendants[i]
+		if d.Status == "backlog" || (d.Status == "in_progress" && d.ExecutionState != "running" && d.ExecutionState != "failed") {
+			d.Status = "in_progress"
+			d.ExecutionState = "idle"
+			d.UpdatedAt = time.Now().UTC()
+			if err := h.store.UpdateTask(d); err != nil {
+				log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
 			} else {
-				h.boardStreamMgr.BroadcastTaskUpdated(descendants[i].ProjectID, &descendants[i])
+				h.boardStreamMgr.BroadcastTaskUpdated(d.ProjectID, d)
 			}
 		}
 	}
@@ -495,7 +496,7 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string)
 				// Moved away from done — reset
 				d.ExecutionState = "idle"
 			}
-			// Keep existing state (failed, stopped, awaiting_review, idle) if not overridden above
+			// Keep existing state (failed, stopped, idle) if not overridden above
 		}
 		if err := h.store.UpdateTask(d); err != nil {
 			log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
@@ -1207,7 +1208,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 			if err := h.executor.StopTask(d.ID); err != nil {
 				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
 			}
-			d.ExecutionState = "stopped"
+			d.ExecutionState = "idle"
 			d.Output = "Stopped by parent"
 			d.UpdatedAt = time.Now().UTC()
 			_ = h.store.UpdateTask(&d)
@@ -1220,7 +1221,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 		// Task might not be running (parent may be idle while subtask runs)
 		task, _ := h.store.GetTask(projectID, taskID)
 		if task != nil && task.ExecutionState == "running" {
-			task.ExecutionState = "stopped"
+			task.ExecutionState = "idle"
 			task.Output = "Stopped by user"
 			task.UpdatedAt = time.Now().UTC()
 			_ = h.store.UpdateTask(task)
@@ -1230,7 +1231,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 
 	task, _ := h.store.GetTask(projectID, taskID)
 	if task != nil {
-		task.ExecutionState = "stopped"
+		task.ExecutionState = "idle"
 		task.Output = "Stopped by user"
 		task.UpdatedAt = time.Now().UTC()
 		_ = h.store.UpdateTask(task)

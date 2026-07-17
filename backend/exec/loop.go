@@ -984,7 +984,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							}
 						}
 					} else {
-						setup.task.ExecutionState = "awaiting_review"
+						setup.task.ExecutionState = "idle"
 						setup.task.Status = "review"
 					}
 					te.store.UpdateTask(setup.task)

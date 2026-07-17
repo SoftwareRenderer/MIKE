@@ -164,11 +164,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				te.failTask(task, projectID, "Pi Coding Agent failed to start (timeout waiting for agent)", "pi_startup_timeout")
 			} else {
 				// Parent context cancelled
-				task.ExecutionState = "stopped"
+				task.ExecutionState = "idle"
 				task.Status = "review"
 				task.Output = "Stopped by user"
 				te.store.UpdateTask(task)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			}
 			return
@@ -233,11 +233,11 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 		case <-ctx.Done():
 			log.Printf("[pi] task=%s context cancelled", task.ID)
 			client.Abort(ctx)
-			task.ExecutionState = "stopped"
+			task.ExecutionState = "idle"
 			task.Status = "review"
 			task.Output = "Stopped by user"
 			te.store.UpdateTask(task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
 			return
@@ -381,13 +381,13 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						te.store.UpdateTask(task)
 						agentEnded = true
 					} else if stopReason == "aborted" {
-						task.ExecutionState = "stopped"
+						task.ExecutionState = "idle"
 						task.Status = "review"
 						task.Output = "Pi Coding Agent was aborted"
 						te.store.UpdateTask(task)
 						agentEnded = true
 					} else {
-						task.ExecutionState = "awaiting_review"
+						task.ExecutionState = "idle"
 						task.Status = "review"
 						task.Output = fmt.Sprintf("Pi Coding Agent finished (%s)", stopReason)
 						te.store.UpdateTask(task)
