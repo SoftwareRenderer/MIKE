@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import type { Task, TaskCommit } from '$lib/types';
-    import type { DiffFile } from '$lib/types/diff';
+    import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
@@ -46,7 +46,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
 
-    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; activeTab?: 'context' | 'chat' | 'diff'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff') => void } = $props();
+    let { task, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
 
     let allTasks = $derived(appStore.board?.tasks || []);
 
@@ -557,7 +557,7 @@
             if (data.rows) {
                 const added = data.rows.filter((r: any) => r.variant === 'added').length;
                 const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
-                diffCache.setFile(path, { path, rows: data.rows, added, removed, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved });
+                diffCache.setFile(path, { path, rows: data.rows as DiffRow[], added, removed, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved });
             }
         } catch (e) {
             // Silently fail
@@ -574,7 +574,7 @@
         // Mark as loading
         diffCache.setUntrackedMeta(path, { ...(diffCache.state.untracked[path] || {}), loading: true });
         try {
-            const data = await getDiffFile(task.project_id, task.id, path, { full: isTruncated });
+            const data = await getDiffFile(task.project_id, task.id, path, { full: !!isTruncated });
             if (data.lines) {
                 diffCache.setFile(path, {
                     path,

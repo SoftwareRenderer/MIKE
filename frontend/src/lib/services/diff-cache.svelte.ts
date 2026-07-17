@@ -1,4 +1,4 @@
-import type { DiffFile, DiffRow } from '$lib/types/diff';
+import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
 
 /** Metadata for untracked files. */
 export interface UntrackedMeta {
@@ -25,8 +25,8 @@ export interface DiffStats {
 export interface DiffCacheApis {
     getTaskDiff: (projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }) => Promise<DiffApiResponse>;
     getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileApiResponse>;
-    stageFile: (projectId: string, taskId: string, path: string, stage: boolean) => Promise<void>;
-    enrichRows: (rows: DiffRow[]) => DiffRow[];
+    stageFile: (projectId: string, taskId: string, path: string, stage: boolean) => Promise<unknown>;
+    enrichRows: (rows: ApiDiffRow[]) => DiffRow[];
 }
 
 /** Response from getTaskDiff API. */
@@ -50,7 +50,7 @@ export interface DiffApiResponse {
 
 /** Response from getDiffFile API. */
 export interface DiffFileApiResponse {
-    rows?: DiffRow[];
+    rows?: ApiDiffRow[];
     lines?: string[];
     truncated?: boolean;
     origAdded?: number;
