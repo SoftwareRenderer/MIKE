@@ -968,7 +968,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 // CommitAndMerge commits worktree changes and optionally merges the task branch.
 // Operations are serialized per project via the commit queue to prevent git race conditions.
-func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) {
+func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) error {
 	release := te.commitQueue.Acquire(projectID)
 	defer release()
 
@@ -980,8 +980,12 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 		task, _ := te.store.GetTaskByTaskID(taskID)
 		if err := te.MergeBranch(projectID, taskID, task); err != nil {
 			log.Printf("[auto-commit] task=%s merge failed: %v", taskID, err)
+			return err
 		}
+	} else {
+		log.Printf("[auto-commit] task=%s merge skipped (auto_merge=false)", taskID)
 	}
+	return nil
 }
 
 // syncTargetIntoTask merges the target branch into the task's branch (in the task's worktree)

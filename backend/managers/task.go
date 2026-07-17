@@ -382,6 +382,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		// Task moved away from Done — reset status so it can run again
 		task.ExecutionState = "idle"
 	}
+	started := false
 	if req.Status == "in_progress" && task.ExecutionState != "running" {
 		// If this task is a subtask, use subtask-aware start (moves parent only, not siblings)
 		if task.ParentTaskID != "" {
@@ -390,6 +391,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				task.ExecutionState = "idle"
 				task.Status = originalStatus
 				task.Output = err.Error()
+			} else {
+				started = true
 			}
 		} else {
 			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
@@ -412,8 +415,19 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 					task.ExecutionState = "idle"
 					task.Status = originalStatus
 					task.Output = err.Error()
+				} else {
+					started = true
 				}
 			}
+		}
+	}
+	// Reload after successful start to pick up branch set by prepareTaskExecution.
+	// The start path calls UpdateTask internally, but our stale task object would
+	// overwrite fields like branch with empty values.
+	if started {
+		reloaded, err := h.store.GetTask(projectID, taskID)
+		if err == nil {
+			task = reloaded
 		}
 	}
 	if err := h.store.UpdateTask(task); err != nil {
@@ -726,6 +740,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	h.executor.GetWorktreeMu(taskID).Lock()
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
+	if !worktreeExists {
+		log.Printf("[commit-and-done] task=%s worktree does not exist, skipping commit", taskID)
+	}
 	if worktreeExists {
 		commitMsg := body.CommitMessage
 		if commitMsg == "" {
