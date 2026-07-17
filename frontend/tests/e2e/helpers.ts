@@ -1,7 +1,4 @@
 import { expect, Page, Locator } from '@playwright/test';
-import http from 'node:http';
-
-const TEST_PASSWORD = 'test-password-1234';
 
 // --- Shared API helpers (replaces duplicate code in individual test files) ---
 
@@ -38,7 +35,7 @@ async function getCsrfToken(page: Page): Promise<string> {
 /**
  * CSRF-aware fetch wrapper for use in page.evaluate.
  * Use this instead of raw fetch for POST/PUT/DELETE requests.
- * Returns { ok, status, json, text } from the response.
+ * Returns { ok, status, data } from the response.
  */
 export async function csrfFetch(
   page: Page,
@@ -64,18 +61,8 @@ export async function csrfFetch(
 
 /** PUT /api/config with the given body and wait for it to propagate. */
 export async function apiPutConfig(page: Page, body: Record<string, any>): Promise<any> {
-  // Ensure page has a valid origin
   await getOrigin(page);
-  // Get CSRF token: first from window.__csrfToken (set by login fixture),
-  // then from session endpoint as fallback
-  let csrfToken = await page.evaluate(() => (window as any).__csrfToken || '');
-  if (!csrfToken) {
-    csrfToken = await page.evaluate(async () => {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      return data.csrf_token || '';
-    });
-  }
+  const csrfToken = await getCsrfToken(page);
   return await page.evaluate(async ({ bodyData, csrf }) => {
     const res = await fetch('/api/config', {
       method: 'PUT',
@@ -93,7 +80,6 @@ export async function apiPutConfig(page: Page, body: Record<string, any>): Promi
 
 /** GET /api/config and return parsed JSON. */
 export async function apiGetConfig(page: Page): Promise<any> {
-  // Ensure page has a valid origin
   await getOrigin(page);
   return await page.evaluate(async () => {
     const res = await fetch('/api/config');
@@ -110,47 +96,9 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
   }).toPass({ timeout });
 }
 
-// --- Condition-based wait helpers (replaces arbitrary sleeps) ---
+// --- Project & Task API helpers ---
 
-/** Wait for a locator's attribute to change from its current value. */
-export async function waitForAttributeChange(locator: Locator, attr: string, timeout = 5000): Promise<void> {
-  const initialValue = await locator.getAttribute(attr);
-  await expect(async () => {
-    const currentValue = await locator.getAttribute(attr);
-    expect(currentValue).not.toBe(initialValue);
-  }).toPass({ timeout });
-}
-
-/** Wait for a locator's text content to change from its current value. */
-export async function waitForTextChange(locator: Locator, timeout = 5000): Promise<void> {
-  const initialText = await locator.textContent();
-  await expect(async () => {
-    const currentText = await locator.textContent();
-    expect(currentText).not.toBe(initialText);
-  }).toPass({ timeout });
-}
-
-/** Wait for a locator to have a specific count (replaces sleep after add/remove). */
-export async function waitForCount(locator: Locator, expectedCount: number, timeout = 5000): Promise<void> {
-  await expect(locator).toHaveCount(expectedCount, { timeout });
-}
-
-/** Wait for an element to disappear from the DOM. */
-export async function waitForHidden(locator: Locator, timeout = 5000): Promise<void> {
-  await expect(locator).toBeHidden({ timeout });
-}
-
-/** Wait for bounding box width to change (for resize tests). */
-export async function waitForWidthChange(locator: Locator, timeout = 5000): Promise<void> {
-  const initialBox = await locator.boundingBox();
-  const initialWidth = initialBox?.width || 0;
-  await expect(async () => {
-    const box = await locator.boundingBox();
-    expect(box?.width).not.toBe(initialWidth);
-  }).toPass({ timeout });
-}
-
-// Helper: get the first project ID from the API.
+/** Get the first project ID from the API. */
 export async function getProjectId(page: Page): Promise<string> {
   return await page.evaluate(async () => {
     const res = await fetch('/api/projects');
@@ -159,7 +107,7 @@ export async function getProjectId(page: Page): Promise<string> {
   });
 }
 
-// Helper: get the last task ID from the board API
+/** Get the last task ID from the board API. */
 export async function getLastTaskId(page: Page, projectId: string): Promise<string> {
   return await page.evaluate(async ({ pid }) => {
     const res = await fetch(`/api/projects/${pid}/board`);
@@ -168,7 +116,7 @@ export async function getLastTaskId(page: Page, projectId: string): Promise<stri
   }, { pid: projectId });
 }
 
-// Helper: get task data from the API
+/** Get task data from the API. */
 export async function getTaskData(page: Page, projectId: string, taskId: string): Promise<Record<string, unknown>> {
   return await page.evaluate(async ({ pid, tid }) => {
     const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
@@ -176,25 +124,28 @@ export async function getTaskData(page: Page, projectId: string, taskId: string)
   }, { pid: projectId, tid: taskId });
 }
 
-// Helper: wait for WebSocket to connect by checking chat form is interactive
-export async function waitForWebSocket(page: Page): Promise<void> {
-  await expect(page.locator('.chat-form')).toBeVisible();
-}
+// --- Chat form readiness helpers ---
 
-// Helper: wait for the send button to be visible (chat form ready for input, isLoading=false).
-// Use this BEFORE interacting with the textarea to ensure the form is stable.
+/**
+ * Wait for the send button to be visible (chat form ready for input, isLoading=false).
+ * Use this BEFORE interacting with the textarea to ensure the form is stable.
+ */
 export async function waitForSendButton(page: Page): Promise<void> {
   await expect(page.locator('.btn-send')).toBeVisible();
 }
 
-// Helper: like waitForSendButton but returns false instead of throwing on timeout.
-// Use this with test.skip() for graceful handling of executor-dependent tests.
+/**
+ * Like waitForSendButton but returns false instead of throwing on timeout.
+ * Use this with test.skip() for graceful handling of executor-dependent tests.
+ */
 export async function waitForSendButtonGraceful(page: Page): Promise<boolean> {
   return page.locator('.btn-send').isVisible().catch(() => false);
 }
 
-// Helper: wait for the chat form to be interactive (send OR stop button visible).
-// Use this after starting a task when the executor may be calling the LLM.
+/**
+ * Wait for the chat form to be interactive (send OR stop button visible).
+ * Use this after starting a task when the executor may be calling the LLM.
+ */
 export async function waitForChatFormReady(page: Page): Promise<void> {
   await expect(page.locator('.chat-form')).toBeVisible();
   // Wait for either the send button (idle) or stop button (LLM responding)
@@ -205,9 +156,13 @@ export async function waitForChatFormReady(page: Page): Promise<void> {
   }).toPass();
 }
 
-// Helper: wait for a new user message to appear in the chat (after sending).
-// Compares count before/after to detect the new message.
-export async function waitForNewUserMessage(page: Page): Promise<void> {
+// --- Message helpers ---
+
+/**
+ * Wait for a new user message to appear in the chat (after sending).
+ * Compares count before/after to detect the new message.
+ */
+async function waitForNewUserMessage(page: Page): Promise<void> {
   const countBefore = await page.locator('.chat-message.user').count();
   await expect(async () => {
     const count = await page.locator('.chat-message.user').count();
@@ -215,12 +170,28 @@ export async function waitForNewUserMessage(page: Page): Promise<void> {
   }).toPass();
 }
 
-// Helper: wait for chat message to appear
-export async function waitForChatMessage(page: Page): Promise<void> {
-  await expect(page.locator('.chat-message')).toBeVisible();
+/**
+ * Send a message via the chat UI.
+ * Waits for send button (form stable) → fills → presses Enter → waits for user message to appear.
+ * Uses Playwright auto-wait (no arbitrary timeouts).
+ */
+export async function sendMessage(page: Page, message: string): Promise<void> {
+  // Wait for the send button to be visible (form is stable, not loading).
+  await waitForSendButton(page);
+  // Fill and send — Playwright auto-waits for textarea to be actionable
+  const chatTextarea = page.locator('textarea[placeholder*="message"]');
+  await chatTextarea.fill(message);
+  await chatTextarea.press('Enter');
+  // Wait for the user message to appear in chat (confirms message was sent)
+  await waitForNewUserMessage(page);
 }
 
-// Helper: click "Start Task" if the task is in new state
+// --- Task lifecycle helpers ---
+
+/**
+ * Click "Start Task" if the task is in new state.
+ * Private helper used by waitForChatForm.
+ */
 async function clickStartTaskIfNew(page: Page): Promise<void> {
   const startButton = page.locator('.btn-start-task');
   if (!(await startButton.isVisible().catch(() => false))) {
@@ -229,8 +200,11 @@ async function clickStartTaskIfNew(page: Page): Promise<void> {
   await startButton.click().catch(() => {});
 }
 
-// Helper: move task to in_progress via API (bypasses executor, for UI-only tests)
-// This makes the chat form appear without needing the executor/LLM.
+/**
+ * Move task to in_progress via API (bypasses executor, for UI-only tests).
+ * This makes the chat form appear without needing the executor/LLM.
+ * Returns true if the task is now in_progress.
+ */
 export async function ensureTaskStarted(page: Page, projectId: string, taskId: string): Promise<boolean> {
   // Check if task is already not in backlog
   const taskData = await page.evaluate(async ({ pid, tid }) => {
@@ -257,9 +231,11 @@ export async function ensureTaskStarted(page: Page, projectId: string, taskId: s
   return updated?.status === 'in_progress';
 }
 
-// Helper: wait for the chat form to appear. Handles the case where the "Restart Task"
-// button is shown (executor hasn't responded to initial prompt yet).
-// Returns true if the chat form is visible, false otherwise.
+/**
+ * Wait for the chat form to appear. Handles the case where the "Restart Task"
+ * button is shown (executor hasn't responded to initial prompt yet).
+ * Returns true if the chat form is visible, false otherwise.
+ */
 export async function waitForChatForm(page: Page): Promise<boolean> {
   await clickStartTaskIfNew(page);
   // Wait for either the chat form or the restart button
@@ -279,8 +255,10 @@ export async function waitForChatForm(page: Page): Promise<boolean> {
   return true;
 }
 
-// Helper: ensure chat form is ready for input (send button visible, isLoading=false)
-// Waits for the LLM to finish any pending response before resolving.
+/**
+ * Ensure chat form is ready for input (send button visible, isLoading=false).
+ * Waits for the LLM to finish any pending response before resolving.
+ */
 export async function ensureChatForm(page: Page, requireSendBtn = true): Promise<void> {
   await waitForChatForm(page);
   if (requireSendBtn) {
@@ -288,8 +266,12 @@ export async function ensureChatForm(page: Page, requireSendBtn = true): Promise
   }
 }
 
-// Helper: navigate to a task detail page using window.location (triggers full reload for SPA).
-// page.goto() doesn't re-trigger onMount for SPAs, so we use window.location.href instead.
+// --- Navigation helpers ---
+
+/**
+ * Navigate to a task detail page using window.location (triggers full reload for SPA).
+ * page.goto() doesn't re-trigger onMount for SPAs, so we use window.location.href instead.
+ */
 export async function navigateToTask(page: Page, taskId: string, projectId?: string): Promise<void> {
   if (!taskId) {
     throw new Error(`navigateToTask called with undefined/empty taskId`);
@@ -299,48 +281,13 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
   await expect(page.locator('.task-detail-page')).toBeVisible();
 }
 
-// Helper: create a fresh task and open it via URL
-// Uses the API to create the task (avoids race with LLM title generation replacing card text)
-// then navigates directly to the task detail page.
-export async function createAndOpenTask(page: Page, title?: string): Promise<string> {
-  const taskPrompt = title || `task-${Date.now()}`;
-  const projectId = await getProjectId(page);
-  const taskId = await createTaskViaApi(page, projectId, taskPrompt);
-  await navigateToTask(page, taskId);
-  return taskId;
-}
+// --- Task creation helpers ---
 
-// Helper: send a message via the chat UI.
-// Waits for send button (form stable) → fills → presses Enter → waits for user message to appear.
-// Uses Playwright auto-wait (no arbitrary timeouts).
-export async function sendMessage(page: Page, message: string): Promise<void> {
-  // Wait for the send button to be visible (form is stable, not loading).
-  await waitForSendButton(page);
-  // Fill and send — Playwright auto-waits for textarea to be actionable
-  const chatTextarea = page.locator('textarea[placeholder*="message"]');
-  await chatTextarea.fill(message);
-  await chatTextarea.press('Enter');
-  // Wait for the user message to appear in chat (confirms message was sent)
-  await waitForNewUserMessage(page);
-}
-
-// Helper: send a message and wait for the LLM response to complete.
-// Returns after the send button reappears (isLoading=false).
-export async function sendMessageAndWait(page: Page, message: string): Promise<void> {
-  await sendMessage(page, message);
-  // Wait for send button to reappear (LLM complete)
-  await expect(page.locator('.btn-send')).toBeVisible();
-}
-
-// Helper: create a task via the API and return its ID.
-// Uses csrfFetch for CSRF-aware API calls. Direct API creation is faster and more reliable than UI modal.
+/**
+ * Create a task via the API and return its ID.
+ * Uses csrfFetch for CSRF-aware API calls. Direct API creation is faster and more reliable than UI modal.
+ */
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
-  // Get existing task IDs before creating
-  const existingIds = await page.evaluate(async (pid) => {
-    const res = await fetch(`/api/projects/${pid}/board`);
-    const board = await res.json();
-    return board.tasks.map((t: any) => t.id);
-  }, projectId);
   // Create task via API (CSRF-aware)
   const config = await apiGetConfig(page);
   const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
@@ -370,18 +317,16 @@ export async function createTaskViaApi(page: Page, projectId: string, prompt: st
   return taskId;
 }
 
-// Helper: send a message via HTTP POST to trigger lazy-start.
-// This bypasses the "Start Task" button and avoids the first executor.
-export async function sendViaWebSocket(page: Page, projectId: string, taskId: string, message: string): Promise<void> {
-  return await page.evaluate(async ({ pid, tid, msg }) => {
-    const res = await fetch(`/api/projects/${pid}/tasks/${tid}/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: msg }),
-    });
-    if (!res.ok) {
-      throw new Error(`Send failed: ${res.status}`);
-    }
-    await res.json();
-  }, { pid: projectId, tid: taskId, msg: message });
+/**
+ * Create a fresh task and open it via URL.
+ * Uses the API to create the task (avoids race with LLM title generation replacing card text)
+ * then navigates directly to the task detail page.
+ * Returns the created task ID.
+ */
+export async function createAndOpenTask(page: Page, title?: string): Promise<string> {
+  const taskPrompt = title || `task-${Date.now()}`;
+  const projectId = await getProjectId(page);
+  const taskId = await createTaskViaApi(page, projectId, taskPrompt);
+  await navigateToTask(page, taskId);
+  return taskId;
 }
