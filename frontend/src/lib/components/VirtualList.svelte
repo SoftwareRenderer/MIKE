@@ -63,6 +63,26 @@
     // Scroll container ref
     let scrollEl: HTMLElement | null = null;
 
+    // Keyboard navigation: Page Up/Down, Arrow Up/Down, Home, End
+    function handleKeydown(e: KeyboardEvent) {
+        const el = scrollEl;
+        if (!el) return;
+        const scrollAmount = e.key === 'ArrowUp' || e.key === 'ArrowDown' ? 80 : el.clientHeight * 0.8;
+        if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+            e.preventDefault();
+            el.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+        } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+            e.preventDefault();
+            el.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
+        } else if (e.key === 'Home') {
+            e.preventDefault();
+            el.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (e.key === 'End') {
+            e.preventDefault();
+            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        }
+    }
+
     // Legacy: track internal scroll position and container height
     let internalScrollTop = $state(0);
     let containerHeight = $state(0);
@@ -272,9 +292,11 @@
             bind:this={scrollEl}
             role={role}
             aria-label={ariaLabel}
+            tabindex="0"
             onscroll={onscroll}
             onwheel={onwheel}
             ontouchstart={ontouchstart}
+            onkeydown={handleKeydown}
         >
             <div class="virtual-spacer" style="height: {totalHeight}px">
                 <div class="virtual-content" style="transform: translateY({visibleOffset}px)">
@@ -292,9 +314,11 @@
             bind:this={scrollEl}
             role={role}
             aria-label={ariaLabel}
+            tabindex="0"
             onscroll={onscroll}
             onwheel={onwheel}
             ontouchstart={ontouchstart}
+            onkeydown={handleKeydown}
         >
             {#each items as item, index}
                 {@render children({ item, index })}
@@ -307,9 +331,11 @@
         bind:this={scrollEl}
         role={role}
         aria-label={ariaLabel}
+        tabindex="0"
         onscroll={onscroll}
         onwheel={onwheel}
         ontouchstart={ontouchstart}
+        onkeydown={handleKeydown}
     >
         <div class="virtual-spacer" style="height: {vs?.totalHeight ?? 0}px; position: relative;">
             {#each newVisibleItems as { item, index, offset }}
@@ -334,6 +360,11 @@
         min-height: 0;
         overflow-y: auto;
         overflow-x: hidden;
+        outline: none;
+    }
+    .virtual-scroll:focus-visible,
+    .virtual-list:focus-visible {
+        box-shadow: inset 0 0 0 1px var(--color-accent);
     }
 
     .virtual-spacer {
