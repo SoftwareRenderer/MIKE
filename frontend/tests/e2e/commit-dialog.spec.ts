@@ -1,36 +1,35 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
-import { execSync as exec } from 'child_process';
 import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask } from './helpers';
 
 // --- Shared utilities ---
 
 function getConfig() {
-    return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
+  return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
 }
 
 function getWorktreePath(projectId: string, taskId: string): string {
-    // Test servers use WORKTREES_DIR=/tmp/kanban-test-worktrees
-    return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
+  // Test servers use WORKTREES_DIR=/tmp/kanban-test-worktrees
+  return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
 }
 
 function worktreeExists(projectId: string, taskId: string): boolean {
-    const path = getWorktreePath(projectId, taskId);
-    // Check for a proper git worktree (has .git file pointing to the main repo)
-    return existsSync(path) && existsSync(`${path}/.git`);
+  const path = getWorktreePath(projectId, taskId);
+  // Check for a proper git worktree (has .git file pointing to the main repo)
+  return existsSync(path) && existsSync(`${path}/.git`);
 }
 
 function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string): void {
-    const worktreePath = getWorktreePath(projectId, taskId);
-    mkdirSync(worktreePath, { recursive: true });
-    writeFileSync(`${worktreePath}/${filePath}`, content);
-    // Stage the file so git detects it
-    try {
-      exec(`cd ${worktreePath} && git add ${filePath}`);
-    } catch {
-      // git add might fail if worktree isn't fully initialized; untracked files are still detected
-    }
+  const worktreePath = getWorktreePath(projectId, taskId);
+  mkdirSync(worktreePath, { recursive: true });
+  writeFileSync(`${worktreePath}/${filePath}`, content);
+  // Stage the file so git detects it
+  try {
+    execSync(`cd ${worktreePath} && git add ${filePath}`);
+  } catch {
+    // git add might fail if worktree isn't fully initialized; untracked files are still detected
+  }
 }
 
 test.describe.serial('Commit Dialog', () => {
@@ -137,7 +136,13 @@ test.describe.serial('Commit Dialog', () => {
     await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
 
     // Wait for diff stats to arrive (indicates changes exist)
-    await page.waitForTimeout(2000);
+    await expect(async () => {
+      const diff = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
+        return res.ok ? await res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(diff).not.toBeNull();
+    }).toPass({ timeout: 10000 });
 
     // Click "Commit and move to Done"
     const commitBtn = page.locator('.btn-commit-done');
@@ -194,7 +199,15 @@ test.describe.serial('Commit Dialog', () => {
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible();
     await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(2000);
+
+    // Wait for diff stats to arrive (indicates changes exist)
+    await expect(async () => {
+      const diff = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
+        return res.ok ? await res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(diff).not.toBeNull();
+    }).toPass({ timeout: 10000 });
 
     // Click commit button
     await page.click('.btn-commit-done');
@@ -267,7 +280,13 @@ test.describe.serial('Commit Dialog', () => {
     await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
 
     // Wait for diff stats to arrive (indicates changes exist)
-    await page.waitForTimeout(2000);
+    await expect(async () => {
+      const diff = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
+        return res.ok ? await res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(diff).not.toBeNull();
+    }).toPass({ timeout: 10000 });
 
     // Click "Commit and move to Done" (has yellow border when changes exist)
     const commitBtn = page.locator('.btn-commit-and-done').first();
