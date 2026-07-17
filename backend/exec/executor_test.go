@@ -133,7 +133,8 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 }
 
 // TestPrepareTaskExecution_SetsBaseRefOnFirstRun verifies that on first run
-// (no existing BaseRef), the BaseRef is correctly set from CreateWorktree.
+// (no existing BaseRef), the BaseRef is correctly set from CreateWorktree
+// as a branch name (e.g. "master"), not a commit SHA.
 func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-baseref-first-run"
@@ -161,12 +162,12 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 		t.Fatal("prepare task execution returned nil")
 	}
 
-	// Verify BaseRef is set to a SHA (40 hex chars)
+	// Verify BaseRef is set to a branch name (not a 40-char SHA)
 	if setup.task.BaseRef == "" {
 		t.Error("BaseRef should be set on first run")
 	}
-	if len(setup.task.BaseRef) != 40 {
-		t.Errorf("BaseRef should be a 40-char SHA, got %q (len=%d)", setup.task.BaseRef, len(setup.task.BaseRef))
+	if len(setup.task.BaseRef) == 40 {
+		t.Errorf("BaseRef should be a branch name, not a 40-char SHA, got %q", setup.task.BaseRef)
 	}
 
 	// Cleanup

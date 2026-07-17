@@ -791,7 +791,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		// Render merge conflict prompt template
 		userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
-			TargetBranch:    task.BaseRef,
+			TargetBranch:    h.resolveMergeTarget(projectID, task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,

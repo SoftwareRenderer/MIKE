@@ -881,7 +881,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 								conflictedFiles := GetConflictedFiles(setup.worktreePath)
 								prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 									TaskBranch:      setup.task.Branch,
-									TargetBranch:    setup.task.BaseRef,
+									TargetBranch:    te.resolveMergeTarget(setup.projectID, setup.task),
 									TaskTitle:       setup.task.Title,
 									TaskDescription: setup.task.Prompt,
 									ConflictedFiles: conflictedFiles,
@@ -934,7 +934,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      setup.task.Branch,
-								TargetBranch:    setup.task.BaseRef,
+								TargetBranch:    te.resolveMergeTarget(setup.projectID, setup.task),
 								TaskTitle:       setup.task.Title,
 								TaskDescription: setup.task.Prompt,
 								ConflictedFiles: conflictedFiles,
