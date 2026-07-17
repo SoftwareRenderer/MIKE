@@ -75,24 +75,28 @@ test.describe.serial('Settings Power Consumption', () => {
   test('should show power and electricity inputs in provider settings', async ({ page }) => {
     await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
+    await expect(page.locator('.modal')).toBeVisible();
 
     const card = page.locator('.provider-card').first();
-    if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+    await expect(card).toBeVisible();
+
+    // Expand the provider card if collapsed
+    const details = card.locator('.provider-details');
+    if (!await details.isVisible().catch(() => false)) {
       await card.locator('.provider-card-header').click();
-      await expect(card.locator('.provider-details')).toBeVisible();
+      await expect(details).toBeVisible({ timeout: 5000 });
     }
 
-    // Power section should be visible
-    const powerSection = card.locator('.power-section');
-    await expect(powerSection).toBeVisible();
+    // Wait for the power/electricity section to render
+    await expect(page.locator('.currency-section')).toBeVisible({ timeout: 5000 });
 
     // Power (W) input should exist and have the configured value
-    const powerInput = card.locator('#power-w-0');
-    await expect(powerInput).toBeVisible();
+    const powerInput = page.locator('#power-w-0');
+    await expect(powerInput).toBeVisible({ timeout: 5000 });
     await expect(powerInput).toHaveValue('500');
 
     // Electricity ($/kWh) input should exist and have the configured value
-    const elecInput = card.locator('#elec-cost-0');
+    const elecInput = page.locator('#elec-cost-0');
     await expect(elecInput).toBeVisible();
     await expect(elecInput).toHaveValue('0.12');
   });

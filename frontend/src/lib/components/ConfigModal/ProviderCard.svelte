@@ -198,7 +198,7 @@
                 <div class="provider-options">
                     <div class="option-row">
                         <div class="option-label-group">
-                            <label class="option-label" for={`concurrency-{index}`}>Concurrency</label>
+                            <label class="option-label" for={`concurrency-${index}`}>Concurrency</label>
                             <span class="help-icon" title="Maximum simultaneous requests to this provider.">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
@@ -206,7 +206,7 @@
                                 </svg>
                             </span>
                         </div>
-                        <input id={`concurrency-{index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" />
+                        <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" />
                     </div>
                 </div>
 
