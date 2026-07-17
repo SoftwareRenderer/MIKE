@@ -54,11 +54,13 @@
         taskStatus?: string;
         onNavigateTask?: (taskId: string) => void;
         queued?: boolean;
+        editDiffOverrides?: Record<string, boolean>;
+        onToggleEditDiff?: (toolId: string, currentExpanded: boolean) => void;
         projectId?: string;
         taskId?: string;
     }
 
-    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '' }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -425,7 +427,7 @@
             <!-- Tool calls within reasoning region always visible -->
             {#each interleavedLayout!.reasoningSegments as seg}
                 {#if seg.type === 'tool'}
-                    <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
+                    <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {editDiffOverrides} onToggleEditDiff={onToggleEditDiff} {onNavigateTask} {projectId} taskId={msgTaskId} />
                 {/if}
             {/each}
         </div>
@@ -442,7 +444,7 @@
     {/if}
     {#if interleavedLayout!.trailingTools && interleavedLayout!.trailingTools.length > 0}
         {#each interleavedLayout!.trailingTools as tc (tc.toolId)}
-            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
+            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {editDiffOverrides} onToggleEditDiff={onToggleEditDiff} {onNavigateTask} {projectId} taskId={msgTaskId} />
         {/each}
     {/if}
 {/snippet}
@@ -470,7 +472,7 @@
     {/if}
     {#if toolCalls && toolCalls.length > 0}
         {#each toolCalls as tc (tc.toolId)}
-            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
+            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {editDiffOverrides} onToggleEditDiff={onToggleEditDiff} {onNavigateTask} {projectId} taskId={msgTaskId} />
         {/each}
     {/if}
 {/snippet}

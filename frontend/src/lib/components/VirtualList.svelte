@@ -115,6 +115,7 @@
     // ── Variable-height mode (useVirtualScroll) ──
 
     // Virtual scroll controller (only used in variable-height mode)
+    // svelte-ignore non_reactive_update — vs is set once and its internal $state drives reactivity
     let vs: ReturnType<typeof useVirtualScroll> | null = null;
 
     // svelte-ignore state_referenced_locally — useVirtualScroll creates $state that is read by $derived consumers below
