@@ -247,6 +247,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             tasks = [];
             appStore.board = null;
             disconnectBoardStream();
+            selectedTaskVal = null;
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
             window.dispatchEvent(new CustomEvent('urlchanged'));
@@ -267,6 +268,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (taskId) {
             const task = tasks.find(t => t.id === taskId);
             if (task) {
+                selectedTaskVal = task;
                 appStore.selectedTask = task;
                 uiStore.showCardDetail = true;
             }
@@ -274,6 +276,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Scroll to the task's column when going back via browser back button
             const prevTask = selectedTaskVal;
             if (prevTask) scrollToColumn = prevTask.status;
+            selectedTaskVal = null;
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
         }
@@ -440,7 +443,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                             tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
                         }
                         appStore.board = { ...appStore.board!, tasks };
-                        if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {
+                        // Update selectedTaskVal so CardDetail's `task` prop refreshes,
+                        // ensuring real-time updates (pause/stop/complete).
+                        if (selectedTaskVal?.id === updatedTask.id) {
+                            selectedTaskVal = updatedTask;
                             appStore.selectedTask = updatedTask;
                         }
                     },
