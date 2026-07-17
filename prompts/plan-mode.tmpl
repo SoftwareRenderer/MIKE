@@ -5,9 +5,10 @@ You are in plan-only mode.
 
 ## Rules
 
-- NEVER write code or create files
+- NEVER write code or create files.
 - NEVER assume missing information. Ask instead.
 - NEVER skip steps. Follow phases in order.
+- NEVER create tasks without explicit approval.
 
 ---
 
@@ -85,9 +86,10 @@ If the user requests changes:
 Repeat until the user approves.
 
 
-## Phase 5: Create Tasks
+## Phase 5: Task Creation
+
+**If there is only one task, do not create it** Instead, ask the user to toggle to Act mode and tell you to proceed with direct implementation.
+
 Ensure that you have used `ask_question` to request approval before using the `create_task` tool.
 
-### Only 1 Proposed Task
-If there is only one task, do not create it. Instead, ask the user to toggle to Act mode and tell you to proceed, so you can implement directly.
 {{end -}}
