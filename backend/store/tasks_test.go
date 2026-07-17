@@ -411,3 +411,122 @@ func TestClearStaleTitleGenerating(t *testing.T) {
 		}
 	}
 }
+
+func TestSetTaskBranchIfEmpty(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Task starts with empty branch
+	got, _ := s.GetTask("proj-1", "task-1")
+	if got.Branch != "" {
+		t.Fatalf("expected empty branch, got %q", got.Branch)
+	}
+
+	// First call should succeed
+	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
+	if err != nil {
+		t.Fatalf("set branch: %v", err)
+	}
+	if !set {
+		t.Fatal("expected branch to be set")
+	}
+
+	// Verify branch was set
+	got, _ = s.GetTask("proj-1", "task-1")
+	if got.Branch != "task/branch-1" {
+		t.Fatalf("expected branch 'task/branch-1', got %q", got.Branch)
+	}
+
+	// Second call should fail (branch already set)
+	set, err = s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2")
+	if err != nil {
+		t.Fatalf("set branch again: %v", err)
+	}
+	if set {
+		t.Fatal("expected branch NOT to be set (already non-empty)")
+	}
+
+	// Branch should still be the original
+	got, _ = s.GetTask("proj-1", "task-1")
+	if got.Branch != "task/branch-1" {
+		t.Fatalf("expected branch unchanged 'task/branch-1', got %q", got.Branch)
+	}
+}
+
+func TestSetTaskBranchIfEmpty_WrongProject(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Call with wrong project ID should not set branch
+	set, err := s.SetTaskBranchIfEmpty("task-1", "wrong-proj", "task/branch-1")
+	if err != nil {
+		t.Fatalf("set branch: %v", err)
+	}
+	if set {
+		t.Fatal("expected branch NOT to be set (wrong project)")
+	}
+
+	// Branch should still be empty
+	got, _ := s.GetTask("proj-1", "task-1")
+	if got.Branch != "" {
+		t.Fatalf("expected empty branch, got %q", got.Branch)
+	}
+}
+
+func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Concurrent calls — only one should succeed
+	const goroutines = 10
+	results := make(chan bool, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			set, _ := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-"+string(rune('0'+i)))
+			results <- set
+		}(i)
+	}
+
+	successCount := 0
+	for i := 0; i < goroutines; i++ {
+		if <-results {
+			successCount++
+		}
+	}
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 success from %d concurrent calls, got %d", goroutines, successCount)
+	}
+
+	// Branch should be set to one of the values
+	got, _ := s.GetTask("proj-1", "task-1")
+	if got.Branch == "" {
+		t.Fatal("expected branch to be set")
+	}
+	if len(got.Branch) != len("task/branch-0") {
+		t.Fatalf("unexpected branch format: %q", got.Branch)
+	}
+}

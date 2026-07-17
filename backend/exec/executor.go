@@ -39,6 +39,8 @@ type TaskExecutor struct {
 	gate         *ConcurrencyGate
 	taskMu       sync.Mutex
 	tasks        map[string]*executionState
+	// Per-task mutexes to serialize worktree access across executors and merges.
+	worktreeMu sync.Map // taskID -> *sync.Mutex
 }
 
 type executionState struct {
@@ -68,6 +70,8 @@ type executionState struct {
 	sandboxOperatingMode string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
+	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
+	done chan struct{}
 }
 
 // modelConfig holds mutable model/provider settings for an executor.
@@ -104,6 +108,12 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 	}
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
+}
+
+// GetWorktreeMu returns the per-task mutex for serializing worktree access.
+func (te *TaskExecutor) GetWorktreeMu(taskID string) *sync.Mutex {
+	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
 }
 
 // WorktreeMgr returns the WorktreeManager. Used by server wiring.
@@ -380,17 +390,37 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 
 	branchName := te.generateBranchName(parent, parent.ID, projectID)
 
+	// Atomic set prevents double worktree creation from concurrent callers.
+	set, err := te.store.SetTaskBranchIfEmpty(parent.ID, projectID, branchName)
+	if err != nil {
+		return fmt.Errorf("set parent branch: %w", err)
+	}
+	if !set {
+		latest, err := te.store.GetTaskByTaskID(parent.ID)
+		if err != nil {
+			return fmt.Errorf("reload parent task: %w", err)
+		}
+		if latest.Branch != "" {
+			parent.Branch = latest.Branch
+			return nil
+		}
+		// Unreachable safety net — SQLite guarantees this won't happen.
+	}
+
 	// Create a worktree for the parent from HEAD.
 	// This creates the branch AND the worktree directory in one step.
 	// When the parent starts later, CreateWorktree will find the directory
 	// already exists and return early (reusing this worktree).
-	_, _, err := te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, "")
+	_, _, err = te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, "")
 	if err != nil {
 		return fmt.Errorf("create parent worktree: %w", err)
 	}
 
-	// Update parent task with the branch only — do NOT change status.
-	// The parent stays in its current column (backlog) while subtasks run.
+	// Refresh updatedAt; adopt another caller's branch name if they won the race.
+	latest, _ := te.store.GetTaskByTaskID(parent.ID)
+	if latest.Branch != "" && latest.Branch != branchName {
+		branchName = latest.Branch
+	}
 	parent.Branch = branchName
 	parent.UpdatedAt = time.Now().UTC()
 	if err := te.store.UpdateTask(parent); err != nil {
@@ -496,6 +526,13 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		return nil
 	}
 
+	// Reload to avoid stale state — prepareTaskExecution has its own guard.
+	selected, err := te.store.GetTaskByTaskID(selectedID)
+	if err != nil || !isIncompleteForStart(*selected) {
+		log.Printf("[auto-start] task=%s selected sibling %s no longer incomplete, skipping", finishedTaskID, selectedID)
+		return nil
+	}
+
 	log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
 	return te.StartSubtaskWithParent(projectID, selectedID)
 }
@@ -523,6 +560,7 @@ type taskExecSetup struct {
 	forwardPorts          []types.PortForward
 	sandboxMounts         []types.SandboxMount
 	sandboxEnvs           []types.SandboxEnv
+	done                  chan struct{} // closed by executor defer; see executionState.done
 }
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
@@ -656,7 +694,8 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "pi"
 	}
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *pi.CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status}
+	doneCh := make(chan struct{})
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *pi.CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -679,6 +718,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		forwardPorts:          project.ForwardPorts,
 		sandboxMounts:         project.SandboxMounts,
 		sandboxEnvs:           project.SandboxEnvs,
+		done:                  doneCh,
 	}, nil
 }
 
@@ -802,13 +842,12 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	state, exists := te.tasks[taskID]
 	if exists {
 		if state.executorType != requestedType {
-			// Executor type switch: stop old executor, start new one
 			log.Printf("[executor-switch] task=%s switching from %s to %s", taskID, state.executorType, requestedType)
+			done := state.done
 			state.cancel()
 			delete(te.tasks, taskID)
 			te.taskMu.Unlock()
-			// Brief drain to let old executor finish its select loop
-			time.Sleep(100 * time.Millisecond)
+			<-done
 			go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
 			return
 		}
@@ -953,6 +992,10 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 // The caller (MergeBranch) should check task.ExecutionState after return — if it is
 // "merge_conflict", the final merge should be skipped.
 func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
+	// Serialize against the task's own tool execution.
+	te.GetWorktreeMu(taskID).Lock()
+	defer te.GetWorktreeMu(taskID).Unlock()
+
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
 		return fmt.Errorf("get project for sync: %w", err)
@@ -1173,7 +1216,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	}
 
 	if mergeInWorktree != "" {
-		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID)
+		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
 	}
 	return te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
 }
@@ -1184,9 +1227,13 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID)
 }
 
-// mergeInWorktree performs a merge inside a specific worktree directory.
-// Used when the target branch is checked out in another worktree (e.g., parent's worktree).
-func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID string) error {
+// mergeInWorktree merges inside another task's worktree (e.g. the parent's).
+// Acquires ownerTaskID's mutex to serialize against the owner's tool execution.
+func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID, ownerTaskID string) error {
+	if ownerTaskID != "" {
+		te.GetWorktreeMu(ownerTaskID).Lock()
+		defer te.GetWorktreeMu(ownerTaskID).Unlock()
+	}
 	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID)
 }
 
