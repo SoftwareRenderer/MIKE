@@ -60,7 +60,7 @@ test.describe('Pi Coding Agent', () => {
     // Valid states: running (processing), idle/completed (done),
     // failed (timeout or error), stopped (user cancelled), or empty (not started)
     console.log(`[pi-test] task state: status=${taskData.status}, execution_state=${taskData.execution_state}, output=${taskData.output || '(none)'}`);
-    const validStates = ['', 'running', 'idle', 'completed, 'failed', 'stopped'];
+    const validStates = ['', 'running', 'idle', 'completed', 'failed', 'stopped'];
     expect(validStates.includes(taskData.execution_state)).toBe(true);
 
     // If the task failed, it should have a descriptive error message

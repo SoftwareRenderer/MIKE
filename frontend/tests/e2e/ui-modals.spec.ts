@@ -5,6 +5,7 @@ import {
   csrfFetch,
   navigateToTask,
   getTaskData,
+  waitForSendButton,
 } from './helpers';
 
 // ─── Review Bar (serial — shares projectId across tests) ───
@@ -566,5 +567,85 @@ test.describe.serial('Edit Task Modal', () => {
     const cancelButton2 = page.locator('.modal-footer .btn-secondary');
     await cancelButton2.click();
     await expect(modal2).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+// ─── Create Task Modal — No Close On Overlay Click ───
+
+test.describe.serial('Create Task Modal Overlay', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should not close create task modal when clicking outside', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    await page.goto(`/?project=${projectId}`);
+    await page.waitForSelector('.card', { timeout: 10000 });
+
+    // Open the create task modal via the "+ Create Task" button
+    await page.getByRole('button', { name: '+ Create Task' }).click();
+
+    // Wait for the modal dialog to appear (use role selector for reliability)
+    const modal = page.getByRole('dialog', { name: 'Create Task' });
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // Click on the overlay (the dark background behind the modal)
+    // The overlay is the fixed background; click outside the modal content
+    const overlay = page.locator('div.overlay').first();
+    await overlay.click({ position: { x: 10, y: 10 } });
+
+    // Modal should still be open
+    await expect(modal).toBeVisible();
+
+    // Clean up: close via Cancel button
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+// ─── Edit Task Modal — No Close On Overlay Click ───
+
+test.describe.serial('Edit Task Modal Overlay', () => {
+  let projectId: string;
+  let taskId: string;
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    projectId = await getProjectId(page);
+  });
+
+  test('should not close edit task modal when clicking outside', async ({ page }) => {
+    const title = `edit-overlay-${Date.now()}`;
+    taskId = await createTaskViaApi(page, projectId, title);
+    expect(taskId).not.toBe('');
+
+    // Navigate to the task detail page
+    await navigateToTask(page, taskId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+
+    // Find the card for this task in the side panel (it will be selected)
+    const card = page.locator('.card.selected');
+    await expect(card).toBeVisible({ timeout: 5000 });
+
+    // Click the edit button
+    const editButton = card.locator('button[aria-label="Edit task"]');
+    await expect(editButton).toBeVisible();
+    await editButton.click();
+
+    // Verify the EditTaskModal appears
+    const modal = page.locator('.modal[aria-labelledby="modal-title"]');
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // Click on the overlay (the dark background behind the modal)
+    await page.click('.overlay', { position: { x: 10, y: 10 } });
+
+    // Modal should still be open
+    await expect(modal).toBeVisible();
+
+    // Clean up: close via Cancel button
+    await page.locator('.modal-footer .btn-secondary').click();
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
   });
 });

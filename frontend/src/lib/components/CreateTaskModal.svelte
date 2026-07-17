@@ -352,7 +352,7 @@
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={handleClose}>
+<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
     {#if parentId}
         <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
     {/if}
