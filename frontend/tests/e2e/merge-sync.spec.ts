@@ -100,11 +100,11 @@ test.describe.serial('Merge Sync', () => {
     await commitBtn.click();
 
     // Wait for the commit dialog to appear (if there are changes)
-    const commitDialog = page.locator('.commit-dialog');
+    const commitDialog = page.locator('.commit-textarea');
     await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
     // Confirm the commit
-    const confirmBtn = page.locator('.commit-dialog').locator('button:has-text("Commit")');
+    const confirmBtn = page.locator('.modal-footer .btn-primary');
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
