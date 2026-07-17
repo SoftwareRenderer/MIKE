@@ -196,7 +196,7 @@ test.describe.serial('Settings Model Delete', () => {
   });
 
   test('should delete the correct model when models are displayed in sorted order', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -281,7 +281,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should show reasoning effort select for each model in settings', async ({ page }) => {
         // Open settings modal
-        await page.click('[aria-label="Settings"]');
+        await page.click('.icon-btn[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand a provider card
@@ -315,7 +315,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should default to Medium for new models', async ({ page }) => {
         // Open settings
-        await page.click('[aria-label="Settings"]');
+        await page.click('.icon-btn[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand first provider
@@ -352,7 +352,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should persist reasoning effort after save', async ({ page }) => {
         // Open settings
-        await page.click('[aria-label="Settings"]');
+        await page.click('.icon-btn[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
         // Expand first provider
@@ -374,7 +374,7 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings
-            await page.click('[aria-label="Settings"]');
+            await page.click('.icon-btn[aria-label="Settings"]');
             await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
 
             // Expand first provider again

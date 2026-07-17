@@ -480,6 +480,6 @@ export default async function main(): Promise<void> {
             console.log('[global-setup] Stale lock detected, cleaning up');
         }
         cleanupStaleState(false);
-        await setup();
     }
+    await setup();
 }

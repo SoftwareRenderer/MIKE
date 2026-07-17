@@ -47,7 +47,7 @@
     </button>
 {/snippet}
 
-<BaseModal title="" width="360px" zIndex={1000} footer={footer} onClose={() => {}} header={header}>
+<BaseModal title="" width="360px" zIndex={1000} closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
     <p class="login-subtitle">Enter your password to continue</p>
 
     {#if error}

@@ -73,7 +73,7 @@ test.describe.serial('Settings Power Consumption', () => {
   });
 
   test('should show power and electricity inputs in provider settings', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -98,7 +98,7 @@ test.describe.serial('Settings Power Consumption', () => {
   });
 
   test('should save and persist power/electricity settings', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -128,7 +128,7 @@ test.describe.serial('Settings Power Consumption', () => {
   });
 
   test('should allow empty power settings (zero values)', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -208,7 +208,7 @@ test.describe.serial('Settings API Key', () => {
   });
 
   test('should show API key input on same line as URL', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -249,7 +249,7 @@ test.describe.serial('Settings API Key', () => {
     await page.reload();
     await page.waitForSelector('.card', { timeout: 10000 });
 
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -265,7 +265,7 @@ test.describe.serial('Settings API Key', () => {
   });
 
   test('should allow entering and saving a new API key', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -318,7 +318,7 @@ test.describe.serial('Settings API Key', () => {
   });
 
   test('provider without API key works (empty field is valid)', async ({ page}) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -339,7 +339,7 @@ test.describe.serial('Settings API Key', () => {
   });
 
   test('Test Connection passes the API key to the backend', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -372,7 +372,7 @@ test.describe.serial('Settings API Key', () => {
   });
 
   test('Fetch Models passes the API key to the backend', async ({ page }) => {
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
@@ -417,7 +417,7 @@ test.describe.serial('Settings API Key', () => {
     await page.reload();
     await page.waitForSelector('.card', { timeout: 10000 });
 
-    await page.locator('[aria-label="Settings"]').click();
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
     await page.waitForSelector('.modal', { timeout: 5000 });
 
     const card = page.locator('.provider-card').first();
