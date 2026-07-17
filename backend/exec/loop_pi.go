@@ -177,6 +177,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 
 	// Event loop
 	startTime := time.Now()
+	turnStartTime := startTime // start of current agent turn (for per-turn Duration)
 	agentEnded := false
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int // accumulated across all assistant messages
@@ -260,7 +261,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				log.Printf("[pi] task=%s agent_end stopReason=%s", task.ID, stopReason)
 
 				// Persist assistant messages and tool calls from agent_end.
-				pt, ptok := te.persistAgentEndMessages(projectID, task.ID, task.CurrentThreadID, event.Messages, sandboxEnabled, startTime)
+				pt, ptok := te.persistAgentEndMessages(projectID, task.ID, task.CurrentThreadID, event.Messages, sandboxEnabled, turnStartTime)
 				totalPromptTokens += pt
 				totalPredictedTokens += ptok
 
@@ -273,6 +274,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 						log.Printf("[pi] task=%s context changed notification, skipping", task.ID)
 					} else {
 						log.Printf("[pi] task=%s agent_end: forwarding queued user message for next turn", task.ID)
+						turnStartTime = time.Now()
 						err := client.Prompt(ctx, um.Content, "steer")
 						if err != nil {
 							log.Printf("[pi] task=%s failed to forward queued message: %v", task.ID, err)
@@ -332,6 +334,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 								log.Printf("[pi] task=%s failed to render merge conflict prompt: %v", task.ID, pErr)
 							}
 							log.Printf("[pi] task=%s merge conflict, prompting Pi to resolve", task.ID)
+							turnStartTime = time.Now()
 							err := client.Prompt(ctx, prompt)
 							if err != nil {
 								log.Printf("[pi] task=%s failed to send merge conflict prompt: %v", task.ID, err)
@@ -408,6 +411,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 			// "steer" queues the message while the agent is running;
 			// it is delivered after the current turn's tool calls finish.
 			log.Printf("[pi] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
+			turnStartTime = time.Now()
 			err := client.Prompt(ctx, um.Content, "steer")
 			if err != nil {
 				log.Printf("[pi] task=%s failed to forward user message: %v", task.ID, err)
