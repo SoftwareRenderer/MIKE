@@ -49,7 +49,22 @@ test.describe('Chat draft text persistence', () => {
     await textarea.pressSequentially(testMessage); // Simulates key-by-key input
     await expect(textarea).toHaveValue(testMessage);
     // Wait for debounced save to IndexedDB
-    await page.waitForTimeout(500);
+    await page.waitForFunction((expectedValue) => {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('kanban-storage');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('drafts', 'readonly');
+          const store = tx.objectStore('drafts');
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            const values = getAll.result || [];
+            resolve(values.includes(expectedValue));
+          };
+          getAll.onerror = () => resolve(false);
+        };
+        req.onerror = () => resolve(false);
+      });
+    }, testMessage, { timeout: 5000 });
 
     // Reload the page
     await page.reload();
@@ -69,7 +84,22 @@ test.describe('Chat draft text persistence', () => {
     await textarea.pressSequentially('draft for task A');
     await expect(textarea).toHaveValue('draft for task A');
     // Wait for debounced IndexedDB write (100ms debounce + DB write time)
-    await page.waitForTimeout(500);
+    await page.waitForFunction((expectedValue) => {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('kanban-storage');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('drafts', 'readonly');
+          const store = tx.objectStore('drafts');
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            const values = getAll.result || [];
+            resolve(values.includes(expectedValue));
+          };
+          getAll.onerror = () => resolve(false);
+        };
+        req.onerror = () => resolve(false);
+      });
+    }, 'draft for task A', { timeout: 5000 });
 
     // Create and navigate to a second task
     const taskIdB = await createTaskViaApi(page, projectId, `draft-test-b-${Date.now()}`);
@@ -102,13 +132,29 @@ test.describe('Chat draft text persistence', () => {
     await textarea.pressSequentially(testMessage);
     await expect(textarea).toHaveValue(testMessage);
     // Wait for debounced save to IndexedDB
-    await page.waitForTimeout(500);
+    await page.waitForFunction((expectedValue) => {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('kanban-storage');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('drafts', 'readonly');
+          const store = tx.objectStore('drafts');
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            const values = getAll.result || [];
+            resolve(values.includes(expectedValue));
+          };
+          getAll.onerror = () => resolve(false);
+        };
+        req.onerror = () => resolve(false);
+      });
+    }, testMessage, { timeout: 5000 });
 
     // Send via the send button
     await page.locator('.btn-send').click();
     // Chat form hides after send (showRestartButton becomes true).
     // Draft is cleared by onClearDraft callback.
-    await page.waitForTimeout(500);
+    // Wait for the LLM response to complete and form to reappear
+    await waitForIdle(page);
 
     // Reload and verify draft was cleared (textarea should be empty)
     await page.reload();
@@ -124,8 +170,24 @@ test.describe('Chat draft text persistence', () => {
     const textarea = page.locator('textarea[placeholder*="message"]');
     await textarea.click();
     await textarea.pressSequentially('draft for soon-to-be-deleted task');
-    await page.waitForTimeout(500);
     await expect(textarea).toHaveValue('draft for soon-to-be-deleted task');
+    // Wait for debounced save to IndexedDB
+    await page.waitForFunction((expectedValue) => {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('kanban-storage');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('drafts', 'readonly');
+          const store = tx.objectStore('drafts');
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            const values = getAll.result || [];
+            resolve(values.includes(expectedValue));
+          };
+          getAll.onerror = () => resolve(false);
+        };
+        req.onerror = () => resolve(false);
+      });
+    }, 'draft for soon-to-be-deleted task', { timeout: 5000 });
 
     // Delete the task via API
     await page.evaluate(async ({ pid, tid }) => {
@@ -137,7 +199,8 @@ test.describe('Chat draft text persistence', () => {
 
     // Should show a 404 or task-not-found state — wait for page to stabilize
     await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(1000);
+    // Wait for the page to show a non-task-detail state (404 or redirect)
+    await expect(page.locator('.task-detail-page')).not.toBeVisible({ timeout: 10000 }).catch(() => {});
 
     // Navigate to any other task — the stale draft should have been cleaned
     const otherTaskId = await createTaskViaApi(page, projectId, `after-delete-${Date.now()}`);

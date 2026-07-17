@@ -73,9 +73,6 @@ test.describe.serial('Model switcher in task view', () => {
         // Wait for the provider dropdown to close and model to update
         await expect(page.locator('.portal-provider-dropdown')).toBeHidden({ timeout: 5000 });
 
-        // Wait a moment for updateTask to complete
-        await page.waitForTimeout(500);
-
         // Verify the task model was updated via API
         taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-b1');
@@ -116,9 +113,6 @@ test.describe.serial('Model switcher in task view', () => {
         // Wait for the model dropdown to close
         await expect(page.locator('.portal-model-dropdown')).toBeHidden({ timeout: 5000 });
 
-        // Wait for updateTask to complete
-        await page.waitForTimeout(500);
-
         // Verify the task model was updated
         taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-a2');
@@ -149,7 +143,6 @@ test.describe.serial('Model switcher in task view', () => {
         await page.waitForSelector('.portal-model-dropdown', { timeout: 5000 });
         await page.click('.model-option:has-text("model-a2")');
         await expect(page.locator('.portal-model-dropdown')).toBeHidden({ timeout: 5000 });
-        await page.waitForTimeout(500);
 
         // Intercept the /send request to verify it includes reasoning_effort
         const sendPromise = page.waitForResponse(resp =>
