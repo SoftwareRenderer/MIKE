@@ -65,8 +65,8 @@
         onClearDraft,
     }: Props = $props();
     let canSend = $derived((value.trim().length > 0 || attachments.length > 0) && !disabled && !(providers.length > 0 && !selectedModel));
-    let showModelSelector = $derived(providers.length > 0 || isAgent);
     let isAgent = $derived(selectedUrl === PI_SENTINEL_URL);
+    let showModelSelector = $derived(providers.length > 0 || isAgent);
     let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
     const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
     const MAX_IMAGES = 4;

@@ -100,8 +100,6 @@
 
     // O(1) lookup — replaces Array.includes/some in template
     let unsavedPaths = $derived(new Set(unsavedFiles));
-    // O(1) lookup for fs event handler — replaces entries.some()
-    let entryPaths = $derived(new Set(entries.map(e => e.path)));
     let unsavedDirPrefixes = $derived.by(() => {
         const prefixes = new Set<string>();
         for (const p of unsavedFiles) {
@@ -117,6 +115,8 @@
     let gitStatusMap = $state(new Map<string, string>());
 
     let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
+    // O(1) lookup for fs event handler — replaces entries.some()
+    let entryPaths = $derived(new Set(entries.map(e => e.path)));
     let loading = $state(true);
     let error = $state('');
     let firstLoadComplete = $state(false);
