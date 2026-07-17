@@ -30,9 +30,22 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             return p.startsWith('./') ? p : `./${p}`;
         }
         case 'edit_file': {
-            const p = args.path as string;
+            let p = args.path as string;
+            let edits = args.edits as Array<{ oldText: string; newText: string }>;
+            // During streaming, args may be empty but rawArgs has the JSON.
+            // Try full parse first, then regex fallback for partial JSON.
+            if (!p && rawArgs) {
+                try {
+                    const parsed = JSON.parse(rawArgs);
+                    p = parsed.path as string;
+                    edits = parsed.edits as Array<{ oldText: string; newText: string }>;
+                } catch {
+                    // Partial JSON (e.g. "{\"path\":\"src/file.go\",\"edits\":[{\"oldText\":\"hel")
+                    const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                    if (m) p = m[1].replace(/\\"/g, '"');
+                }
+            }
             if (!p) return '';
-            const edits = args.edits as Array<{ oldText: string; newText: string }>;
             const editCount = edits ? edits.length : 0;
             const pathDisplay = p.startsWith('./') ? p : `./${p}`;
             if (editCount <= 0) return pathDisplay;
