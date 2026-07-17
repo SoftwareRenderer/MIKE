@@ -21,8 +21,10 @@ import { slide } from 'svelte/transition';
     let fileSections = new Map<string, HTMLElement>();
     function registerFileSection(el: HTMLElement, path: string) {
         fileSections.set(path, el);
-        return () => {
-            fileSections.delete(path);
+        return {
+            destroy() {
+                fileSections.delete(path);
+            },
         };
     }
 
@@ -118,10 +120,10 @@ import { slide } from 'svelte/transition';
     // Derived counts for section headers
     let stagedCount = $derived(sortedStagedFiles.length + sortedStagedUntracked.length);
     let unstagedCount = $derived(sortedUnstagedFiles.length + sortedUnstagedUntracked.length);
-    let stagedAdditions = $derived(sortedStagedFiles.reduce((s, f) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedStagedUntracked.reduce((s, e) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
-    let stagedDeletions = $derived(sortedStagedFiles.reduce((s, f) => s + (f.origRemoved ?? f.removed ?? 0), 0));
-    let unstagedAdditions = $derived(sortedUnstagedFiles.reduce((s, f) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedUnstagedUntracked.reduce((s, e) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
-    let unstagedDeletions = $derived(sortedUnstagedFiles.reduce((s, f) => s + (f.origRemoved ?? f.removed ?? 0), 0));
+    let stagedAdditions = $derived(sortedStagedFiles.reduce((s: number, f: DiffFile) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedStagedUntracked.reduce((s: number, e: UntrackedEntry) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
+    let stagedDeletions = $derived(sortedStagedFiles.reduce((s: number, f: DiffFile) => s + (f.origRemoved ?? f.removed ?? 0), 0));
+    let unstagedAdditions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedUnstagedUntracked.reduce((s: number, e: UntrackedEntry) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
+    let unstagedDeletions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origRemoved ?? f.removed ?? 0), 0));
 
     // Load collapsed files from IndexedDB on init
     loadCollapsedDiffFiles().then(ids => { collapsedFiles = ids; }).catch(() => {});
@@ -254,8 +256,10 @@ import { slide } from 'svelte/transition';
         });
     }
 
+    type UntrackedEntry = { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean };
+
     /** Sort untracked entries by path: files with directory prefix first, then root files. */
-    function sortUntrackedByPath(entries: typeof untracked): typeof untracked {
+    function sortUntrackedByPath(entries: UntrackedEntry[]): UntrackedEntry[] {
         return [...entries].sort((a, b) => {
             const aHasDir = a.path.includes('/');
             const bHasDir = b.path.includes('/');
@@ -691,7 +695,7 @@ import { slide } from 'svelte/transition';
                         <button
                             type="button"
                             class="diff-expand-btn"
-                            onclick={() => onExpandUntracked(entry.path)}
+                            onclick={() => onExpandUntracked?.(entry.path)}
                             title="Load full diff for this file"
                         >
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -705,7 +709,7 @@ import { slide } from 'svelte/transition';
                 <div class="diff-file-content">
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
-                            <button type="button" class="diff-expand-btn diff-expand-center" onclick={() => onExpandUntracked(entry.path)}>
+                            <button type="button" class="diff-expand-btn diff-expand-center" onclick={() => onExpandUntracked?.(entry.path)}>
                                 Load {ufile.added} line{ufile.added !== 1 ? 's' : ''}
                             </button>
                         </div>
