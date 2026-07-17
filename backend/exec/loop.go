@@ -213,7 +213,7 @@ type loopContext struct {
 	contextWindow    *int
 	systemPrompt     string
 	sandboxEnabled   bool
-	startTime        time.Time
+	callStartTime    time.Time // start of current LLM call (for per-call Duration)
 	usage            *types.ChatUsage
 	checkpointIdx    int // messages index of last checkpoint
 }
@@ -345,7 +345,6 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		contextWindow:    contextWindow,
 		systemPrompt:     messages[0].Content,
 		sandboxEnabled:   setup.sandboxEnabled,
-		startTime:        time.Now(),
 	}
 
 	for {
@@ -618,6 +617,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			}
 		}
 
+		lc.callStartTime = time.Now()
 		go func() {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 
@@ -650,6 +650,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.pendingToolCalls = nil
 					lc.finishReason = ""
 					flusher.reset()
+					lc.callStartTime = time.Now()
 					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 					if streamErr == nil {
 						break
@@ -780,7 +781,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		if len(lc.pendingToolCalls) > 0 {
 			// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
 			msgCountBefore := len(lc.messages)
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:msgCountBefore], assistantText, lc.reasoningContent.String(), lc.startTime)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:msgCountBefore], assistantText, lc.reasoningContent.String())
 			assistantCreatedAt := time.Now().UTC()
 			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
@@ -789,7 +790,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				ModelName: activeModel, ProviderName: lc.providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
-				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: assistantCreatedAt,
+				Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: assistantCreatedAt,
 			})
 
 			// Track if any tool call was a git command — needed because fsnotify
@@ -916,7 +917,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 								"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 								"cache_tokens": cacheTokens,
 								"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-								"model_name": activeModel, "duration": time.Since(lc.startTime).Milliseconds(),
+								"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
 							}})
 							te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 							if setup.task.ParentTaskID != "" {
@@ -993,7 +994,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 						"cache_tokens": cacheTokens,
 						"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-						"model_name": activeModel, "duration": time.Since(lc.startTime).Milliseconds(),
+						"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
 					}})
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					// Post-tool git check: broadcast diff if a git command changed the state
@@ -1110,8 +1111,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				assistantMsg.ReasoningContent = lc.reasoningContent.String()
 			}
 			lc.messages = append(lc.messages, assistantMsg)
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String(), lc.startTime)
-			duration := time.Since(lc.startTime).Milliseconds()
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String())
+			duration := time.Since(lc.callStartTime).Milliseconds()
 			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: assistantMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
@@ -1203,14 +1204,14 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			reasoningText := lc.reasoningContent.String()
 
 			// Persist the reasoning-only assistant message
-			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages, "", reasoningText, lc.startTime)
+			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages, "", reasoningText)
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
 				Content: "", ReasoningContent: reasoningText,
 				ModelName: activeModel, ProviderName: lc.providerName,
 				PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 				PromptMs: promptMs, PredictedMs: predictedMs,
-				Duration: time.Since(lc.startTime).Milliseconds(), CreatedAt: time.Now().UTC(),
+				Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 			})
 
 			// Append reasoning to conversation history so the LLM sees its own thinking.
@@ -1376,7 +1377,7 @@ func (te *TaskExecutor) gitRun(dir string, args ...string) error {
 	return err
 }
 
-func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string, startTime time.Time) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
+func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
 	if usage != nil {
 		return usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, int(usage.PromptMs), int(usage.PredictedMs)
 	}
