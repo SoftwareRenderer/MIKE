@@ -47,7 +47,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     $effect(() => { mountsExpanded = !!project.sandbox_mounts && project.sandbox_mounts.length > 0; });
     $effect(() => { sandboxEnvs = project.sandbox_envs ?? []; });
     $effect(() => { envsExpanded = !!project.sandbox_envs && project.sandbox_envs.length > 0; });
-    $effect(() => { prevSandboxEnabled = project.sandbox_enabled ?? false; });
     $effect(() => { networkIsolationBaseline = project.sandbox_network_isolation ?? false; });
     let newMountHostPath = $state('');
     let newMountContainerPath = $state('');
@@ -106,7 +105,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let prevSandboxEnabled = $state(false);
     let userToggledNetwork = $state(false);
     let networkIsolationBaseline = $state(false);
+    let skipAutoEnable = $state(true);
     $effect(() => {
+        if (skipAutoEnable) {
+            skipAutoEnable = false;
+            prevSandboxEnabled = sandboxEnabled;
+            return;
+        }
         if (sandboxEnabled && prevSandboxEnabled === false && !userToggledNetwork) {
             networkIsolation = true;
             networkIsolationBaseline = true;
