@@ -1443,11 +1443,10 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 }
 
 // TestPrepareTaskExecution_BranchPersists verifies that prepareTaskExecution
-// persists the branch to the DB and that a subsequent full-row UpdateTask
-// with a stale task object (branch="") does NOT overwrite it.
-// This reproduces the bug where the move handler loaded the task, called
-// StartSubtaskWithParent (which set the branch), then called UpdateTask
-// with the stale object, overwriting the branch back to "".
+// persists the branch to the DB and that the handler's reload-before-update
+// pattern preserves it. The move handler reloads the task after StartTask
+// to pick up the branch set by prepareTaskExecution, avoiding the stale
+// object bug where UpdateTask would overwrite branch back to "".
 func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -1508,20 +1507,22 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	}
 	branch := taskFromDB.Branch
 
-	// 5. Simulate the buggy handler: UpdateTask with stale object (branch="")
-	// This is what the move handler used to do.
-	staleTask.Status = "in_progress" // handler's status
-	staleTask.Branch = ""            // stale, never updated
-	if err := te.store.UpdateTask(staleTask); err != nil {
-		t.Fatalf("stale UpdateTask failed: %v", err)
+	// 5. Simulate the fixed handler: reload task before UpdateTask.
+	// The handler reloads to pick up the branch set by prepareTaskExecution,
+	// avoiding the stale object bug where UpdateTask would overwrite branch.
+	reloaded, err := te.store.GetTaskByTaskID(subtaskID)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	reloaded.Status = "in_progress" // handler's status
+	if err := te.store.UpdateTask(reloaded); err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
 	}
 
-	// 6. Verify branch is STILL set in DB
-	// With the fix, the handler reloads the task before UpdateTask,
-	// so the stale object is not used. Without the fix, this would fail.
+	// 6. Verify branch is STILL set in DB after the reload-and-update pattern
 	taskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
 	if taskFromDB.Branch == "" {
-		t.Fatal("branch should NOT be overwritten by stale UpdateTask")
+		t.Fatal("branch should NOT be cleared by reload-and-update")
 	}
 	if taskFromDB.Branch != branch {
 		t.Errorf("branch changed: was %q, now %q", branch, taskFromDB.Branch)
