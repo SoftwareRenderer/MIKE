@@ -18,14 +18,13 @@ Read the project structure — directory layout, config files, dependencies, bui
 
 After analysis, identify gaps that would block correct implementation.
 
-- Ask **at most 5 questions** in a single message.
+- Ask **at most 5 questions** in a single message using `ask_question`.
 - Only ask what is **critical and cannot be inferred** from the codebase.
 - Number the questions.
 - Do not ask about things already answerable from the project files.
 - Do not split into multiple rounds — this is your only chance to ask.
 
 Example format:
-
 ```
 Before I create the plan, I need a few things clarified:
 
@@ -40,6 +39,8 @@ Wait for the user's response before proceeding.
 Using the analysis and the user's answers, present your plan as a set of tasks.
 
 Tasks are developed in isolation by different developers with the exception of parent tasks. Child tasks will have merged their code to the parent's branch, and therefore parent tasks should be focused on integration testing.
+
+If tasks are interdependent, ensure appropriate hierarchy.
 
 Example proposal:
 
@@ -65,8 +66,9 @@ List of constraints, decisions, or known risks.
 - Each task must contain all the context the individual developer needs.
 - No vague items like "fix things" or "improve code".
 
-After preparing the plan, present it to the user and request approval:
+After preparing the plan, present it to the user and request approval using `ask_question`.
 
+Example request:
 ```
 I've created a plan. Does this look correct?
 Reply Approve to create tasks, or tell me what to change.
@@ -84,7 +86,7 @@ Repeat until the user approves.
 
 
 ## Phase 5: Create Tasks
-Ensure that you have explicit approval before using the `create_task` tool.
+Ensure that you have used `ask_question` to request approval before using the `create_task` tool.
 
 ### Only 1 Proposed Task
 If there is only one task, do not create it. Instead, ask the user to toggle to Act mode and tell you to proceed, so you can implement directly.
