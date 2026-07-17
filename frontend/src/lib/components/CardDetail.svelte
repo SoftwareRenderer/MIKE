@@ -48,7 +48,7 @@
 
     let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
 
-    let allTasks = $derived(appStore.board?.tasks || []);
+    let allTasks = $derived(tasks || appStore.board?.tasks || []);
 
     const overviewSections = [
         { id: 'backlog', title: 'Backlog' },

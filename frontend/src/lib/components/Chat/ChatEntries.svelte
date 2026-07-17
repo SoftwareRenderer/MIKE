@@ -22,6 +22,7 @@
         retryError,
         isAgentSelected,
         taskStatus,
+        taskExecutionState,
         projectId,
         taskId,
         onScroll,
@@ -55,6 +56,7 @@
         retryError: string;
         isAgentSelected: () => boolean;
         taskStatus: string;
+        taskExecutionState: string;
         projectId: string;
         taskId: string;
         onScroll?: () => void;
@@ -374,7 +376,7 @@
             {/snippet}
         </VirtualList>
 
-        {#if awaitingResponse && connected}
+        {#if awaitingResponse && connected && taskExecutionState === 'running'}
             <QueueIndicator
                 {queuePosition}
                 {queueEstimatedWait}

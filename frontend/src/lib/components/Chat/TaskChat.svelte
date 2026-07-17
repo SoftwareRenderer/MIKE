@@ -1241,6 +1241,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         {retryError}
         {isAgentSelected}
         {taskStatus}
+        {taskExecutionState}
         {projectId}
         {taskId}
         onScroll={onScroll}
