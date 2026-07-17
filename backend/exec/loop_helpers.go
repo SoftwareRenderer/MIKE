@@ -22,11 +22,11 @@ import (
 // handleStopped sets the task to stopped state, broadcasts the update, and optionally
 // persists an error message. Used by all ctx.Done and cancellation paths.
 func (te *TaskExecutor) handleStopped(task *types.Task, projectID, taskID string, output, code string, persistError bool) {
-	task.ExecutionState = "stopped"
+	task.ExecutionState = "idle"
 	task.Status = "review"
 	task.Output = output
 	te.store.UpdateTask(task)
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "stopped", "activity": "Task stopped by user"}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	if persistError {
 		te.sendAndPersistError(taskID, output, code)

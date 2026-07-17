@@ -429,8 +429,8 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 	// don't get stale tokens from a previous turn.
 	if event.Type == types.WSTypeStatus {
 		if state, ok := event.Data.(map[string]string)["state"]; ok {
-			if state == "stopped" || state == "failed" || state == "completed" ||
-				state == "awaiting_review" || state == "idle" || state == "cancelled" {
+			if state == "failed" || state == "completed" ||
+				state == "idle" || state == "cancelled" {
 				asm.clearTaskBuffer(projectID + ":" + taskID)
 			}
 		}

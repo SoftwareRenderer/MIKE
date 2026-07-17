@@ -1302,7 +1302,7 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	reviewTask := createTaskInProject(t, te.store, proj.ID, "review-task")
 	// Move review task to review status
 	reviewTask.Status = "review"
-	reviewTask.ExecutionState = "awaiting_review"
+	reviewTask.ExecutionState = "idle"
 	_ = te.store.UpdateTask(reviewTask)
 
 	// Only runningTask has an active executor
@@ -1328,8 +1328,8 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	if reviewTaskAfter.Status != "review" {
 		t.Errorf("expected review task status='review', got %q", reviewTaskAfter.Status)
 	}
-	if reviewTaskAfter.ExecutionState != "awaiting_review" {
-		t.Errorf("expected review task execution_state='awaiting_review', got %q", reviewTaskAfter.ExecutionState)
+	if reviewTaskAfter.ExecutionState != "idle" {
+		t.Errorf("expected review task execution_state='idle', got %q", reviewTaskAfter.ExecutionState)
 	}
 }
 

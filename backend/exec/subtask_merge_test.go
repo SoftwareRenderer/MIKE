@@ -675,9 +675,10 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	}
 }
 
-// TestAutoStartNextSibling_ParentInBacklog verifies that AutoStartNextSibling
-// works when the parent is in backlog (not in_progress). The parent stays in
-// backlog while subtasks run, and siblings auto-start correctly.
+// TestAutoStartNextSibling_ParentInBacklog verifies that when the parent is in
+// backlog, AutoStartNextSibling does NOT auto-start sibling tasks. Only the first
+// subtask runs; siblings stay idle in In Progress until the user explicitly moves
+// the parent to In Progress.
 func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -695,7 +696,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}
 	te.store.CreateTask(parent)
 
-	// Create two subtasks
+	// Create two subtasks — moved to in_progress by moveAllDescendantsToInProgress
 	subtask1ID := "subtask1-sibling"
 	subtask2ID := "subtask2-sibling"
 	for i, id := range []string{subtask1ID, subtask2ID} {
@@ -705,7 +706,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 			Title:             "Subtask " + id,
 			Prompt:            "Subtask prompt",
 			Status:            "in_progress",
-			ExecutionState:       "idle",
+			ExecutionState:    "idle",
 			ParentTaskID:      parentID,
 			CurrentThreadID:   "thread-subtask-" + string(rune('1'+i)),
 			LlamaServerURL:    "http://localhost:8080",
@@ -746,26 +747,214 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	setup.cancel()
 	te.StopTask(subtask1ID)
 
-	// AutoStartNextSibling should start subtask2 (parent is in backlog)
+	// AutoStartNextSibling should NOT start subtask2 because parent is in backlog
 	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID, "review")
 	if err != nil {
 		t.Fatalf("AutoStartNextSibling failed: %v", err)
 	}
 
-	// Verify subtask2 is now running
+	// Verify subtask2 is NOT registered in the executor's in-memory task map
+	te.taskMu.Lock()
+	_, exists2 := te.tasks[subtask2ID]
+	te.taskMu.Unlock()
+	if exists2 {
+		t.Error("subtask2 should NOT be registered in executor task map when parent is in backlog")
+	}
+
+	// Verify subtask2 is NOT running in DB
 	subtask2, _ := te.store.GetTaskByTaskID(subtask2ID)
-	if subtask2.ExecutionState != "running" {
-		t.Errorf("subtask2 should be running, got execution_state %q", subtask2.ExecutionState)
+	if subtask2.ExecutionState == "running" {
+		t.Error("subtask2 should NOT be running — sibling should not auto-start when parent is in backlog")
+	}
+	if subtask2.Status != "in_progress" {
+		t.Errorf("subtask2 should stay in in_progress, got status %q", subtask2.Status)
+	}
+	if subtask2.ExecutionState != "idle" {
+		t.Errorf("subtask2 should be idle, got execution_state %q", subtask2.ExecutionState)
 	}
 
 	// Verify parent is STILL in backlog
 	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
 	if parentFromDB.Status != "backlog" {
-		t.Errorf("parent should still be in backlog after sibling auto-start, got %q", parentFromDB.Status)
+		t.Errorf("parent should still be in backlog, got %q", parentFromDB.Status)
+	}
+}
+
+// TestAutoStartNextSibling_ParentInProgress verifies that when the parent is
+// in_progress and a subtask completes, the LLM selects the next sibling and
+// starts it.
+func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent in in_progress
+	parentID := "parent-inprogress-test"
+	parent := &types.Task{
+		ID:                parentID,
+		ProjectID:         projectID,
+		Title:             "Parent Task",
+		Prompt:            "Parent prompt",
+		Status:            "in_progress",
+		ExecutionState:    "idle",
+		CurrentThreadID:   "thread-parent",
+		LlamaServerURL:    "http://localhost:8080",
+		ModelName:         "test-model",
+	}
+	te.store.CreateTask(parent)
+
+	// Create two subtasks in in_progress
+	subtask1ID := "subtask1-inprogress"
+	subtask2ID := "subtask2-inprogress"
+	for i, id := range []string{subtask1ID, subtask2ID} {
+		subtask := &types.Task{
+			ID:                id,
+			ProjectID:         projectID,
+			Title:             "Subtask " + id,
+			Prompt:            "Subtask prompt",
+			Status:            "in_progress",
+			ExecutionState:    "idle",
+			ParentTaskID:      parentID,
+			CurrentThreadID:   "thread-subtask-" + string(rune('1'+i)),
+			LlamaServerURL:    "http://localhost:8080",
+			ModelName:         "test-model",
+		}
+		te.store.CreateTask(subtask)
+	}
+
+	// Prepare subtask1
+	setup, err := te.prepareTaskExecution(projectID, subtask1ID, "", "")
+	if err != nil {
+		t.Fatalf("prepareTaskExecution failed: %v", err)
+	}
+	if setup == nil {
+		t.Fatal("prepareTaskExecution returned nil")
+	}
+	defer func() {
+		setup.cancel()
+		te.StopTask(subtask1ID)
+	}()
+
+	// Verify parent is in in_progress
+	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Status != "in_progress" {
+		t.Errorf("parent should be in_progress, got status %q", parentFromDB.Status)
+	}
+
+	// Simulate subtask1 completing (move to review)
+	subtask1, _ := te.store.GetTaskByTaskID(subtask1ID)
+	subtask1.Status = "review"
+	subtask1.ExecutionState = "idle"
+	te.store.UpdateTask(subtask1)
+
+	// Stop subtask1 executor
+	setup.cancel()
+	te.StopTask(subtask1ID)
+
+	// AutoStartNextSibling should start subtask2 (parent is in_progress)
+	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID, "review")
+	if err != nil {
+		t.Fatalf("AutoStartNextSibling failed: %v", err)
+	}
+
+	// Verify subtask2 is registered in the executor's in-memory task map
+	te.taskMu.Lock()
+	state2, exists2 := te.tasks[subtask2ID]
+	te.taskMu.Unlock()
+	if !exists2 {
+		t.Fatal("subtask2 should be registered in executor task map")
+	}
+	if state2.executorType != "llm" {
+		t.Errorf("subtask2 executor type should be 'llm', got %q", state2.executorType)
+	}
+
+	// Verify subtask2 is running in DB
+	subtask2, _ := te.store.GetTaskByTaskID(subtask2ID)
+	if subtask2.ExecutionState != "running" {
+		t.Errorf("subtask2 should be running, got execution_state %q", subtask2.ExecutionState)
+	}
+	if subtask2.Status != "in_progress" {
+		t.Errorf("subtask2 status should be in_progress, got %q", subtask2.Status)
+	}
+
+	// Verify parent is still in in_progress
+	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Status != "in_progress" {
+		t.Errorf("parent should still be in_progress, got %q", parentFromDB.Status)
 	}
 
 	// Cleanup
 	te.StopTask(subtask2ID)
+}
+
+// TestStartSubtaskWithParent_InheritsModelConfig verifies that when a subtask
+// doesn't have its own LLM config, it inherits from the parent. This ensures
+// subtasks created by plan-mode decomposition can start without explicit model settings.
+func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	// Create parent with model config
+	parentID := "parent-model-inherit"
+	parent := &types.Task{
+		ID:                parentID,
+		ProjectID:         projectID,
+		Title:             "Parent Task",
+		Prompt:            "Parent prompt",
+		Status:            "in_progress",
+		ExecutionState:    "idle",
+		CurrentThreadID:   "thread-parent",
+		LlamaServerURL:    "http://localhost:8080",
+		ModelName:         "test-model",
+	}
+	te.store.CreateTask(parent)
+
+	// Create subtask WITHOUT model config (simulates plan-mode created subtask)
+	subtaskID := "subtask-no-model"
+	subtask := &types.Task{
+		ID:                subtaskID,
+		ProjectID:         projectID,
+		Title:             "Subtask No Model",
+		Prompt:            "Subtask prompt",
+		Status:            "in_progress",
+		ExecutionState:    "idle",
+		ParentTaskID:      parentID,
+		CurrentThreadID:   "thread-subtask",
+		// LlamaServerURL and ModelName are intentionally empty
+	}
+	te.store.CreateTask(subtask)
+
+	// Verify subtask has no model config
+	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	if subtaskFromDB.LlamaServerURL != "" {
+		t.Fatalf("subtask should have no LlamaServerURL initially, got %q", subtaskFromDB.LlamaServerURL)
+	}
+	if subtaskFromDB.ModelName != "" {
+		t.Fatalf("subtask should have no ModelName initially, got %q", subtaskFromDB.ModelName)
+	}
+
+	// StartSubtaskWithParent should inherit model config from parent
+	err := te.StartSubtaskWithParent(projectID, subtaskID)
+	if err != nil {
+		t.Fatalf("StartSubtaskWithParent failed: %v", err)
+	}
+
+	// Verify subtask now has inherited model config
+	subtaskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	if subtaskFromDB.LlamaServerURL != "http://localhost:8080" {
+		t.Errorf("subtask should inherit LlamaServerURL from parent, got %q", subtaskFromDB.LlamaServerURL)
+	}
+	if subtaskFromDB.ModelName != "test-model" {
+		t.Errorf("subtask should inherit ModelName from parent, got %q", subtaskFromDB.ModelName)
+	}
+
+	// Verify subtask is registered in executor
+	te.taskMu.Lock()
+	_, exists := te.tasks[subtaskID]
+	te.taskMu.Unlock()
+	if !exists {
+		t.Error("subtask should be registered in executor task map")
+	}
+
+	// Cleanup
+	te.StopTask(subtaskID)
 }
 
 // TestAutoStartNextSibling_AllDoneParentStaysInBacklog verifies that when all
