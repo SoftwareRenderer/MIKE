@@ -168,6 +168,15 @@
         } | null;
     } | null = $state(null);
 
+    // Edit diff expand/collapse overrides — lives here (above VirtualList)
+    // so state survives item unmount/remount during scroll.
+    // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
+    let editDiffOverrides = $state<Record<string, boolean>>({});
+
+    function handleEditDiffToggle(toolId: string, currentExpanded: boolean) {
+        editDiffOverrides = { ...editDiffOverrides, [toolId]: !currentExpanded };
+    }
+
     function handleScrollElChange(el: HTMLElement | null) {
         chatScrollEl = el;
         if (onScrollElChange) {
@@ -328,7 +337,7 @@
                             </div>
                             <div class="divider-line"></div>
                         </div>
-                        <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onEdit={(msgId, newContent) => onMsgEdit(msgId, newContent)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                        <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onEdit={(msgId, newContent) => onMsgEdit(msgId, newContent)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} />
                     </div>
                 {:else if entry.role === 'merge_resolution'}
                     <div class="merge-resolution-entry">
@@ -355,11 +364,11 @@
                     </div>
                 {:else if entry.role === 'user'}
                     <div class="sticky-user-message" data-user-msg-first-line={entry.content.split('\n')[0]}>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} />
                     </div>
                 {:else}
                     <div>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} projectId={projectId} taskId={taskId} />
+                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} />
                     </div>
                 {/if}
             {/snippet}

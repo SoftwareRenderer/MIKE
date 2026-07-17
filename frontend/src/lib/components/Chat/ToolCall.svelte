@@ -38,13 +38,15 @@
             startedAt?: number; // timestamp when tool call started (ms)
         };
         expandedArgs: Set<string>;
+        editDiffOverrides: Record<string, boolean>;
         projectId?: string;
         taskId?: string;
         onToggleArgs: (toolId: string) => void;
+        onToggleEditDiff: (toolId: string, currentExpanded: boolean) => void;
         onNavigateTask?: (taskId: string) => void;
     }
 
-    let { toolCall: tc, expandedArgs, onToggleArgs, onNavigateTask, projectId, taskId }: Props = $props();
+    let { toolCall: tc, expandedArgs, onToggleArgs, editDiffOverrides, onToggleEditDiff, onNavigateTask, projectId, taskId }: Props = $props();
 
     // For bash: distinguish streaming (command being generated) from executing (command running).
     // Streaming: raw_args is partial JSON. Executing: raw_args is complete JSON (or args.command set).
@@ -342,11 +344,13 @@
     }
 
     // Edit diff expand/collapse — auto-expand for tiny changes (≤2 lines).
-    // Start expanded when trivial so no transition fires on mount (avoids scroll jump in virtual list).
+    // State is managed by parent (ChatMessage) to survive virtual list remounts.
     let _editChanges = $derived(countEditChanges(tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined));
     let isEditDiffTrivial = $derived((_editChanges.added + _editChanges.removed) <= 2);
-    // svelte-ignore state_referenced_locally — tc.args.edits is static per tool call, so initial capture is intentional
-    let editDiffExpanded = $state(isEditDiffTrivial);
+    // Use explicit user override if set, otherwise fall back to trivial auto-expand default
+    let editDiffExpanded = $derived(
+        tc.toolId in editDiffOverrides ? editDiffOverrides[tc.toolId]! : isEditDiffTrivial
+    );
     let editLinesAdded = $derived(() => _editChanges.added);
     let editLinesRemoved = $derived(() => _editChanges.removed);
     let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
@@ -427,7 +431,7 @@
             <div class="tool-timeout-badge">{timeoutBadge}</div>
         {/if}
         {#if hasEditDiff}
-            <button class="edit-diff-toggle" onclick={() => editDiffExpanded = !editDiffExpanded} aria-expanded={editDiffExpanded}>
+            <button class="edit-diff-toggle" onclick={() => onToggleEditDiff(tc.toolId, editDiffExpanded)} aria-expanded={editDiffExpanded}>
                 <span class="lines-added">+{editLinesAdded()}</span>
                 <span class="lines-removed">/-{editLinesRemoved()}</span>
                 <span class="edit-diff-arrow">{editDiffExpanded ? '▴' : '▾'}</span>
