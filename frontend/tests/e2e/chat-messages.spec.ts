@@ -72,15 +72,18 @@ test.describe.serial('Chat Message Actions', () => {
   });
 
   test('second user message should have delete button while first does not', async ({ page }) => {
-    // Send the first user message via API (bypasses LLM wait)
-    const msg1 = `first message ${Date.now()}`;
+    // The beforeEach already sent a message via ensureTaskStarted, so there's 1 user message.
+    // Send another message to have at least 2 user messages.
+    const msg2 = `second message ${Date.now()}`;
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
       method: 'POST',
-      body: { content: msg1 },
+      body: { content: msg2 },
     });
 
-    // Wait for the first user message to appear
-    await expect(page.locator('.chat-message.user')).toHaveCount(1, { timeout: 10000 });
+    // Wait for at least 2 user messages (beforeEach created 1, we just sent 1 more)
+    await expect(async () => {
+      expect(await page.locator('.chat-message.user').count()).toBeGreaterThanOrEqual(2);
+    }).toPass({ timeout: 10000 });
     await waitForSendButton(page);
 
     // The first user message should NOT have a delete button
@@ -88,21 +91,10 @@ test.describe.serial('Chat Message Actions', () => {
     const firstDeleteBtn = firstMessage.locator('[aria-label="Delete message and all following messages"]');
     await expect(firstDeleteBtn).not.toBeVisible();
 
-    // Send a second user message
-    const msg2 = `second message ${Date.now()}`;
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST',
-      body: { content: msg2 },
-    });
-
-    // Wait for the second user message to appear
-    await expect(page.locator('.chat-message.user')).toHaveCount(2, { timeout: 10000 });
-    await waitForSendButton(page);
-
-    // The second user message SHOULD have a delete button
-    const secondMessage = page.locator('.chat-message.user').last();
-    const secondDeleteBtn = secondMessage.locator('[aria-label="Delete message and all following messages"]');
-    await expect(secondDeleteBtn).toBeVisible({ timeout: 5000 });
+    // The last user message SHOULD have a delete button
+    const lastMessage = page.locator('.chat-message.user').last();
+    const lastDeleteBtn = lastMessage.locator('[aria-label="Delete message and all following messages"]');
+    await expect(lastDeleteBtn).toBeVisible({ timeout: 5000 });
 
     // The first user message should STILL NOT have a delete button
     await expect(firstDeleteBtn).not.toBeVisible();
@@ -134,9 +126,9 @@ test.describe.serial('Chat Message Actions', () => {
     }
 
     await deleteBtn.click();
-    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-    await page.click('.confirm-dialog .btn-confirm');
-    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await page.click('[role="dialog"] .btn-confirm');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should not duplicate the previous assistant message after deleting a user message', async ({ page }) => {
@@ -189,9 +181,9 @@ test.describe.serial('Chat Message Actions', () => {
     }
 
     await deleteBtn.click();
-    await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-    await page.click('.confirm-dialog .btn-confirm');
-    await expect(page.locator('.confirm-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await page.click('[role="dialog"] .btn-confirm');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     await waitForSendButton(page);
 

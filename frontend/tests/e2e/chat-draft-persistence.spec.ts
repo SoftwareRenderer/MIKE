@@ -16,7 +16,9 @@ async function waitForIdle(page: any) {
 
 /** Wait for the chat textarea to be available. Does NOT stop LLM responses. */
 async function waitForTextarea(page: any) {
-  await expect(page.locator('textarea[placeholder*="message"]')).toBeVisible({ timeout: 30000 });
+  // The chat textarea may have different placeholder text depending on task state
+  // Use a more general selector that matches the chat form textarea
+  await expect(page.locator('.chat-form textarea')).toBeVisible({ timeout: 30000 });
 }
 
 /** Open a task in in_progress state and wait for the chat form to be ready. */
@@ -43,7 +45,7 @@ test.describe('Chat draft text persistence', () => {
     const projectId = await getProjectId(page);
     const taskId = await openReadyTask(page, projectId);
 
-    const textarea = page.locator('textarea[placeholder*="message"]');
+    const textarea = page.locator('.chat-form textarea');
     const testMessage = 'hello world draft test';
     await textarea.click();
     await textarea.pressSequentially(testMessage); // Simulates key-by-key input
