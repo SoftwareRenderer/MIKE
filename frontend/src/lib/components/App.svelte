@@ -432,11 +432,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     onTaskUpdated: (updatedTask: Task) => {
                         // Replace existing task, or append if it's genuinely new
                         // (e.g., created via create_task tool call).
+                        // Deduplicate to prevent divergence with appStore.board.tasks patches.
                         const idx = tasks.findIndex(t => t.id === updatedTask.id);
                         if (idx >= 0) {
                             tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
                         } else {
-                            tasks = [...tasks, updatedTask];
+                            tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
                         }
                         appStore.board = { ...appStore.board!, tasks };
                         if (selectedTaskVal && selectedTaskVal.id === updatedTask.id) {

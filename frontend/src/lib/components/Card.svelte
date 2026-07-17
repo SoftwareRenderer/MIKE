@@ -39,8 +39,7 @@
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
     let hasChildren = $derived(children.length > 0);
-
-    // Subtask progress: parent counts as 1 unit, pct = (doneChildren + parentDone) / (totalChildren + 1)
+    // Subtask progress: counts ALL descendants regardless of column
     let subtaskProgress = $derived.by(() => {
         if (!hasChildren) return null;
         // Recursively count all nested descendants
@@ -77,7 +76,7 @@
     // Check if any descendant is running (for pause button on parent)
     let hasRunningDescendant = $derived.by(() => {
         const isActive = (s: string) => s === 'running' || s === 'pulling_image';
-        if (!hasChildren) return isActive(task.execution_state);
+        if (children.length === 0) return isActive(task.execution_state);
         for (const child of children) {
             if (isActive(child.execution_state)) return true;
             // Recursively check (childrenMap has all tasks, not just same-column)

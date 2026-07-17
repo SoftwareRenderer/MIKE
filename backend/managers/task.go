@@ -395,6 +395,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
 			children, _ := h.store.GetChildren(taskID)
 			if len(children) > 0 {
+				h.moveAllDescendantsToInProgress(taskID)
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
