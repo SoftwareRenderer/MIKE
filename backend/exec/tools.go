@@ -570,6 +570,22 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		UpdatedAt:                 now,
 	}
 
+	// Apply config defaults for auto_merge / subtasks_auto_merge
+	if te.configStore != nil {
+		if cfg, err := te.configStore.GetConfig(); err == nil {
+			if cfg.DefaultAutoMerge != nil {
+				newTask.AutoMerge = *cfg.DefaultAutoMerge
+			}
+			if cfg.DefaultSubtasksAutoMerge != nil {
+				newTask.SubtasksAutoMerge = *cfg.DefaultSubtasksAutoMerge
+			}
+		}
+	}
+	// For child tasks, inherit auto_merge from parent's subtasks_auto_merge
+	if actualParentID != "" && parentTask != nil {
+		newTask.AutoMerge = parentTask.SubtasksAutoMerge
+	}
+
 	if err := te.store.CreateTask(newTask); err != nil {
 		return "", fmt.Errorf("failed to create task: %w", err)
 	}
