@@ -94,8 +94,14 @@
         for (const tc of entry.toolCalls || []) {
             h += 30; // header
             h += 30; // args (collapsed for many tools)
-            if (tc.result) h += estimateTextHeight(tc.result, 35);
-            else if (tc.isPending) h += 30;
+            if (tc.toolName === 'edit_file') {
+                // edit_file has a diff toggle + optional expanded diff
+                h += estimateEditDiffHeight(tc);
+            } else if (tc.result) {
+                h += estimateTextHeight(tc.result, 35);
+            } else if (tc.isPending) {
+                h += 30;
+            }
         }
         if (entry.isStreaming) h += 20;
         if (entry.stats) h += 24;
@@ -109,6 +115,44 @@
         const wrappedLines = Math.ceil(chars / 70);
         const totalLines = Math.max(lines, wrappedLines);
         return base + totalLines * 20;
+    }
+
+    /** Estimate height of an edit_file tool call's diff toggle + expanded diff. */
+    function estimateEditDiffHeight(tc: NonNullable<ChatEntry['toolCalls']>[number]): number {
+        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
+        if (!edits) return 30; // just the toggle button
+
+        let totalDiffLines = 0;
+        let changes = 0;
+        for (const edit of edits) {
+            const oldLines = (edit.oldText || '').split('\n');
+            const newLines = (edit.newText || '').split('\n');
+            const pairCount = Math.min(oldLines.length, newLines.length);
+            for (let p = 0; p < pairCount; p++) {
+                if (oldLines[p] === newLines[p]) {
+                    totalDiffLines += 1; // identical — 1 context line
+                } else {
+                    totalDiffLines += 2; // different — removed + added
+                    changes += 2;
+                }
+            }
+            // Unpaired lines
+            const unpairedOld = oldLines.length - pairCount;
+            const unpairedNew = newLines.length - pairCount;
+            totalDiffLines += unpairedOld + unpairedNew;
+            changes += unpairedOld + unpairedNew;
+        }
+
+        // Toggle button (always visible)
+        let h = 30;
+
+        // Auto-expanded for trivial changes (≤2), otherwise collapsed
+        if (changes <= 2) {
+            h += totalDiffLines * 20; // ~20px per diff line
+            h += edits.length * 5; // separator between edit blocks
+        }
+
+        return h;
     }
 
     // Virtual list scroll element — received from VirtualList via callback

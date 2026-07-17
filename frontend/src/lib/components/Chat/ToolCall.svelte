@@ -323,47 +323,31 @@
         return blocks;
     }
 
-    // Edit diff expand/collapse — auto-expand for tiny changes (≤2 lines)
-    let editDiffExpanded = $state(false);
-    let isEditDiffTrivial = $derived(
-        (editLinesAdded() + editLinesRemoved()) <= 2
-    );
-
-    $effect(() => {
-        if (isEditDiffTrivial) editDiffExpanded = true;
-    });
-    let editLinesAdded = $derived(() => {
-        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
-        if (!edits) return 0;
+    /** Count actual added/removed lines by comparing old/new text positionally. */
+    function countEditChanges(edits: Array<{ oldText: string; newText: string }> | undefined): { added: number; removed: number } {
+        if (!edits) return { added: 0, removed: 0 };
         let added = 0;
-        for (const edit of edits) {
-            const oldLines = (edit.oldText || '').split('\n');
-            const newLines = (edit.newText || '').split('\n');
-            const pairCount = Math.min(oldLines.length, newLines.length);
-            for (let p = 0; p < pairCount; p++) {
-                if (oldLines[p] !== newLines[p]) added++;
-            }
-            // Unpaired new lines are pure additions
-            added += Math.max(0, newLines.length - pairCount);
-        }
-        return added;
-    });
-    let editLinesRemoved = $derived(() => {
-        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
-        if (!edits) return 0;
         let removed = 0;
         for (const edit of edits) {
             const oldLines = (edit.oldText || '').split('\n');
             const newLines = (edit.newText || '').split('\n');
             const pairCount = Math.min(oldLines.length, newLines.length);
             for (let p = 0; p < pairCount; p++) {
-                if (oldLines[p] !== newLines[p]) removed++;
+                if (oldLines[p] !== newLines[p]) { added++; removed++; }
             }
-            // Unpaired old lines are pure removals
             removed += Math.max(0, oldLines.length - pairCount);
+            added += Math.max(0, newLines.length - pairCount);
         }
-        return removed;
-    });
+        return { added, removed };
+    }
+
+    // Edit diff expand/collapse — auto-expand for tiny changes (≤2 lines).
+    // Start expanded when trivial so no transition fires on mount (avoids scroll jump in virtual list).
+    let _editChanges = $derived(countEditChanges(tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined));
+    let isEditDiffTrivial = $derived((_editChanges.added + _editChanges.removed) <= 2);
+    let editDiffExpanded = $state(isEditDiffTrivial);
+    let editLinesAdded = $derived(() => _editChanges.added);
+    let editLinesRemoved = $derived(() => _editChanges.removed);
     let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
 
     // Rendered markdown for request_review summary
