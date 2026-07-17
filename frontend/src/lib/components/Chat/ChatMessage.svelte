@@ -90,7 +90,7 @@
         }
         if (renderCache.size >= CACHE_MAX) {
             const firstKey = renderCache.keys().next().value;
-            renderCache.delete(firstKey);
+            if (firstKey) renderCache.delete(firstKey);
         }
         renderCache.set(key, result);
         return result;
@@ -423,26 +423,26 @@
                 {content}
             />
             <!-- Tool calls within reasoning region always visible -->
-            {#each interleavedLayout.reasoningSegments as seg}
+            {#each interleavedLayout!.reasoningSegments as seg}
                 {#if seg.type === 'tool'}
-                    <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={seg.tc.messageId} {projectId} taskId={msgTaskId} />
+                    <ToolCall toolCall={seg.tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
                 {/if}
             {/each}
         </div>
     {/if}
-    {#if interleavedLayout.trailingContent}
+    {#if interleavedLayout!.trailingContent}
         <div class="message-bubble assistant-bubble">
             <div class="message-text" class:streaming={isStreaming}>
-                {@html memoizedRender('assistant', interleavedLayout.trailingContent)}
+                {@html memoizedRender('assistant', interleavedLayout!.trailingContent)}
                 {#if isStreaming}
                     <span class="cursor-blink"></span>
                 {/if}
             </div>
         </div>
     {/if}
-    {#if interleavedLayout.trailingTools && interleavedLayout.trailingTools.length > 0}
-        {#each interleavedLayout.trailingTools as tc (tc.toolId)}
-            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} {projectId} taskId={msgTaskId} />
+    {#if interleavedLayout!.trailingTools && interleavedLayout!.trailingTools.length > 0}
+        {#each interleavedLayout!.trailingTools as tc (tc.toolId)}
+            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
         {/each}
     {/if}
 {/snippet}
@@ -470,7 +470,7 @@
     {/if}
     {#if toolCalls && toolCalls.length > 0}
         {#each toolCalls as tc (tc.toolId)}
-            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} messageId={tc.messageId} {projectId} taskId={msgTaskId} />
+            <ToolCall toolCall={tc} {expandedArgs} onToggleArgs={toggleArgs} {onNavigateTask} {projectId} taskId={msgTaskId} />
         {/each}
     {/if}
 {/snippet}

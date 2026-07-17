@@ -34,6 +34,7 @@
         onMsgDelete,
         onMsgFork,
         onMsgSend,
+        onMsgEdit,
         onRegenerate,
         onNavigateTask,
         onViewChanges,
@@ -164,7 +165,7 @@
         vs: {
             getItemOffset: (index: number) => number;
             totalHeight: number;
-        };
+        } | null;
     } | null = $state(null);
 
     function handleScrollElChange(el: HTMLElement | null) {

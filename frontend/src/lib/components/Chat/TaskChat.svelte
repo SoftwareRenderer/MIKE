@@ -313,7 +313,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
-        createTaskMessage,
+        createTaskMessage: (p, t, r, c) => createTaskMessage(p, t, r, c).then(() => {}),
     });
 
     /** Wrapper around stream handler with component-specific echo logic. */
@@ -1104,9 +1104,9 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             // 3. Subscribe to this task directly (triggers buffer replay from server).
             // Handler is already set up above, so buffer events won't be missed.
             // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
-            const stream = getAppStreamRef();
-            if (stream) {
-                stream.subscribeTask(projectId, taskId);
+            const appStream = getAppStreamRef();
+            if (appStream) {
+                appStream.subscribeTask(projectId, taskId);
             }
 
             // 4. Load history from DB (merges with buffer entries via ID-based dedup).
