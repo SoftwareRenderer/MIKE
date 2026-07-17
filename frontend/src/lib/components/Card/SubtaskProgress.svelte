@@ -4,6 +4,7 @@
     import { fade, slide } from 'svelte/transition';
 
     let {
+        taskId,
         subtaskProgress,
         expanded,
         hasChildren,
@@ -20,6 +21,7 @@
         onSelect,
         onRefreshBoard,
     }: {
+        taskId?: string;
         subtaskProgress: { done: number; total: number; pct: number } | null;
         expanded: boolean;
         hasChildren: boolean;
@@ -44,7 +46,7 @@
         class="subtask-progress-bar"
         class:is-expanded={expanded}
         style="--pct: {subtaskProgress.pct * 100}"
-        onclick={onToggleExpanded}
+        onclick={() => { if (taskId) onToggleExpanded?.(taskId); }}
         aria-expanded={expanded}
     >
         <span class="subtask-progress-fill" style="width: {subtaskProgress.pct * 100}%"></span>
