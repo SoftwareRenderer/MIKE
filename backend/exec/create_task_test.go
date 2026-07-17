@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,10 +33,15 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
 	appStreamMgr := stream.NewAppStreamManager(s, nil)
+	cs := config.NewConfigStore(s, "")
+	// Set workspace_dir (required for GetConfig to work)
+	_ = s.SetConfigValue("workspace_dir", t.TempDir())
+	_ = s.SetConfigValue("providers", "[]")
+	_ = s.SetConfigValue("default_provider", "")
 	return &TaskExecutor{
 		store:        s,
 		appStreamMgr: appStreamMgr,
-		configStore:  &config.ConfigStore{},
+		configStore:  cs,
 		tasks:        make(map[string]*executionState),
 	}
 }
@@ -479,6 +485,121 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 
 	if !ok {
 		t.Errorf("expected request_review to succeed with subtasks, got: %s", result2)
+	}
+}
+
+// newTestExecutorWithConfig creates a TaskExecutor with config defaults set.
+func newTestExecutorWithConfig(t *testing.T, autoMerge, subtasksAutoMerge bool) *TaskExecutor {
+	t.Helper()
+	s := testStore(t)
+	appStreamMgr := stream.NewAppStreamManager(s, nil)
+	cs := config.NewConfigStore(s, "")
+	// Set workspace_dir (required for GetConfig to work)
+	_ = s.SetConfigValue("workspace_dir", t.TempDir())
+	_ = s.SetConfigValue("providers", "[]")
+	_ = s.SetConfigValue("default_provider", "")
+	_ = s.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", autoMerge))
+	_ = s.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", subtasksAutoMerge))
+	return &TaskExecutor{
+		store:        s,
+		appStreamMgr: appStreamMgr,
+		configStore:  cs,
+		tasks:        make(map[string]*executionState),
+	}
+}
+
+func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
+	autoMerge := true
+	subtasksAutoMerge := true
+	te := newTestExecutorWithConfig(t, autoMerge, subtasksAutoMerge)
+	parent := createParentTask(t, te.store, "parent-auto-merge", "proj-am", "backlog")
+
+	// Create an independent task (no parent_task_id)
+	result, err := te.handleCreateTask(map[string]any{
+		"title":  "Independent Task",
+		"prompt": "Test prompt",
+	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]string
+	json.Unmarshal([]byte(result), &resp)
+	task, err := te.store.GetTaskByTaskID(resp["task_id"])
+	if err != nil {
+		t.Fatalf("get created task: %v", err)
+	}
+
+	// Independent task should get config defaults
+	if !task.AutoMerge {
+		t.Errorf("expected AutoMerge=true from config default, got %v", task.AutoMerge)
+	}
+	if !task.SubtasksAutoMerge {
+		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", task.SubtasksAutoMerge)
+	}
+}
+
+func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing.T) {
+	// Config defaults: autoMerge=false, subtasksAutoMerge=true
+	te := newTestExecutorWithConfig(t, false, true)
+	// Parent has subtasks_auto_merge=true (from config or explicit)
+	parent := createParentTask(t, te.store, "parent-inherit-am", "proj-inh", "backlog")
+	parent.SubtasksAutoMerge = true
+	_ = te.store.UpdateTask(parent)
+
+	// Create a subtask under this parent
+	result, err := te.handleCreateTask(map[string]any{
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "parent-inherit-am",
+	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]string
+	json.Unmarshal([]byte(result), &resp)
+	child, err := te.store.GetTaskByTaskID(resp["task_id"])
+	if err != nil {
+		t.Fatalf("get created task: %v", err)
+	}
+
+	// Child should inherit parent's SubtasksAutoMerge as its AutoMerge
+	if !child.AutoMerge {
+		t.Errorf("expected AutoMerge=true (inherited from parent SubtasksAutoMerge), got %v", child.AutoMerge)
+	}
+	// Child's SubtasksAutoMerge should come from config default
+	if !child.SubtasksAutoMerge {
+		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", child.SubtasksAutoMerge)
+	}
+}
+
+func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
+	// Config with defaults disabled
+	te := newTestExecutorWithConfig(t, false, false)
+	parent := createParentTask(t, te.store, "parent-no-defaults", "proj-nd", "backlog")
+
+	result, err := te.handleCreateTask(map[string]any{
+		"title":  "Task",
+		"prompt": "Test prompt",
+	}, parent, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]string
+	json.Unmarshal([]byte(result), &resp)
+	task, err := te.store.GetTaskByTaskID(resp["task_id"])
+	if err != nil {
+		t.Fatalf("get created task: %v", err)
+	}
+
+	// Should be false when config defaults are false
+	if task.AutoMerge {
+		t.Errorf("expected AutoMerge=false, got %v", task.AutoMerge)
+	}
+	if task.SubtasksAutoMerge {
+		t.Errorf("expected SubtasksAutoMerge=false, got %v", task.SubtasksAutoMerge)
 	}
 }
 
