@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForChatFormReady } from './helpers';
 
-test.describe.configure({ mode: 'parallel' });
+test.describe.configure({ mode: 'serial' });
 
 /** Wait for chat form to be idle (send button visible). Stops any active LLM response. */
 async function waitForIdle(page: any) {
