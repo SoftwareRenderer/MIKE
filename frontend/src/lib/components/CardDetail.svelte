@@ -428,6 +428,9 @@
 
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
+                // Don't close when user is typing in an input/textarea
+                const tag = (document.activeElement as HTMLElement)?.tagName.toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                 if (diffFullscreen) {
                     diffFullscreen = false;
                 } else if (checkpointDiffOpen) {
