@@ -8,11 +8,11 @@ export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  workers: 2,
+  workers: 4,
   globalSetup: './tests/global-setup.ts',
   globalTeardown: './tests/global-setup.ts',
   reporter: 'list',
-  timeout: 120000,
+  timeout: 60000,
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'off',
@@ -37,7 +37,7 @@ export default defineConfig({
       // Config-modifying suites on isolated server; serialized to avoid races
       testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts'],
       fullyParallel: false,
-      workers: 1,
+      workers: 2,
     },
   ],
 });
