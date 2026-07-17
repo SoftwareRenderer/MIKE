@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-test.describe.serial('Login', () => {
+test.describe.configure({ mode: 'parallel' });
+test.describe('Login', () => {
     test.beforeEach(async ({ page }) => {
         // Clear cookies to simulate fresh session
         const context = page.context();

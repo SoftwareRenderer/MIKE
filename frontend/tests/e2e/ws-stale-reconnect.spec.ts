@@ -22,8 +22,19 @@ test.describe.serial('WebSocket stale connection detection', () => {
         // 4. Reload to trigger a fresh connection attempt that will fail
         await page.goto('/');
 
-        // 5. Wait for reconnect logic to kick in
-        await page.waitForTimeout(3000);
+        // 5. Wait for reconnect logic to kick in — detect WS state via polling
+        await page.waitForFunction(
+          () => {
+            // Check if the reconnecting banner is visible or if WebSocket is in a reconnecting state
+            const banner = document.querySelector('.reconnecting-banner');
+            if (banner && banner.offsetParent !== null) return true;
+            // Also check if there's a WebSocket connection attempt in progress
+            return false;
+          },
+          { timeout: 10000 }
+        ).catch(() => {
+          // Banner may not appear immediately; that's okay — proceed to restore connection
+        });
 
         // 6. Restore WebSocket connections
         blockWs = false;
@@ -32,8 +43,14 @@ test.describe.serial('WebSocket stale connection detection', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        // 8. Verify the page is connected (no reconnecting banner)
-        await expect(page.locator('.reconnecting-banner')).not.toBeVisible({ timeout: 15000 });
+        // 8. Verify the page is connected (no reconnecting banner) — poll for stable state
+        await page.waitForFunction(
+          () => {
+            const banner = document.querySelector('.reconnecting-banner');
+            return !banner || banner.offsetParent === null;
+          },
+          { timeout: 15000 }
+        );
     });
 
     test('visibilitychange handler is registered and checks connection health', async ({ page }) => {
