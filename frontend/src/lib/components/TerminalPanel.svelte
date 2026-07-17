@@ -234,7 +234,6 @@
 
         // Local non-null references for closures (term is Terminal | null at module level).
         const terminal = term!;
-        const element = terminal.element!;
 
         let webglRef: WebglAddon | null = new WebglAddon();
         webglRef.onContextLoss(() => { webglRef = null; });
@@ -244,6 +243,9 @@
         terminal.open(container);
         fit.fit();
         terminal.focus();
+
+        // terminal.element is only set AFTER open() — must not access before.
+        const element = terminal.element!;
 
         const proj = appStore.selectedProject;
         const task = appStore.selectedTask;
