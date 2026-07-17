@@ -337,7 +337,7 @@
     // Computed inline to avoid Svelte 5 $derived function-call TypeScript issues.
     let bashTimeout = $derived<number | undefined>(
         tc.toolName !== 'bash' ? undefined :
-        tc.args && 'timeout' in tc.args ? tc.args.timeout as number :
+        tc.args && 'timeout' in tc.args ? (tc.args.timeout as number) || undefined :
         tc.raw_args ? (() => { const m = tc.raw_args!.match(/"timeout"\s*:\s*(\d+)/); return m ? parseInt(m[1], 10) : undefined; })() :
         undefined
     );
