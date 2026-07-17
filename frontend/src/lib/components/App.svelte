@@ -1,6 +1,7 @@
 
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
@@ -207,7 +208,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
         }
     });
-    $effect(() => { if (taskDiffStatsContext?.get) taskDiffStats = taskDiffStatsContext.get(); });
+    $effect(() => { if (taskDiffStatsContext) taskDiffStats = get(taskDiffStatsContext); });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
     // Subscribes when a task is selected, unsubscribes only when switching to a
@@ -715,13 +716,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 tasks = b.tasks || [];
                 appStore.board = b;
                 // Update selected task reference
-                if (selectedTaskVal) {
-                    const fresh = tasks.find(t => t.id === selectedTaskVal.id);
+                { const sel = selectedTaskVal; if (sel) {
+                    const fresh = tasks.find(t => t.id === sel.id);
                     if (fresh) {
                         selectedTaskVal = fresh;
                         appStore.selectedTask = fresh;
                     }
-                }
+                }}
             }
             const c = await getConfig();
             cfg = c;
@@ -824,10 +825,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         queueMicrotask(() => {
             if (collapsed) {
                 // Focus the collapse toggle button
-                document.querySelector('.desktop-collapse-btn')?.focus();
+                (document.querySelector('.desktop-collapse-btn') as HTMLElement | null)?.focus();
             } else {
                 // Focus the first project item
-                document.querySelector('.project-item')?.focus();
+                (document.querySelector('.project-item') as HTMLElement | null)?.focus();
             }
         });
     }
@@ -1029,7 +1030,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectPath={currentProject.path}
                         currentBranch={currentBranch}
                         initialFile={urlFileId || ''}
-                        sandboxEnabled={currentProject.sandbox_enabled}
+                        sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
                         onUpdateFile={handleExplorerFileChange}

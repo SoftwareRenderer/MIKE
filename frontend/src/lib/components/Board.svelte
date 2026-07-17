@@ -231,7 +231,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
         // Reset hasScrolled when target changes (new close event)
         if (target !== lastScrolledTarget) {
             hasScrolled = false;
-            lastScrolledTarget = target;
+            lastScrolledTarget = target ?? null;
         }
         if (!target || !boardEl || hasScrolled) return;
         // Skip scroll if target column is empty (e.g. last task in column was deleted)

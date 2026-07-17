@@ -80,6 +80,7 @@ export interface Task {
     created_at: string;
     updated_at: string;
     assigned_ports?: AssignedPort[];
+    base_ref?: string;
 }
 
 export interface Thread {

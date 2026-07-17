@@ -557,14 +557,14 @@
                             {getModelColor}
                             {parseDefaultModel}
                             isDragging={dragIndex === i}
-                            onDragStart={(e) => handleDragStart(e, i)}
+                            onDragStart={(e: PointerEvent) => handleDragStart(e, i)}
                             onRemove={() => removeProvider(i)}
                             onFetchModels={() => fetchModelsForProvider(i)}
                             onTestConnection={() => testProviderConnection(i)}
                             onToggleDefaultProvider={() => toggleDefaultProvider(p.name)}
                             onAddModel={() => addModelToProvider(i)}
-                            onRemoveModel={(mi) => removeModelFromProvider(i, mi)}
-                            onSetDefaultModel={(name, effort) => setProviderDefaultModel(i, name, effort)}
+                            onRemoveModel={(mi: number) => removeModelFromProvider(i, mi)}
+                            onSetDefaultModel={(name: string, effort?: string) => setProviderDefaultModel(i, name, effort)}
                             onSyncMeta={() => syncProviderMeta(p)}
                         />
                     {/each}

@@ -237,7 +237,7 @@
                     path.setAttribute('stroke-linecap', 'round');
                     path.setAttribute('stroke-linejoin', 'round');
                     svg.appendChild(path);
-                    return svg;
+                    return svg as unknown as HTMLElement;
                 },
             }),
             drawSelection(),
@@ -271,7 +271,7 @@
                     charCount = update.state.doc.length;
                     // Capture delta for undo/redo history persistence.
                     // Only capture user edits (not programmatic changes during restore).
-                    if (!view.__restoring) {
+                    if (!(view as any).__restoring) {
                         const deltas: { from: number; to: number; insert: string }[] = [];
                         update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
                             deltas.push({ from: fromA, to: toA, insert: inserted.toString() });
