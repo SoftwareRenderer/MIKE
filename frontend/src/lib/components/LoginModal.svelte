@@ -69,7 +69,7 @@
     />
 </BaseModal>
 
-{#snippet header({ title: _ })}
+{#snippet header({ title: _title }: { title: string })}
     <div class="login-header">
         <h2>Sign in</h2>
     </div>

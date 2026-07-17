@@ -171,7 +171,7 @@
                     path.setAttribute('stroke-linecap', 'round');
                     path.setAttribute('stroke-linejoin', 'round');
                     svg.appendChild(path);
-                    return svg;
+                    return svg as unknown as HTMLElement;
                 },
             }),
             drawSelection(),

@@ -77,7 +77,7 @@
 </script>
 
 {#snippet footer()}
-    <span class="current-path">{formatPath(selectedPath)}</span>
+    <span class="current-path">{formatPath(selectedPath ?? '')}</span>
     <div class="footer-actions">
         <button type="button" class="btn-secondary" onclick={onClose} title="Cancel">Cancel</button>
         <button type="button" class="btn-primary" onclick={handleSelect} disabled={!selectedPath} title="Select this directory">

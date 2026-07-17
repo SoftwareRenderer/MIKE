@@ -29,7 +29,7 @@ import BaseModal from './BaseModal.svelte';
     });
 </script>
 
-<BaseModal width="480px" onClose={onClose}>
+<BaseModal title="Sandbox Info" width="480px" onClose={onClose}>
         {#snippet header({ title })}
             <div class="panel-title">
                 <Icon src={shieldIcon} color="#E6EDF3" width={16} height={16} />
