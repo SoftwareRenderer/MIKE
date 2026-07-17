@@ -220,6 +220,7 @@ type loopContext struct {
 
 func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	defer func() {
+		close(setup.done) // signal executor exit for ForwardUserMessage type-switch
 		if r := recover(); r != nil {
 			log.Printf("[panic] setup.task=%s recovered from panic: %v", setup.task.ID, r)
 			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
@@ -845,9 +846,16 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.taskMu.Lock()
 				state := te.tasks[setup.task.ID]
 				te.taskMu.Unlock()
+				// Serialize tool writes against subtask merges into this worktree.
+				if !lc.sandboxEnabled {
+					te.GetWorktreeMu(setup.task.ID).Lock()
+				}
 				result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 				})
+				if !lc.sandboxEnabled {
+					te.GetWorktreeMu(setup.task.ID).Unlock()
+				}
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})

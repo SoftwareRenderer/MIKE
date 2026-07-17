@@ -121,6 +121,20 @@ func (s *Store) UpdateTaskExecutionState(taskID, projectID, executionState strin
 	return err
 }
 
+// SetTaskBranchIfEmpty sets branch only if empty. Returns true on success.
+func (s *Store) SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	res, err := s.db.Exec(`UPDATE tasks SET branch = ?, updated_at = ? WHERE id = ? AND project_id = ? AND branch = ''`,
+		branch, now.Format(time.RFC3339), taskID, projectID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := res.RowsAffected()
+	return rows > 0, nil
+}
+
 // SetTaskMergeConflict sets or clears the merge conflict flag on a task.
 func (s *Store) SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error {
 	s.mu.Lock()

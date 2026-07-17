@@ -311,6 +311,8 @@ func runGitDir(dir string, args ...string) error {
 // paths in the execution loop. Callers handle the divergent post-resolution
 // control flow (inject prompt vs. mark done vs. mark failed).
 func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) (commitOK bool, updatedTask *types.Task) {
+	// Don't acquire worktree mutex — MergeBranch→syncTargetIntoTask does. Would deadlock.
+	// Safe: LLM is done, loop is single-threaded, syncTargetIntoTask locks below.
 	commitOK = true
 
 	if isMergeInProgress(worktreePath) {

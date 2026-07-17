@@ -722,7 +722,8 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	defer release()
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
 
-	// Try to commit worktree changes (skip if worktree doesn't exist)
+	// Commit worktree changes, serialized against tool execution.
+	h.executor.GetWorktreeMu(taskID).Lock()
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if worktreeExists {
@@ -732,6 +733,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
+	h.executor.GetWorktreeMu(taskID).Unlock()
 
 	// Capture branch tip before merge (for post-commit diff comparison)
 	if task.Branch != "" {

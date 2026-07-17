@@ -99,3 +99,95 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 		t.Fatalf("expected order 3, got %d", order.Load())
 	}
 }
+
+func TestGetWorktreeMu_SameTaskReturnsSameMutex(t *testing.T) {
+	te := &TaskExecutor{}
+	
+	mu1 := te.GetWorktreeMu("task-1")
+	mu2 := te.GetWorktreeMu("task-1")
+	
+	if mu1 != mu2 {
+		t.Fatal("expected same mutex for same task ID")
+	}
+}
+
+func TestGetWorktreeMu_DifferentTasksReturnDifferentMutexes(t *testing.T) {
+	te := &TaskExecutor{}
+	
+	mu1 := te.GetWorktreeMu("task-1")
+	mu2 := te.GetWorktreeMu("task-2")
+	
+	if mu1 == mu2 {
+		t.Fatal("expected different mutexes for different task IDs")
+	}
+}
+
+func TestGetWorktreeMu_ConcurrentAccess(t *testing.T) {
+	te := &TaskExecutor{}
+
+	var observed int
+	var mu sync.Mutex
+	done := make(chan struct{})
+
+	// G1: holds task-1 mutex
+	go func() {
+		te.GetWorktreeMu("task-1").Lock()
+		mu.Lock()
+		observed++
+		mu.Unlock()
+		<-done
+		te.GetWorktreeMu("task-1").Unlock()
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// G2: blocks on task-1 mutex
+	gotSecond := make(chan struct{})
+	go func() {
+		te.GetWorktreeMu("task-1").Lock()
+		mu.Lock()
+		observed++
+		mu.Unlock()
+		te.GetWorktreeMu("task-1").Unlock()
+		close(gotSecond)
+	}()
+
+	// G3: different task, should not block
+	go func() {
+		te.GetWorktreeMu("task-2").Lock()
+		mu.Lock()
+		observed++
+		mu.Unlock()
+		te.GetWorktreeMu("task-2").Unlock()
+	}()
+
+	// G3 should complete quickly
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-time.After(1 * time.Second):
+		t.Fatal("goroutine 3 should not have blocked")
+	}
+
+	// G2 should still be blocked
+	select {
+	case <-gotSecond:
+		t.Fatal("goroutine 2 should still be blocked")
+	default:
+	}
+
+	close(done)
+
+	// G2 should now proceed
+	select {
+	case <-gotSecond:
+	case <-time.After(1 * time.Second):
+		t.Fatal("goroutine 2 should have unblocked")
+	}
+
+	mu.Lock()
+	finalObserved := observed
+	mu.Unlock()
+	if finalObserved != 3 {
+		t.Fatalf("expected 3 observations, got %d", finalObserved)
+	}
+}
