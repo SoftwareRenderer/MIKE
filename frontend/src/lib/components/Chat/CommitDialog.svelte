@@ -52,6 +52,12 @@
 
     function handleMessageChange() {
         editedMessage = message;
+        // Cancel streaming commit generation when the user starts typing
+        if (streaming && abortController) {
+            abortController.abort();
+            abortController = null;
+            streaming = false;
+        }
     }
 
     // Parse SSE stream from the commit preview endpoint

@@ -206,7 +206,9 @@ function selectResponse(parsed) {
     }
 
     // Slow response: for stop button test and cancel-during-streaming test (needs streaming to be visible)
-    if (/stop button|stop-test|cancel-test|interrupt-test/i.test(lastUserMsg)) {
+    // Also slow for commit preview messages so cancel-on-type tests can intercept the stream
+    if (/stop button|stop-test|cancel-test|interrupt-test/i.test(lastUserMsg) ||
+        /Conversation context:|Git diff/i.test(lastUserMsg)) {
         return { chunks: textResponseSlow, chunkDelay: 100 };
     }
 
