@@ -13,10 +13,19 @@ export interface DiffRow {
     lineNumber: number | null;
     /** Type of this line. */
     variant: 'context' | 'added' | 'removed';
-    /** The text content (without the +/-/ prefix). Omitted when segments present. */
+    /** The text content (without the +/-/prefix). Omitted when segments present. */
     text?: string;
     /** Word-level inline diff segments (set for paired removed/added rows). */
     segments?: InlineDiffSegment[];
+}
+
+/** A diff row as returned by the API (variant/tone are strings, not strict literals). */
+export interface ApiDiffRow {
+    key?: string;
+    lineNumber: number | null;
+    variant: string;
+    text?: string;
+    segments?: Array<{ key: string; text: string; tone: string }>;
 }
 
 /** A parsed file group from a unified diff. */

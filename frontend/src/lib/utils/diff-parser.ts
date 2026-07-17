@@ -1,5 +1,5 @@
 import { diffWordsWithSpace } from 'diff';
-import type { DiffFile, DiffRow, InlineDiffSegment } from '$lib/types/diff';
+import type { ApiDiffRow, DiffFile, DiffRow, InlineDiffSegment } from '$lib/types/diff';
 
 /**
  * Parse a raw unified diff (git diff output) into structured DiffFile[] data.
@@ -211,14 +211,14 @@ export function buildModifiedSegments(oldText: string, newText: string): {
  * Post-process rows to add word-level inline diff segments for adjacent
  * removed/added blocks (e.g. rows parsed from a git patch which lack them).
  */
-export function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
+export function enrichRowsWithInlineSegments(rows: ApiDiffRow[]): DiffRow[] {
     const result: DiffRow[] = [];
     let index = 0;
 
     while (index < rows.length) {
         const row = rows[index];
         if (!row || row.variant !== 'removed') {
-            result.push(row);
+            result.push(row as DiffRow);
             index++;
             continue;
         }
@@ -239,7 +239,7 @@ export function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
 
         if (addedBlock.length === 0) {
             // Pure deletion — no pairing possible
-            result.push(...removedBlock);
+            result.push(...removedBlock as DiffRow[]);
             continue;
         }
 
@@ -255,7 +255,7 @@ export function enrichRowsWithInlineSegments(rows: DiffRow[]): DiffRow[] {
             }
         }
 
-        result.push(...removedBlock, ...addedBlock);
+        result.push(...removedBlock as DiffRow[], ...addedBlock as DiffRow[]);
     }
 
     return result;

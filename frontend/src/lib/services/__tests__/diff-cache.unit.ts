@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DiffCache, type DiffCacheApis, type DiffApiResponse, type DiffStats } from '$lib/services/diff-cache.svelte';
+import type { DiffRow } from '$lib/types/diff';
 
 function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
     return {
         getTaskDiff: vi.fn(async () => ({ files: {} })),
         getDiffFile: vi.fn(async () => ({ rows: [] })),
         stageFile: vi.fn(async () => {}),
-        enrichRows: (rows) => rows,
+        enrichRows: (rows) => rows as DiffRow[],
         ...overrides,
     };
 }
