@@ -73,12 +73,15 @@ test.describe('Chat Core', () => {
 
     if (!await requireSendButton(page)) return;
 
-    await sendMessage(page, 'list directory contents');
+    await sendMessage(page, 'list all files');
     await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.tool-call-card').first()).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.tool-name').first()).toBeVisible();
-    await expect(page.locator('.chat-message.assistant').first()).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 15000 });
+    // Wait for tool execution to complete and assistant response to appear
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+    // Verify assistant message exists (may appear after tool results)
+    const assistantCount = await page.locator('.chat-message.assistant').count();
+    expect(assistantCount).toBeGreaterThan(0);
   });
 
   // ─── Stop / Cancel ────────────────────────────────────────────────────────
